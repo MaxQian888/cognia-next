@@ -30,7 +30,7 @@ import { ShareLinkDialog } from "@/components/share/share-link-dialog"
 import { ThemeGallery } from "@/components/share/theme-gallery"
 import { buildChatSharePayload } from "@/lib/share/chat-export"
 import { InteractivePageDialog } from "@/components/a2ui/from-execution/interactive-page-dialog"
-import { downloadBlob } from "@/lib/files/download"
+import { saveExport } from "@/lib/files/save-export"
 import { getDb } from "@/lib/db/schema"
 import { Link2Icon, LayoutDashboardIcon, ImageDownIcon } from "lucide-react"
 import { CustomThemeEditor } from "./custom-theme-editor"
@@ -133,7 +133,15 @@ export function SingleExportDialog({
             .toLowerCase()
             .replace(/[^a-z0-9]+/g, "-")
             .replace(/^-+|-+$/g, "") || "conversation"
-        downloadBlob(blob, `${slug}.png`)
+        const outcome = await saveExport({
+          filename: `${slug}.png`,
+          data: blob,
+          mimeType: "image/png",
+        })
+        if (outcome.kind === "error") {
+          throw new Error(outcome.message)
+        }
+        notifyExportOutcome(outcome, { t, shareTitle: session.title })
       } catch (e) {
         if (e instanceof ChatPngTooLongError) {
           setPngError(t("pngTooLong"))

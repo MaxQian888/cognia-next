@@ -11,6 +11,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
+import { CompassIcon } from "lucide-react"
 
 import { ActiveFilterChips } from "@/components/discover/active-filter-chips"
 import { DiscoverCategorySidebar } from "@/components/discover/discover-category-sidebar"
@@ -21,6 +22,7 @@ import { DiscoverViewToggle } from "@/components/discover/discover-view-toggle"
 import { SortFilterSheet } from "@/components/discover/sort-filter-sheet"
 import { DiscoverSearch } from "@/components/mobile/discover/discover-search"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { useDiscoverHome } from "@/hooks/discover/use-discover-home"
 import { useDiscoverLayout } from "@/hooks/discover/use-discover-layout"
 import { useDiscoverFavorites } from "@/hooks/discover/use-discover-favorites"
@@ -76,38 +78,45 @@ export function DiscoverDesktopBody() {
   return (
     <FeaturePageShell
       storageId="discover"
-      toolbar={
-        <div className="flex w-full items-center gap-3" data-testid="discover-desktop-toolbar">
-          <h1 className="text-sm font-semibold">{t("title")}</h1>
-          {!isHome && !loading ? (
-            <span className="text-xs text-muted-foreground" data-testid="discover-result-count">
-              {t("resultCount", { count: items.length })}
-            </span>
-          ) : null}
-          {!isHome ? (
-            <ActiveFilterChips
-              sort={sort}
-              filter={filter}
-              onSortChange={setSort}
-              onFilterChange={setFilter}
-              className="hidden md:flex"
-            />
-          ) : null}
-          <div className="ml-auto flex items-center gap-2">
-            <div className="w-72 max-w-full">
-              <DiscoverSearch value={query} onChange={setQuery} inputRef={searchRef} />
+      header={
+        <FeaturePageHeader
+          icon={<CompassIcon />}
+          title={t("title")}
+          summary={
+            !isHome && !loading ? (
+              <span data-testid="discover-result-count">
+                {t("resultCount", { count: items.length })}
+              </span>
+            ) : undefined
+          }
+          controls={
+            <div
+              className="flex min-w-max items-center gap-2"
+              data-testid="discover-desktop-toolbar"
+            >
+              {!isHome ? (
+                <ActiveFilterChips
+                  sort={sort}
+                  filter={filter}
+                  onSortChange={setSort}
+                  onFilterChange={setFilter}
+                />
+              ) : null}
+              <div className="ml-auto w-72 max-w-[60vw]">
+                <DiscoverSearch value={query} onChange={setQuery} inputRef={searchRef} />
+              </div>
+              {!isHome ? <DiscoverViewToggle category={category} /> : null}
+              {!isHome ? (
+                <SortFilterSheet
+                  sort={sort}
+                  filter={filter}
+                  onSortChange={setSort}
+                  onFilterChange={setFilter}
+                />
+              ) : null}
             </div>
-            {!isHome ? <DiscoverViewToggle category={category} /> : null}
-            {!isHome ? (
-              <SortFilterSheet
-                sort={sort}
-                filter={filter}
-                onSortChange={setSort}
-                onFilterChange={setFilter}
-              />
-            ) : null}
-          </div>
-        </div>
+          }
+        />
       }
       leftPane={{
         content: (

@@ -6,6 +6,10 @@ import type { ChatSession } from "@cognia/agent-config-types"
 jest.mock("@/hooks/data/use-single-export", () => ({
   useSingleExport: () => ({ run: jest.fn(), busy: false }),
 }))
+jest.mock("@cognia/logging", () => ({
+  ...jest.requireActual("@cognia/logging"),
+  createLogger: () => ({ info: jest.fn(), error: jest.fn() }),
+}))
 jest.mock("@/stores/theme", () => ({
   useCustomThemeStore: () => undefined,
 }))
@@ -25,14 +29,22 @@ jest.mock("@/lib/export/html/chat-png", () => ({
   ChatPngTooLongError: FakeTooLong,
 }))
 
-const mockDownloadBlob = jest.fn()
-jest.mock("@/lib/files/download", () => ({
-  downloadBlob: (...a: unknown[]) => mockDownloadBlob(...a),
+const mockSaveExport = jest.fn()
+jest.mock("@/lib/files/save-export", () => ({
+  saveExport: (...a: unknown[]) => mockSaveExport(...a),
 }))
 
 const session = { id: "s1", title: "My chat" } as ChatSession
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.clearAllMocks()
+  mockSaveExport.mockResolvedValue({
+    kind: "saved",
+    platform: "web",
+    location: "downloads",
+    filename: "my-chat.png",
+  })
+})
 
 describe("SingleExportDialog", () => {
   it("renders the format picker and a share-via-link action", () => {
@@ -58,15 +70,20 @@ describe("SingleExportDialog", () => {
     expect(screen.queryByTestId("theme-gallery")).toBeNull()
   })
 
-  it("downloads a PNG via the rasterizer", async () => {
-    mockRenderChatToPng.mockResolvedValue(new Blob(["png"], { type: "image/png" }))
+  it("saves the rendered PNG through the cross-platform export boundary", async () => {
+    const blob = new Blob(["png"], { type: "image/png" })
+    mockRenderChatToPng.mockResolvedValue(blob)
     render(
       <SingleExportDialog session={session} defaultFormat="html" open onOpenChange={() => {}} />
     )
     fireEvent.click(screen.getByTestId("export-download-png"))
-    await waitFor(() => expect(mockDownloadBlob).toHaveBeenCalledTimes(1))
-    const [, filename] = mockDownloadBlob.mock.calls[0]
-    expect(String(filename)).toBe("my-chat.png")
+    await waitFor(() =>
+      expect(mockSaveExport).toHaveBeenCalledWith({
+        filename: "my-chat.png",
+        data: blob,
+        mimeType: "image/png",
+      })
+    )
   })
 
   it("surfaces the too-long message when the render overflows", async () => {
@@ -82,6 +99,20 @@ describe("SingleExportDialog", () => {
         )
       ).toBeInTheDocument()
     )
-    expect(mockDownloadBlob).not.toHaveBeenCalled()
+    expect(mockSaveExport).not.toHaveBeenCalled()
+  })
+
+  it("surfaces an error when the platform saver rejects the rendered PNG", async () => {
+    mockRenderChatToPng.mockResolvedValue(new Blob(["png"], { type: "image/png" }))
+    mockSaveExport.mockResolvedValueOnce({ kind: "error", message: "permission denied" })
+    render(
+      <SingleExportDialog session={session} defaultFormat="html" open onOpenChange={() => {}} />
+    )
+
+    fireEvent.click(screen.getByTestId("export-download-png"))
+
+    await waitFor(() =>
+      expect(screen.getByText("Failed to render the image. Try again.")).toBeInTheDocument()
+    )
   })
 })

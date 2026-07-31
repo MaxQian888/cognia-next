@@ -136,6 +136,7 @@ function CanvasDesktopShell() {
       <ResizablePanelGroup
         key={layoutVersion}
         orientation="horizontal"
+        resizeTargetMinimumSize={{ coarse: 28, fine: 20 }}
         className="flex-1 min-h-0"
         onLayoutChanged={(layout) => {
           const order = ["canvas-left", "canvas-center", "canvas-right"] as const
@@ -191,7 +192,7 @@ function CanvasDesktopShell() {
             outward is how the collapsed workbench is reopened. */}
         <ResizableHandle
           withHandle
-          className={cn(rightCollapsed && !railPersistent && "hidden")}
+          className={cn("z-20 after:w-5", rightCollapsed && !railPersistent && "hidden")}
           onPointerDown={() => {
             rightDragStartCollapsedRef.current = rightCollapsed
           }}

@@ -28,6 +28,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { listAllGoals } from "@/lib/db/goals"
 import { GoalAnalyticsPanel } from "@/components/goal/analytics/goal-analytics-panel"
 import { GoalQuickCreateDialog } from "@/components/goal/goal-quick-create-dialog"
@@ -64,26 +65,21 @@ export function GoalConsole({ initialTab }: GoalConsoleProps) {
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col" data-testid="goal-console">
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-6 py-4">
-        <div className="flex items-center gap-2.5">
-          <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <TargetIcon className="size-5" aria-hidden />
-          </span>
-          <div>
-            <h1 className="text-lg font-semibold leading-tight">{t("console.title")}</h1>
-            <p className="text-xs text-muted-foreground">{t("console.subtitle")}</p>
+      <FeaturePageHeader
+        icon={<TargetIcon />}
+        title={t("console.title")}
+        description={t("console.subtitle")}
+        actions={
+          <div className="flex items-center gap-2">
+            <PluginExtensionSlot
+              point="goal.toolbar"
+              className="flex items-center gap-2 empty:hidden"
+            />
+            <GoalConsolePrefsPopover />
+            <GoalQuickCreateDialog />
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {/* Plugin toolbar contributions for the Goals console. */}
-          <PluginExtensionSlot
-            point="goal.toolbar"
-            className="flex items-center gap-2 empty:hidden"
-          />
-          <GoalConsolePrefsPopover />
-          <GoalQuickCreateDialog />
-        </div>
-      </header>
+        }
+      />
 
       <Tabs
         value={tab}

@@ -40,6 +40,7 @@ import {
 import { Empty, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import {
   Sheet,
   SheetContent,
@@ -456,15 +457,12 @@ export function MemoryConsole({ initialSelectedId }: MemoryConsoleProps = {}) {
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col gap-4 p-4">
-      <header className="flex items-center gap-3">
-        <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10">
-          <BrainIcon className="size-5 text-primary" />
-        </div>
-        <div>
-          <h1 className="text-lg font-semibold">{t("title")}</h1>
-          <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-        </div>
-      </header>
+      <FeaturePageHeader
+        icon={<BrainIcon />}
+        title={t("title")}
+        description={t("subtitle")}
+        className="rounded-xl border shadow-sm"
+      />
 
       <Tabs defaultValue="app" className="flex min-h-0 flex-1 flex-col gap-4">
         <TabsList>

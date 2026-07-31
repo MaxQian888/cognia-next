@@ -67,10 +67,14 @@ jest.mock("react-resizable-panels", () => {
     ...rest
   }: DivProps & Record<string, unknown>) => rest
   return {
-    Group: ({ children, ...rest }: DivProps) =>
+    Group: ({ children, resizeTargetMinimumSize, ...rest }: DivProps & Record<string, unknown>) =>
       ReactImpl.createElement(
         "div",
-        { "data-testid": "panel-group", ...filterProps(rest) },
+        {
+          "data-testid": "panel-group",
+          "data-resize-target-size": JSON.stringify(resizeTargetMinimumSize),
+          ...filterProps(rest),
+        },
         children
       ),
     Panel: ({ children, ...rest }: DivProps & Record<string, unknown>) => {
@@ -152,7 +156,13 @@ describe("CanvasShell", () => {
     it("renders 3 panels and 2 handles when both rails open", () => {
       renderWithProviders(<CanvasShell />)
       expect(screen.getAllByTestId("panel")).toHaveLength(3)
-      expect(screen.getAllByTestId("panel-resize-handle")).toHaveLength(2)
+      const handles = screen.getAllByTestId("panel-resize-handle")
+      expect(handles).toHaveLength(2)
+      expect(handles[1]).toHaveClass("after:w-5", "z-20")
+      expect(screen.getByTestId("panel-group")).toHaveAttribute(
+        "data-resize-target-size",
+        JSON.stringify({ coarse: 28, fine: 20 })
+      )
     })
 
     it("wraps the center pane with min-w-0 to allow flex shrinking", () => {

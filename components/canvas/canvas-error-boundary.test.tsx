@@ -74,6 +74,17 @@ describe("CanvasErrorBoundary", () => {
     expect(screen.getAllByText("Something went wrong").length).toBeGreaterThan(0)
   })
 
+  it("fills the available canvas pane when rendering the error UI", () => {
+    renderWithProviders(
+      <CanvasErrorBoundary>
+        <ThrowError shouldThrow={true} />
+      </CanvasErrorBoundary>
+    )
+
+    const fallback = screen.getAllByText("Something went wrong")[0]?.closest(".bg-background")
+    expect(fallback).toHaveClass("w-full", "min-w-0", "flex-1")
+  })
+
   it("renders custom fallback when provided", () => {
     renderWithProviders(
       <CanvasErrorBoundary fallback={<div>Custom fallback</div>}>

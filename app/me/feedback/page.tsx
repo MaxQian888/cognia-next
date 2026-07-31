@@ -30,7 +30,7 @@ function diagnosticsPayload(): string {
     sync = "(unavailable)"
   }
   return [
-    `cognia-next ${APP_VERSION}`,
+    `Cognia ${APP_VERSION}`,
     `UA: ${ua}`,
     `Date: ${new Date().toISOString()}`,
     `Sync snapshot:\n${sync}`,
