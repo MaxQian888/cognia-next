@@ -6,10 +6,9 @@ rustflags = ["--cfg", "tokio_unstable"]
 # recognizes it across rebuilds and stops re-prompting for the password.
 # See src-tauri/scripts/dev-codesign.sh; one-time setup: `pnpm dev:sign:setup`.
 #
-# This target runner covers direct `cargo run`. Tauri builds and launches the
-# artifact itself, so `tauri dev` uses the platform-specific `build.runner` in
-# `src-tauri/tauri.macos.conf.json` instead. Both paths share
-# `src-tauri/scripts/dev-codesign.sh`.
+# Cargo is Tauri's default development runner, so this covers both direct
+# `cargo run` and `pnpm tauri dev` without inserting an intermediate process
+# that could outlive Tauri and orphan the app.
 [target.aarch64-apple-darwin]
 # Target-specific rustflags replace `[build].rustflags`, so keep
 # `tokio_unstable` here. The config-relative linker driver selects the Mach-O

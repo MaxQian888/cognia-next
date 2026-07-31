@@ -12,20 +12,26 @@ test("parseArgs defaults to memory-safe shards with bounded parallelism", () => 
   assert.deepEqual(parseArgs([]), {
     shards: 8,
     jobs: 2,
+    workers: 4,
     maxOldSpaceSize: 8192,
     out: "coverage",
     only: undefined,
   })
-  assert.deepEqual(parseArgs(["--shards", "3", "--jobs", "1", "--max-old-space-size", "4096"]), {
-    shards: 3,
-    jobs: 1,
-    maxOldSpaceSize: 4096,
-    out: "coverage",
-    only: undefined,
-  })
+  assert.deepEqual(
+    parseArgs(["--shards", "3", "--jobs", "1", "--workers", "2", "--max-old-space-size", "4096"]),
+    {
+      shards: 3,
+      jobs: 1,
+      workers: 2,
+      maxOldSpaceSize: 4096,
+      out: "coverage",
+      only: undefined,
+    }
+  )
   assert.deepEqual(parseArgs(["--only", "3,6,3"]).only, [3, 6])
   assert.deepEqual(parseArgs(["--", "--only", "2"]).only, [2])
   assert.throws(() => parseArgs(["--jobs", "0"]), /positive integer/)
+  assert.throws(() => parseArgs(["--workers", "0"]), /positive integer/)
   assert.throws(() => parseArgs(["--unknown"]), /Unknown argument/)
 })
 
@@ -35,8 +41,9 @@ test("effectiveJobCount never oversubscribes the shard count", () => {
 })
 
 test("buildCoveragePlan isolates reports and defers thresholds to the merge", () => {
-  const plan = buildCoveragePlan({ shards: 2, out: "coverage" })
+  const plan = buildCoveragePlan({ shards: 2, workers: 2, out: "coverage" })
   assert.equal(plan.shards.length, 2)
+  assert.ok(plan.shards[0].args.includes("--maxWorkers=2"))
   assert.ok(plan.shards[0].args.includes("--testTimeout=120000"))
   assert.deepEqual(plan.shards[0].args.slice(-4), [
     "--shard=1/2",

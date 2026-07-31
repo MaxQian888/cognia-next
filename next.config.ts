@@ -52,7 +52,7 @@ const withSerwist = withSerwistInit({
   exclude: [({ asset }) => asset.source.size() > MAX_PRECACHE_ASSET_BYTES],
 })
 
-const internalHost = process.env.TAURI_DEV_HOST || "localhost"
+const internalHost = process.env.TAURI_DEV_HOST
 
 // Relative path: Turbopack on Windows rejects absolute paths in resolveAlias.
 const browserStub = "./lib/browser-stubs/empty.js"
@@ -162,6 +162,11 @@ const NODE_ONLY_MODULES = [
 // (see vercel/next.js#56477). Production export behavior is unchanged.
 const nextConfig: NextConfig = {
   output: isProd ? "export" : undefined,
+  // Tauri and local browser tooling may address the same dev server through
+  // the IPv4 loopback alias while Next starts it as `localhost`. Allow only
+  // that additional loopback host so HMR and generated font resources remain
+  // available without widening dev-resource access to the LAN.
+  allowedDevOrigins: ["127.0.0.1"],
   // Build-time type checking uses a stories-free program. Storybook
   // `*.stories.tsx` and their `lib/storybook/**` fixtures are dev-only preview
   // artifacts that never enter the static export, so a broken story must not
@@ -214,8 +219,11 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
-  // Configure assetPrefix or else the server won't properly resolve your assets.
-  assetPrefix: isProd ? undefined : `http://${internalHost}:3000`,
+  // Ordinary browser development must keep lazy chunks on the page origin so
+  // `next dev --port <port>` continues to work when 3000 is unavailable.
+  // Tauri sets TAURI_DEV_HOST when its WebView needs an explicit cross-origin
+  // asset host; preserve that path without forcing every dev session to :3000.
+  assetPrefix: !isProd && internalHost ? `http://${internalHost}:3000` : undefined,
   // Turbopack (pnpm dev): alias Node.js built-ins to the empty stub so none of
   // their (third-party) callers enter the browser bundle.
   turbopack: {

@@ -63,8 +63,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
-          version: 10
 
       - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
@@ -116,8 +114,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
-          version: 10
 
       - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
@@ -223,8 +219,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
-          version: 10
 
       - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
@@ -254,8 +248,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
-          version: 10
 
       - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
@@ -287,8 +279,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
-          version: 10
 
       - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
@@ -348,8 +338,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
-          version: 10
 
       - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
@@ -410,8 +398,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
-          version: 10
 
       - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
@@ -499,8 +485,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
-          version: 10
 
       - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
@@ -567,8 +551,6 @@ jobs:
           fetch-depth: 0
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
-          version: 10
       - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
         with:
@@ -617,8 +599,6 @@ jobs:
         uses: actions/checkout@v6
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
-          version: 10
       - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
         with:
@@ -673,8 +653,6 @@ jobs:
           fetch-depth: 0
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
-          version: 10
       - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
         with:
@@ -729,8 +707,6 @@ jobs:
           fetch-depth: 0
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
-          version: 10
       - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
         with:

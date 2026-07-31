@@ -152,6 +152,7 @@ const projectCommon: Config = {
     // source tree, not dist — dev/test never depend on a build step (the dist is
     // only produced to prove each package compiles standalone). These MUST come
     // before the broad `^@/` rule below; Jest tries entries in order.
+    "^@cognia/eval-core(.*)$": "<rootDir>/packages/eval-core/src$1",
     "^@cognia/provider-types(.*)$": "<rootDir>/packages/provider-types/src$1",
     "^@cognia/provider-core(.*)$": "<rootDir>/packages/provider-core/src$1",
     "^@cognia/provider-embedding(.*)$": "<rootDir>/packages/provider-embedding/src$1",
@@ -342,6 +343,12 @@ const globalConfig: Config = {
     "packages/provider-core/src/**/*.{ts,tsx}",
     "packages/provider-embedding/src/**/*.{ts,tsx}",
     "packages/provider-routing/src/**/*.{ts,tsx}",
+    // Evaluation decision logic is a pure shared package and must retain the
+    // same per-metric coverage guarantee as other newly extracted cores.
+    "packages/eval-core/src/**/*.{ts,tsx}",
+    "!packages/eval-core/src/**/*.test.{ts,tsx}",
+    "!packages/eval-core/src/types.ts",
+    "!packages/eval-core/src/index.ts",
     // rag was lifted out of lib/ai/rag (coverage-collected), so keep it collected.
     "packages/rag/src/**/*.{ts,tsx}",
     // error-parsers was lifted out of lib/error-parsers (coverage-collected).

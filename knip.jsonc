@@ -78,10 +78,7 @@
     },
     "packages/*": {},
     "packages/plugin-sdk": {
-      "entry": [
-        "scripts/import-code-128-contribution-schemas.mjs",
-        "tsup.author-types.config.ts",
-      ],
+      "entry": ["scripts/import-code-128-contribution-schemas.mjs", "tsup.author-types.config.ts"],
     },
     "packages/plugin-ui": {
       "entry": ["tsup.author-types.config.ts"],

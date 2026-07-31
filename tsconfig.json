@@ -22,6 +22,8 @@
     ],
     "paths": {
       "@/*": ["./*"],
+      "@cognia/eval-core": ["./packages/eval-core/src/index.ts"],
+      "@cognia/eval-core/*": ["./packages/eval-core/src/*"],
       "@cognia/provider-types": ["./packages/provider-types/src/index.ts"],
       "@cognia/provider-types/*": ["./packages/provider-types/src/*"],
       "@cognia/provider-core": ["./packages/provider-core/src/index.ts"],

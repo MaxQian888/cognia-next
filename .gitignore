@@ -115,6 +115,7 @@ tsc.out.txt
 # `/src-tauri/Cargo.lock` and `/crates/cognia-cli/Cargo.lock` paths exist
 # only so a stray file there is caught instead of accidentally committed.
 /src-tauri/Cargo.lock
+/src-tauri/binaries/
 /crates/*/Cargo.lock
 
 # rustfmt backup files (created by `rustfmt --backup`) and rustc ICE dumps.

@@ -24,12 +24,20 @@ function positiveInteger(flag, value) {
 }
 
 export function parseArgs(argv) {
-  const args = { shards: 8, jobs: 2, maxOldSpaceSize: 8192, out: "coverage", only: undefined }
+  const args = {
+    shards: 8,
+    jobs: 2,
+    workers: 4,
+    maxOldSpaceSize: 8192,
+    out: "coverage",
+    only: undefined,
+  }
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === "--") continue
     if (arg === "--shards") args.shards = positiveInteger(arg, argv[++i])
     else if (arg === "--jobs") args.jobs = positiveInteger(arg, argv[++i])
+    else if (arg === "--workers") args.workers = positiveInteger(arg, argv[++i])
     else if (arg === "--max-old-space-size") {
       args.maxOldSpaceSize = positiveInteger(arg, argv[++i])
     } else if (arg === "--out") {
@@ -52,7 +60,7 @@ export function effectiveJobCount(shards, jobs) {
   return Math.min(shards, jobs)
 }
 
-export function buildCoveragePlan({ shards, out, only }) {
+export function buildCoveragePlan({ shards, workers = 4, out, only }) {
   const shardRoot = path.join(out, "shards")
   const shardPlans = Array.from({ length: shards }, (_, index) => {
     const shard = index + 1
@@ -65,7 +73,7 @@ export function buildCoveragePlan({ shards, out, only }) {
         "jest",
         "--coverage",
         "--silent",
-        "--maxWorkers=4",
+        `--maxWorkers=${workers}`,
         "--testTimeout=120000",
         `--shard=${shard}/${shards}`,
         `--coverageDirectory=${coverageDirectory}`,

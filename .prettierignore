@@ -13,6 +13,8 @@ public/monaco
 # Serwist owns these generated, minified service-worker bundles.
 public/sw.js
 public/swe-worker-*.js
+# Integrity-pinned models.dev shards are compact output owned by the sync generator.
+public/catalog/models-dev/providers
 # Vendored skill content — managed by the skill plugin, not hand-edited.
 .agents/skills
 .claude/skills
