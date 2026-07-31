@@ -278,7 +278,7 @@ export async function runCouncil(
 export async function defaultCouncilRunPrompt(): Promise<RunCouncilDeps["runPrompt"]> {
   const { runRoutedPrompt, defaultRoutedPromptDeps } =
     await import("@/lib/workflow/nodes/ai/ai-prompt-routed")
-  const routedDeps = await defaultRoutedPromptDeps()
+  const routedDeps = await defaultRoutedPromptDeps("council")
   return async (input: RunPromptInput): Promise<RunPromptOutput> => {
     const out = await runRoutedPrompt(
       {

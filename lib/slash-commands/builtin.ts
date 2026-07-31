@@ -103,6 +103,8 @@ export interface SlashCommand {
   scope: SlashScope
   /** Hint text rendered next to the name (e.g. "<file>"). */
   argumentHint?: string
+  /** Literal first-argument values surfaced by the composer's inline completer. */
+  argumentOptions?: string[]
   /** Action handler. When set, picking the command runs it instead of inserting text. */
   handler?: (ctx: SlashContext) => void | Promise<void>
   /** Prompt template inserted into the textarea. Supports `$1..$9` and `$ARGUMENTS`. */
@@ -292,6 +294,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
       "Set permission mode directly (default | acceptEdits | plan | bypassPermissions). " +
       "With no arg, cycles like /permissions.",
     argumentHint: "<mode?>",
+    argumentOptions: ["default", "acceptEdits", "plan", "bypassPermissions"],
     scope: "builtin",
     category: "system",
     handler: (ctx) => {
@@ -420,6 +423,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     scope: "builtin",
     category: "goal",
     argumentHint: "<objective | status | pause | resume | stop | update <text> | show>",
+    argumentOptions: ["status", "pause", "resume", "stop", "update", "show"],
     handler: async (ctx) => {
       const result = await dispatchGoalSubcommand(ctx)
       if (!result) return
@@ -442,6 +446,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     scope: "builtin",
     category: "system",
     argumentHint: "<status | feed | play | pet | sleep | clean | treat>",
+    argumentOptions: ["status", "feed", "play", "pet", "sleep", "clean", "treat"],
     handler: async (ctx) => {
       const result = await dispatchPetSubcommand(ctx.args)
       ctx.pushSystemMessage(result.system)
@@ -454,6 +459,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     scope: "builtin",
     category: "loop",
     argumentHint: "<[interval] prompt | status | list | pause | resume | stop>",
+    argumentOptions: ["status", "list", "pause", "resume", "stop"],
     handler: async (ctx) => {
       // Self-paced kick-off is NOT dispatched here: LoopRuntime fires its
       // kickoff listener and the chat hook sends iteration 1 silently —
@@ -481,6 +487,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     scope: "builtin",
     category: "chat",
     argumentHint: "[status | list [n] | forget <id>]",
+    argumentOptions: ["status", "list", "forget"],
     handler: async (ctx) => {
       const result = await dispatchMemorySubcommand(ctx)
       if (result?.system) ctx.pushSystemMessage(result.system)

@@ -55,6 +55,9 @@ describe("BUILTIN_SLASH_COMMANDS registry", () => {
     expect(pet?.template).toBeUndefined()
     expect(pet?.argumentHint).toContain("feed")
     expect(pet?.argumentHint).toContain("treat")
+    expect(pet?.argumentOptions).toEqual(
+      expect.arrayContaining(["status", "feed", "play", "sleep", "clean", "treat"])
+    )
   })
 
   it("/init carries a non-empty template (no Action handler)", () => {
