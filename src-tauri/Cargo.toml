@@ -354,7 +354,7 @@ zip = { version = "2", default-features = false, features = ["deflate", "bzip2"]
 # are affected by sandbox-escape advisories that were fixed in 36.0.12.
 wasmtime = { version = "=36.0.12", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
 wasmtime-wasi = "=36.0.12"
-wasmparser = "0.221"
+wasmparser = "0.254"
 
 # CLI argument parsing for the cognia-server binary (Phase D follow-up).
 # `derive` gives us the `#[derive(Parser)]` macro; `std` keeps default
