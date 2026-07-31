@@ -148,6 +148,25 @@ async function seedLegacyV86(dbName: string) {
   legacy.close()
 }
 
+async function seedLegacyQueueV135(dbName: string) {
+  const legacy = new Dexie(dbName)
+  legacy.version(135).stores({
+    mobileOutboundQueue: "&id, status, [status+nextAttemptAt], createdAt, command",
+  })
+  await legacy.open()
+  await legacy.table("mobileOutboundQueue").put({
+    id: "legacy-action",
+    command: "workflow_trigger_manual",
+    payload: { workflowId: "wf-1" },
+    status: "pending",
+    attempts: 0,
+    createdAt: 1,
+    nextAttemptAt: 1,
+    idempotencyKey: "legacy-key",
+  })
+  legacy.close()
+}
+
 describe("migrateLegacyDatabaseToAccount", () => {
   it("reports whether a legacy database exists without opening the account target", async () => {
     const sourceDbName = "cognia-legacy-exists-test"
@@ -249,6 +268,30 @@ describe("migrateLegacyDatabaseToAccount", () => {
     })
 
     nowSpy.mockRestore()
+    registryDb.close()
+  }, 30000)
+
+  it("attributes quarantined legacy queue rows to the account receiving the migration", async () => {
+    const sourceDbName = "cognia-legacy-v135-queue-migration-test"
+    await deleteCogniaDb(sourceDbName)
+    await deleteCogniaDb(accountDatabaseName("acct_legacy"))
+    await seedLegacyQueueV135(sourceDbName)
+    const { db: registryDb, registry } = await createRegistry("legacy-v135-queue")
+
+    await migrateLegacyDatabaseToAccount({
+      registry,
+      sourceDbName,
+      targetAccountId: "acct_legacy",
+    })
+
+    const accountDb = new CogniaDB(accountDatabaseName("acct_legacy"))
+    await accountDb.open()
+    await expect(accountDb.mobileOutboundQueue.get("legacy-action")).resolves.toMatchObject({
+      accountId: "acct_legacy",
+      targetId: "legacy-mixed",
+      status: "deadlettered",
+    })
+    accountDb.close()
     registryDb.close()
   }, 30000)
 

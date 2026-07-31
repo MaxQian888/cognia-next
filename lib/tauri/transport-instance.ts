@@ -50,5 +50,7 @@ export let transport: Transport = pickTransport()
  * No-op-safe to call multiple times; the last writer wins.
  */
 export function setTransport(next: Transport): void {
+  const previous = transport as Transport & { destroy?: () => void }
+  if (previous !== next) previous.destroy?.()
   transport = next
 }

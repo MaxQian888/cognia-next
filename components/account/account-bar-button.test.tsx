@@ -26,13 +26,42 @@ jest.mock("./account-manage-dialog", () => ({
   AccountManageDialog: ({ open }: { open: boolean }) =>
     open ? <div data-testid="manage-dialog" /> : null,
 }))
+jest.mock("./runtime-target-menu-section", () => ({
+  RuntimeTargetMenuSection: ({ onSwitched }: { onSwitched: () => void }) => (
+    <button type="button" data-testid="runtime-target-switch" onClick={onSwitched}>
+      switch
+    </button>
+  ),
+}))
+jest.mock("@/components/ui/separator", () => ({ Separator: () => <hr /> }))
 
 // Inline the popover so its content is always queryable.
-jest.mock("@/components/ui/popover", () => ({
-  Popover: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  PopoverTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  PopoverContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/popover", () => {
+  const React = jest.requireActual<typeof import("react")>("react")
+  const Context = React.createContext({ open: false, onOpenChange: (_open: boolean) => {} })
+  return {
+    Popover: ({
+      children,
+      open,
+      onOpenChange,
+    }: {
+      children: React.ReactNode
+      open: boolean
+      onOpenChange: (open: boolean) => void
+    }) => (
+      <Context.Provider value={{ open, onOpenChange }}>
+        <div data-testid="account-popover" data-open={String(open)}>
+          {children}
+        </div>
+      </Context.Provider>
+    ),
+    PopoverTrigger: ({ children }: { children: React.ReactElement<{ onClick?: () => void }> }) => {
+      const { open, onOpenChange } = React.useContext(Context)
+      return React.cloneElement(children, { onClick: () => onOpenChange(!open) })
+    },
+    PopoverContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  }
+})
 
 import { AccountBarButton } from "./account-bar-button"
 
@@ -69,6 +98,15 @@ describe("AccountBarButton", () => {
     expect(screen.queryByTestId("manage-dialog")).toBeNull()
     fireEvent.click(screen.getByTestId("account-bar-manage"))
     expect(screen.getByTestId("manage-dialog")).toBeInTheDocument()
+  })
+
+  it("closes the account popover after switching runtime targets", () => {
+    mockState = { accounts: [acc("a1", "Ada")], lock: jest.fn(), activeAccountId: "a1" }
+    render(<AccountBarButton />)
+    fireEvent.click(screen.getByTestId("account-bar-button"))
+    expect(screen.getByTestId("account-popover")).toHaveAttribute("data-open", "true")
+    fireEvent.click(screen.getByTestId("runtime-target-switch"))
+    expect(screen.getByTestId("account-popover")).toHaveAttribute("data-open", "false")
   })
 
   it("falls back to the user icon when no account is active", () => {

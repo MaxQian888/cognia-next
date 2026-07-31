@@ -8,6 +8,18 @@ import type { RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
 
 export type DevicePlatform = "ios" | "android" | "web" | "unknown"
 
+/** Public, signed locator for the durable terminal host. Never contains secrets. */
+export interface TerminalHostDescriptor {
+  hostId: string
+  issuedAt: number
+  expiresAt?: number
+  lanUrl?: string
+  signalingRoomId?: string
+  signingPublicKey: string
+  credentialKeyId: string
+  signature: string
+}
+
 export interface PairedDeviceRow {
   /** UUIDv4, server-generated at pair time. Primary key. */
   deviceId: string
@@ -93,6 +105,12 @@ export interface PairedDeviceRow {
    * mirrors it so the gate in `rpc.rs` stays an O(1) lookup.
    */
   allowAgentControl?: boolean
+
+  /** Independent deny-by-default grant for viewing and controlling host terminals. */
+  allowRemoteTerminal: boolean
+
+  /** Sanitized descriptor provisioned only while terminal access is granted. */
+  terminalHostDescriptor?: TerminalHostDescriptor
 
   /**
    * Separate Locked Use grant. This is meaningful only together with

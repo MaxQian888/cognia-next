@@ -24,6 +24,7 @@ import {
   installDesktopSignalingController,
   installCompanionSignalingController,
 } from "@/lib/signaling"
+import { CompanionOutboundRunnerProvider } from "./companion-outbound-runner-provider"
 
 export function CompanionEventBridgeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
@@ -44,5 +45,10 @@ export function CompanionEventBridgeProvider({ children }: { children: React.Rea
     return detach
   }, [])
 
-  return <>{children}</>
+  return (
+    <>
+      <CompanionOutboundRunnerProvider />
+      {children}
+    </>
+  )
 }

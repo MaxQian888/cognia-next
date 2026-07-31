@@ -6,7 +6,7 @@
  */
 
 import "fake-indexeddb/auto"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { PairedDevicesCard } from "./paired-devices-card"
@@ -21,6 +21,27 @@ function setTauri(on: boolean) {
 }
 
 let callSpy: jest.SpiedFunction<typeof transport.call>
+
+async function interactUntil(
+  action: () => Promise<void>,
+  assertion: () => void | Promise<void>
+): Promise<void> {
+  await act(async () => {
+    await action()
+    let lastError: unknown
+    for (let attempt = 0; attempt < 100; attempt++) {
+      try {
+        await assertion()
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        return
+      } catch (error) {
+        lastError = error
+        await new Promise<void>((resolve) => setTimeout(resolve, 10))
+      }
+    }
+    throw lastError
+  })
+}
 
 beforeEach(async () => {
   await getDb().delete()
@@ -90,11 +111,10 @@ describe("<PairedDevicesCard />", () => {
     const revokeBtn = await screen.findByRole("button", {
       name: /Revoke Phone/i,
     })
-    await user.click(revokeBtn)
-
-    await waitFor(() => {
-      expect(revokeIds).toEqual(["dev-c"])
-    })
+    await interactUntil(
+      () => user.click(revokeBtn),
+      () => expect(revokeIds).toEqual(["dev-c"])
+    )
     const rows = await listPairedDevices()
     expect(rows[0]?.revokedAt).toBeDefined()
   })
@@ -122,11 +142,10 @@ describe("<PairedDevicesCard />", () => {
     const toggle = await screen.findByRole("switch", {
       name: /Toggle remote control for Phone/i,
     })
-    await user.click(toggle)
-
-    await waitFor(() => {
-      expect(calls).toEqual([{ deviceId: "dev-rc", allowed: true }])
-    })
+    await interactUntil(
+      () => user.click(toggle),
+      () => expect(calls).toEqual([{ deviceId: "dev-rc", allowed: true }])
+    )
     const rows = await listPairedDevices()
     expect(rows[0]?.allowRemoteControl).toBe(true)
   })
@@ -158,11 +177,10 @@ describe("<PairedDevicesCard />", () => {
     const toggle = await screen.findByRole("switch", {
       name: /Toggle remote control for Phone/i,
     })
-    await user.click(toggle)
-
-    await waitFor(() => {
-      expect(calls).toEqual([{ deviceId: "dev-rc2", allowed: false }])
-    })
+    await interactUntil(
+      () => user.click(toggle),
+      () => expect(calls).toEqual([{ deviceId: "dev-rc2", allowed: false }])
+    )
     const rows = await listPairedDevices()
     expect(rows[0]?.allowRemoteControl).toBe(false)
   })
@@ -191,15 +209,13 @@ describe("<PairedDevicesCard />", () => {
     })
 
     render(<PairedDevicesCard />)
-    await user.click(
-      await screen.findByRole("switch", {
-        name: /Toggle Locked Use for Trusted Phone/i,
-      })
-    )
-
-    await waitFor(() => {
-      expect(calls).toEqual([{ deviceId: "dev-locked", allowed: true }])
+    const lockedToggle = await screen.findByRole("switch", {
+      name: /Toggle Locked Use for Trusted Phone/i,
     })
+    await interactUntil(
+      () => user.click(lockedToggle),
+      () => expect(calls).toEqual([{ deviceId: "dev-locked", allowed: true }])
+    )
     const rows = await listPairedDevices()
     expect(rows[0]?.allowLockedComputerUse).toBe(true)
   })
@@ -228,18 +244,17 @@ describe("<PairedDevicesCard />", () => {
     })
 
     render(<PairedDevicesCard />)
-    await user.click(
-      await screen.findByRole("switch", {
-        name: /Toggle remote control for Trusted Phone/i,
-      })
-    )
-
-    await waitFor(() => {
-      expect(commands).toEqual([
-        "companion_set_locked_computer_use",
-        "companion_set_remote_control",
-      ])
+    const remoteControlToggle = await screen.findByRole("switch", {
+      name: /Toggle remote control for Trusted Phone/i,
     })
+    await interactUntil(
+      () => user.click(remoteControlToggle),
+      () =>
+        expect(commands).toEqual([
+          "companion_set_locked_computer_use",
+          "companion_set_remote_control",
+        ])
+    )
     const rows = await listPairedDevices()
     expect(rows[0]?.allowRemoteControl).toBe(false)
     expect(rows[0]?.allowLockedComputerUse).toBe(false)
@@ -272,11 +287,10 @@ describe("<PairedDevicesCard />", () => {
 
     render(<PairedDevicesCard />)
     const resumeBtn = await screen.findByRole("button", { name: /Resume Phone/i })
-    await user.click(resumeBtn)
-
-    await waitFor(() => {
-      expect(unrevokeIds).toEqual(["dev-d"])
-    })
+    await interactUntil(
+      () => user.click(resumeBtn),
+      () => expect(unrevokeIds).toEqual(["dev-d"])
+    )
     const rows = await listPairedDevices()
     expect(rows[0]?.pausedAt).toBeUndefined()
   })
@@ -305,19 +319,134 @@ describe("<PairedDevicesCard />", () => {
     const toggle = await screen.findByRole("switch", {
       name: /Toggle agent control for Laptop/i,
     })
-    await user.click(toggle)
-
-    await waitFor(() => {
-      expect(calls).toContainEqual({
-        name: "companion_set_agent_control",
-        args: { deviceId: "dev-ac1", allowed: true },
-      })
-    })
+    await interactUntil(
+      () => user.click(toggle),
+      () =>
+        expect(calls).toContainEqual({
+          name: "companion_set_agent_control",
+          args: { deviceId: "dev-ac1", allowed: true },
+        })
+    )
     // Enabling it must not have touched the remote-control grant.
     expect(calls.some((c) => c.name === "companion_set_remote_control")).toBe(false)
     const { getPairedDevice } = await import("@/lib/db/paired-devices")
     const row = await getPairedDevice("dev-ac1")
     expect(row?.allowAgentControl).toBe(true)
     expect(row?.allowRemoteControl).toBeUndefined()
+  })
+
+  it("provisions and grants remote terminal access independently", async () => {
+    const user = userEvent.setup()
+    await addPairedDevice({
+      deviceId: "dev-terminal",
+      label: "Tablet",
+      platform: "android",
+      pubkey: "tablet-public-key",
+      appVersion: "0.1.0",
+      nowMs: Date.now(),
+    })
+    const descriptor = {
+      hostId: "host-a",
+      issuedAt: 1,
+      expiresAt: 2,
+      lanUrl: "wss://192.168.1.8:27890/ws/terminal",
+      signingPublicKey: "signing-key",
+      credentialKeyId: "credential-key",
+      signature: "signature",
+    }
+    const calls: Array<{ name: string; args: unknown }> = []
+    callSpy.mockImplementation(async (name: string, args?: unknown) => {
+      calls.push({ name, args })
+      if (name === "terminal_host_service") {
+        return { running: true, endpoint: "local", descriptor } as never
+      }
+      return undefined as never
+    })
+
+    render(<PairedDevicesCard />)
+    const terminalToggle = await screen.findByRole("switch", {
+      name: /Toggle terminal access for Tablet/i,
+    })
+    await interactUntil(
+      () => user.click(terminalToggle),
+      () =>
+        expect(calls).toContainEqual({
+          name: "companion_set_remote_terminal",
+          args: { deviceId: "dev-terminal", allowed: true },
+        })
+    )
+    expect(calls).toContainEqual({
+      name: "terminal_host_service",
+      args: {
+        action: {
+          kind: "provision",
+          deviceId: "dev-terminal",
+          devicePublicKey: "tablet-public-key",
+        },
+      },
+    })
+    expect(calls.some((call) => call.name === "companion_set_remote_control")).toBe(false)
+    expect(calls.some((call) => call.name === "companion_set_agent_control")).toBe(false)
+    const { getPairedDevice } = await import("@/lib/db/paired-devices")
+    const row = await getPairedDevice("dev-terminal")
+    expect(row?.allowRemoteTerminal).toBe(true)
+    expect(row?.terminalHostDescriptor).toEqual(descriptor)
+  })
+
+  it("rolls back the persisted terminal grant when the native allow-list rejects it", async () => {
+    await addPairedDevice({
+      deviceId: "dev-terminal-fail",
+      label: "Phone",
+      platform: "ios",
+      pubkey: "phone-public-key",
+      appVersion: "0.1.0",
+      nowMs: Date.now(),
+    })
+    let rejectTerminalGrant!: (error: Error) => void
+    const terminalGrant = new Promise<void>((_resolve, reject) => {
+      rejectTerminalGrant = reject
+    })
+    callSpy.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === "terminal_host_service") {
+        return {
+          descriptor: {
+            hostId: "host-a",
+            issuedAt: 1,
+            expiresAt: 2,
+            signingPublicKey: "signing-key",
+            credentialKeyId: "credential-key",
+            signature: "signature",
+          },
+        } as never
+      }
+      if (name === "companion_set_remote_terminal" && (args as { allowed: boolean }).allowed) {
+        await terminalGrant
+      }
+      return undefined as never
+    })
+
+    render(<PairedDevicesCard />)
+    const terminalToggle = await screen.findByRole("switch", {
+      name: /Toggle terminal access for Phone/i,
+    })
+    await interactUntil(
+      async () => {
+        fireEvent.click(terminalToggle)
+      },
+      async () => {
+        const { getPairedDevice } = await import("@/lib/db/paired-devices")
+        expect((await getPairedDevice("dev-terminal-fail"))?.allowRemoteTerminal).toBe(true)
+      }
+    )
+    expect(terminalToggle).toBeChecked()
+    await interactUntil(
+      async () => rejectTerminalGrant(new Error("native grant failed")),
+      async () => {
+        const { getPairedDevice } = await import("@/lib/db/paired-devices")
+        expect((await getPairedDevice("dev-terminal-fail"))?.allowRemoteTerminal).toBe(false)
+      }
+    )
+    const { getPairedDevice } = await import("@/lib/db/paired-devices")
+    expect((await getPairedDevice("dev-terminal-fail"))?.allowRemoteTerminal).toBe(false)
   })
 })

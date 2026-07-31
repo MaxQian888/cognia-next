@@ -4,7 +4,7 @@
 import { act, renderHook } from "@testing-library/react"
 
 const lockMock = jest.fn()
-const state = { minutes: 0, locked: false }
+const state = { minutes: 0, locked: false, streaming: false }
 
 jest.mock("@/stores/account/account-store", () => {
   const useAccountStore = (selector: (s: { locked: boolean }) => unknown) =>
@@ -16,6 +16,13 @@ jest.mock("@/stores/account/account-store", () => {
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (s: { settings: { accountAutoLockMinutes: number } }) => unknown) =>
     selector({ settings: { accountAutoLockMinutes: state.minutes } }),
+}))
+
+jest.mock("@/stores/chat/chat-store", () => ({
+  useChatStore: (selector: (s: { sessions: Record<string, { status: string }> }) => unknown) =>
+    selector({
+      sessions: state.streaming ? { local: { status: "streaming" } } : {},
+    }),
 }))
 
 import { useAutoLock } from "./use-auto-lock"
@@ -33,6 +40,7 @@ beforeEach(() => {
   lockMock.mockReset()
   state.minutes = 0
   state.locked = false
+  state.streaming = false
   jest.useFakeTimers()
   jest.setSystemTime(0)
   setVisibility("visible")
@@ -56,6 +64,16 @@ describe("useAutoLock", () => {
   it("does not arm when already locked", () => {
     state.minutes = 1
     state.locked = true
+    renderHook(() => useAutoLock())
+    act(() => {
+      jest.advanceTimersByTime(5 * MIN)
+    })
+    expect(lockMock).not.toHaveBeenCalled()
+  })
+
+  it("pauses auto-lock while a local turn is streaming", () => {
+    state.minutes = 1
+    state.streaming = true
     renderHook(() => useAutoLock())
     act(() => {
       jest.advanceTimersByTime(5 * MIN)

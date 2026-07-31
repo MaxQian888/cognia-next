@@ -41,5 +41,6 @@ export function makePairedDevice(over: Partial<PairedDeviceRow> = {}): PairedDev
     lastSeenAt: BASE - deviceSeq * 60_000,
     appVersion: "1.4.2",
     ...over,
+    allowRemoteTerminal: over.allowRemoteTerminal ?? false,
   }
 }

@@ -33,6 +33,7 @@ jest.mock("@/lib/accounts/account-db", () => ({
     deleteAccount: mockDeleteRegistryAccount,
   })),
   accountDatabaseName: (accountId: string) => `cognia-account-${accountId}`,
+  generateAccountId: () => "acct_generated",
 }))
 
 const mockCreatePasswordVerifier = jest.fn<Promise<PasswordVerifierRecord>, [string]>()
@@ -50,6 +51,38 @@ const mockIsDevAutoUnlockEnabled = jest.fn<boolean, []>()
 
 jest.mock("@/lib/accounts/dev-auto-unlock", () => ({
   isDevAutoUnlockEnabled: () => mockIsDevAutoUnlockEnabled(),
+}))
+
+let mockIsTauri = true
+let mockIsCapacitor = false
+jest.mock("@/lib/platform/detect", () => ({
+  isTauri: () => mockIsTauri,
+  isCapacitor: () => mockIsCapacitor,
+}))
+
+const mockProvisionBrowserVault = jest.fn<Promise<string>, [string, string]>()
+const mockUnlockBrowserVault = jest.fn<Promise<void>, [string, string]>()
+const mockVerifyBrowserVaultPassword = jest.fn<Promise<boolean>, [string, string]>()
+const mockChangeBrowserVaultPassword = jest.fn<Promise<void>, [string, string, string]>()
+const mockDeleteBrowserVault = jest.fn<Promise<void>, [string]>()
+const mockLockBrowserVault = jest.fn<void, []>()
+jest.mock("@/lib/runtime/browser-vault", () => ({
+  provisionBrowserVault: (...args: [string, string]) => mockProvisionBrowserVault(...args),
+  unlockBrowserVault: (...args: [string, string]) => mockUnlockBrowserVault(...args),
+  verifyBrowserVaultPassword: (...args: [string, string]) =>
+    mockVerifyBrowserVaultPassword(...args),
+  changeBrowserVaultPassword: (...args: [string, string, string]) =>
+    mockChangeBrowserVaultPassword(...args),
+  deleteBrowserVault: (...args: [string]) => mockDeleteBrowserVault(...args),
+  lockBrowserVault: () => mockLockBrowserVault(),
+}))
+
+const mockSetActiveRuntimeTargetContext = jest.fn<void, [string, string]>()
+const mockClearActiveRuntimeTargetContext = jest.fn<void, []>()
+jest.mock("@/lib/runtime/runtime-target-context", () => ({
+  setActiveRuntimeTargetContext: (...args: [string, string]) =>
+    mockSetActiveRuntimeTargetContext(...args),
+  clearActiveRuntimeTargetContext: () => mockClearActiveRuntimeTargetContext(),
 }))
 
 const mockLegacyDatabaseExists = jest.fn<Promise<boolean>, []>()
@@ -72,6 +105,8 @@ const mockDropAccountDatabase = jest.fn<Promise<void>, [string]>()
 const mockPurgeAccountLocalState = jest.fn<Promise<void>, [string]>()
 const mockActivateAccountLocalState = jest.fn<Promise<void>, [string]>()
 const mockClearAccountLocalState = jest.fn<void, []>()
+const mockPrepareRuntimeTarget = jest.fn()
+const mockRemoveRuntimeTargets = jest.fn<Promise<void>, [string]>()
 
 let createAccountStore: typeof import("./account-store").createAccountStore
 let selectActiveAccount: typeof import("./account-store").selectActiveAccount
@@ -107,6 +142,8 @@ function makeStore() {
     purgeAccountLocalState: mockPurgeAccountLocalState,
     activateAccountLocalState: mockActivateAccountLocalState,
     clearAccountLocalState: mockClearAccountLocalState,
+    prepareRuntimeTarget: mockPrepareRuntimeTarget,
+    removeRuntimeTargets: mockRemoveRuntimeTargets,
   }
   return createAccountStore(dependencies)
 }
@@ -116,6 +153,13 @@ beforeEach(() => {
   window.localStorage.clear()
   window.sessionStorage.clear()
   mockIsDevAutoUnlockEnabled.mockReturnValue(false)
+  mockIsTauri = true
+  mockIsCapacitor = false
+  mockProvisionBrowserVault.mockResolvedValue("recovery-key")
+  mockUnlockBrowserVault.mockResolvedValue()
+  mockVerifyBrowserVaultPassword.mockResolvedValue(true)
+  mockChangeBrowserVaultPassword.mockResolvedValue()
+  mockDeleteBrowserVault.mockResolvedValue()
   mockListAccounts.mockResolvedValue([])
   mockGetState.mockResolvedValue({ activeAccountId: null })
   mockCreatePasswordVerifier.mockImplementation(async (password) => verifier(password))
@@ -144,6 +188,16 @@ beforeEach(() => {
   mockDropAccountDatabase.mockResolvedValue()
   mockPurgeAccountLocalState.mockResolvedValue()
   mockActivateAccountLocalState.mockResolvedValue()
+  mockPrepareRuntimeTarget.mockResolvedValue({
+    accountId: "acct_browser",
+    id: "web-standalone",
+    kind: "standalone",
+    label: "This browser",
+    createdAt: 1,
+    updatedAt: 1,
+    lastUsedAt: 1,
+  })
+  mockRemoveRuntimeTargets.mockResolvedValue()
 })
 
 describe("account store load", () => {
@@ -226,6 +280,124 @@ describe("account store load", () => {
 
     expect(store.getState().accounts).toEqual([alpha])
     expect(store.getState().error).toBeNull()
+  })
+})
+
+describe("browser Vault lifecycle", () => {
+  beforeEach(() => {
+    mockIsTauri = false
+  })
+
+  it("provisions the Vault before registering a browser account", async () => {
+    const store = makeStore()
+
+    await store
+      .getState()
+      .createAccount({ id: "acct_browser", displayName: "Browser", password: "secret" })
+
+    expect(mockProvisionBrowserVault).toHaveBeenCalledWith("acct_browser", "secret")
+    expect(mockCreateRegistryAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "acct_browser" })
+    )
+    expect(store.getState().pendingRecoveryKey).toBe("recovery-key")
+    expect(mockActivateAccountDatabase).toHaveBeenCalledWith("acct_browser", "web-standalone")
+    expect(mockSetActiveRuntimeTargetContext).toHaveBeenCalledWith("acct_browser", "web-standalone")
+  })
+
+  it("unlocks and locks the browser Vault with the account gate", async () => {
+    const browserAccount = account("acct_browser", "Browser")
+    mockListAccounts.mockResolvedValue([browserAccount])
+    mockGetState.mockResolvedValue({ activeAccountId: browserAccount.id })
+    const store = makeStore()
+    await store.getState().load()
+
+    await store.getState().unlockAccount(browserAccount.id, "secret")
+    expect(mockUnlockBrowserVault).toHaveBeenCalledWith(browserAccount.id, "secret")
+    expect(mockPrepareRuntimeTarget).toHaveBeenCalledWith(browserAccount.id)
+
+    store.getState().lock()
+    expect(mockLockBrowserVault).toHaveBeenCalledTimes(1)
+  })
+
+  it("uses the Vault as browser password authority when the registry verifier has drifted", async () => {
+    const browserAccount = account("acct_browser", "Browser")
+    mockListAccounts.mockResolvedValue([browserAccount])
+    mockGetState.mockResolvedValue({ activeAccountId: browserAccount.id })
+    mockVerifyPassword.mockResolvedValue(false)
+    const store = makeStore()
+    await store.getState().load()
+
+    await store.getState().unlockAccount(browserAccount.id, "vault-password")
+
+    expect(mockVerifyPassword).not.toHaveBeenCalled()
+    expect(mockUnlockBrowserVault).toHaveBeenCalledWith(browserAccount.id, "vault-password")
+  })
+
+  it("rolls the registry verifier back when the Vault password update fails", async () => {
+    const browserAccount = account("acct_browser", "Browser", verifier("old-password"))
+    mockListAccounts.mockResolvedValue([browserAccount])
+    mockGetState.mockResolvedValue({ activeAccountId: browserAccount.id })
+    mockChangeBrowserVaultPassword.mockRejectedValueOnce(new Error("vault write failed"))
+    const store = makeStore()
+    await store.getState().load()
+
+    await expect(
+      store.getState().changePassword(browserAccount.id, "old-password", "new-password")
+    ).rejects.toThrow("vault write failed")
+
+    expect(mockVerifyBrowserVaultPassword).toHaveBeenCalledWith(browserAccount.id, "old-password")
+    expect(mockUpdatePasswordVerifier).toHaveBeenNthCalledWith(
+      1,
+      browserAccount.id,
+      verifier("new-password")
+    )
+    expect(mockChangeBrowserVaultPassword).toHaveBeenCalledWith(
+      browserAccount.id,
+      "old-password",
+      "new-password"
+    )
+    expect(mockUpdatePasswordVerifier).toHaveBeenNthCalledWith(
+      2,
+      browserAccount.id,
+      browserAccount.passwordVerifier
+    )
+    expect(store.getState().accounts[0]).toEqual(browserAccount)
+  })
+
+  it("surfaces both failures when the Vault update and registry rollback fail", async () => {
+    const browserAccount = account("acct_browser", "Browser", verifier("old-password"))
+    mockListAccounts.mockResolvedValue([browserAccount])
+    mockGetState.mockResolvedValue({ activeAccountId: browserAccount.id })
+    mockChangeBrowserVaultPassword.mockRejectedValueOnce(new Error("vault write failed"))
+    mockUpdatePasswordVerifier
+      .mockResolvedValueOnce(
+        account(browserAccount.id, browserAccount.displayName, verifier("new-password"))
+      )
+      .mockRejectedValueOnce(new Error("registry rollback failed"))
+    const store = makeStore()
+    await store.getState().load()
+
+    const rejection = store
+      .getState()
+      .changePassword(browserAccount.id, "old-password", "new-password")
+    await expect(rejection).rejects.toBeInstanceOf(AggregateError)
+    await expect(rejection).rejects.toMatchObject({
+      errors: [
+        expect.objectContaining({ message: "vault write failed" }),
+        expect.objectContaining({ message: "registry rollback failed" }),
+      ],
+    })
+  })
+
+  it("clears a displayed one-time recovery key only after acknowledgement", async () => {
+    const store = makeStore()
+    await store
+      .getState()
+      .createAccount({ id: "acct_browser", displayName: "Browser", password: "secret" })
+
+    store.getState().acknowledgeRecoveryKey()
+
+    expect(store.getState().pendingRecoveryKey).toBeNull()
   })
 })
 

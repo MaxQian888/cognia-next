@@ -19,6 +19,10 @@ jest.mock("@/lib/signaling", () => ({
   installCompanionSignalingController: () => installCompanionSignaling(),
 }))
 
+jest.mock("./companion-outbound-runner-provider", () => ({
+  CompanionOutboundRunnerProvider: () => <span data-testid="outbound-runner" />,
+}))
+
 it("mounts all companion bridges and detaches them with the provider", () => {
   const view = render(
     <CompanionEventBridgeProvider>
@@ -27,6 +31,7 @@ it("mounts all companion bridges and detaches them with the provider", () => {
   )
 
   expect(screen.getByText("child")).toBeInTheDocument()
+  expect(screen.getByTestId("outbound-runner")).toBeInTheDocument()
   expect(installEventBridge).toHaveBeenCalledTimes(1)
   expect(installDesktopSignaling).toHaveBeenCalledTimes(1)
   expect(installCompanionSignaling).toHaveBeenCalledTimes(1)

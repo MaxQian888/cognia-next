@@ -1,7 +1,11 @@
 import Dexie from "dexie"
 import { create, type UseBoundStore, type StoreApi } from "zustand"
 
-import { LocalAccountRegistry, accountDatabaseName } from "@/lib/accounts/account-db"
+import {
+  LocalAccountRegistry,
+  accountDatabaseName,
+  generateAccountId,
+} from "@/lib/accounts/account-db"
 import type { LocalAccountRecord } from "@/lib/accounts/account-types"
 import {
   legacyDatabaseExists,
@@ -9,6 +13,24 @@ import {
 } from "@/lib/accounts/legacy-migration"
 import { createPasswordVerifier, verifyPassword } from "@/lib/accounts/password-client"
 import { isDevAutoUnlockEnabled } from "@/lib/accounts/dev-auto-unlock"
+import { isCapacitor, isTauri } from "@/lib/platform/detect"
+import {
+  changeBrowserVaultPassword,
+  deleteBrowserVault,
+  lockBrowserVault,
+  provisionBrowserVault,
+  unlockBrowserVault,
+  verifyBrowserVaultPassword,
+} from "@/lib/runtime/browser-vault"
+import {
+  prepareAccountRuntimeTarget,
+  removeAccountRuntimeTargets,
+} from "@/lib/runtime/account-runtime-target"
+import type { RuntimeTargetRecord } from "@/lib/runtime/target-registry"
+import {
+  clearActiveRuntimeTargetContext,
+  setActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
 import { activateAccountDatabase, clearAccountDatabaseSelection } from "@/lib/db/schema"
 import {
   activateArtifactAccountStorage,
@@ -45,6 +67,7 @@ export interface AccountStoreState {
   loading: boolean
   locked: boolean
   error: string | null
+  pendingRecoveryKey: string | null
   accountRevision: number
 
   load: () => Promise<void>
@@ -60,6 +83,7 @@ export interface AccountStoreState {
   setAccountAvatar: (accountId: string, avatarDataUrl: string | null) => Promise<LocalAccountRecord>
   deleteAccount: (accountId: string, options?: DeleteLocalAccountOptions) => Promise<void>
   lock: () => void
+  acknowledgeRecoveryKey: () => void
 }
 
 export interface AccountStoreDependencies {
@@ -68,6 +92,8 @@ export interface AccountStoreDependencies {
   purgeAccountLocalState: (accountId: string) => Promise<void>
   activateAccountLocalState: (accountId: string) => Promise<void>
   clearAccountLocalState: () => void
+  prepareRuntimeTarget: (accountId: string) => Promise<RuntimeTargetRecord>
+  removeRuntimeTargets: (accountId: string) => Promise<void>
 }
 
 export type AccountStore = UseBoundStore<StoreApi<AccountStoreState>>
@@ -80,6 +106,7 @@ const DEFAULT_STATE = {
   loading: false,
   locked: false,
   error: null,
+  pendingRecoveryKey: null,
   accountRevision: 0,
 }
 
@@ -92,6 +119,8 @@ export function createAccountStore(
     purgeAccountLocalState: purgeLocalStorageForAccount,
     activateAccountLocalState: activateBrowserAccountLocalState,
     clearAccountLocalState: clearBrowserAccountLocalState,
+    prepareRuntimeTarget: prepareAccountRuntimeTarget,
+    removeRuntimeTargets: removeAccountRuntimeTargets,
     ...dependencyOverrides,
   }
 
@@ -119,7 +148,14 @@ export function createAccountStore(
 
     const activateUnlockedAccount = async (accountId: string): Promise<void> => {
       await dependencies.registry.setActiveAccountId(accountId)
-      activateAccountDatabase(accountId)
+      const target = shouldUseBrowserVault()
+        ? await dependencies.prepareRuntimeTarget(accountId)
+        : null
+      activateSelectedDatabase(accountId, target?.id)
+      setActiveRuntimeTargetContext(
+        accountId,
+        target?.id ?? (isCapacitor() ? "mobile-companion" : "local-host")
+      )
       await dependencies.activateAccountLocalState(accountId)
       set((state) => ({
         activeAccountId: accountId,
@@ -161,7 +197,14 @@ export function createAccountStore(
             if (autoUnlockedAccountId !== registryState.activeAccountId) {
               await dependencies.registry.setActiveAccountId(autoUnlockedAccountId)
             }
-            activateAccountDatabase(autoUnlockedAccountId)
+            const target = shouldUseBrowserVault()
+              ? await dependencies.prepareRuntimeTarget(autoUnlockedAccountId)
+              : null
+            activateSelectedDatabase(autoUnlockedAccountId, target?.id)
+            setActiveRuntimeTargetContext(
+              autoUnlockedAccountId,
+              target?.id ?? (isCapacitor() ? "mobile-companion" : "local-host")
+            )
             await dependencies.activateAccountLocalState(autoUnlockedAccountId)
           }
           set((state) => ({
@@ -190,13 +233,26 @@ export function createAccountStore(
             : await dependencies.registry.listAccounts()
           const isFirstAccount = existingAccounts.length === 0
           const shouldActivate = input.activate ?? isFirstAccount
+          const accountId = input.id ?? generateAccountId()
           const passwordVerifier = await createPasswordVerifier(input.password)
-          const account = await dependencies.registry.createAccount({
-            id: input.id,
-            displayName: input.displayName,
-            passwordVerifier,
-            activate: shouldActivate,
-          })
+          const useBrowserVault = shouldUseBrowserVault()
+          const recoveryKey = useBrowserVault
+            ? await provisionBrowserVault(accountId, input.password)
+            : null
+          let account: LocalAccountRecord
+          try {
+            account = await dependencies.registry.createAccount({
+              id: accountId,
+              displayName: input.displayName,
+              passwordVerifier,
+              activate: shouldActivate,
+            })
+          } catch (error) {
+            if (useBrowserVault) {
+              await deleteBrowserVault(accountId).catch(() => {})
+            }
+            throw error
+          }
 
           if (isFirstAccount && (await legacyDatabaseExists())) {
             await migrateLegacyDatabaseToAccount({
@@ -216,12 +272,20 @@ export function createAccountStore(
                 ? false
                 : computeLocked(accounts, state.activeAccountId, state.unlockedAccountId),
               error: null,
+              pendingRecoveryKey: recoveryKey,
               accountRevision: shouldActivate ? state.accountRevision + 1 : state.accountRevision,
             }
           })
 
           if (shouldActivate) {
-            activateAccountDatabase(account.id)
+            const target = useBrowserVault
+              ? await dependencies.prepareRuntimeTarget(account.id)
+              : null
+            activateSelectedDatabase(account.id, target?.id)
+            setActiveRuntimeTargetContext(
+              account.id,
+              target?.id ?? (isCapacitor() ? "mobile-companion" : "local-host")
+            )
             await dependencies.activateAccountLocalState(account.id)
           }
 
@@ -236,9 +300,13 @@ export function createAccountStore(
         try {
           assertPasswordProvided(password)
           const account = await findAccount(accountId)
-          const ok = await verifyPassword(password, account.passwordVerifier)
-          if (!ok) {
-            throw new Error("Invalid local account password.")
+          if (shouldUseBrowserVault()) {
+            await unlockBrowserVault(account.id, password)
+          } else {
+            const ok = await verifyPassword(password, account.passwordVerifier)
+            if (!ok) {
+              throw new Error("Invalid local account password.")
+            }
           }
           await activateUnlockedAccount(account.id)
         } catch (error) {
@@ -255,9 +323,13 @@ export function createAccountStore(
           }
           assertPasswordProvided(password)
           const account = await findAccount(accountId)
-          const ok = await verifyPassword(password, account.passwordVerifier)
-          if (!ok) {
-            throw new Error("Invalid local account password.")
+          if (shouldUseBrowserVault()) {
+            await unlockBrowserVault(account.id, password)
+          } else {
+            const ok = await verifyPassword(password, account.passwordVerifier)
+            if (!ok) {
+              throw new Error("Invalid local account password.")
+            }
           }
           await activateUnlockedAccount(account.id)
         } catch (error) {
@@ -289,7 +361,10 @@ export function createAccountStore(
           assertPasswordProvided(currentPassword)
           assertPasswordProvided(newPassword)
           const account = await findAccount(accountId)
-          const ok = await verifyPassword(currentPassword, account.passwordVerifier)
+          const useBrowserVault = shouldUseBrowserVault()
+          const ok = useBrowserVault
+            ? await verifyBrowserVaultPassword(accountId, currentPassword)
+            : await verifyPassword(currentPassword, account.passwordVerifier)
           if (!ok) {
             throw new Error("Invalid local account password.")
           }
@@ -298,6 +373,24 @@ export function createAccountStore(
             accountId,
             passwordVerifier
           )
+          if (useBrowserVault) {
+            try {
+              await changeBrowserVaultPassword(accountId, currentPassword, newPassword)
+            } catch (vaultError) {
+              try {
+                await dependencies.registry.updatePasswordVerifier(
+                  accountId,
+                  account.passwordVerifier
+                )
+              } catch (rollbackError) {
+                throw new AggregateError(
+                  [vaultError, rollbackError],
+                  "Browser Vault password update failed and the registry verifier could not be rolled back."
+                )
+              }
+              throw vaultError
+            }
+          }
           set((state) => {
             const accounts = upsertAccount(state.accounts, updated)
             return {
@@ -337,7 +430,13 @@ export function createAccountStore(
           const replacementAccountId = options.replacementAccountId
           await dependencies.registry.deleteAccount(accountId, { replacementAccountId })
           await dependencies.dropAccountDatabase(accountId)
+          if (shouldUseBrowserVault()) {
+            await dependencies.removeRuntimeTargets(accountId)
+          }
           await dependencies.purgeAccountLocalState(accountId)
+          if (shouldUseBrowserVault()) {
+            await deleteBrowserVault(accountId)
+          }
 
           set((state) => {
             const accounts = state.accounts.filter((account) => account.id !== accountId)
@@ -357,6 +456,7 @@ export function createAccountStore(
           })
 
           if (wasActive) {
+            clearActiveRuntimeTargetContext()
             clearAccountDatabaseSelection()
             dependencies.clearAccountLocalState()
           }
@@ -366,6 +466,8 @@ export function createAccountStore(
       },
 
       lock: () => {
+        lockBrowserVault()
+        clearActiveRuntimeTargetContext()
         clearAccountDatabaseSelection()
         dependencies.clearAccountLocalState()
         set((state) => ({
@@ -374,8 +476,24 @@ export function createAccountStore(
           error: null,
         }))
       },
+
+      acknowledgeRecoveryKey: () => {
+        set({ pendingRecoveryKey: null })
+      },
     }
   })
+}
+
+function shouldUseBrowserVault(): boolean {
+  return !isTauri() && !isCapacitor()
+}
+
+function activateSelectedDatabase(accountId: string, targetId?: string): void {
+  if (targetId) {
+    activateAccountDatabase(accountId, targetId)
+  } else {
+    activateAccountDatabase(accountId)
+  }
 }
 
 export const useAccountStore = createAccountStore()
@@ -399,6 +517,7 @@ export async function unlockAccountForHost(accountId: string): Promise<void> {
     )
   }
   activateAccountDatabase(accountId)
+  setActiveRuntimeTargetContext(accountId, "local-host")
   useAccountStore.setState((state) => ({
     activeAccountId: accountId,
     unlockedAccountId: accountId,

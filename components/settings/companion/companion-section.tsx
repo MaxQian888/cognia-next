@@ -125,6 +125,9 @@ async function seedRemoteControlAllowList(): Promise<void> {
     await transport.call<void>("companion_seed_agent_control", {
       deviceIds: live.filter((d) => d.allowAgentControl === true).map((d) => d.deviceId),
     })
+    await transport.call<void>("companion_seed_remote_terminal", {
+      deviceIds: live.filter((d) => d.allowRemoteTerminal === true).map((d) => d.deviceId),
+    })
   } catch (err) {
     console.warn("seedRemoteControlAllowList failed", err)
   }

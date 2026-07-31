@@ -10,6 +10,10 @@ import { DraftApprovalPanel } from "./draft-approval-panel"
 import { createDraft, listAllPendingDrafts } from "@/lib/db/connector-drafts"
 import { listAll, listByStatus } from "@/lib/db/mobile-outbound-queue"
 import { getDb } from "@/lib/db/schema"
+import {
+  clearActiveRuntimeTargetContext,
+  setActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => {
@@ -25,10 +29,15 @@ jest.mock("next-intl", () => ({
 }))
 
 beforeEach(async () => {
+  setActiveRuntimeTargetContext("acct_draft", "mobile-draft-test")
   // Clear Dexie tables.
   const db = getDb()
   await db.connectorDrafts.clear()
   for (const r of await listAll()) await db.mobileOutboundQueue.delete(r.id)
+})
+
+afterEach(() => {
+  clearActiveRuntimeTargetContext()
 })
 
 describe("<DraftApprovalPanel />", () => {

@@ -64,6 +64,7 @@ function makeDevice(over: Partial<PairedDeviceRow> = {}): PairedDeviceRow {
     lastSeenAt: 0,
     appVersion: "1.0.0",
     ...over,
+    allowRemoteTerminal: over.allowRemoteTerminal ?? false,
   }
 }
 

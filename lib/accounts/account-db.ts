@@ -261,7 +261,7 @@ function nextTimestamp(candidate: number, previous: number): number {
   return candidate > previous ? candidate : previous + 1
 }
 
-function generateAccountId(): string {
+export function generateAccountId(): string {
   const cryptoObject = globalThis.crypto
   if (typeof cryptoObject?.randomUUID === "function") {
     return `acct_${cryptoObject.randomUUID().replace(/-/g, "").slice(0, 24)}`

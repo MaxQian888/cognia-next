@@ -24,9 +24,13 @@
 
 import { makeDefaultLoader } from "@/lib/capacitor/_shared"
 import { isCapacitor } from "@/lib/platform/detect"
+import { getActiveBrowserVault, type EncryptedVaultSecret } from "@/lib/runtime/browser-vault"
+import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import { importV2SigningPrivateKey, type RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
 
 export interface CompanionConfig {
+  /** Stable runtime target id. Added by Web registration after first pair. */
+  targetId?: string
   /** e.g. "https://192.168.1.42:7890" */
   baseUrl: string
   /** Long-lived JWT returned by `POST /api/v1/auth/pair`. */
@@ -96,6 +100,7 @@ export interface CompanionConfigStorage {
 }
 
 const CONFIG_KEY = "cognia.companion.config.v1"
+const CONFIG_BOOK_KEY = "cognia.companion.targets.v2"
 const SIGNALING_KEY_DB = "cognia-signaling-identity-v2"
 const SIGNALING_KEY_STORE = "keys"
 
@@ -103,6 +108,31 @@ interface BrowserSignalingKeyStore {
   save(deviceId: string, jwk: JsonWebKey): Promise<CryptoKey>
   load(deviceId: string): Promise<CryptoKey | null>
   clear(deviceId: string): Promise<void>
+}
+
+interface BrowserVaultSecretAdapter {
+  accountId: string
+  encryptSecret(name: string, value: string): Promise<EncryptedVaultSecret>
+  decryptSecret(name: string, secret: EncryptedVaultSecret): Promise<string>
+  storeSecret(name: string, value: string): Promise<void>
+  loadSecret(name: string): Promise<string | null>
+  deleteSecret(name: string): Promise<void>
+}
+
+type PublicBrowserCompanionConfig = Omit<
+  CompanionConfig,
+  "deviceJwt" | "signalingPrivateKeyJwk" | "signalingPrivateKey"
+>
+
+interface BrowserCompanionTargetBook {
+  version: 2
+  targets: Record<string, PublicBrowserCompanionConfig>
+}
+
+interface StoredBrowserCompanionConfig extends Omit<CompanionConfig, "deviceJwt"> {
+  deviceJwt?: string
+  deviceJwtEncrypted?: EncryptedVaultSecret
+  signalingPrivateKeyEncrypted?: EncryptedVaultSecret
 }
 
 class IndexedDbSignalingKeyStore implements BrowserSignalingKeyStore {
@@ -166,19 +196,66 @@ class IndexedDbSignalingKeyStore implements BrowserSignalingKeyStore {
 
 export class LocalStorageCompanionStorage implements CompanionConfigStorage {
   constructor(
-    private readonly signalingKeys: BrowserSignalingKeyStore = new IndexedDbSignalingKeyStore()
+    private readonly signalingKeys: BrowserSignalingKeyStore = new IndexedDbSignalingKeyStore(),
+    private readonly vaultProvider: () => BrowserVaultSecretAdapter | null = getActiveBrowserVault
   ) {}
 
   async load(): Promise<CompanionConfig | null> {
     if (typeof window === "undefined") return null
     try {
+      const vault = this.vaultProvider()
+      if (!vault) return null
+      const scope = getActiveRuntimeTargetContext()
+      const targetId = scope?.accountId === vault.accountId ? scope.targetId : null
+      const book = readBrowserTargetBook()
+      const accountTargets = Object.entries(book.targets)
+        .filter(([key]) => key.startsWith(`${vault.accountId}:`))
+        .map(([, value]) => value)
+      const publicConfig = targetId
+        ? book.targets[browserTargetKey(vault.accountId, targetId)]
+        : accountTargets.length === 1
+          ? accountTargets[0]
+          : undefined
+      if (publicConfig) {
+        return this.hydrateTarget(publicConfig, vault)
+      }
+
+      // One-time compatibility path for the former single-target v1 record.
+      // It remains readable until successfully copied into the v2 target book
+      // and Vault secret rows; the source is removed only after that succeeds.
       const raw = window.localStorage.getItem(CONFIG_KEY)
       if (!raw) return null
-      const config = JSON.parse(raw) as CompanionConfig
-      if (config.signalingRoomDescriptor) {
-        const key = await this.signalingKeys.load(config.deviceId)
-        if (key) config.signalingPrivateKey = key
+      const stored = JSON.parse(raw) as StoredBrowserCompanionConfig
+      const deviceJwt = stored.deviceJwtEncrypted
+        ? await vault.decryptSecret(
+            companionJwtSecretName(stored.targetId ?? stored.deviceId),
+            stored.deviceJwtEncrypted
+          )
+        : stored.deviceJwt
+      if (!deviceJwt) return null
+      const config: CompanionConfig = {
+        ...stored,
+        targetId: stored.targetId ?? stored.deviceId,
+        deviceJwt,
       }
+      delete (config as StoredBrowserCompanionConfig).deviceJwtEncrypted
+      if (config.signalingRoomDescriptor) {
+        if (stored.signalingPrivateKeyEncrypted) {
+          const serialized = await vault.decryptSecret(
+            companionSigningSecretName(stored.targetId ?? stored.deviceId),
+            stored.signalingPrivateKeyEncrypted
+          )
+          config.signalingPrivateKey = await importV2SigningPrivateKey(
+            JSON.parse(serialized) as JsonWebKey
+          )
+        } else {
+          const key = await this.signalingKeys.load(config.deviceId)
+          if (key) config.signalingPrivateKey = key
+        }
+      }
+      delete (config as StoredBrowserCompanionConfig).signalingPrivateKeyEncrypted
+      await this.save(config)
+      window.localStorage.removeItem(CONFIG_KEY)
       return config
     } catch {
       return null
@@ -187,26 +264,117 @@ export class LocalStorageCompanionStorage implements CompanionConfigStorage {
 
   async save(config: CompanionConfig): Promise<void> {
     if (typeof window === "undefined") return
-    const publicConfig = { ...config }
+    const vault = this.vaultProvider()
+    if (!vault) throw new Error("Browser Vault must be unlocked before saving a pairing.")
+    const targetId = config.targetId ?? config.deviceId
+    await vault.storeSecret(companionJwtSecretName(targetId), config.deviceJwt)
     if (config.signalingPrivateKeyJwk) {
-      publicConfig.signalingPrivateKey = await this.signalingKeys.save(
-        config.deviceId,
-        config.signalingPrivateKeyJwk
+      await vault.storeSecret(
+        companionSigningSecretName(targetId),
+        JSON.stringify(config.signalingPrivateKeyJwk)
       )
     }
-    delete publicConfig.signalingPrivateKey
-    delete publicConfig.signalingPrivateKeyJwk
-    window.localStorage.setItem(CONFIG_KEY, JSON.stringify(publicConfig))
+    const publicConfig = { ...config } as PublicBrowserCompanionConfig
+    delete (publicConfig as Partial<CompanionConfig>).deviceJwt
+    delete (publicConfig as Partial<CompanionConfig>).signalingPrivateKey
+    delete (publicConfig as Partial<CompanionConfig>).signalingPrivateKeyJwk
+    const book = readBrowserTargetBook()
+    book.targets[browserTargetKey(vault.accountId, targetId)] = {
+      ...publicConfig,
+      targetId,
+    }
+    writeBrowserTargetBook(book)
+    window.localStorage.removeItem(CONFIG_KEY)
   }
 
   async clear(): Promise<void> {
     if (typeof window === "undefined") return
-    const existing = await this.load()
-    if (existing?.signalingRoomDescriptor) {
-      await this.signalingKeys.clear(existing.deviceId)
+    const vault = this.vaultProvider()
+    const scope = getActiveRuntimeTargetContext()
+    if (vault) {
+      const book = readBrowserTargetBook()
+      const accountKeys = Object.keys(book.targets).filter((key) =>
+        key.startsWith(`${vault.accountId}:`)
+      )
+      const targetId =
+        scope?.accountId === vault.accountId
+          ? scope.targetId
+          : accountKeys.length === 1
+            ? accountKeys[0].slice(vault.accountId.length + 1)
+            : null
+      if (!targetId) {
+        window.localStorage.removeItem(CONFIG_KEY)
+        return
+      }
+      const key = browserTargetKey(vault.accountId, targetId)
+      const existing = book.targets[key]
+      if (existing) {
+        const cleanup: Array<Promise<void>> = [
+          vault.deleteSecret(companionJwtSecretName(targetId)),
+          vault.deleteSecret(companionSigningSecretName(targetId)),
+        ]
+        if (existing.signalingRoomDescriptor) {
+          cleanup.push(this.signalingKeys.clear(existing.deviceId))
+        }
+        await Promise.all(cleanup)
+        delete book.targets[key]
+        writeBrowserTargetBook(book)
+      }
     }
     window.localStorage.removeItem(CONFIG_KEY)
   }
+
+  private async hydrateTarget(
+    publicConfig: PublicBrowserCompanionConfig,
+    vault: BrowserVaultSecretAdapter
+  ): Promise<CompanionConfig | null> {
+    const targetId = publicConfig.targetId ?? publicConfig.deviceId
+    const deviceJwt = await vault.loadSecret(companionJwtSecretName(targetId))
+    if (!deviceJwt) return null
+    const config: CompanionConfig = { ...publicConfig, targetId, deviceJwt }
+    if (config.signalingRoomDescriptor) {
+      const serialized = await vault.loadSecret(companionSigningSecretName(targetId))
+      if (serialized) {
+        config.signalingPrivateKey = await importV2SigningPrivateKey(
+          JSON.parse(serialized) as JsonWebKey
+        )
+      } else {
+        const legacyKey = await this.signalingKeys.load(config.deviceId)
+        if (legacyKey) config.signalingPrivateKey = legacyKey
+      }
+    }
+    return config
+  }
+}
+
+function browserTargetKey(accountId: string, targetId: string): string {
+  return `${accountId}:${targetId}`
+}
+
+function readBrowserTargetBook(): BrowserCompanionTargetBook {
+  const raw = window.localStorage.getItem(CONFIG_BOOK_KEY)
+  if (!raw) return { version: 2, targets: {} }
+  const parsed = JSON.parse(raw) as BrowserCompanionTargetBook
+  if (parsed.version !== 2 || !parsed.targets || typeof parsed.targets !== "object") {
+    throw new Error("Browser Companion target book is incompatible.")
+  }
+  return parsed
+}
+
+function writeBrowserTargetBook(book: BrowserCompanionTargetBook): void {
+  if (Object.keys(book.targets).length === 0) {
+    window.localStorage.removeItem(CONFIG_BOOK_KEY)
+    return
+  }
+  window.localStorage.setItem(CONFIG_BOOK_KEY, JSON.stringify(book))
+}
+
+function companionJwtSecretName(identity: string): string {
+  return `companion:${identity}:device-jwt`
+}
+
+function companionSigningSecretName(identity: string): string {
+  return `companion:${identity}:signaling-private-jwk`
 }
 
 // ---------------------------------------------------------------------------

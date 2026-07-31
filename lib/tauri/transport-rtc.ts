@@ -218,6 +218,7 @@ const BUFFERED_AMOUNT_HIGH_WATER = 1024 * 1024
 const BUFFERED_AMOUNT_LOW_WATER = 256 * 1024
 const MAX_PENDING_REMOTE_ICE = 256
 const PENDING_REMOTE_ICE_TTL_MS = 30_000
+export const TERMINAL_DATACHANNEL_LABEL = "cognia.terminal"
 
 export class TransportRtc {
   private readonly opts: Required<
@@ -240,6 +241,7 @@ export class TransportRtc {
   private signaling: SignalingClient | null = null
   private pc: RTCPeerConnection | null = null
   private dc: RTCDataChannel | null = null
+  private terminalDc: RTCDataChannel | null = null
   private state: RtcState = "idle"
   private negotiationTimer: ReturnType<typeof setTimeout> | null = null
   /** Timer for the `awaiting-peer` phase (opposite peer not yet in room). */
@@ -324,6 +326,15 @@ export class TransportRtc {
 
   getState(): RtcState {
     return this.state
+  }
+
+  /**
+   * Return the terminal-only ordered channel negotiated with this peer.
+   * Terminal framing and backpressure are owned by `TerminalHostConnection`;
+   * the Companion RPC channel never inspects terminal bytes.
+   */
+  getTerminalDataChannel(): RTCDataChannel | null {
+    return this.terminalDc
   }
 
   onStateChange(handler: (state: RtcState) => void): () => void {
@@ -734,6 +745,14 @@ export class TransportRtc {
       }
       this.dc = null
     }
+    if (this.terminalDc) {
+      try {
+        this.terminalDc.close()
+      } catch {
+        // ignored
+      }
+      this.terminalDc = null
+    }
     if (this.pc) {
       try {
         this.pc.close()
@@ -832,6 +851,7 @@ export class TransportRtc {
     // Mobile is the offerer; desktop answers.
     const dc = pc.createDataChannel(DATACHANNEL_LABEL, { ordered: true })
     this.attachDataChannel(dc)
+    this.terminalDc = pc.createDataChannel(TERMINAL_DATACHANNEL_LABEL, { ordered: true })
 
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
@@ -996,6 +1016,14 @@ export class TransportRtc {
         /* ignored */
       }
       this.dc = null
+    }
+    if (this.terminalDc) {
+      try {
+        this.terminalDc.close()
+      } catch {
+        /* ignored */
+      }
+      this.terminalDc = null
     }
     if (this.pc) {
       try {

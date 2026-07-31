@@ -7,8 +7,8 @@ description: WebRTC 移动端 ↔ 桌面端通道（ADR-0021）真机烟测清�
 
 任何可能影响 WebRTC 通道端到端的改动（信令信封 schema、SDP/ICE 握手、
 配对流程、汇合点升级、`TransportRtc` 状态机）落地后请走一遍本清单。
-自动化的 `pnpm webrtc:smoke` 只覆盖汇合点服务器自身——这份清单跑完整的
-移动端（Capacitor）↔ 桌面端（Tauri）路径。
+自动化的 `pnpm webrtc:smoke` 只覆盖汇合点服务器自身——这份清单同时覆盖
+移动端（Capacitor）↔ 桌面端（Tauri）和浏览器（Web Companion）↔ 桌面/云宿主路径。
 
 ## 准备
 
@@ -17,6 +17,8 @@ description: WebRTC 移动端 ↔ 桌面端通道（ADR-0021）真机烟测清�
 - 一台跑着最新 `pnpm tauri dev` 的桌面机器。
 - 一部装好对应移动端构建（`pnpm mobile:sync` + Xcode / Android Studio）
   的手机。
+- 一个从已授权 HTTPS Origin 提供的生产 Web 构建。解锁浏览器 Vault，
+  并通过邀请链接或 payload 与同一宿主配对。
 - 手机切到**蜂窝网络**（与桌面不同 Wi-Fi）——这样才能强制 WebRTC 通道
   做真实的 NAT 打洞，而不是落在 `ws-lan`。
 - 桌面打开 `chrome://webrtc-internals`，两端打开 Cognia 应用的
@@ -88,6 +90,19 @@ curl -s https://signaling.cognia.cn/metrics | grep -E "signaling_(rooms|peers|fr
 # → 计数器非零；尤其是 signaling_rooms_active >= 1 与
 #   signaling_peers_active >= 2 在房间存活期间都应满足。
 ```
+
+## 步骤 6 — 浏览器安全与故障转移
+
+1. 在 Web 构建中重新配对。确认 `localStorage` 的公开目标簿不包含 device JWT、
+   Provider key、OIDC token 或私有 JWK；这些值只能加密保存在已解锁 Vault 中。
+2. 拒绝宿主证书（或使用未受信的本地 CA），确认 UI 明确报告证书信任问题，
+   而不是统一显示“离线”。安装 CA、刷新后验证 HTTPS 恢复。
+3. 从宿主白名单移除 Web Origin，确认 UI 能区分 CORS/PNA，并且不会退回明文
+   HTTP；随后恢复精确 Origin。
+4. 屏蔽直连 ICE candidate。已配置 TURN 时通道必须变为 `rtc-relay`；
+   未配置 TURN 时 UI 必须明确说明中继不可用。
+5. 切换到另一个已保存目标再切回。订阅、IndexedDB 数据和排队写入必须始终
+   绑定原来的 `accountId` 与 `targetId`。
 
 ## 提交
 

@@ -15,10 +15,12 @@ import { useTranslations } from "next-intl"
 import { LockKeyholeIcon, SettingsIcon, UserRoundIcon } from "lucide-react"
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import { selectActiveAccount, useAccountStore } from "@/stores/account/account-store"
 
 import { AccountManageDialog } from "./account-manage-dialog"
+import { RuntimeTargetMenuSection } from "./runtime-target-menu-section"
 
 export function AccountBarButton({ className }: { className?: string }) {
   const t = useTranslations("account.switcher")
@@ -56,10 +58,12 @@ export function AccountBarButton({ className }: { className?: string }) {
             )}
           </button>
         </PopoverTrigger>
-        <PopoverContent align="end" sideOffset={4} className="w-56 p-1">
+        <PopoverContent align="end" sideOffset={4} className="w-64 p-1">
           <div className="px-2 py-1.5 text-xs text-muted-foreground">
             {activeAccount ? activeAccount.displayName : t("noActive")}
           </div>
+          <RuntimeTargetMenuSection onSwitched={() => setOpen(false)} />
+          <Separator className="my-1" />
           <button
             type="button"
             onClick={() => {

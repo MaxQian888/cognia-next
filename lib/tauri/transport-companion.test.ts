@@ -29,6 +29,31 @@ import {
 } from "./transport-companion"
 import { remoteEventResyncCoordinator } from "./resync-coordinator"
 
+const mockVaultSecrets = new Map<string, string>()
+jest.mock("@/lib/runtime/browser-vault", () => ({
+  getActiveBrowserVault: () => ({
+    accountId: "acct_transport",
+    async storeSecret(name: string, value: string) {
+      mockVaultSecrets.set(name, value)
+    },
+    async loadSecret(name: string) {
+      return mockVaultSecrets.get(name) ?? null
+    },
+    async deleteSecret(name: string) {
+      mockVaultSecrets.delete(name)
+    },
+    async encryptSecret(name: string, value: string) {
+      mockVaultSecrets.set(name, value)
+      return { version: 1, iv: `iv-${name}`, ciphertext: `sealed-${name}` }
+    },
+    async decryptSecret(name: string) {
+      const value = mockVaultSecrets.get(name)
+      if (!value) throw new Error("secret missing")
+      return value
+    },
+  }),
+}))
+
 // ---------------------------------------------------------------------------
 // Mock fetch response factory — avoids `new Response(...)` which jsdom lacks.
 // ---------------------------------------------------------------------------
@@ -148,6 +173,7 @@ const g = globalThis as Record<string, unknown>
 
 beforeEach(() => {
   MockWebSocket.reset()
+  mockVaultSecrets.clear()
 
   // Inject our MockWebSocket so CompanionTransport uses it.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -211,8 +237,9 @@ describe("config helpers", () => {
     await saveCompanionConfig(MOCK_CONFIG)
     __resetCompanionConfigCacheForTests()
     expect(loadCompanionConfig()).toBeNull()
-    expect(await hydrateCompanionConfig()).toEqual(MOCK_CONFIG)
-    expect(loadCompanionConfig()).toEqual(MOCK_CONFIG)
+    const hydrated = { ...MOCK_CONFIG, targetId: MOCK_CONFIG.deviceId }
+    expect(await hydrateCompanionConfig()).toEqual(hydrated)
+    expect(loadCompanionConfig()).toEqual(hydrated)
   })
 })
 
@@ -332,6 +359,16 @@ describe("call() — idempotency key", () => {
     expect(headers["Idempotency-Key"]).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
     )
+  })
+
+  it("reuses a caller-provided idempotency key for queued mutations", async () => {
+    fetchSpy.mockResolvedValue(mockResponse({}, 200))
+
+    transport = new CompanionTransport()
+    await transport.call("connector_send", { text: "hello" }, { idempotencyKey: "queue-key-1" })
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBe("queue-key-1")
   })
 
   it("does NOT include Idempotency-Key for read-only commands", async () => {

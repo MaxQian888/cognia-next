@@ -20,6 +20,7 @@
 import { useEffect, useRef } from "react"
 
 import { useAccountStore } from "@/stores/account/account-store"
+import { useChatStore } from "@/stores/chat/chat-store"
 import { useSettingsStore } from "@/stores/settings"
 
 const ACTIVITY_EVENTS = ["pointerdown", "keydown", "pointermove", "wheel", "touchstart"] as const
@@ -27,11 +28,16 @@ const ACTIVITY_EVENTS = ["pointerdown", "keydown", "pointermove", "wheel", "touc
 export function useAutoLock(): void {
   const minutes = useSettingsStore((s) => s.settings?.accountAutoLockMinutes ?? 0)
   const locked = useAccountStore((s) => s.locked)
+  const localTurnRunning = useChatStore((state) =>
+    Object.values(state.sessions).some(
+      (session) => session.status === "streaming" || session.status === "awaiting_approval"
+    )
+  )
   const lastActivityRef = useRef(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    if (minutes <= 0 || locked) return
+    if (minutes <= 0 || locked || localTurnRunning) return
 
     const windowMs = minutes * 60_000
 
@@ -88,5 +94,5 @@ export function useAutoLock(): void {
       document.removeEventListener("visibilitychange", onVisibility)
       window.removeEventListener("focus", onVisibility)
     }
-  }, [minutes, locked])
+  }, [minutes, locked, localTurnRunning])
 }

@@ -15,8 +15,11 @@
  * localStorage key `LocalStorageCompanionStorage` owns.
  */
 
+import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
+
 // Mirrors CONFIG_KEY in lib/tauri/companion-storage.ts (asserted by test).
 export const WEB_COMPANION_CONFIG_KEY = "cognia.companion.config.v1"
+export const WEB_COMPANION_TARGET_BOOK_KEY = "cognia.companion.targets.v2"
 
 /** Build-time server URL, normalized (no trailing slash); null when unset. */
 export function buildTimeServerUrl(): string | null {
@@ -29,10 +32,33 @@ export function buildTimeServerUrl(): string | null {
 export function hasStoredWebPairing(): boolean {
   if (typeof window === "undefined") return false
   try {
+    const targetBookRaw = window.localStorage.getItem(WEB_COMPANION_TARGET_BOOK_KEY)
+    if (targetBookRaw) {
+      const targetBook = JSON.parse(targetBookRaw) as {
+        version?: unknown
+        targets?: Record<string, unknown>
+      }
+      if (targetBook.version === 2 && targetBook.targets) {
+        const scope = getActiveRuntimeTargetContext()
+        if (scope) {
+          return Boolean(targetBook.targets[`${scope.accountId}:${scope.targetId}`])
+        }
+        if (Object.keys(targetBook.targets).length > 0) return true
+      }
+    }
+
     const raw = window.localStorage.getItem(WEB_COMPANION_CONFIG_KEY)
     if (!raw) return false
-    const parsed = JSON.parse(raw) as { baseUrl?: unknown; deviceJwt?: unknown }
-    return typeof parsed.baseUrl === "string" && typeof parsed.deviceJwt === "string"
+    const parsed = JSON.parse(raw) as {
+      baseUrl?: unknown
+      deviceJwt?: unknown
+      deviceJwtEncrypted?: unknown
+    }
+    return (
+      typeof parsed.baseUrl === "string" &&
+      (typeof parsed.deviceJwt === "string" ||
+        (typeof parsed.deviceJwtEncrypted === "object" && parsed.deviceJwtEncrypted !== null))
+    )
   } catch {
     return false
   }

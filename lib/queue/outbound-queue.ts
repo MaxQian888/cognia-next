@@ -32,6 +32,7 @@ import {
 import type { MobileOutboundJobRow } from "@/lib/db/mobile-outbound-types"
 import { detectNativePlatform } from "@/lib/capacitor/_shared"
 import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
+import type { RuntimeTargetScope } from "@/lib/runtime/runtime-target-context"
 
 export interface OutboundDispatcher {
   /** Resolves with the RPC return body. Throws on transport failure. */
@@ -44,6 +45,8 @@ export interface OutboundDispatcher {
 
 export interface RunnerOptions {
   dispatcher: OutboundDispatcher
+  /** Immutable delivery scope captured when this runner is created. */
+  scope: RuntimeTargetScope
   /** Test seam — defaults to `Date.now`. */
   now?: () => number
   /** Test seam — defaults to `Math.random`. */
@@ -83,7 +86,7 @@ const DEFAULT_OPTS: Pick<
  * itself; consumers don't have to plumb online/offline.
  */
 export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
-  const { dispatcher, now, random, enforceMobile, vacuumKeepMs } = {
+  const { dispatcher, scope, now, random, enforceMobile, vacuumKeepMs } = {
     ...DEFAULT_OPTS,
     ...opts,
   }
@@ -119,7 +122,7 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
       await vacuumSent(vacuumKeepMs).catch(() => 0)
       // Drain until no more ready rows.
       while (!stopped) {
-        const claimed = await claimNext(now())
+        const claimed = await claimNext(now(), scope)
         if (!claimed) break
         await dispatchOne(claimed)
       }

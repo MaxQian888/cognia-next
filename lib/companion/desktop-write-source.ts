@@ -194,7 +194,7 @@ export async function dispatchCommand(
     case "host_capabilities":
       return hostCapabilities()
     case "host_feature_manifest":
-      return hostFeatureManifest()
+      return hostFeatureManifest(payload)
     // Mobile outbound-queue commands (Gap 3 reconciliation) — these go
     // through the same generic desktop_writes_bridge but land in
     // subsystem-specific dispatch arms below. Production callers:
@@ -765,12 +765,21 @@ async function hostCapabilities(): Promise<unknown> {
   return { platform: detectPlatform(), capabilities: detectLocalCapabilities() }
 }
 
-async function hostFeatureManifest(): Promise<unknown> {
+async function hostFeatureManifest(payload: Record<string, unknown>): Promise<unknown> {
   const [{ buildLocalHostFeatureManifest }, { detectPlatform }] = await Promise.all([
     import("@/lib/platform/host-feature-manifest"),
     import("@/lib/platform/detect"),
   ])
-  return buildLocalHostFeatureManifest({ platform: detectPlatform() })
+  const callerDeviceGrants = payload.callerDeviceGrants
+  const deviceGrants =
+    Array.isArray(callerDeviceGrants) &&
+    callerDeviceGrants.every((grant) => typeof grant === "string" && grant.length > 0)
+      ? callerDeviceGrants
+      : undefined
+  return buildLocalHostFeatureManifest({
+    platform: detectPlatform(),
+    deviceGrants,
+  })
 }
 
 // ---------------------------------------------------------------------------

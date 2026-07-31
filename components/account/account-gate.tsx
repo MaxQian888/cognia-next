@@ -6,9 +6,11 @@ import { useTranslations } from "next-intl"
 import { LockKeyholeIcon, UserRoundPlusIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { isTauri } from "@/lib/tauri"
+import { PageLoading } from "@/components/ui/loading-states"
+import { isCapacitor } from "@/lib/tauri"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { PASSWORD_MIN_LENGTH } from "@/lib/accounts/password-policy"
 import { selectActiveAccount, useAccountStore } from "@/stores/account/account-store"
@@ -26,8 +28,10 @@ export function AccountGate({ children }: AccountGateProps) {
   const loading = useAccountStore((state) => state.loading)
   const locked = useAccountStore((state) => state.locked)
   const storeError = useAccountStore((state) => state.error)
+  const pendingRecoveryKey = useAccountStore((state) => state.pendingRecoveryKey)
   const createAccount = useAccountStore((state) => state.createAccount)
   const unlockAccount = useAccountStore((state) => state.unlockAccount)
+  const acknowledgeRecoveryKey = useAccountStore((state) => state.acknowledgeRecoveryKey)
   const activeAccount = useAccountStore(selectActiveAccount)
 
   const displayNameId = useId()
@@ -36,6 +40,7 @@ export function AccountGate({ children }: AccountGateProps) {
   const [password, setPassword] = useState("")
   const [actionError, setActionError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [recoverySaved, setRecoverySaved] = useState(false)
 
   const targetAccount = useMemo(
     () => activeAccount ?? accounts[0] ?? null,
@@ -48,20 +53,51 @@ export function AccountGate({ children }: AccountGateProps) {
   useAutoLock()
 
   if (!loaded || loading) {
-    return <GateShell>{t("loading")}</GateShell>
+    return <PageLoading variant="workspace" allowReload title={t("loading")} />
   }
 
-  // Local password-protected accounts are a Tauri/desktop-only concept — the
-  // password verifier is minted by Rust (`account_password_create_verifier`),
-  // which simply does not exist off Tauri. On mobile the CompanionBootProvider
-  // `/pair` flow is the entry gate (scan + pair to a desktop server, biometric
-  // sign-out); on plain web there is no at-rest gate. Pass through on both so
-  // the gate downstream can take over instead of stranding the user on a
-  // create-account form whose IPC always throws. Placed after the `loaded`
-  // gate so server + first client render agree (both show the loading shell);
-  // `isTauri()` is only evaluated post-hydration. See ADR-0021.
-  if (!isTauri()) {
+  // Native mobile retains the established runtime chooser / pairing gate.
+  // Ordinary browsers use the same local account gate as desktop, backed by
+  // the Web Crypto PBKDF2 verifier instead of a Tauri command.
+  if (isCapacitor()) {
     return <>{children}</>
+  }
+
+  if (pendingRecoveryKey) {
+    const recoverySavedId = `${passwordId}-recovery-saved`
+    return (
+      <GateShell>
+        <section
+          aria-label={t("recoveryForm")}
+          data-testid="account-vault-recovery"
+          className="flex w-full max-w-lg flex-col gap-4"
+        >
+          <div>
+            <h1 className="text-lg font-semibold">{t("recoveryTitle")}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">{t("recoveryDescription")}</p>
+          </div>
+          <code className="select-all break-all rounded-md border bg-muted p-4 font-mono text-sm">
+            {pendingRecoveryKey}
+          </code>
+          <div className="flex items-start gap-2">
+            <Checkbox
+              id={recoverySavedId}
+              checked={recoverySaved}
+              onCheckedChange={(checked) => setRecoverySaved(checked === true)}
+            />
+            <Label htmlFor={recoverySavedId}>{t("recoverySaved")}</Label>
+          </div>
+          <Button
+            type="button"
+            data-testid="account-vault-recovery-continue"
+            disabled={!recoverySaved}
+            onClick={() => acknowledgeRecoveryKey()}
+          >
+            {t("recoveryContinue")}
+          </Button>
+        </section>
+      </GateShell>
+    )
   }
 
   // The desktop-pet overlay / popup windows load this same root layout but are

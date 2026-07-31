@@ -14,6 +14,7 @@ import {
   setPushToken,
   setAgentControlAllowed,
   setRemoteControlAllowed,
+  setRemoteTerminalAllowed,
   touchPairedDevice,
 } from "./paired-devices"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
@@ -48,6 +49,7 @@ describe("addPairedDevice", () => {
     expect(row?.lastSeenAt).toBe(1_700_000_000_000)
     expect(row?.revokedAt).toBeUndefined()
     expect(row?.pushToken).toBeUndefined()
+    expect(row?.allowRemoteTerminal).toBe(false)
   })
 
   it("keeps accountId absent for legacy callers that do not provide it", async () => {
@@ -527,6 +529,57 @@ describe("setAgentControlAllowed", () => {
     const row = await getPairedDevice("dev-ac4")
     expect(row?.allowRemoteControl).toBe(false)
     expect(row?.allowAgentControl).toBe(true)
+  })
+})
+
+describe("setRemoteTerminalAllowed", () => {
+  const descriptor = {
+    hostId: "host-1",
+    issuedAt: 10,
+    lanUrl: "wss://host.local/ws/terminal",
+    signingPublicKey: "public-key",
+    credentialKeyId: "device-key-1",
+    signature: "signature",
+  }
+
+  async function pair(deviceId: string) {
+    await addPairedDevice({
+      deviceId,
+      label: "phone",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+  }
+
+  it("requires a signed host descriptor when granting access", async () => {
+    await pair("dev-terminal-1")
+    await expect(setRemoteTerminalAllowed("dev-terminal-1", true)).rejects.toThrow("descriptor")
+    expect((await getPairedDevice("dev-terminal-1"))?.allowRemoteTerminal).toBe(false)
+  })
+
+  it("stores the independent grant and sanitized descriptor", async () => {
+    await pair("dev-terminal-2")
+    expect(await setRemoteTerminalAllowed("dev-terminal-2", true, descriptor)).toBe(true)
+    const row = await getPairedDevice("dev-terminal-2")
+    expect(row).toEqual(
+      expect.objectContaining({
+        allowRemoteTerminal: true,
+        terminalHostDescriptor: descriptor,
+      })
+    )
+    expect(row?.allowRemoteControl).toBeUndefined()
+    expect(row?.allowAgentControl).toBeUndefined()
+  })
+
+  it("revokes immediately and removes the descriptor", async () => {
+    await pair("dev-terminal-3")
+    await setRemoteTerminalAllowed("dev-terminal-3", true, descriptor)
+    expect(await setRemoteTerminalAllowed("dev-terminal-3", false)).toBe(true)
+    const row = await getPairedDevice("dev-terminal-3")
+    expect(row?.allowRemoteTerminal).toBe(false)
+    expect(row?.terminalHostDescriptor).toBeUndefined()
   })
 })
 

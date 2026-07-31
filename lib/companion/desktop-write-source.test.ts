@@ -435,6 +435,7 @@ describe("dispatchCommand: device_capabilities_report", () => {
       appVersion: "1.0.0",
       pairedAt: 1,
       lastSeenAt: 1,
+      allowRemoteTerminal: false,
     })
   }
 
@@ -800,12 +801,14 @@ describe("dispatchCommand: memory_* (ADR-0069)", () => {
 })
 
 describe("dispatchCommand: unknown command", () => {
-  it("returns the versioned host feature contract", async () => {
+  it("returns the versioned host feature contract with least-privilege defaults", async () => {
     await expect(dispatchCommand("host_feature_manifest", {})).resolves.toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       hostBuildId: expect.any(String),
       platform: expect.any(String),
       generatedAt: expect.any(Number),
+      protocol: { min: 1, max: 2 },
+      deviceGrants: ["host.observe"],
       features: {
         "claude.host-tools": {
           version: 1,
@@ -816,6 +819,16 @@ describe("dispatchCommand: unknown command", () => {
         rpcJsonBodyBytes: 64 * 1024,
         skillUploadChunkBytes: 32 * 1024,
       },
+    })
+  })
+
+  it("projects only the authenticated caller grants supplied by the RPC boundary", async () => {
+    await expect(
+      dispatchCommand("host_feature_manifest", {
+        callerDeviceGrants: ["host.observe", "agent.run"],
+      })
+    ).resolves.toMatchObject({
+      deviceGrants: ["host.observe", "agent.run"],
     })
   })
 

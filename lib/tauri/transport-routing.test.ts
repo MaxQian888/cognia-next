@@ -49,6 +49,16 @@ describe("RoutingTransport", () => {
     expect(getActiveRemoteTransport()).toBeNull()
   })
 
+  it("keeps service commands on the local Tauri plane when no remote is active", async () => {
+    const local = fakeTransport("local")
+    const routing = new RoutingTransport(local.transport)
+
+    const result = await routing.call("integration_ingress_poll", { limit: 100 })
+
+    expect(result).toBe("local:integration_ingress_poll")
+    expect(local.calls).toEqual([{ name: "integration_ingress_poll", args: { limit: 100 } }])
+  })
+
   it("routes to the active remote transport once one is installed", async () => {
     const local = fakeTransport("local")
     const remote = fakeTransport("remote")

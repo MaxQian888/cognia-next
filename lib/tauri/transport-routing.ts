@@ -21,7 +21,7 @@
  * drives it via {@link setActiveRemoteTransport}.
  */
 
-import type { Transport } from "./transport-types"
+import type { Transport, TransportCallOptions } from "./transport-types"
 import { getCommandDescriptor } from "./command-descriptors"
 
 /**
@@ -67,6 +67,8 @@ export interface RemoteHostEndpoint {
   baseUrl: string
   /** Signed device JWT — the companion auth middleware reads `?token=`. */
   deviceJwt: string
+  /** Stable paired-device id used by multiplexed terminal controller state. */
+  deviceId?: string
   /**
    * SHA-256 fingerprint of the remote companion certificate's SPKI.
    * Required by the Pro IDE relay before it sends the device JWT upstream.
@@ -146,18 +148,25 @@ export class RoutingTransport implements Transport {
     return activeRemote ?? this.local
   }
 
-  call<T = unknown>(name: string, args?: Record<string, unknown>): Promise<T> {
+  call<T = unknown>(
+    name: string,
+    args?: Record<string, unknown>,
+    options?: TransportCallOptions
+  ): Promise<T> {
     const descriptor = getCommandDescriptor(name)
     if (!descriptor || descriptor.target === "client") {
-      return this.local.call<T>(name, args)
+      return this.local.call<T>(name, args, options)
     }
     if (descriptor.target === "execution") {
-      return (activeRemote ?? this.local).call<T>(name, args)
+      return (activeRemote ?? this.local).call<T>(name, args, options)
     }
     if (descriptor.target === "host-admin") {
       return Promise.reject(
         new Error(`Command "${name}" requires an explicit host-admin execution context`)
       )
+    }
+    if (!activeRemote) {
+      return this.local.call<T>(name, args, options)
     }
     return Promise.reject(
       new Error(`Command "${name}" is service-only and cannot use the device routing plane`)

@@ -63,6 +63,8 @@ test.describe("mobile — offline banner + outbound queue", () => {
       const { getDb } = await import("@/lib/db/schema")
       await getDb().mobileOutboundQueue.put({
         id: "q_test_pending_1",
+        accountId: "acct_e2e",
+        targetId: "mobile-companion",
         // Must be a live MOBILE_OUTBOUND_COMMANDS member — "rpc_generic" was
         // trimmed from the command surface in the 2026-05-17 audit.
         command: "app_settings_update",

@@ -31,7 +31,12 @@ import { pinnedFetch } from "@/lib/tauri/pinned-fetch"
 import { recordRecentServer } from "@/lib/connectivity/recent-servers"
 import { saveCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 
-import { describeNetworkError, validateBaseUrl, validatePairJwt } from "./pair-helpers"
+import {
+  classifyPairNetworkError,
+  validateBaseUrl,
+  validatePairJwt,
+  validateWebPairingTransport,
+} from "./pair-helpers"
 import { redeemPairCode, redeemPairJwt, type RedeemResult } from "./pair-api"
 import { DiscoverHelp } from "./discover-help"
 
@@ -178,7 +183,6 @@ export function PairStep({
       setPhase({ kind: "error", message: urlError })
       return
     }
-
     let result: RedeemResult
     if (mode === "jwt") {
       const trimmedJwt = pairJwt.trim()
@@ -198,6 +202,10 @@ export function PairStep({
         setPhase({ kind: "error", message: jwtError })
         return
       }
+      if (validateWebPairingTransport(trimmedUrl, webMode)) {
+        setPhase({ kind: "error", message: t("web.httpsRequired") })
+        return
+      }
       setPhase({ kind: "pairing" })
       try {
         result = await redeemPairJwt({
@@ -206,13 +214,20 @@ export function PairStep({
           serverFingerprint: serverFingerprint || undefined,
         })
       } catch (err) {
-        setPhase({ kind: "error", message: describeNetworkError(err) })
+        setPhase({
+          kind: "error",
+          message: describePairNetworkError(err, t, webMode),
+        })
         return
       }
     } else {
       const trimmedCode = pairCode.trim()
       if (!/^\d{6}$/.test(trimmedCode)) {
         setPhase({ kind: "error", message: t("codeError.malformed") })
+        return
+      }
+      if (validateWebPairingTransport(trimmedUrl, webMode)) {
+        setPhase({ kind: "error", message: t("web.httpsRequired") })
         return
       }
       setPhase({ kind: "pairing" })
@@ -223,7 +238,10 @@ export function PairStep({
           serverFingerprint: serverFingerprint || undefined,
         })
       } catch (err) {
-        setPhase({ kind: "error", message: describeNetworkError(err) })
+        setPhase({
+          kind: "error",
+          message: describePairNetworkError(err, t, webMode),
+        })
         return
       }
     }
@@ -279,7 +297,10 @@ export function PairStep({
 
     // Error branch — surface a useful message for the user.
     if (result.kind === "network_error") {
-      setPhase({ kind: "error", message: describeNetworkError(result.message) })
+      setPhase({
+        kind: "error",
+        message: describePairNetworkError(result.message, t, webMode),
+      })
       return
     }
     if (result.kind === "code_error") {
@@ -291,7 +312,7 @@ export function PairStep({
       kind: "error",
       message: describeHttpStatus(result.status, t),
     })
-  }, [baseUrl, mode, pairCode, pairJwt, serverFingerprint, onPaired, t])
+  }, [baseUrl, mode, pairCode, pairJwt, serverFingerprint, webMode, onPaired, t])
 
   const isPairing = phase.kind === "pairing"
 
@@ -532,4 +553,28 @@ function describeHttpStatus(status: number, t: ReturnType<typeof useTranslations
   if (status === 404) return t("httpError.404")
   if (status >= 500) return t("httpError.5xx", { status })
   return t("httpError.generic", { status })
+}
+
+function describePairNetworkError(
+  error: unknown,
+  t: ReturnType<typeof useTranslations>,
+  webMode: boolean
+): string {
+  const kind = classifyPairNetworkError(error)
+  switch (kind === "browser_blocked" && !webMode ? "unreachable" : kind) {
+    case "certificate":
+      return t("networkError.certificate")
+    case "browser_policy":
+      return t("networkError.browserPolicy")
+    case "browser_blocked":
+      return t("networkError.browserBlocked")
+    case "offline":
+      return t("networkError.offline")
+    case "unreachable":
+      return t("networkError.unreachable")
+    case "unknown":
+      return t("networkError.unknown", {
+        message: error instanceof Error ? error.message : String(error),
+      })
+  }
 }

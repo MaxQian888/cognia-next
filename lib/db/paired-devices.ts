@@ -8,7 +8,11 @@
  * `revokePairedDevice` to soft-delete a device.
  */
 
-import type { DevicePlatform, PairedDeviceRow } from "@/types/mobile/paired-device"
+import type {
+  DevicePlatform,
+  PairedDeviceRow,
+  TerminalHostDescriptor,
+} from "@/types/mobile/paired-device"
 import type { RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
 import { getDb } from "./schema"
 
@@ -47,6 +51,7 @@ export async function addPairedDevice(input: AddPairedDeviceInput): Promise<void
     appVersion: input.appVersion,
     pairedAt: now,
     lastSeenAt: now,
+    allowRemoteTerminal: false,
   }
   if (input.accountId) {
     row.accountId = input.accountId
@@ -238,6 +243,31 @@ export async function setAgentControlAllowed(deviceId: string, allowed: boolean)
   const updated = await getDb().pairedDevices.update(deviceId, {
     allowAgentControl: allowed,
   })
+  return updated > 0
+}
+
+/** Persist or immediately revoke the independent remote-terminal grant. */
+export async function setRemoteTerminalAllowed(
+  deviceId: string,
+  allowed: boolean,
+  descriptor?: TerminalHostDescriptor
+): Promise<boolean> {
+  if (allowed && !descriptor) {
+    throw new Error("terminal host descriptor is required when granting remote terminal access")
+  }
+  let updated = 0
+  await getDb()
+    .pairedDevices.where("deviceId")
+    .equals(deviceId)
+    .modify((row) => {
+      row.allowRemoteTerminal = allowed
+      if (allowed && descriptor) {
+        row.terminalHostDescriptor = descriptor
+      } else {
+        delete row.terminalHostDescriptor
+      }
+      updated += 1
+    })
   return updated > 0
 }
 

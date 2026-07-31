@@ -12,6 +12,11 @@ jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(),
 }))
 
+let tauriRuntime = true
+jest.mock("@/lib/platform/detect", () => ({
+  isTauri: () => tauriRuntime,
+}))
+
 const invokeMock = invoke as jest.MockedFunction<typeof invoke>
 
 const verifier: PasswordVerifierRecord = {
@@ -28,6 +33,7 @@ const verifier: PasswordVerifierRecord = {
 
 describe("password-client", () => {
   beforeEach(() => {
+    tauriRuntime = true
     invokeMock.mockReset()
   })
 
@@ -108,5 +114,23 @@ describe("password-client", () => {
       params: [],
     })
     await expect(createPasswordVerifier("correct horse")).rejects.toThrow(/verifier/i)
+  })
+
+  it("creates and verifies a PBKDF2 verifier in an ordinary browser", async () => {
+    tauriRuntime = false
+
+    const browserVerifier = await createPasswordVerifier("correct horse")
+
+    expect(browserVerifier).toMatchObject({
+      algorithm: "pbkdf2-sha256-v1",
+      params: {
+        iterations: 600_000,
+        hash: "SHA-256",
+        outputLength: 32,
+      },
+    })
+    await expect(verifyPassword("correct horse", browserVerifier)).resolves.toBe(true)
+    await expect(verifyPassword("wrong horse", browserVerifier)).resolves.toBe(false)
+    expect(invokeMock).not.toHaveBeenCalled()
   })
 })

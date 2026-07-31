@@ -5,13 +5,19 @@ import {
   hasStoredWebPairing,
   hasWebCompanionTarget,
   WEB_COMPANION_CONFIG_KEY,
+  WEB_COMPANION_TARGET_BOOK_KEY,
 } from "./web-companion"
+import {
+  clearActiveRuntimeTargetContext,
+  setActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
 
 const ENV_KEY = "NEXT_PUBLIC_COGNIA_SERVER_URL"
 
 afterEach(() => {
   delete process.env[ENV_KEY]
   window.localStorage.clear()
+  clearActiveRuntimeTargetContext()
 })
 
 describe("buildTimeServerUrl", () => {
@@ -41,6 +47,26 @@ describe("hasStoredWebPairing", () => {
       WEB_COMPANION_CONFIG_KEY,
       JSON.stringify({ baseUrl: "https://s:7890", deviceJwt: "jwt" })
     )
+    expect(hasStoredWebPairing()).toBe(true)
+  })
+
+  it("uses the active account target when a v2 multi-target book exists", () => {
+    window.localStorage.setItem(
+      WEB_COMPANION_TARGET_BOOK_KEY,
+      JSON.stringify({
+        version: 2,
+        targets: {
+          "acct_web:companion-one": {
+            targetId: "companion-one",
+            baseUrl: "https://one.example.com",
+          },
+        },
+      })
+    )
+    setActiveRuntimeTargetContext("acct_web", "web-standalone")
+    expect(hasStoredWebPairing()).toBe(false)
+
+    setActiveRuntimeTargetContext("acct_web", "companion-one")
     expect(hasStoredWebPairing()).toBe(true)
   })
 })

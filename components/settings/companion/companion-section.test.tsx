@@ -18,6 +18,7 @@ import {
   listPairedDevices,
   setLockedComputerUseAllowed,
   setRemoteControlAllowed,
+  setRemoteTerminalAllowed,
 } from "@/lib/db/paired-devices"
 import { decodePairPayload } from "@/lib/qr/pair-payload"
 import { useAccountStore } from "@/stores/account/account-store"
@@ -106,6 +107,13 @@ describe("CompanionSection", () => {
     })
     await setRemoteControlAllowed("trusted-device", true)
     await setLockedComputerUseAllowed("trusted-device", true)
+    await setRemoteTerminalAllowed("trusted-device", true, {
+      hostId: "host-1",
+      issuedAt: Date.now(),
+      signingPublicKey: "public-key",
+      credentialKeyId: "credential-1",
+      signature: "signature",
+    })
     callSpy.mockImplementation(async (name: string, args?: unknown) => {
       if (name === "companion_server_status") return STATUS_STOPPED
       if (name === "companion_server_start") {
@@ -125,6 +133,9 @@ describe("CompanionSection", () => {
       const callNames = callSpy.mock.calls.map((c) => c[0])
       expect(callNames).toContain("companion_server_start")
       expect(callSpy).toHaveBeenCalledWith("companion_seed_locked_computer_use", {
+        deviceIds: ["trusted-device"],
+      })
+      expect(callSpy).toHaveBeenCalledWith("companion_seed_remote_terminal", {
         deviceIds: ["trusted-device"],
       })
     })

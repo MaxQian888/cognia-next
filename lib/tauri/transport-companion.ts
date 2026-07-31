@@ -1,9 +1,11 @@
 "use client"
 
 import { classifyWsHost } from "@/lib/connectivity/lan-classify"
+import { isCapacitor, isTauri } from "@/lib/platform/detect"
+import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import { getCommandDescriptor } from "./command-descriptors"
 import { type CompanionConfig, companionStorage } from "./companion-storage"
-import type { Transport } from "./transport-types"
+import type { Transport, TransportCallOptions } from "./transport-types"
 import { pinnedFetch } from "./pinned-fetch"
 import { remoteEventResyncCoordinator } from "./resync-coordinator"
 import { TransportRtc, type TransportRtcOptions } from "./transport-rtc"
@@ -49,25 +51,94 @@ export function loadCompanionConfig(): CompanionConfig | null {
 
 /** Read storage and prime the cache. Call once at app boot. Idempotent. */
 export async function hydrateCompanionConfig(): Promise<CompanionConfig | null> {
-  cachedConfig = await companionStorage().load()
+  const stored = await companionStorage().load()
+  cachedConfig = stored ? await attachWebRuntimeTarget(stored, true) : null
   return cachedConfig
 }
 
 export async function saveCompanionConfig(config: CompanionConfig): Promise<void> {
+  const nextConfig = await attachWebRuntimeTarget(config, false)
   // Cache update must run before the await so any synchronous reader (a
   // `transport.call()` chained right after) sees the new config.
-  cachedConfig = config
-  await companionStorage().save(config)
+  cachedConfig = nextConfig
+  await companionStorage().save(nextConfig)
+  await activateWebCompanionTransport()
+  notifyCompanionConfigChanged()
 }
 
 export async function clearCompanionConfig(): Promise<void> {
   cachedConfig = null
   await companionStorage().clear()
+  if (isPlainBrowser()) {
+    const [{ detachActiveCompanionRuntimeTarget }, { setTransport }, { WebStubTransport }] =
+      await Promise.all([
+        import("@/lib/runtime/account-runtime-target"),
+        import("./transport-instance"),
+        import("./transport-web"),
+      ])
+    await detachActiveCompanionRuntimeTarget()
+    setTransport(new WebStubTransport())
+  }
+  notifyCompanionConfigChanged()
+}
+
+/**
+ * Rebind the process transport after the active Web runtime target changes.
+ * The target registry/database pointer must already be switched. Companion
+ * credentials are resolved by targetId from the unlocked Vault; standalone
+ * targets deliberately resolve to null and install the honest Web stub.
+ */
+export async function reloadCompanionConfigForActiveTarget(): Promise<CompanionConfig | null> {
+  if (!isPlainBrowser()) return loadCompanionConfig()
+  cachedConfig = await companionStorage().load()
+  if (cachedConfig) {
+    await activateWebCompanionTransport()
+  } else {
+    const [{ setTransport }, { WebStubTransport }] = await Promise.all([
+      import("./transport-instance"),
+      import("./transport-web"),
+    ])
+    setTransport(new WebStubTransport())
+  }
+  notifyCompanionConfigChanged()
+  return cachedConfig
 }
 
 /** Test-only — reset the cache between cases. */
 export function __resetCompanionConfigCacheForTests(): void {
   cachedConfig = null
+}
+
+async function attachWebRuntimeTarget(
+  config: CompanionConfig,
+  persistAssignedTarget: boolean
+): Promise<CompanionConfig> {
+  if (!isPlainBrowser() || !getActiveRuntimeTargetContext()) return config
+  const { deriveCompanionRuntimeTargetId, registerCompanionRuntimeTarget } =
+    await import("@/lib/runtime/account-runtime-target")
+  const targetId = config.targetId ?? (await deriveCompanionRuntimeTargetId(config))
+  const nextConfig = { ...config, targetId }
+  if (persistAssignedTarget && config.targetId !== targetId) {
+    await companionStorage().save(nextConfig)
+  }
+  await registerCompanionRuntimeTarget(nextConfig)
+  return nextConfig
+}
+
+async function activateWebCompanionTransport(): Promise<void> {
+  if (!isPlainBrowser()) return
+  const { setTransport } = await import("./transport-instance")
+  setTransport(new CompanionTransport())
+}
+
+function notifyCompanionConfigChanged(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("cognia:companion-config-changed"))
+  }
+}
+
+function isPlainBrowser(): boolean {
+  return typeof window !== "undefined" && !isTauri() && !isCapacitor()
 }
 
 // ---------------------------------------------------------------------------
@@ -278,7 +349,11 @@ export class CompanionTransport implements Transport {
 
   // ── Transport.call ─────────────────────────────────────────────────────────
 
-  async call<T = unknown>(name: string, args?: Record<string, unknown>): Promise<T> {
+  async call<T = unknown>(
+    name: string,
+    args?: Record<string, unknown>,
+    options?: TransportCallOptions
+  ): Promise<T> {
     const config = this.config()
     if (!config) {
       return Promise.reject(
@@ -300,7 +375,7 @@ export class CompanionTransport implements Transport {
     // the HTTPS fallback. If the DataChannel write reached the server and ran
     // before the channel hard-failed, the fallback request carrying the same
     // key lets the server dedupe instead of double-executing the command.
-    const idempotencyKey = isReadOnly ? undefined : crypto.randomUUID()
+    const idempotencyKey = isReadOnly ? undefined : (options?.idempotencyKey ?? crypto.randomUUID())
     if (this.rtc && this.rtc.getState() === "open" && !this.isOnConnectedLan()) {
       try {
         const params = args ?? {}
@@ -573,6 +648,24 @@ export class CompanionTransport implements Transport {
       return "ok"
     }
     return "no-tier"
+  }
+
+  /**
+   * Expose the terminal-only channel without widening the generic Transport
+   * interface. The terminal subsystem feature-detects this capability on the
+   * active Companion transport and applies its own canonical binary framing.
+   */
+  public getTerminalDataChannel(): RTCDataChannel | null {
+    return (
+      this.rtc?.getTerminalDataChannel() ??
+      this.rtcConnectingInstance?.getTerminalDataChannel() ??
+      null
+    )
+  }
+
+  public getTerminalClientId(): string | null {
+    const deviceId = this.config()?.deviceId
+    return deviceId ? `companion:${deviceId}` : null
   }
 
   /** Tear down the WebRTC tier explicitly. Called from `destroy()`. */

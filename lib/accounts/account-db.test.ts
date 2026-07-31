@@ -6,6 +6,7 @@ import {
   CogniaAccountRegistryDB,
   LocalAccountRegistry,
   accountDatabaseName,
+  generateAccountId,
 } from "./account-db"
 import type { PasswordVerifierRecord } from "./account-types"
 
@@ -284,5 +285,20 @@ describe("LocalAccountRegistry", () => {
     expect(() => accountDatabaseName("acct ok")).toThrow(/account id/i)
     expect(() => accountDatabaseName("../acct")).toThrow(/account id/i)
     expect(() => accountDatabaseName("acct-ok_123")).not.toThrow()
+  })
+})
+
+describe("generateAccountId", () => {
+  it("uses the timestamp and random fallback when randomUUID is unavailable", () => {
+    const originalCrypto = globalThis.crypto
+    const now = jest.spyOn(Date, "now").mockReturnValue(1234)
+    const random = jest.spyOn(Math, "random").mockReturnValue(0.5)
+    Object.defineProperty(globalThis, "crypto", { configurable: true, value: {} })
+
+    expect(generateAccountId()).toBe("acct_ya_i")
+
+    Object.defineProperty(globalThis, "crypto", { configurable: true, value: originalCrypto })
+    now.mockRestore()
+    random.mockRestore()
   })
 })

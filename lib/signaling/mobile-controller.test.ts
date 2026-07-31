@@ -17,7 +17,11 @@ import {
   __resetCompanionConfigCacheForTests,
   saveCompanionConfig,
 } from "@/lib/tauri/transport-companion"
-import type { CompanionConfig } from "@/lib/tauri/companion-storage"
+import {
+  __setCompanionStorageForTests,
+  type CompanionConfig,
+  type CompanionConfigStorage,
+} from "@/lib/tauri/companion-storage"
 import type { NetworkStatus } from "@/lib/capacitor/network"
 import type { AppSettings } from "@cognia/agent-config-types"
 
@@ -104,6 +108,28 @@ class FakeTransport {
 }
 
 type Tx = import("@/lib/tauri/transport-companion").CompanionTransport
+
+let storedCompanionConfig: CompanionConfig | null = null
+const testCompanionStorage: CompanionConfigStorage = {
+  load: async () => storedCompanionConfig,
+  save: async (config) => {
+    storedCompanionConfig = config
+  },
+  clear: async () => {
+    storedCompanionConfig = null
+  },
+}
+
+beforeEach(() => {
+  storedCompanionConfig = null
+  __setCompanionStorageForTests(testCompanionStorage)
+  __resetCompanionConfigCacheForTests()
+})
+
+afterEach(() => {
+  __setCompanionStorageForTests(null)
+  __resetCompanionConfigCacheForTests()
+})
 
 function settings(patch: Partial<AppSettings> = {}): AppSettings {
   return {

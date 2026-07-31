@@ -122,6 +122,7 @@ class FakeSignaling {
 
 class FakeDataChannel {
   readyState: "connecting" | "open" | "closing" | "closed" = "connecting"
+  readonly ordered = true
   onopen: (() => void) | null = null
   onclose: (() => void) | null = null
   onerror: (() => void) | null = null
@@ -285,6 +286,21 @@ describe("TransportRtc", () => {
     pcs[0].channels[0].open()
     await connect
     expect(rtc.getState()).toBe("open")
+  })
+
+  it("negotiates a separate ordered terminal channel with the canonical label", async () => {
+    const { rtc, pcs } = makeRtc()
+    const connect = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+
+    expect(pcs[0].channels.map((channel) => channel.label)).toEqual([
+      "cognia.v2",
+      "cognia.terminal",
+    ])
+    expect(rtc.getTerminalDataChannel()).toBe(pcs[0].channels[1])
+
+    pcs[0].channels[0].open()
+    await connect
   })
 
   // ADR-0021 F1 — cold-start race. Before the fix, the mobile sent its offer

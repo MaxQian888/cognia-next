@@ -21,6 +21,7 @@ function rows(now: number): PairedDeviceRow[] {
       pairedAt: now - 48 * HOUR,
       lastSeenAt: now - 2 * HOUR,
       allowRemoteControl: true,
+      allowRemoteTerminal: true,
       serverFingerprint: "ab".repeat(32),
     },
     {
@@ -32,6 +33,7 @@ function rows(now: number): PairedDeviceRow[] {
       pairedAt: now - 72 * HOUR,
       lastSeenAt: now - 30 * HOUR,
       pausedAt: now - 1 * HOUR,
+      allowRemoteTerminal: false,
     },
     {
       deviceId: "33333333-3333-4333-8333-333333333333",
@@ -42,6 +44,7 @@ function rows(now: number): PairedDeviceRow[] {
       pairedAt: now - 200 * HOUR,
       lastSeenAt: now - 150 * HOUR,
       revokedAt: now - 100 * HOUR,
+      allowRemoteTerminal: false,
     },
   ]
 }

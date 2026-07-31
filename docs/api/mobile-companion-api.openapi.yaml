@@ -3231,12 +3231,40 @@ paths:
                 type: object
                 required: [schemaVersion, hostBuildId, platform, generatedAt, features, limits]
                 properties:
-                  schemaVersion: { type: integer, enum: [1] }
+                  schemaVersion:
+                    {
+                      type: integer,
+                      enum: [1, 2],
+                      description: "V2 adds protocol negotiation, host identity, operation health, and device grants. Clients continue to accept V1.",
+                    }
                   hostBuildId: { type: string }
                   platform: { type: string, enum: [tauri, mobile, web, headless] }
                   generatedAt: { type: integer }
                   features: { type: object, additionalProperties: true }
                   limits: { type: object, additionalProperties: true }
+                  hostIdentity:
+                    type: object
+                    required: [id, kind]
+                    properties:
+                      id: { type: string }
+                      kind: { type: string, enum: [desktop, cloud] }
+                  protocol:
+                    type: object
+                    required: [min, max]
+                    properties:
+                      min: { type: integer, minimum: 1 }
+                      max: { type: integer, minimum: 1 }
+                  operations:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, feature, featureVersion, healthy]
+                      properties:
+                        name: { type: string }
+                        feature: { type: string }
+                        featureVersion: { type: integer, minimum: 1 }
+                        healthy: { type: boolean }
+                  deviceGrants: { type: array, items: { type: string }, uniqueItems: true }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "503":
           {
@@ -5008,108 +5036,70 @@ paths:
                 - { type: object, additionalProperties: true }
                 - { type: string }
 
-  /ws/v1/terminal:
+  /api/v1/terminal/socket-ticket:
+    post:
+      operationId: issueTerminalSocketTicket
+      tags: [terminal]
+      summary: Issue a short-lived terminal WebSocket ticket.
+      description: |
+        Authenticates the paired device JWT, verifies that remote terminal
+        access is enabled and that the device holds the terminal grant, then
+        returns a single-use ticket bound to that device. The device JWT must
+        never be copied into a WebSocket URL.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Ticket issued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ticket, expiresAt]
+                properties:
+                  ticket: { type: string }
+                  expiresAt: { type: integer, format: int64 }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          description: Remote terminal access is disabled or the device lacks the terminal grant.
+
+  /ws/terminal:
     get:
       operationId: wsTerminal
       tags: [terminal]
       summary: WebSocket upgrade — interactive remote PTY (live terminal).
       description: |
-        The live, interactive terminal channel. The request/response
-        `terminal_*` RPCs cover listing, killing, and one-shot `terminal_exec`;
-        this endpoint is the ONLY way to spawn and drive a persistent
-        stdin-streaming PTY from a remote device. OpenAPI 3.1 does not formally
-        describe WebSocket protocols, so (as with `/ws/v1/events`) the upgrade is
-        documented as an HTTP `GET` whose 101 response transitions to a WS
-        connection; frame-level details live in the `x-websocket` extension.
+        The live, interactive terminal channel. OpenAPI 3.1 does not formally
+        describe WebSocket protocols, so the upgrade is documented as an HTTP
+        `GET` whose 101 response transitions to a WebSocket. Every WebSocket
+        binary message is one canonical terminal-protocol frame; the same
+        framing is used by LAN WebSocket, WAN WebRTC, and the native host bridge.
 
         ## Capability gate
 
-        A valid device JWT only proves the device is *paired* (the chat-only
-        baseline tier). Opening a remote PTY is strictly more powerful than
-        `terminal_exec`, so it requires the same elevated **remote-control**
-        capability (`allowRemoteControl`) those mutating RPCs are gated behind.
-        The gate runs before the upgrade — an unauthorized device gets `403`
-        and never reaches the socket.
+        Remote terminal access must be enabled on the host and the paired device
+        must hold the terminal grant. Authorization is revalidated while the
+        socket is open so revocation closes an existing connection.
 
         ## Auth
 
-        `Authorization: Bearer <jwt>` is preferred; browsers cannot reliably set
-        headers on `new WebSocket()`, so `?token=<jwt>` is accepted as a
-        fallback (header wins when both are present).
+        The device JWT is sent only to authenticated
+        `POST /api/v1/terminal/socket-ticket`. That endpoint returns a
+        short-lived, single-use ticket bound to the device. The ticket is the
+        only credential accepted in the WebSocket URL.
 
-        ## Lifecycle — fresh spawn
-
-        1. Client opens
-           `wss://<host>/ws/v1/terminal?token=<jwt>&spawn=1&shell=<sh>&rows=<r>&cols=<c>`
-           (optional `cwd`, `projectId`, `extensionId`, `shellIntegration`).
-        2. Server spawns a PTY and sends one
-           `{ "kind": "ready", "sessionId": "<uuid>", "shell": "<resolved>" }`
-           text frame.
-        3. PTY stdout streams to the client as **binary** frames.
-        4. Server emits text control frames as they occur:
-           `{ "kind": "integration", "event": …, "seq": <u64> }` (OSC 633 shell
-           integration) and, once, `{ "kind": "exit", "code": <int|null>, "seq": <u64> }`.
-        5. Client sends stdin as **binary** frames; control as text:
-           `{ "kind": "resize", "rows": <r>, "cols": <c> }` and `{ "kind": "kill" }`.
-
-        ## Lifecycle — resume
-
-        Reconnect to a session this device spawned with
-        `wss://<host>/ws/v1/terminal?token=<jwt>&sessionId=<id>&resumeFrom=<seq>`.
-        The server verifies the requesting device matches the spawning device,
-        replays every retained event with `seq > resumeFrom` from the in-Rust
-        replay buffer, then resumes live emission. If `resumeFrom` is ahead of
-        the server's last seq the client is told it is ahead.
+        Clients send canonical `spawn`, `attach`, `stdin`, `resize`, `detach`,
+        `takeControl`, `releaseControl`, and `kill` command frames. The host
+        responds with canonical acknowledgement, snapshot, output, integration,
+        replay-gap, controller-change, exit, and error frames. Durable sessions
+        can be reattached with a replay cursor for up to the configured replay
+        retention budget.
       parameters:
         - in: query
-          name: token
-          required: false
-          description: "Device JWT. Optional only when `Authorization: Bearer` is present."
+          name: ticket
+          required: true
+          description: Short-lived, single-use ticket issued by the authenticated socket-ticket endpoint.
           schema: { type: string }
-        - in: query
-          name: spawn
-          required: false
-          description: Set to `"1"` for a fresh spawn. Omit to resume — then `sessionId` (+ `resumeFrom`) must identify an existing session this device owns.
-          schema: { type: string, enum: ["1"] }
-        - in: query
-          name: shell
-          required: false
-          description: Shell to launch on a fresh spawn (resolved server-side when omitted).
-          schema: { type: string }
-        - in: query
-          name: rows
-          required: false
-          schema: { type: integer, minimum: 1, maximum: 65535 }
-        - in: query
-          name: cols
-          required: false
-          schema: { type: integer, minimum: 1, maximum: 65535 }
-        - in: query
-          name: cwd
-          required: false
-          schema: { type: string }
-        - in: query
-          name: projectId
-          required: false
-          schema: { type: string }
-        - in: query
-          name: extensionId
-          required: false
-          schema: { type: string }
-        - in: query
-          name: shellIntegration
-          required: false
-          schema: { type: string }
-        - in: query
-          name: sessionId
-          required: false
-          description: Resume target — id of an existing PTY session this device spawned.
-          schema: { type: string }
-        - in: query
-          name: resumeFrom
-          required: false
-          description: Last event sequence the client observed; the server replays events with `seq` greater than this before resuming.
-          schema: { type: integer, format: int64, minimum: 0 }
         - in: header
           name: Upgrade
           required: true
@@ -5136,68 +5126,82 @@ paths:
         "200":
           description: |
             Synthetic 2xx documenting the WebSocket message contract. The router never
-            returns 200 for `/ws/v1/terminal` — clients receive 101 on success, or
+            returns 200 for `/ws/terminal` — clients receive 101 on success, or
             401/403/426 on failure. Exists so OpenAPI tooling that requires a 2xx
             response per operation can find one.
           content:
             application/json:
               schema:
-                description: Server-emitted text control frames (PTY stdout is sent as binary, not described here).
-                oneOf:
-                  - {
-                      type: object,
-                      required: [kind],
-                      properties:
-                        {
-                          kind: { type: string, enum: [ready] },
-                          sessionId: { type: string },
-                          shell: { type: string },
-                        },
-                    }
-                  - {
-                      type: object,
-                      required: [kind, seq],
-                      properties:
-                        {
-                          kind: { type: string, enum: [integration] },
-                          event: {},
-                          seq: { type: integer, format: int64 },
-                        },
-                    }
-                  - {
-                      type: object,
-                      required: [kind],
-                      properties:
-                        {
-                          kind: { type: string, enum: [exit] },
-                          code: { type: ["integer", "null"] },
-                          seq: { type: integer, format: int64 },
-                        },
-                    }
+                type: string
+                format: binary
+                description: Canonical terminal-protocol binary frame.
         "401":
           $ref: "#/components/responses/JwtRejected"
         "403":
-          description: Forbidden — the device lacks the remote-control capability required to open a PTY.
+          description: Forbidden — remote terminal access is disabled or the device lacks the terminal grant.
         "426":
           description: Upgrade required — issued when the request is not a valid WS upgrade.
       x-websocket:
         subprotocol: null
         outboundFrames:
-          - name: ReadyFrame
-            description: Sent once on a fresh spawn with the new session id and resolved shell.
+          - name: CanonicalTerminalFrame
+            description: Binary header plus payload; kind identifies snapshots, output, integration, replay, controller, exit, acknowledgement, or error.
+        inboundFrames:
+          - name: CanonicalTerminalFrame
+            description: Binary header plus payload; kind identifies the host command.
+
+  /ws/v1/terminal:
+    get:
+      operationId: wsTerminalLegacy
+      deprecated: true
+      tags: [terminal]
+      summary: Legacy interactive terminal WebSocket compatibility adapter.
+      description: |
+        Retained for released clients that authenticate with a device JWT and
+        use raw binary stdin/stdout plus JSON text control frames. The adapter
+        translates this wire format to the durable host protocol. New clients
+        must use the socket-ticket flow and `/ws/terminal`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: token
+          required: false
+          description: Legacy device JWT query fallback; the Authorization header is preferred.
+          schema: { type: string }
+        - in: query
+          name: spawn
+          required: false
+          schema: { type: string, enum: ["1"] }
+        - in: query
+          name: sessionId
+          required: false
+          schema: { type: string }
+        - in: query
+          name: resumeFrom
+          required: false
+          schema: { type: integer, format: int64, minimum: 0 }
+        - in: header
+          name: Upgrade
+          required: true
+          schema: { type: string, enum: [websocket] }
+      responses:
+        "101": { description: Switching protocols. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          description: Remote terminal access is disabled or the device lacks the terminal grant.
+        "426": { description: Upgrade required. }
+      x-websocket:
+        outboundFrames:
+          - name: ReadyOrControl
+            description: JSON text ready, integration, exit, or error frame.
           - name: PtyOutput
-            description: Raw PTY stdout — binary frames (no JSON envelope, no seq).
-          - name: IntegrationFrame
-            description: Shell-integration event from OSC 633, carries a seq for replay.
-          - name: ExitFrame
-            description: Sent once when the PTY exits.
+            description: Raw PTY stdout bytes.
         inboundFrames:
           - name: PtyInput
-            description: Raw stdin — binary frames.
-          - name: ResizeFrame
-            description: '{ "kind": "resize", "rows": <r>, "cols": <c> }'
-          - name: KillFrame
-            description: '{ "kind": "kill" } — terminates the PTY.'
+            description: Raw PTY stdin bytes.
+          - name: ResizeOrKill
+            description: JSON text resize or kill command.
 
   # ─────────────────────────────────────────────────────────────────────────
   # rpc — source control (ADR-0038, Wave 4.1). camelCase arg keys mirror the

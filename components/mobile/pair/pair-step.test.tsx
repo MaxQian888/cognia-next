@@ -83,6 +83,18 @@ jest.mock("next-intl", () => ({
       "web.pasteHint": "Paste the full cgnp2 payload or the raw pair JWT.",
       "web.storageNoticeTitle": "Credential stays in this browser",
       "web.storageNotice": "Stored in localStorage — pair from a trusted device.",
+      "web.httpsRequired":
+        "Browser pairing requires HTTPS so the pair credential is never sent in cleartext.",
+      "networkError.certificate":
+        "The server certificate could not be verified. Check the HTTPS certificate.",
+      "networkError.browserPolicy":
+        "The browser blocked the request because of CORS or Private Network Access policy.",
+      "networkError.browserBlocked":
+        "The browser blocked the connection. Check HTTPS certificate and CORS or Private Network Access settings.",
+      "networkError.offline": "This device is offline. Reconnect to a network and try again.",
+      "networkError.unreachable":
+        "Could not reach the desktop server. Check the URL, server, and same network.",
+      "networkError.unknown": `Pairing request failed: ${(vars?.message as string) ?? ""}`,
       "payloadError.invalid": "That pairing payload couldn't be decoded.",
       "payloadError.versionMismatch": `Payload version ${(vars?.got as number) ?? "?"} not understood.`,
     }
@@ -137,6 +149,26 @@ describe("<PairStep />", () => {
     await user.click(screen.getByTestId("pair-tab-jwt"))
     await user.click(screen.getByTestId("pair-submit"))
     expect(await screen.findByTestId("pair-error")).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("does not send browser pairing credentials over HTTP", async () => {
+    const fetchMock = (globalThis as unknown as { fetch: jest.Mock }).fetch
+    const user = userEvent.setup()
+    render(
+      <PairStep
+        webMode
+        prefilledBaseUrl="http://192.168.1.42:7890"
+        prefilledPairJwt={VALID_JWT}
+        onPaired={() => {}}
+      />
+    )
+
+    await user.click(screen.getByTestId("pair-submit"))
+
+    expect(await screen.findByTestId("pair-error")).toHaveTextContent(
+      /requires HTTPS/i
+    )
     expect(fetchMock).not.toHaveBeenCalled()
   })
 

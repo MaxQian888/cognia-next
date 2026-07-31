@@ -1,6 +1,8 @@
 import Dexie from "dexie"
 
 import { CogniaDB, LEGACY_COGNIA_DB_NAME } from "@/lib/db/schema"
+import type { MobileOutboundJobRow } from "@/lib/db/mobile-outbound-types"
+import { LEGACY_MIXED_TARGET_ID } from "@/lib/runtime/target-registry"
 import { accountDatabaseName, type LocalAccountRegistry } from "./account-db"
 
 export const DEFAULT_LEGACY_MIGRATION_BATCH_SIZE = 500
@@ -53,7 +55,9 @@ export async function migrateLegacyDatabaseToAccount(
     const tables: LegacyMigrationTableSummary[] = []
     for (const sourceTable of source.tables) {
       const targetTable = target.table(sourceTable.name)
-      const copied = await copyTableRows(sourceTable, targetTable, batchSize)
+      const copied = await copyTableRows(sourceTable, targetTable, batchSize, (row) =>
+        migrateLegacyRowForAccount(sourceTable.name, row, input.targetAccountId)
+      )
       const verified = await verifyCopiedRows(sourceTable, targetTable, batchSize)
       tables.push({ name: sourceTable.name, copied, verified })
     }
@@ -97,7 +101,8 @@ function normalizeBatchSize(batchSize: number | undefined): number {
 async function copyTableRows(
   sourceTable: Dexie.Table,
   targetTable: Dexie.Table,
-  batchSize: number
+  batchSize: number,
+  transform: (row: unknown) => unknown = (row) => row
 ): Promise<number> {
   let copied = 0
   let offset = 0
@@ -105,10 +110,31 @@ async function copyTableRows(
   while (true) {
     const rows = await sourceTable.offset(offset).limit(batchSize).toArray()
     if (rows.length === 0) return copied
-    await targetTable.bulkPut(rows)
+    await targetTable.bulkPut(rows.map(transform))
     copied += rows.length
     offset += rows.length
   }
+}
+
+function migrateLegacyRowForAccount(
+  tableName: string,
+  row: unknown,
+  targetAccountId: string
+): unknown {
+  if (tableName !== "mobileOutboundQueue" || !row || typeof row !== "object") {
+    return row
+  }
+  const queueRow = row as Partial<MobileOutboundJobRow>
+  if (queueRow.accountId && queueRow.accountId !== "legacy-unscoped" && queueRow.targetId) {
+    return row
+  }
+  return {
+    ...queueRow,
+    accountId: targetAccountId,
+    targetId: LEGACY_MIXED_TARGET_ID,
+    status: "deadlettered",
+    lastError: "Legacy outbound action could not be safely attributed to a runtime target.",
+  } satisfies Partial<MobileOutboundJobRow>
 }
 
 async function verifyCopiedRows(

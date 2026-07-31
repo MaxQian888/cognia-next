@@ -11,12 +11,18 @@ jest.mock("next-intl", () => ({
     values ? `${key}:${Object.values(values).join(",")}` : key,
 }))
 
-// AccountGate only gates on Tauri; off Tauri it passes through. Default the
-// mock to Tauri so the local-account form/unlock tests below keep exercising
-// the gate; the pass-through tests flip it to false.
+jest.mock("@/hooks/use-network-status", () => ({
+  useNetworkStatus: () => ({
+    loading: false,
+    status: { connected: true, connectionType: "wifi" as const },
+  }),
+}))
+
 let mockIsTauri = true
+let mockIsCapacitor = false
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => mockIsTauri,
+  isCapacitor: () => mockIsCapacitor,
 }))
 
 // The pet overlay / popup windows load the same layout; the gate must pass
@@ -41,8 +47,10 @@ let mockState: Pick<
   | "loading"
   | "locked"
   | "error"
+  | "pendingRecoveryKey"
   | "createAccount"
   | "unlockAccount"
+  | "acknowledgeRecoveryKey"
 >
 
 jest.mock("@/stores/account/account-store", () => ({
@@ -79,8 +87,10 @@ function setGateState(overrides: Partial<typeof mockState> = {}) {
     loading: false,
     locked: false,
     error: null,
+    pendingRecoveryKey: null,
     createAccount: mockCreateAccount,
     unlockAccount: mockUnlockAccount,
+    acknowledgeRecoveryKey: jest.fn(),
     ...overrides,
   }
 }
@@ -88,6 +98,7 @@ function setGateState(overrides: Partial<typeof mockState> = {}) {
 beforeEach(() => {
   jest.clearAllMocks()
   mockIsTauri = true
+  mockIsCapacitor = false
   mockPetRole = "main"
   mockCreateAccount.mockResolvedValue(account("acct_first", "First"))
   mockUnlockAccount.mockResolvedValue()
@@ -103,6 +114,10 @@ describe("AccountGate", () => {
       </AccountGate>
     )
     expect(screen.getByText("loading")).toBeInTheDocument()
+    expect(screen.getByRole("progressbar", { name: "page.progressLabel" })).toHaveAttribute(
+      "aria-valuetext",
+      "page.stages.interface"
+    )
     expect(screen.queryByText("child")).not.toBeInTheDocument()
   })
 
@@ -135,7 +150,7 @@ describe("AccountGate", () => {
     expect(screen.getByText("registry offline")).toBeInTheDocument()
   })
 
-  it("passes through to children off Tauri instead of the create-account form", () => {
+  it("shows the create-account form in an ordinary browser", () => {
     mockIsTauri = false
     setGateState({ accounts: [] })
     render(
@@ -143,14 +158,12 @@ describe("AccountGate", () => {
         <div>child</div>
       </AccountGate>
     )
-    // Mobile/web: no local-account form (its IPC always throws). The /pair
-    // gate downstream takes over instead.
-    expect(screen.getByText("child")).toBeInTheDocument()
-    expect(screen.queryByText("firstRunTitle")).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "createAccount" })).not.toBeInTheDocument()
+    expect(screen.queryByText("child")).not.toBeInTheDocument()
+    expect(screen.getByText("firstRunTitle")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "createAccount" })).toBeInTheDocument()
   })
 
-  it("passes through to children off Tauri even when the registry reports locked", () => {
+  it("shows the unlock form in an ordinary browser", () => {
     mockIsTauri = false
     setGateState({
       accounts: [account("acct_alpha", "Alpha")],
@@ -162,8 +175,21 @@ describe("AccountGate", () => {
         <div>child</div>
       </AccountGate>
     )
+    expect(screen.queryByText("child")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "unlockAccount" })).toBeInTheDocument()
+  })
+
+  it("passes through to the native mobile pairing gate", () => {
+    mockIsTauri = false
+    mockIsCapacitor = true
+    setGateState({ accounts: [] })
+    render(
+      <AccountGate>
+        <div>child</div>
+      </AccountGate>
+    )
     expect(screen.getByText("child")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "unlockAccount" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "createAccount" })).not.toBeInTheDocument()
   })
 
   it.each(["overlay", "popup"] as const)(
@@ -224,6 +250,32 @@ describe("AccountGate", () => {
         password: "secret-pw",
       })
     )
+    expect(screen.queryByText("child")).not.toBeInTheDocument()
+  })
+
+  it("requires explicit confirmation before dismissing the one-time recovery key", () => {
+    const acknowledgeRecoveryKey = jest.fn()
+    setGateState({
+      accounts: [account("acct_alpha", "Alpha")],
+      activeAccountId: "acct_alpha",
+      unlockedAccountId: "acct_alpha",
+      pendingRecoveryKey: "recovery-key-once",
+      acknowledgeRecoveryKey,
+    })
+    render(
+      <AccountGate>
+        <div>child</div>
+      </AccountGate>
+    )
+
+    const continueButton = screen.getByRole("button", { name: "recoveryContinue" })
+    expect(screen.getByText("recovery-key-once")).toBeInTheDocument()
+    expect(continueButton).toBeDisabled()
+
+    fireEvent.click(screen.getByRole("checkbox"))
+    fireEvent.click(continueButton)
+
+    expect(acknowledgeRecoveryKey).toHaveBeenCalledTimes(1)
     expect(screen.queryByText("child")).not.toBeInTheDocument()
   })
 

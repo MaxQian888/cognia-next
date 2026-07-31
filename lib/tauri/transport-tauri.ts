@@ -3,7 +3,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { createDiagnostic } from "@cognia/diagnostics"
-import type { Transport } from "./transport-types"
+import type { Transport, TransportCallOptions } from "./transport-types"
 import { safeUnlisten } from "./safe-unlisten"
 import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
 
@@ -27,7 +27,11 @@ import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
  * discoverable.
  */
 export class TauriTransport implements Transport {
-  call<T = unknown>(name: string, args?: Record<string, unknown>): Promise<T> {
+  call<T = unknown>(
+    name: string,
+    args?: Record<string, unknown>,
+    _options?: TransportCallOptions
+  ): Promise<T> {
     return invoke<T>(name, args)
   }
 

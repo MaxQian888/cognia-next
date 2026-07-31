@@ -68,4 +68,20 @@ describe("transport-instance selection", () => {
     mod.setTransport(fake)
     expect(mod.transport).toBe(fake)
   })
+
+  it("destroys the previous managed transport when switching targets", () => {
+    const { mod } = loadInstance()
+    const destroy = jest.fn()
+    const previous = {
+      call: jest.fn(),
+      subscribe: jest.fn(() => () => {}),
+      destroy,
+    } as Transport & { destroy: () => void }
+    const next: Transport = { call: jest.fn(), subscribe: jest.fn(() => () => {}) }
+
+    mod.setTransport(previous)
+    mod.setTransport(next)
+
+    expect(destroy).toHaveBeenCalledTimes(1)
+  })
 })
