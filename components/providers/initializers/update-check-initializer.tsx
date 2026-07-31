@@ -82,7 +82,9 @@ export function UpdateCheckInitializer() {
   }, [updateSettings])
 
   useEffect(() => {
-    if (!isTauri() || !updateSettings.autoCheck) return
+    if (process.env.NODE_ENV === "development" || !isTauri() || !updateSettings.autoCheck) {
+      return
+    }
 
     let cancelled = false
 

@@ -176,7 +176,12 @@ export function GatewayProvider() {
             const engine = buildRoutingEngine(live, {
               getInFlight: (id) => (base.getInFlight?.(id) ?? 0) + (req.inFlight?.[id] ?? 0),
             })
-            entries = resolveGatewayDecision(req, engine)
+            entries = await resolveGatewayDecision(
+              req,
+              engine,
+              undefined,
+              live.autoRouting?.dataPolicy
+            )
           }
         } catch {
           entries = [] // any failure → empty = gateway uses its snapshot

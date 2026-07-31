@@ -51,6 +51,8 @@ describe("PluginRuntimeInitializer", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockInitializeManager.mockResolvedValue(undefined)
+    delete (window as typeof window & { __cogniaPluginRuntimeReady?: boolean })
+      .__cogniaPluginRuntimeReady
   })
 
   it("boots the manager with the browser profile when not in Tauri", async () => {
@@ -180,6 +182,36 @@ describe("PluginRuntimeInitializer", () => {
 
     await waitFor(() => expect(mockInitializeManager).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(mockEmitBus).toHaveBeenCalledWith("system:app:ready", {}))
+  })
+
+  it("publishes E2E readiness only after the manager boot settles", async () => {
+    let release!: () => void
+    mockInitializeManager.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+    mockDetectPlatform.mockReturnValue("web")
+    mockResolveBootstrap.mockReturnValue({
+      shouldInitialize: true,
+      config: { runtimeProfile: "browser", pluginDirectory: "", enablePython: false },
+    })
+
+    render(<PluginRuntimeInitializer />)
+    await waitFor(() => expect(mockInitializeManager).toHaveBeenCalledTimes(1))
+    expect(
+      (window as typeof window & { __cogniaPluginRuntimeReady?: boolean })
+        .__cogniaPluginRuntimeReady
+    ).toBe(false)
+
+    release()
+    await waitFor(() =>
+      expect(
+        (window as typeof window & { __cogniaPluginRuntimeReady?: boolean })
+          .__cogniaPluginRuntimeReady
+      ).toBe(true)
+    )
   })
 
   it("emits APP_CLOSING on the plugin bus on beforeunload", async () => {

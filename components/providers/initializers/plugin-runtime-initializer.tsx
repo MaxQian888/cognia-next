@@ -8,6 +8,12 @@ import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message
 
 const log = loggers.plugin
 
+declare global {
+  interface Window {
+    __cogniaPluginRuntimeReady?: boolean
+  }
+}
+
 /**
  * Boot-time initializer for the plugin platform.
  *
@@ -36,6 +42,7 @@ export function PluginRuntimeInitializer() {
   useEffect(() => {
     if (hasInitialized.current) return
     hasInitialized.current = true
+    window.__cogniaPluginRuntimeReady = false
 
     const initialize = async () => {
       try {
@@ -84,6 +91,7 @@ export function PluginRuntimeInitializer() {
 
         const { initializePluginManager } = await import("@/lib/plugin/core/manager")
         await initializePluginManager(resolution.config)
+        window.__cogniaPluginRuntimeReady = true
         log.info("plugin-runtime: initialized", { profile: resolution.config.runtimeProfile })
         // Announce boot completion on the plugin message bus so plugins can run
         // post-ready work (the catalog declared `APP_READY` but nothing emitted

@@ -101,6 +101,20 @@ describe("UpdateCheckInitializer", () => {
     expect(checkForUpdateMock).not.toHaveBeenCalled()
   })
 
+  it("does not check the release endpoint from a development build", async () => {
+    const env = jest.replaceProperty(process, "env", {
+      ...process.env,
+      NODE_ENV: "development",
+    })
+    try {
+      render(<UpdateCheckInitializer />)
+      await Promise.resolve()
+      expect(checkForUpdateMock).not.toHaveBeenCalled()
+    } finally {
+      env.restore()
+    }
+  })
+
   it("does not check when auto-check is disabled", async () => {
     settingsState.settings = { updates: { ...defaultUpdateSettings, autoCheck: false } }
     render(<UpdateCheckInitializer />)

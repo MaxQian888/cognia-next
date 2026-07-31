@@ -34,6 +34,11 @@ jest.mock("@/lib/db/gateway-request-log", () => ({
   appendGatewayRequestLog: (...a: unknown[]) => mockAppendLog(...a),
 }))
 
+const mockResolveDecision = jest.fn(async (..._args: unknown[]) => [])
+jest.mock("@/lib/gateway/decide", () => ({
+  resolveGatewayDecision: (...args: unknown[]) => mockResolveDecision(...args),
+}))
+
 // Subscription enrich is a no-op pass-through in these tests (returns the
 // base snapshot); the resolver itself is covered in snapshot-publisher.test.
 jest.mock("@/lib/subscription/opencode/chat-bridge", () => ({
@@ -87,6 +92,7 @@ const settingsState = {
     providerSettings: { openai: { providerId: "openai", apiKey: "k", enabled: true } },
     customProviders: [],
     modelMappings: [],
+    autoRouting: { dataPolicy: "local-only" },
   },
 }
 jest.mock("@/stores/settings", () => ({
@@ -109,6 +115,7 @@ describe("GatewayProvider", () => {
     // test would be read as this one's.
     mockBuildEngine.mockClear()
     mockBuildDeps.mockClear()
+    mockResolveDecision.mockClear()
     for (const k of Object.keys(handlers)) delete handlers[k]
   })
   afterEach(() => {
@@ -211,6 +218,17 @@ describe("GatewayProvider", () => {
     render(<GatewayProvider />)
     const overrides = await decideWith({ requestId: "r3", model: "some-alias" })
     expect(overrides?.getInFlight("openai")).toBe(2)
+  })
+
+  it("passes the live auto-routing data policy into the decision resolver", async () => {
+    render(<GatewayProvider />)
+    await decideWith({ requestId: "r-policy", model: "some-alias" })
+    expect(mockResolveDecision).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "r-policy" }),
+      expect.any(Object),
+      undefined,
+      "local-only"
+    )
   })
 
   it("is inert outside Tauri", () => {
