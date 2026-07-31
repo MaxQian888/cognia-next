@@ -22,6 +22,33 @@ function caseId(): string {
   return "evc_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
 }
 
+function assetIds(evalCase: Pick<EvalCase, "contentParts">): Set<string> {
+  return new Set(
+    (evalCase.contentParts ?? []).flatMap((part) => (part.type === "asset" ? [part.assetId] : []))
+  )
+}
+
+async function reconcileAssetReferences(previous: EvalCase[], next: EvalCase[]): Promise<void> {
+  const deltas = new Map<string, number>()
+  for (const evalCase of previous) {
+    for (const assetId of assetIds(evalCase)) deltas.set(assetId, (deltas.get(assetId) ?? 0) - 1)
+  }
+  for (const evalCase of next) {
+    for (const assetId of assetIds(evalCase)) deltas.set(assetId, (deltas.get(assetId) ?? 0) + 1)
+  }
+  const db = getDb()
+  for (const [assetId, delta] of deltas) {
+    if (delta === 0) continue
+    const asset = await db.evalAssets.get(assetId)
+    if (!asset) throw new Error(`Evaluation asset ${assetId} is unavailable`)
+    const referenceCount = asset.referenceCount + delta
+    if (referenceCount < 0) {
+      throw new Error(`Evaluation asset ${assetId} has an invalid reference count`)
+    }
+    await db.evalAssets.update(assetId, { referenceCount })
+  }
+}
+
 export interface CreateDatasetInput {
   name: string
   description?: string
@@ -92,8 +119,17 @@ export async function deleteDataset(id: string): Promise<void> {
   const db = getDb()
   await db.transaction(
     "rw",
-    [db.evalDatasets, db.evalCases, db.evalRuns, db.evalRunCaseResults, db.evalDatasetVersions],
+    [
+      db.evalDatasets,
+      db.evalCases,
+      db.evalRuns,
+      db.evalRunCaseResults,
+      db.evalDatasetVersions,
+      db.evalAssets,
+    ],
     async () => {
+      const cases = await db.evalCases.where("datasetId").equals(id).toArray()
+      await reconcileAssetReferences(cases, [])
       await db.evalCases.where("datasetId").equals(id).delete()
       await deleteRunsForDataset(id)
       await db.evalDatasetVersions.where("datasetId").equals(id).delete()
@@ -132,6 +168,7 @@ export async function addCase(datasetIdValue: string, input: AddCaseInput): Prom
     createdAt: now,
     updatedAt: now,
     ...(input.history ? { history: input.history } : {}),
+    ...(input.contentParts ? { contentParts: input.contentParts } : {}),
     ...(input.reference ? { reference: input.reference } : {}),
     ...(input.failureMode ? { failureMode: input.failureMode } : {}),
     ...(input.sourceTraceId ? { sourceTraceId: input.sourceTraceId } : {}),
@@ -141,7 +178,11 @@ export async function addCase(datasetIdValue: string, input: AddCaseInput): Prom
     ...(input.metadata ? { metadata: input.metadata } : {}),
     ...(input.inputVars ? { inputVars: input.inputVars } : {}),
   }
-  await getDb().evalCases.put(row)
+  const db = getDb()
+  await db.transaction("rw", [db.evalCases, db.evalAssets], async () => {
+    await reconcileAssetReferences([], [row])
+    await db.evalCases.put(row)
+  })
   await bumpDatasetVersion(datasetIdValue)
   return row
 }
@@ -228,6 +269,7 @@ export async function bulkAddCases(
       createdAt: input.createdAt ?? now,
       updatedAt: now,
       ...(input.history ? { history: input.history } : {}),
+      ...(input.contentParts ? { contentParts: input.contentParts } : {}),
       ...(input.reference ? { reference: input.reference } : {}),
       ...(input.failureMode ? { failureMode: input.failureMode } : {}),
       ...(input.sourceTraceId ? { sourceTraceId: input.sourceTraceId } : {}),
@@ -238,7 +280,7 @@ export async function bulkAddCases(
       ...(input.inputVars ? { inputVars: input.inputVars } : {}),
     }))
 
-    await db.transaction("rw", db.evalCases, async () => {
+    await db.transaction("rw", [db.evalCases, db.evalAssets], async () => {
       const existing = await db.evalCases.bulkGet(rows.map((r) => r.id))
       existing.forEach((row, i) => {
         if (row) {
@@ -249,6 +291,10 @@ export async function bulkAddCases(
           added += 1
         }
       })
+      await reconcileAssetReferences(
+        existing.filter((row): row is EvalCase => Boolean(row)),
+        rows
+      )
       await db.evalCases.bulkPut(rows)
     })
 
@@ -279,7 +325,11 @@ export async function updateCase(
   const existing = await getCase(id)
   if (!existing) return undefined
   const next: EvalCase = { ...existing, ...patch, updatedAt: Date.now() }
-  await getDb().evalCases.put(next)
+  const db = getDb()
+  await db.transaction("rw", [db.evalCases, db.evalAssets], async () => {
+    await reconcileAssetReferences([existing], [next])
+    await db.evalCases.put(next)
+  })
   await bumpDatasetVersion(existing.datasetId)
   return next
 }
@@ -287,6 +337,10 @@ export async function updateCase(
 export async function deleteCase(id: string): Promise<void> {
   const existing = await getCase(id)
   if (!existing) return
-  await getDb().evalCases.delete(id)
+  const db = getDb()
+  await db.transaction("rw", [db.evalCases, db.evalAssets], async () => {
+    await reconcileAssetReferences([existing], [])
+    await db.evalCases.delete(id)
+  })
   await bumpDatasetVersion(existing.datasetId)
 }

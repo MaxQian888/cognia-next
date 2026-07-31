@@ -76,6 +76,12 @@ describe("main", () => {
     expect(config.mock.calls[0][0].subcommand).toBe("path")
   })
 
+  it("dispatches eval subcommands", async () => {
+    const evaluation = jest.fn().mockResolvedValue(0)
+    await main(["eval", "preflight", "project.json"], { eval: evaluation })
+    expect(evaluation.mock.calls[0][0].subcommand).toBe("preflight")
+  })
+
   it("dispatches handoff", async () => {
     const handoff = jest.fn().mockResolvedValue(0)
     await main(["handoff", "s1"], { handoff })

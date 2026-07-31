@@ -26,12 +26,17 @@ jest.mock("@/lib/db/eval-datasets", () => ({
 // Keep the real parsers / mappers / foreign adapters; only stub the network.
 const fetchHuggingFaceSchema = jest.fn()
 const importHuggingFace = jest.fn()
+const mockImportForeign = jest.fn()
 jest.mock("@/lib/ai/eval/import", () => {
   const actual = jest.requireActual("@/lib/ai/eval/import")
   return {
     ...actual,
     fetchHuggingFaceSchema: (...a: unknown[]) => fetchHuggingFaceSchema(...(a as [])),
     importHuggingFace: (...a: unknown[]) => importHuggingFace(...(a as [])),
+    importForeign: (...a: unknown[]) =>
+      mockImportForeign.getMockImplementation()
+        ? mockImportForeign(...a)
+        : actual.importForeign(...a),
   }
 })
 
@@ -59,6 +64,7 @@ beforeEach(() => {
   updateDataset.mockClear()
   fetchHuggingFaceSchema.mockReset()
   importHuggingFace.mockReset()
+  mockImportForeign.mockReset()
   recentTraces.mockReturnValue([])
 })
 
@@ -464,6 +470,38 @@ describe("ImportDialog — chrome", () => {
     const c = casesOf(0)[0]
     expect(c.input).toBe("hi")
     expect(c.source).toBeDefined()
+  })
+
+  it("preserves multimodal content parts from a direct import", async () => {
+    const contentParts = [
+      { type: "text", text: "Describe this receipt" },
+      { type: "asset", assetId: "asset_receipt", mediaType: "image/png" },
+    ]
+    mockImportForeign.mockReturnValue({
+      cases: [
+        {
+          id: "case_multimodal",
+          datasetId: "d1",
+          input: "Describe this receipt",
+          contentParts,
+          source: { kind: "import", capability: "chat.qa" },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      skipped: [],
+    })
+    renderDialog()
+    fireEvent.click(screen.getByText("import.tabs.foreign"))
+    fireEvent.change(screen.getByLabelText("import.foreign.pick"), {
+      target: { files: [textFile("multimodal.json", "{}")] },
+    })
+    await waitFor(() => expect(screen.getByTestId("import-preview")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByText('import.action:{"count":1}'))
+    await waitFor(() => expect(bulkAddCases).toHaveBeenCalled())
+
+    expect(casesOf(0)[0].contentParts).toEqual(contentParts)
   })
 
   it("handles a single-column source with no expected column to offer", async () => {

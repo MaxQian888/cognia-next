@@ -16,10 +16,24 @@ jest.mock("@/hooks/eval/use-eval-data", () => ({
 const addCase = jest.fn(async () => ({ id: "c-new" }))
 const updateCase = jest.fn(async () => ({}))
 const deleteCase = jest.fn(async () => {})
+const ingestEvalAsset = jest.fn(async (_input: unknown) => ({
+  type: "asset" as const,
+  assetId: "sha256:asset",
+  mediaType: "image/png",
+  name: "sample.png",
+  privacy: "local-only" as const,
+}))
 jest.mock("@/lib/db/eval-datasets", () => ({
   addCase: (...a: unknown[]) => addCase(...(a as [])),
   updateCase: (...a: unknown[]) => updateCase(...(a as [])),
   deleteCase: (...a: unknown[]) => deleteCase(...(a as [])),
+}))
+jest.mock("@/lib/ai/eval/assets", () => ({
+  ingestEvalAsset: (...args: unknown[]) => ingestEvalAsset(...(args as [unknown])),
+}))
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: (selector: (state: { unlockedAccountId: string }) => unknown) =>
+    selector({ unlockedAccountId: "account-1" }),
 }))
 
 import { CaseList } from "./case-list"
@@ -42,6 +56,7 @@ beforeEach(() => {
   addCase.mockClear()
   updateCase.mockClear()
   deleteCase.mockClear()
+  ingestEvalAsset.mockClear()
 })
 
 describe("CaseList", () => {
@@ -94,5 +109,27 @@ describe("CaseList", () => {
     fireEvent.click(screen.getByText("case.cancel"))
     expect(screen.queryByTestId("case-editor")).not.toBeInTheDocument()
     expect(updateCase).not.toHaveBeenCalled()
+  })
+
+  it("ingests an attachment through the unlocked account and persists its reference", async () => {
+    render(<CaseList datasetId="d" />)
+    fireEvent.click(screen.getByText("case.add"))
+    fireEvent.change(screen.getByLabelText("case.input"), { target: { value: "inspect" } })
+    fireEvent.change(screen.getByLabelText("case.pickAttachments"), {
+      target: { files: [new File(["png"], "sample.png", { type: "image/png" })] },
+    })
+    await waitFor(() => expect(ingestEvalAsset).toHaveBeenCalled())
+    expect(ingestEvalAsset).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: "account-1", file: expect.any(File) })
+    )
+    fireEvent.click(screen.getByText("case.save"))
+    await waitFor(() =>
+      expect(addCase).toHaveBeenCalledWith(
+        "d",
+        expect.objectContaining({
+          contentParts: [expect.objectContaining({ assetId: "sha256:asset" })],
+        })
+      )
+    )
   })
 })

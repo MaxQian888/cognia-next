@@ -101,6 +101,7 @@
     "[ADR 0095 — Desktop Selection Perception](/en/docs/adr/0095-desktop-selection-perception)",
     "[ADR-0096 — Loading-state motion and accessibility](/en/docs/adr/0096-loading-state-motion-and-accessibility)",
     "[ADR-0097 — Cross-device settings contract and companion reach](/en/docs/adr/0097-cross-device-settings-contract-and-companion-reach)",
-    "[ADR 0100 — Unified Template Platform](/en/docs/adr/0100-unified-template-platform)"
+    "[ADR 0100 — Unified Template Platform](/en/docs/adr/0100-unified-template-platform)",
+    "[ADR 0101 — 完整模型评估实验室](/zh/docs/adr/0101-model-evaluation-lab)"
   ]
 }

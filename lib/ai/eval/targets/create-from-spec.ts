@@ -21,6 +21,7 @@ export function createTargetFromSpec(spec: TargetSpec, deps: TargetDepsBundle): 
       return createChatTarget(
         {
           label: spec.label,
+          ...(spec.providerId ? { providerId: spec.providerId } : {}),
           model: spec.model,
           ...(spec.characterId ? { characterId: spec.characterId } : {}),
           ...(spec.cwd ? { cwd: spec.cwd } : {}),

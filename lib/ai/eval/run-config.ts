@@ -114,7 +114,7 @@ export async function runConfiguredEval(
       now: deps.now(),
       k,
       ...(signal ? { signal } : {}),
-      onCaseComplete: (result) => {
+      onCaseComplete: async (result) => {
         const rep0 = result.repetitions[0]
         if (!rep0) return
         const scores: SaveCaseResultInput["scores"] = {}
@@ -134,7 +134,7 @@ export async function runConfiguredEval(
         const cap = deps.maxStoredOutputChars ?? DEFAULT_STORED_OUTPUT_CHARS
         const raw = rep0.sample.output
         const truncated = cap > 0 && raw.length > cap
-        void deps.saveCaseResult({
+        await deps.saveCaseResult({
           runId,
           caseId: result.caseId,
           scores,

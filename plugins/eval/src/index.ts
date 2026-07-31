@@ -17,7 +17,13 @@
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { getRunDetail, listDatasetSummaries, runEvalService } from "@/lib/ai/eval/service"
 import { runCalibration } from "@/lib/ai/eval/calibration/runner"
+import { loadOrCreateEvalArtifactKey } from "@/lib/ai/eval/artifact-crypto"
+import { createBrowserEvalOrchestrator } from "@/lib/ai/eval/browser-execution"
+import { EvalProjectService } from "@/lib/ai/eval/project-service"
+import { SCORING_VERSION } from "@/lib/ai/eval/report"
+import { deterministicScorers } from "@/lib/ai/eval/scorers"
 import type { TargetSpec } from "@/types/eval/run-config"
+import { APP_VERSION } from "@/lib/app-version"
 
 export interface RunDatasetArgs {
   datasetId: string
@@ -114,6 +120,74 @@ export async function runCalibrationTool(args: RunCalibrationArgs) {
   }
 }
 
+export interface EvalProjectV2Args {
+  action:
+    "preflight" | "start" | "pause" | "resume" | "cancel" | "status" | "report" | "extend-budget"
+  projectId?: string
+  experimentId?: string
+  budgetCap?: number
+}
+
+async function loadEvalRuntime() {
+  const [{ useSettingsStore }, { useAccountStore }] = await Promise.all([
+    import("@/stores/settings/settings-store"),
+    import("@/stores/account/account-store"),
+  ])
+  const settings = useSettingsStore.getState().settings
+  const accountId = useAccountStore.getState().unlockedAccountId
+  if (!settings || !accountId)
+    throw new Error("eval_project_v2: an unlocked account and settings are required")
+  return { settings, accountId }
+}
+
+export async function runEvalProjectV2Tool(args: EvalProjectV2Args) {
+  const service = new EvalProjectService()
+  if (args.action === "preflight") {
+    if (!args.projectId) throw new Error("eval_project_v2: projectId is required")
+    return service.verifiedPreflight(args.projectId)
+  }
+  if (args.action === "start") {
+    if (!args.projectId) throw new Error("eval_project_v2: projectId is required")
+    const { settings, accountId } = await loadEvalRuntime()
+    const verified = await service.verifiedPreflight(args.projectId)
+    if (!verified.result.ok) return verified
+    const experiment = await service.start(args.projectId, {
+      appVersion: APP_VERSION,
+      scorerVersions: Object.fromEntries(
+        deterministicScorers().map((scorer) => [scorer.id, String(SCORING_VERSION)])
+      ),
+      randomSeed: crypto.getRandomValues(new Uint32Array(1))[0],
+      environmentCompatibility: verified.environmentCompatibility,
+    })
+    const orchestrator = createBrowserEvalOrchestrator({
+      appSettings: settings,
+      artifactKey: await loadOrCreateEvalArtifactKey(accountId),
+    })
+    void orchestrator.run(experiment.id)
+    return { experimentId: experiment.id, state: experiment.state }
+  }
+  if (!args.experimentId) throw new Error("eval_project_v2: experimentId is required")
+  if (args.action === "pause") await service.pause(args.experimentId)
+  if (args.action === "cancel") await service.cancel(args.experimentId)
+  if (args.action === "extend-budget") {
+    if (typeof args.budgetCap !== "number") {
+      throw new Error("eval_project_v2: budgetCap is required for extend-budget")
+    }
+    await service.extendBudget(args.experimentId, args.budgetCap)
+  }
+  if (args.action === "resume") {
+    const { settings, accountId } = await loadEvalRuntime()
+    await service.resume(args.experimentId)
+    void createBrowserEvalOrchestrator({
+      appSettings: settings,
+      artifactKey: await loadOrCreateEvalArtifactKey(accountId),
+    }).run(args.experimentId)
+  }
+  return args.action === "report"
+    ? service.report(args.experimentId)
+    : service.status(args.experimentId)
+}
+
 const LIST_DEF = {
   name: "eval_list_datasets",
   description:
@@ -181,6 +255,35 @@ const CALIBRATE_DEF = {
   },
 } as const
 
+const PROJECT_V2_DEF = {
+  name: "eval_project_v2",
+  description:
+    "Versioned durable evaluation project API: preflight, start, pause, resume, cancel, status, report, and budget extension.",
+  parametersSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: [
+          "preflight",
+          "start",
+          "pause",
+          "resume",
+          "cancel",
+          "status",
+          "report",
+          "extend-budget",
+        ],
+      },
+      projectId: { type: "string" },
+      experimentId: { type: "string" },
+      budgetCap: { type: "number" },
+    },
+    required: ["action"],
+    additionalProperties: false,
+  },
+} as const
+
 export const evalPluginDefinition: PluginDefinition = {
   manifest: {
     id: "cognia-eval",
@@ -197,6 +300,13 @@ export const evalPluginDefinition: PluginDefinition = {
       pluginId: ctx.pluginId,
       definition: LIST_DEF as never,
       execute: async () => listDatasetSummaries(),
+    })
+    ctx.agent?.registerTool?.({
+      name: PROJECT_V2_DEF.name,
+      pluginId: ctx.pluginId,
+      definition: PROJECT_V2_DEF as never,
+      execute: async (args: Record<string, unknown>) =>
+        runEvalProjectV2Tool(args as unknown as EvalProjectV2Args),
     })
     ctx.agent?.registerTool?.({
       name: RUN_DEF.name,

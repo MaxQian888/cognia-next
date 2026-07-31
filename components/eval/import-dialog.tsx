@@ -298,6 +298,7 @@ export function ImportDialog({
           source: c.source,
           ...(c.reference ? { reference: c.reference } : {}),
           ...(c.history ? { history: c.history } : {}),
+          ...(c.contentParts ? { contentParts: c.contentParts } : {}),
           ...(c.inputVars ? { inputVars: c.inputVars } : {}),
           ...(c.metadata ? { metadata: c.metadata } : {}),
           ...(c.tags ? { tags: c.tags } : {}),

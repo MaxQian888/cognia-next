@@ -1,6 +1,16 @@
 /** cognia-eval builtin plugin — tool registration + handlers. */
-import evalPlugin, { runEvalDatasetTool, runCalibrationTool } from "./index"
+import evalPlugin, { runEvalDatasetTool, runCalibrationTool, runEvalProjectV2Tool } from "./index"
 import type { PluginContext } from "@/types/plugin"
+
+const mockVerifiedPreflight = jest.fn(async (..._args: unknown[]): Promise<unknown> => undefined)
+const mockProjectStart = jest.fn(async (..._args: unknown[]): Promise<unknown> => undefined)
+const mockProjectPause = jest.fn(async (..._args: unknown[]) => {})
+const mockProjectResume = jest.fn(async (..._args: unknown[]) => {})
+const mockProjectCancel = jest.fn(async (..._args: unknown[]) => {})
+const mockProjectStatus = jest.fn(async (..._args: unknown[]): Promise<unknown> => undefined)
+const mockProjectReport = jest.fn(async (..._args: unknown[]): Promise<unknown> => undefined)
+const mockProjectExtend = jest.fn(async (..._args: unknown[]) => {})
+const mockProjectRun = jest.fn(async (..._args: unknown[]) => {})
 
 jest.mock("@/lib/ai/eval/service", () => ({
   listDatasetSummaries: jest.fn(async () => [
@@ -31,7 +41,44 @@ jest.mock("@/lib/ai/eval/calibration/runner", () => ({
   })),
 }))
 jest.mock("@/stores/settings/settings-store", () => ({
-  useSettingsStore: { getState: () => ({ settings: null }) },
+  useSettingsStore: { getState: () => ({ settings: { defaultProvider: "local" } }) },
+}))
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: { getState: () => ({ unlockedAccountId: "account" }) },
+}))
+jest.mock("@/lib/ai/eval/project-service", () => ({
+  EvalProjectService: class {
+    verifiedPreflight(...args: unknown[]) {
+      return mockVerifiedPreflight(...args)
+    }
+    start(...args: unknown[]) {
+      return mockProjectStart(...args)
+    }
+    pause(...args: unknown[]) {
+      return mockProjectPause(...args)
+    }
+    resume(...args: unknown[]) {
+      return mockProjectResume(...args)
+    }
+    cancel(...args: unknown[]) {
+      return mockProjectCancel(...args)
+    }
+    status(...args: unknown[]) {
+      return mockProjectStatus(...args)
+    }
+    report(...args: unknown[]) {
+      return mockProjectReport(...args)
+    }
+    extendBudget(...args: unknown[]) {
+      return mockProjectExtend(...args)
+    }
+  },
+}))
+jest.mock("@/lib/ai/eval/browser-execution", () => ({
+  createBrowserEvalOrchestrator: () => ({ run: (...args: unknown[]) => mockProjectRun(...args) }),
+}))
+jest.mock("@/lib/ai/eval/artifact-crypto", () => ({
+  loadOrCreateEvalArtifactKey: async () => new Uint8Array(32),
 }))
 
 import { runEvalService } from "@/lib/ai/eval/service"
@@ -59,17 +106,98 @@ async function activate(): Promise<Map<string, RegisteredTool>> {
 
 beforeEach(() => {
   ;(runEvalService as jest.Mock).mockClear()
+  mockVerifiedPreflight.mockReset()
+  mockProjectStart.mockReset()
+  mockProjectStatus.mockReset()
+  mockProjectReport.mockReset()
+  mockVerifiedPreflight.mockResolvedValue({
+    environmentCompatibility: {
+      checkedAt: 1,
+      runtimeByVariant: {},
+      storage: { status: "available", requiredBytes: 1, availableBytes: 2 },
+    },
+    result: { ok: true, issues: [], compatibleVariantIds: [], effectiveCaseIds: [] },
+  })
+  mockProjectStart.mockResolvedValue({ id: "experiment", state: "queued" })
+  mockProjectStatus.mockResolvedValue({ experiment: { state: "running" }, tasks: {} })
+  mockProjectReport.mockResolvedValue({ experiment: { state: "completed" }, samples: [] })
 })
 
 describe("cognia-eval plugin", () => {
-  it("registers the four eval tools", async () => {
+  it("registers legacy tools and the versioned project API", async () => {
     const tools = await activate()
     expect([...tools.keys()].sort()).toEqual([
       "eval_get_run",
       "eval_list_datasets",
+      "eval_project_v2",
       "eval_run_calibration",
       "eval_run_dataset",
     ])
+  })
+
+  it("validates identifiers at the versioned project API boundary", async () => {
+    await expect(runEvalProjectV2Tool({ action: "preflight" })).rejects.toThrow(/projectId/)
+    await expect(runEvalProjectV2Tool({ action: "status" })).rejects.toThrow(/experimentId/)
+    await expect(
+      runEvalProjectV2Tool({ action: "extend-budget", experimentId: "experiment" })
+    ).rejects.toThrow(/budgetCap/)
+  })
+
+  it("executes the complete versioned project lifecycle API", async () => {
+    await expect(
+      runEvalProjectV2Tool({ action: "preflight", projectId: "project" })
+    ).resolves.toMatchObject({
+      result: { ok: true },
+    })
+    await expect(runEvalProjectV2Tool({ action: "start", projectId: "project" })).resolves.toEqual({
+      experimentId: "experiment",
+      state: "queued",
+    })
+    expect(mockProjectRun).toHaveBeenCalledWith("experiment")
+
+    await runEvalProjectV2Tool({ action: "pause", experimentId: "experiment" })
+    await runEvalProjectV2Tool({ action: "cancel", experimentId: "experiment" })
+    await runEvalProjectV2Tool({
+      action: "extend-budget",
+      experimentId: "experiment",
+      budgetCap: 25,
+    })
+    await runEvalProjectV2Tool({ action: "resume", experimentId: "experiment" })
+    await expect(
+      runEvalProjectV2Tool({ action: "status", experimentId: "experiment" })
+    ).resolves.toMatchObject({ experiment: { state: "running" } })
+    await expect(
+      runEvalProjectV2Tool({ action: "report", experimentId: "experiment" })
+    ).resolves.toMatchObject({ experiment: { state: "completed" } })
+
+    expect(mockProjectPause).toHaveBeenCalledWith("experiment")
+    expect(mockProjectCancel).toHaveBeenCalledWith("experiment")
+    expect(mockProjectExtend).toHaveBeenCalledWith("experiment", 25)
+    expect(mockProjectResume).toHaveBeenCalledWith("experiment")
+  })
+
+  it("returns blocking preflight evidence without starting or spending", async () => {
+    mockVerifiedPreflight.mockResolvedValueOnce({
+      environmentCompatibility: {
+        checkedAt: 1,
+        runtimeByVariant: {},
+        storage: { status: "insufficient", requiredBytes: 2, availableBytes: 1 },
+      },
+      result: {
+        ok: false,
+        issues: [{ code: "DISK_QUOTA_INSUFFICIENT" }],
+        compatibleVariantIds: [],
+        effectiveCaseIds: [],
+      },
+    })
+
+    await expect(
+      runEvalProjectV2Tool({ action: "start", projectId: "project" })
+    ).resolves.toMatchObject({
+      result: { ok: false },
+    })
+    expect(mockProjectStart).not.toHaveBeenCalled()
+    expect(mockProjectRun).not.toHaveBeenCalled()
   })
 
   it("eval_list_datasets returns summaries", async () => {

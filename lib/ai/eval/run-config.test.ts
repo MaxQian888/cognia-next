@@ -148,6 +148,35 @@ describe("runConfiguredEval", () => {
     expect(firstRow.scores["always-pass"]).toEqual({ value: 1, passed: true, status: "scored" })
   })
 
+  it("awaits every case checkpoint before writing the completed run", async () => {
+    let release!: () => void
+    let entered!: () => void
+    const checkpoint = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const checkpointStarted = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const { deps, saved } = makeDeps({
+      saveCaseResult: jest.fn(async () => {
+        entered()
+        await checkpoint
+      }),
+    })
+
+    const run = runConfiguredEval(
+      "d",
+      { targets: [{ kind: "chat", label: "A", model: "m" }], scorerIds: [], k: 1 },
+      deps
+    )
+    await checkpointStarted
+    expect(saved).toHaveBeenCalledTimes(1)
+
+    release()
+    await run
+    expect(saved.mock.calls.at(-1)?.[0].status).toBe("completed")
+  })
+
   it("carries judge reasoning onto the row and skips the key when absent", async () => {
     const withReasoning: Scorer = {
       id: "judge",

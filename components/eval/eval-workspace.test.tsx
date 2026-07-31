@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -61,13 +61,11 @@ describe("EvalWorkspace", () => {
     expect(screen.getByText("DASHBOARD")).toBeInTheDocument()
   })
 
-  it("frosts the tab bar so it reads over a wallpaper", () => {
+  it("frosts the shared feature header so it reads over a wallpaper", () => {
     render(<EvalWorkspace />)
-    // The segmented tab strip is the header that sits over the wallpaper — it
-    // must carry the same translucent + blur treatment as the shared
-    // feature-shell toolbar so it stays legible against an image background.
-    const header = screen.getByText("tabs.datasets").closest("div")
-    expect(header).toHaveClass("bg-background/80", "backdrop-blur")
+    const header = screen.getByRole("banner")
+    expect(header).toHaveClass("bg-background/88", "backdrop-blur-xl")
+    expect(header).toContainElement(screen.getByText("tabs.datasets"))
   })
 
   describe("run bar", () => {
@@ -100,7 +98,7 @@ describe("EvalWorkspace", () => {
       useEvalRunStore.getState().updateProgress({ done: 4, total: 10, passing: 3, ungraded: 1 })
       const { rerender } = render(<EvalWorkspace />)
       expect(screen.getByTestId("eval-run-bar")).toHaveTextContent("4/10")
-      useEvalRunStore.getState().cancel()
+      act(() => useEvalRunStore.getState().cancel())
       rerender(<EvalWorkspace />)
       expect(screen.getByText("runConfig.cancelRun")).toBeDisabled()
     })

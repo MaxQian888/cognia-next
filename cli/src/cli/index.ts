@@ -12,6 +12,7 @@ import { handoffCommand as defaultHandoff, resumeCommand as defaultResume } from
 import { chatCommand as defaultChat } from "./chat"
 import { logtoCommand as defaultLogto } from "./logto-command"
 import { larkCommand as defaultLark } from "./lark-command"
+import { evalCommand as defaultEval } from "./eval-command"
 import { serveCommand as defaultServe } from "../serve/serve-command"
 import { realOutput, type OutputSink } from "./output"
 import { VERSION } from "../version"
@@ -36,6 +37,7 @@ Usage:
   cognia-agent logto <login|status|logout>          cloud OIDC (Logto) session
                      [--issuer u] [--client-id id] [--resource api] [--scope a,b] [--org id]
   cognia-agent config <get|set|path>
+  cognia eval <preflight|run|status|report|export> ...
   cognia-agent lark <list|approve|reject|disable|enable|unlink|tenant|sweep>
                      [--adapter id] [--user id] [--server-url u] [--json]
                      Feishu identity registry admin for headless installs
@@ -79,6 +81,7 @@ const KNOWN_COMMANDS = new Set([
   "serve",
   "logto",
   "lark",
+  "eval",
 ])
 
 export interface MainDeps {
@@ -91,6 +94,7 @@ export interface MainDeps {
   logto?: typeof defaultLogto
   serve?: typeof defaultServe
   lark?: typeof defaultLark
+  eval?: typeof defaultEval
   out?: OutputSink
 }
 
@@ -151,6 +155,8 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       return (deps.serve ?? defaultServe)(args, { out })
     case "lark":
       return (deps.lark ?? defaultLark)(args, { out })
+    case "eval":
+      return (deps.eval ?? defaultEval)(args, { out })
     default:
       out.error(`unknown command "${args.command}"\n\n${HELP}`)
       return 2

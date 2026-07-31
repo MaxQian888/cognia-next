@@ -66,6 +66,10 @@ export interface EvalSample {
   stepCount: number
   /** True when the run degraded to text-only (no sidecar/tools available). */
   degraded: boolean
+  /** Outbound privacy policy applied to this exact target payload. */
+  redactionPolicy?: "cloud-redacted" | "local-original"
+  /** SHA-256 over the post-gate text payload, stored in the experiment evidence. */
+  redactionDigest?: string
   /** Set when the run itself failed (vs. a clean but low-quality answer). */
   error?: string
 }
@@ -99,12 +103,25 @@ export interface EvalHistoryTurn {
   content: string
 }
 
+/** Ordered input content accepted by the same multimodal provider path as chat. */
+export type EvalInputPart =
+  | { type: "text"; text: string }
+  | {
+      type: "asset"
+      assetId: string
+      mediaType: string
+      name?: string
+      privacy: "scanned" | "manual" | "local-only"
+    }
+
 /** One evaluation test item. */
 export interface EvalCase {
   id: string
   datasetId: string
   /** The user prompt that drives the run. */
   input: string
+  /** Ordered multimodal input. Legacy cases fall back to one text part from `input`. */
+  contentParts?: EvalInputPart[]
   /** Optional prior conversation turns. */
   history?: EvalHistoryTurn[]
   reference?: EvalReference

@@ -10,6 +10,7 @@
  * (`runAndCaptureAssistantReply` + `agentTraces` query) on desktop.
  */
 
+import type { SendContent, SendContentBlock } from "@cognia/agent-config-types"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import type { EvalCase, EvalSample, EvalToolCall, EvalRetrievedChunk } from "@/types/eval/eval"
 import type { EvalTarget } from "../runner"
@@ -106,14 +107,44 @@ export function assembleSampleFromSpans(
 }
 
 /** Render the case (history + prompt) into a single driving prompt string. */
-function renderPrompt(evalCase: EvalCase): string {
-  if (!evalCase.history || evalCase.history.length === 0) return evalCase.input
-  const prior = evalCase.history.map((t) => `${t.role.toUpperCase()}: ${t.content}`).join("\n")
-  return `${prior}\n\n${evalCase.input}`
+async function renderPrompt(
+  evalCase: EvalCase,
+  resolveAsset?: ChatTargetDeps["resolveAsset"]
+): Promise<SendContent> {
+  if (!evalCase.contentParts?.length) {
+    if (!evalCase.history?.length) return evalCase.input
+    const prior = evalCase.history.map((t) => `${t.role.toUpperCase()}: ${t.content}`).join("\n")
+    return `${prior}\n\n${evalCase.input}`
+  }
+  const blocks: SendContentBlock[] = []
+  if (evalCase.history?.length) {
+    blocks.push({
+      type: "text",
+      text: `${evalCase.history.map((t) => `${t.role.toUpperCase()}: ${t.content}`).join("\n")}\n\n`,
+    })
+  }
+  for (const part of evalCase.contentParts) {
+    if (part.type === "text") {
+      blocks.push({ type: "text", text: part.text })
+      continue
+    }
+    if (!resolveAsset) throw new Error(`Evaluation asset ${part.assetId} is unavailable`)
+    const asset = await resolveAsset(part.assetId)
+    blocks.push({
+      type: asset.mediaType.startsWith("image/") ? "image" : "document",
+      source: {
+        type: "base64",
+        media_type: asset.mediaType,
+        data: asset.data,
+      },
+    })
+  }
+  return blocks.length === 1 && blocks[0].type === "text" ? blocks[0].text : blocks
 }
 
 export interface ChatTargetConfig {
   label: string
+  providerId?: string
   model: string
   characterId?: string
   cwd?: string
@@ -123,15 +154,19 @@ export interface ChatTargetConfig {
 export interface ChatTargetDeps {
   /** Run one chat turn; returns the final text and the session it ran in. */
   runTurn(input: {
-    prompt: string
+    prompt: SendContent
+    providerId?: string
     model: string
     characterId?: string
     cwd?: string
     timeoutMs?: number
     signal?: AbortSignal
   }): Promise<{ text: string; sessionId: string }>
+  resolveAsset?(assetId: string): Promise<{ data: string; mediaType: string }>
   /** Fetch the spans emitted for a session. */
   fetchSpans(sessionId: string): Promise<AgentTraceSpan[]>
+  /** Remove the transient evaluation chat after its trace has been captured. */
+  cleanupSession?(sessionId: string): Promise<void>
   /** Whether the tool-enabled (sidecar) path is available. */
   isToolCapable(): boolean
 }
@@ -140,31 +175,36 @@ export function createChatTarget(config: ChatTargetConfig, deps: ChatTargetDeps)
   return {
     label: config.label,
     async run(evalCase: EvalCase, signal?: AbortSignal): Promise<EvalSample> {
-      const prompt = renderPrompt(evalCase)
+      const prompt = await renderPrompt(evalCase, deps.resolveAsset)
       const { text, sessionId } = await deps.runTurn({
         prompt,
+        ...(config.providerId ? { providerId: config.providerId } : {}),
         model: config.model,
         ...(config.characterId ? { characterId: config.characterId } : {}),
         ...(config.cwd ? { cwd: config.cwd } : {}),
         ...(config.timeoutMs ? { timeoutMs: config.timeoutMs } : {}),
         ...(signal ? { signal } : {}),
       })
-      const spans = await deps.fetchSpans(sessionId)
-      return assembleSampleFromSpans(spans, { output: text, degraded: !deps.isToolCapable() })
+      try {
+        const spans = await deps.fetchSpans(sessionId)
+        return assembleSampleFromSpans(spans, { output: text, degraded: !deps.isToolCapable() })
+      } finally {
+        await deps.cleanupSession?.(sessionId)
+      }
     },
   }
 }
 
 /**
  * Wire the real desktop deps: drive `runAndCaptureAssistantReply` in a
- * dedicated session (NOT deleted afterwards, so its `agentTraces` spans stay
- * queryable), then read the spans back by session id. On a non-Tauri host the
+ * dedicated session, captures its `agentTraces`, then deletes the transient
+ * chat so evaluation traffic never pollutes normal history. On a non-Tauri host the
  * run still works but degrades to text-only (no tool spans), which
  * {@link createChatTarget} flags via `degraded`.
  */
 export function defaultChatTargetDeps(): ChatTargetDeps {
   return {
-    async runTurn({ prompt, model, characterId, cwd, timeoutMs, signal }) {
+    async runTurn({ prompt, providerId, model, characterId, cwd, timeoutMs, signal }) {
       const [{ resolveCharacterById }, sessionsDb, settingsDb, buildOpts, runner] =
         await Promise.all([
           import("@/lib/db/characters"),
@@ -193,7 +233,11 @@ export function defaultChatTargetDeps(): ChatTargetDeps {
         ...(cwd ? { workingDir: cwd } : {}),
       })
       const appSettings = await settingsDb.getSettings().catch(() => undefined)
-      const sessionRow = (await sessionsDb.getSession(session.id)) ?? session
+      const sessionRow = {
+        ...((await sessionsDb.getSession(session.id)) ?? session),
+        ...(providerId ? { providerOverride: providerId } : {}),
+        model,
+      }
       const sendOptions = await buildOpts.resolveSendOptions({
         session: sessionRow,
         character,
@@ -208,6 +252,10 @@ export function defaultChatTargetDeps(): ChatTargetDeps {
     async fetchSpans(sessionId: string) {
       const { queryBySession } = await import("@/lib/db/agent-traces")
       return queryBySession(sessionId)
+    },
+    async cleanupSession(sessionId: string) {
+      const { deleteSession } = await import("@/lib/db/sessions")
+      await deleteSession(sessionId)
     },
     isToolCapable() {
       // Set lazily; importing tauri synchronously is fine in the renderer.

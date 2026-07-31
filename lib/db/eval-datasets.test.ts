@@ -30,7 +30,25 @@ beforeEach(async () => {
   await getDb().evalRuns.clear()
   await getDb().evalRunCaseResults.clear()
   await getDb().evalDatasetVersions.clear()
+  await getDb().evalAssets.clear()
 }, 30_000) // cold-open of the fake-idb schema (v97+) can exceed the 5s default.
+
+async function seedEvalAsset(digest: string): Promise<void> {
+  await getDb().evalAssets.put({
+    digest,
+    mediaType: digest.includes("document") ? "application/pdf" : "image/png",
+    size: 1,
+    encryptedBytes: {
+      version: "cognia-eval-encrypted/v1",
+      algorithm: "AES-GCM",
+      iv: "iv",
+      ciphertext: "ciphertext",
+    },
+    referenceCount: 0,
+    createdAt: 1,
+    expiresAt: 10,
+  })
+}
 
 describe("dataset CRUD", () => {
   it("creates a dataset with a generated id, version 1 and timestamps", async () => {
@@ -164,6 +182,7 @@ describe("case CRUD", () => {
 
   it("persists optional authoring metadata when adding a case", async () => {
     const ds = await createDataset({ name: "A", capability: "chat.tool-use" })
+    await seedEvalAsset("asset-1")
     const c = await addCase(ds.id, {
       input: "x",
       source: "handwritten",
@@ -172,6 +191,10 @@ describe("case CRUD", () => {
       notes: "Release gate regression case",
       metadata: { owner: "release" },
       inputVars: { branch: "main" },
+      contentParts: [
+        { type: "text", text: "inspect this" },
+        { type: "asset", assetId: "asset-1", mediaType: "image/png", privacy: "scanned" },
+      ],
     })
 
     expect(await getCase(c.id)).toMatchObject({
@@ -180,7 +203,53 @@ describe("case CRUD", () => {
       notes: "Release gate regression case",
       metadata: { owner: "release" },
       inputVars: { branch: "main" },
+      contentParts: [
+        { type: "text", text: "inspect this" },
+        { type: "asset", assetId: "asset-1", mediaType: "image/png", privacy: "scanned" },
+      ],
     })
+    expect((await getDb().evalAssets.get("asset-1"))?.referenceCount).toBe(1)
+  })
+
+  it("maintains attachment references across case updates and deletion", async () => {
+    const ds = await createDataset({ name: "A", capability: "chat.image" })
+    await seedEvalAsset("asset-1")
+    await seedEvalAsset("asset-2")
+    const created = await addCase(ds.id, {
+      input: "inspect",
+      source: "handwritten",
+      contentParts: [
+        { type: "asset", assetId: "asset-1", mediaType: "image/png", privacy: "local-only" },
+      ],
+    })
+    await updateCase(created.id, {
+      contentParts: [
+        { type: "asset", assetId: "asset-2", mediaType: "image/png", privacy: "manual" },
+      ],
+    })
+    expect((await getDb().evalAssets.get("asset-1"))?.referenceCount).toBe(0)
+    expect((await getDb().evalAssets.get("asset-2"))?.referenceCount).toBe(1)
+    await deleteCase(created.id)
+    expect((await getDb().evalAssets.get("asset-2"))?.referenceCount).toBe(0)
+  })
+
+  it("rejects a case that references an attachment that was never ingested", async () => {
+    const ds = await createDataset({ name: "A", capability: "chat.image" })
+    await expect(
+      addCase(ds.id, {
+        input: "inspect",
+        source: "handwritten",
+        contentParts: [
+          {
+            type: "asset",
+            assetId: "missing",
+            mediaType: "image/png",
+            privacy: "local-only",
+          },
+        ],
+      })
+    ).rejects.toThrow(/unavailable/i)
+    expect(await listCases(ds.id)).toHaveLength(0)
   })
 })
 
@@ -299,6 +368,7 @@ describe("bulkAddCases — optional field coverage", () => {
       capability: "chat.qa",
       gate: { minPassAt1: 0.5 },
     })
+    await seedEvalAsset("document-1")
     await bulkAddCases(ds.id, [
       {
         id: "src-1",
@@ -315,6 +385,15 @@ describe("bulkAddCases — optional field coverage", () => {
         split: "test",
         metadata: { owner: "me" },
         inputVars: { branch: "main" },
+        contentParts: [
+          { type: "text", text: "prompt" },
+          {
+            type: "asset",
+            assetId: "document-1",
+            mediaType: "application/pdf",
+            privacy: "manual",
+          },
+        ],
       },
     ])
     expect((await listCases(ds.id))[0]).toMatchObject({
@@ -331,6 +410,15 @@ describe("bulkAddCases — optional field coverage", () => {
       split: "test",
       metadata: { owner: "me" },
       inputVars: { branch: "main" },
+      contentParts: [
+        { type: "text", text: "prompt" },
+        {
+          type: "asset",
+          assetId: "document-1",
+          mediaType: "application/pdf",
+          privacy: "manual",
+        },
+      ],
     })
   })
 

@@ -43,7 +43,7 @@ export const BOOLEAN_FLAGS = new Set([
 ])
 
 /** Commands whose first extra positional is a subcommand, not free content. */
-export const GROUPED_COMMANDS = new Set(["auth", "config", "logto", "lark"])
+export const GROUPED_COMMANDS = new Set(["auth", "config", "logto", "lark", "eval"])
 
 const SHORT_ALIAS: Record<string, string> = {
   h: "help",

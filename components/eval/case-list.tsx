@@ -14,12 +14,15 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { addCase, updateCase, deleteCase } from "@/lib/db/eval-datasets"
 import { useEvalCases } from "@/hooks/eval/use-eval-data"
+import { ingestEvalAsset, type EvalAssetClearance } from "@/lib/ai/eval/assets"
+import { useAccountStore } from "@/stores/account/account-store"
 import { CaseEditor, type CaseEditorValue } from "./case-editor"
 import type { EvalCase } from "@/types/eval/eval"
 
 export function CaseList({ datasetId }: { datasetId: string }) {
   const t = useTranslations("eval")
   const cases = useEvalCases(datasetId)
+  const accountId = useAccountStore((state) => state.unlockedAccountId)
   const [editing, setEditing] = useState<string | "new" | null>(null)
 
   const handleSave = useCallback(
@@ -34,6 +37,14 @@ export function CaseList({ datasetId }: { datasetId: string }) {
     [datasetId]
   )
 
+  const handleAttach = useCallback(
+    async (file: File, clearance?: EvalAssetClearance) => {
+      if (!accountId) throw new Error(t("case.accountRequired"))
+      return ingestEvalAsset({ accountId, file, clearance })
+    },
+    [accountId, t]
+  )
+
   return (
     <div className="flex flex-col gap-2" data-testid="case-list">
       <div className="flex items-center justify-between">
@@ -45,7 +56,11 @@ export function CaseList({ datasetId }: { datasetId: string }) {
       </div>
 
       {editing === "new" && (
-        <CaseEditor onSave={(v) => void handleSave(v)} onCancel={() => setEditing(null)} />
+        <CaseEditor
+          onSave={(v) => void handleSave(v)}
+          onCancel={() => setEditing(null)}
+          onAttach={handleAttach}
+        />
       )}
 
       {cases.length === 0 && editing !== "new" ? (
@@ -59,6 +74,7 @@ export function CaseList({ datasetId }: { datasetId: string }) {
                   initial={c}
                   onSave={(v) => void handleSave(v, c.id)}
                   onCancel={() => setEditing(null)}
+                  onAttach={handleAttach}
                 />
               ) : (
                 <div className="flex items-center justify-between gap-2 p-2">

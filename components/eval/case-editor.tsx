@@ -9,10 +9,14 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { Loader2Icon, PaperclipIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import type { EvalCase, EvalReference } from "@/types/eval/eval"
+import type { EvalCase, EvalInputPart, EvalReference } from "@/types/eval/eval"
+import type { EvalAssetClearance } from "@/lib/ai/eval/assets"
+
+type EvalAssetPart = Extract<EvalInputPart, { type: "asset" }>
 
 export interface CaseEditorValue {
   input: string
@@ -21,6 +25,7 @@ export interface CaseEditorValue {
   tags?: string[]
   notes?: string
   reference?: EvalReference
+  contentParts?: EvalInputPart[]
   source: EvalCase["source"]
 }
 
@@ -28,6 +33,7 @@ export interface CaseEditorProps {
   initial?: Partial<EvalCase>
   onSave: (value: CaseEditorValue) => void
   onCancel: () => void
+  onAttach?: (file: File, clearance?: EvalAssetClearance) => Promise<EvalAssetPart>
 }
 
 const splitLines = (v: string): string[] =>
@@ -42,7 +48,7 @@ const splitCommas = (v: string): string[] =>
     .map((s) => s.trim())
     .filter(Boolean)
 
-export function CaseEditor({ initial, onSave, onCancel }: CaseEditorProps) {
+export function CaseEditor({ initial, onSave, onCancel, onAttach }: CaseEditorProps) {
   const t = useTranslations("eval")
   const ref = initial?.reference
   const [input, setInput] = useState(initial?.input ?? "")
@@ -58,6 +64,28 @@ export function CaseEditor({ initial, onSave, onCancel }: CaseEditorProps) {
     ref?.expectedToolArgs ? JSON.stringify(ref.expectedToolArgs, null, 2) : ""
   )
   const [argsError, setArgsError] = useState<string | null>(null)
+  const [contentParts, setContentParts] = useState<EvalInputPart[]>(initial?.contentParts ?? [])
+  const [clearanceMode, setClearanceMode] = useState<"local-only" | "manual">("local-only")
+  const [reviewerId, setReviewerId] = useState("")
+  const [uploading, setUploading] = useState(false)
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
+
+  const attachFiles = async (files: FileList | null) => {
+    if (!files?.length || !onAttach) return
+    setUploading(true)
+    setAttachmentError(null)
+    try {
+      const clearance: EvalAssetClearance | undefined =
+        clearanceMode === "manual" ? { method: "manual", actorId: reviewerId } : undefined
+      const uploaded: EvalAssetPart[] = []
+      for (const file of Array.from(files)) uploaded.push(await onAttach(file, clearance))
+      setContentParts((current) => [...current, ...uploaded])
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setUploading(false)
+    }
+  }
 
   const handleSave = () => {
     if (!input.trim()) return
@@ -85,6 +113,7 @@ export function CaseEditor({ initial, onSave, onCancel }: CaseEditorProps) {
       ...(split.trim() ? { split: split.trim() } : {}),
       ...(tags.trim() ? { tags: splitCommas(tags) } : {}),
       ...(notes.trim() ? { notes } : {}),
+      ...(contentParts.length ? { contentParts } : {}),
       ...(Object.keys(reference).length > 0 ? { reference } : {}),
     })
   }
@@ -175,6 +204,93 @@ export function CaseEditor({ initial, onSave, onCancel }: CaseEditorProps) {
         </div>
       </details>
 
+      <details className="rounded-md border p-2">
+        <summary className="cursor-pointer text-sm font-medium">{t("case.attachments")}</summary>
+        <div className="mt-2 flex flex-col gap-2">
+          {contentParts.some((part) => part.type === "asset") ? (
+            <ul className="space-y-1">
+              {contentParts.map((part, index) =>
+                part.type === "asset" ? (
+                  <li
+                    key={`${part.assetId}:${index}`}
+                    className="flex items-center gap-2 rounded-md border px-2 py-1 text-sm"
+                  >
+                    <PaperclipIcon className="size-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">{part.name ?? part.assetId}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {t(`case.privacy.${part.privacy}`)}
+                    </span>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={t("case.removeAttachment", {
+                        name: part.name ?? part.assetId,
+                      })}
+                      onClick={() =>
+                        setContentParts((current) =>
+                          current.filter((_, currentIndex) => currentIndex !== index)
+                        )
+                      }
+                    >
+                      <XIcon />
+                    </Button>
+                  </li>
+                ) : null
+              )}
+            </ul>
+          ) : (
+            <p className="text-xs text-muted-foreground">{t("case.attachmentsEmpty")}</p>
+          )}
+          <label className="flex flex-col gap-1 text-sm">
+            <span>{t("case.attachmentPrivacy")}</span>
+            <select
+              aria-label={t("case.attachmentPrivacy")}
+              className="h-9 rounded-md border bg-background px-3 text-sm"
+              value={clearanceMode}
+              onChange={(event) => setClearanceMode(event.target.value as "local-only" | "manual")}
+            >
+              <option value="local-only">{t("case.privacy.local-only")}</option>
+              <option value="manual">{t("case.privacy.manual")}</option>
+            </select>
+          </label>
+          {clearanceMode === "manual" ? (
+            <Input
+              aria-label={t("case.reviewerId")}
+              placeholder={t("case.reviewerId")}
+              value={reviewerId}
+              onChange={(event) => setReviewerId(event.target.value)}
+            />
+          ) : null}
+          <label className="flex flex-col gap-1 text-sm">
+            <span>{t("case.pickAttachments")}</span>
+            <input
+              type="file"
+              multiple
+              disabled={
+                !onAttach || uploading || (clearanceMode === "manual" && !reviewerId.trim())
+              }
+              aria-label={t("case.pickAttachments")}
+              onChange={(event) => {
+                void attachFiles(event.target.files)
+                event.target.value = ""
+              }}
+            />
+          </label>
+          {uploading ? (
+            <p className="flex items-center gap-1 text-xs text-muted-foreground" role="status">
+              <Loader2Icon className="size-3 animate-spin" />
+              {t("case.attachmentUploading")}
+            </p>
+          ) : null}
+          {attachmentError ? (
+            <p className="text-xs text-destructive" role="alert">
+              {t("case.attachmentFailed", { error: attachmentError })}
+            </p>
+          ) : null}
+        </div>
+      </details>
+
       <label className="flex flex-col gap-1 text-sm">
         <span>{t("case.notes")}</span>
         <Textarea
@@ -186,7 +302,7 @@ export function CaseEditor({ initial, onSave, onCancel }: CaseEditorProps) {
       </label>
 
       <div className="flex gap-2">
-        <Button size="sm" onClick={handleSave} disabled={!input.trim()}>
+        <Button size="sm" onClick={handleSave} disabled={!input.trim() || uploading}>
           {t("case.save")}
         </Button>
         <Button size="sm" variant="ghost" onClick={onCancel}>

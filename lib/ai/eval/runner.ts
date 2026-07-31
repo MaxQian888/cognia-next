@@ -29,7 +29,7 @@ export interface RunEvalOptions {
   k?: number
   signal?: AbortSignal
   /** Progress callback fired after each case completes. */
-  onCaseComplete?: (result: EvalCaseResult, index: number) => void
+  onCaseComplete?: (result: EvalCaseResult, index: number) => void | Promise<void>
 }
 
 function erroredSample(message: string): EvalSample {
@@ -94,7 +94,7 @@ export async function runEval(options: RunEvalOptions): Promise<EvalCaseResult[]
     if (repetitions.length < k) break
     const result: EvalCaseResult = { caseId: evalCase.id, repetitions }
     results.push(result)
-    onCaseComplete?.(result, i)
+    await onCaseComplete?.(result, i)
   }
 
   return results

@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation"
 import { DatabaseIcon, GitCompareIcon, MicroscopeIcon, ScaleIcon, SettingsIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { useEvalRunStore } from "@/stores/eval/eval-run-store"
 import { EvalDashboard } from "./eval-dashboard"
 import { RunsComparePanel } from "./runs-compare-panel"
@@ -42,32 +43,40 @@ export function EvalWorkspace() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-1 border-b bg-background/80 p-2 backdrop-blur">
-        {TABS.map((tab) => {
-          const Icon = tab.icon
-          return (
-            <Button
-              key={tab.key}
-              size="sm"
-              variant={view === tab.key ? "secondary" : "ghost"}
-              aria-pressed={view === tab.key}
-              onClick={() => setView(tab.key)}
-            >
-              <Icon className="size-4" />
-              {tab.label}
-            </Button>
-          )
-        })}
-        <Button
-          size="sm"
-          variant="ghost"
-          className="ml-auto"
-          aria-label={t("settings.title")}
-          onClick={() => router.push("/settings?section=eval")}
-        >
-          <SettingsIcon className="size-4" />
-        </Button>
-      </div>
+      <FeaturePageHeader
+        icon={<ScaleIcon />}
+        title={t("title")}
+        description={t("subtitle")}
+        navigation={
+          <div className="flex items-center gap-1">
+            {TABS.map((tab) => {
+              const Icon = tab.icon
+              return (
+                <Button
+                  key={tab.key}
+                  size="sm"
+                  variant={view === tab.key ? "secondary" : "ghost"}
+                  aria-pressed={view === tab.key}
+                  onClick={() => setView(tab.key)}
+                >
+                  <Icon className="size-4" />
+                  {tab.label}
+                </Button>
+              )
+            })}
+          </div>
+        }
+        actions={
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label={t("settings.title")}
+            onClick={() => router.push("/settings?section=eval")}
+          >
+            <SettingsIcon className="size-4" />
+          </Button>
+        }
+      />
       {activeRun && (
         <div
           className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1 flex items-center gap-2 border-b px-3 py-1.5 text-xs"

@@ -82,6 +82,17 @@ describe("createTargetFromSpec", () => {
     })
   })
 
+  it("threads the explicit providerId into chat execution", async () => {
+    const target = createTargetFromSpec(
+      { kind: "chat", label: "c", providerId: "anthropic", model: "m" },
+      deps
+    )
+    await target.run(evalCase)
+    expect((deps.chat.runTurn as jest.Mock).mock.calls.at(-1)?.[0]).toMatchObject({
+      providerId: "anthropic",
+    })
+  })
+
   it("threads team / workflow timeoutMs", async () => {
     const team = createTargetFromSpec(
       { kind: "team", label: "t", teamId: "tm", timeoutMs: 9000 },
