@@ -2,14 +2,14 @@ import { render, screen } from "@testing-library/react"
 
 jest.mock("@/components/feature-shell/feature-page-shell", () => ({
   FeaturePageShell: ({
-    toolbar,
+    header,
     children,
   }: {
-    toolbar: React.ReactNode
+    header: React.ReactNode
     children: React.ReactNode
   }) => (
     <div>
-      <div data-testid="toolbar">{toolbar}</div>
+      <div data-testid="header">{header}</div>
       {children}
     </div>
   ),
@@ -22,6 +22,6 @@ import { BrowserDesktopBody } from "./browser-desktop-body"
 
 it("renders the title and the preview pane inside the shell", () => {
   render(<BrowserDesktopBody />)
-  expect(screen.getByTestId("toolbar")).toHaveTextContent("Browser")
+  expect(screen.getByTestId("header")).toHaveTextContent("Browser")
   expect(screen.getByTestId("pane")).toBeInTheDocument()
 })

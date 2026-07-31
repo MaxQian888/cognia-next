@@ -168,11 +168,14 @@ describe("arming", () => {
 
   it("collapses and restores the recorder body while keeping its controls available", async () => {
     const user = userEvent.setup()
-    render(<BrowserRecorderPanel pageUrl={BASE} />)
+    const onLayoutChange = jest.fn()
+    render(<BrowserRecorderPanel pageUrl={BASE} onLayoutChange={onLayoutChange} />)
+    onLayoutChange.mockClear()
 
     const toggle = screen.getByRole("button", { name: "record.collapse" })
     expect(toggle).toHaveAttribute("aria-expanded", "true")
     await user.click(toggle)
+    expect(onLayoutChange).toHaveBeenCalledTimes(1)
     expect(toggle).toHaveAttribute("aria-expanded", "false")
     expect(screen.queryByText("record.empty")).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "record.start" })).toBeInTheDocument()

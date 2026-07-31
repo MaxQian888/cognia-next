@@ -13,6 +13,20 @@
 import { browserClient } from "@/lib/browser/client"
 import { appendStep, type RecordedFlow, type RecordedStep } from "@/lib/browser/recording/protocol"
 
+export interface RecordingDriver {
+  start(): Promise<unknown>
+  resume(): Promise<unknown>
+  stop(): Promise<unknown>
+  drain(): Promise<RecordedStep[]>
+}
+
+const embeddedRecordingDriver: RecordingDriver = {
+  start: () => browserClient.embedStartRecord(),
+  resume: () => browserClient.embedResumeRecord(),
+  stop: () => browserClient.embedStopRecord(),
+  drain: () => browserClient.embedDrainRecord(),
+}
+
 export interface RecorderOptions {
   /**
    * Injected clock — `Date.now` is lint-banned in this repo, and injecting it
@@ -27,6 +41,8 @@ export interface RecorderOptions {
   pollMs?: number
   /** Fired whenever the accumulated step list changes, for a live step list. */
   onChange?: (steps: RecordedStep[]) => void
+  /** Host adapter; defaults to the desktop embedded webview. */
+  driver?: RecordingDriver
 }
 
 const DEFAULT_POLL_MS = 400
@@ -43,6 +59,10 @@ export class FlowRecorder {
   private seq = 0
 
   constructor(private readonly opts: RecorderOptions) {}
+
+  private get driver(): RecordingDriver {
+    return this.opts.driver ?? embeddedRecordingDriver
+  }
 
   get recording(): boolean {
     return this.flow !== null
@@ -62,7 +82,7 @@ export class FlowRecorder {
     }
     this.steps = [{ act: "navigate", at: this.seq++, url: baseUrl }]
     this.emit()
-    await browserClient.embedStartRecord()
+    await this.driver.start()
     this.timer = setInterval(() => void this.poll(), this.opts.pollMs ?? DEFAULT_POLL_MS)
   }
 
@@ -71,7 +91,7 @@ export class FlowRecorder {
     if (!this.flow) return
     let drained: RecordedStep[]
     try {
-      drained = await browserClient.embedDrainRecord()
+      drained = await this.driver.drain()
     } catch {
       // The pane can be mid-navigation with no live JS context; the page keeps
       // buffering to sessionStorage, so the next poll picks these up.
@@ -103,7 +123,7 @@ export class FlowRecorder {
     if (!this.flow) return
     await this.poll()
     try {
-      await browserClient.embedResumeRecord()
+      await this.driver.resume()
     } catch {
       // A page that cannot be re-armed yields no further steps; the flow keeps
       // what it already has rather than failing the whole take.
@@ -133,7 +153,7 @@ export class FlowRecorder {
     }
     await this.poll()
     try {
-      await browserClient.embedStopRecord()
+      await this.driver.stop()
     } catch {
       // Best-effort: the take is already in `this.steps`.
     }

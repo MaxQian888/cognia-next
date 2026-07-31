@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
 import type { BrowserNavigated, BrowserSelection, ElementRect } from "@/lib/browser/protocol"
@@ -38,9 +39,30 @@ jest.mock("@/components/browser/remote-browser-preview", () => ({
 // and pulls in the Dexie graph; stub it here and assert only that the pane
 // mounts it and hands it the live URL.
 jest.mock("@/components/browser/browser-recorder-panel", () => ({
-  BrowserRecorderPanel: ({ pageUrl }: { pageUrl: string | null }) => (
-    <div data-testid="recorder-panel" data-page-url={pageUrl ?? ""} />
-  ),
+  BrowserRecorderPanel: ({
+    pageUrl,
+    onLayoutChange,
+  }: {
+    pageUrl: string | null
+    onLayoutChange?: () => void
+  }) => {
+    const [expanded, setExpanded] = useState(true)
+    const previousExpandedRef = useRef(expanded)
+    useLayoutEffect(() => {
+      if (previousExpandedRef.current === expanded) return
+      previousExpandedRef.current = expanded
+      onLayoutChange?.()
+    }, [expanded, onLayoutChange])
+    return (
+      <div data-testid="recorder-panel" data-page-url={pageUrl ?? ""} data-expanded={expanded}>
+        <button
+          type="button"
+          aria-label="toggle recorder layout"
+          onClick={() => setExpanded(false)}
+        />
+      </div>
+    )
+  },
 }))
 jest.mock("@/components/browser/browser-cookie-import-action", () => ({
   BrowserCookieImportAction: ({ currentUrl }: { currentUrl: string | null }) => (
@@ -67,8 +89,11 @@ let mockPhase: "idle" | "loading" | "ready" = "idle"
 let mockHasPainted = false
 const mockBeginLoad = jest.fn()
 let mockRegionVisible = true
+let mockWebviewReady = true
+let mockReadyCallback: (() => void) | undefined
 let mockWebviewVisible: boolean | undefined
 let mockPaneUrl: string | null | undefined
+const mockRefreshBounds = jest.fn()
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockTauri }))
 jest.mock("@/lib/tauri/opener", () => ({
@@ -79,12 +104,22 @@ jest.mock("@/lib/browser/pane-rect", () => ({ setActivePaneRect: jest.fn() }))
 jest.mock("@/hooks/browser/use-browser-pane-webview", () => ({
   useBrowserPaneWebview: (
     _ref: unknown,
-    opts: { url?: string | null; visible?: boolean; onRectChange?: (r: ElementRect) => void }
+    opts: {
+      url?: string | null
+      visible?: boolean
+      onReady?: () => void
+      onRectChange?: (r: ElementRect) => void
+    }
   ) => {
+    const onReady = opts.onReady
     mockWebviewVisible = opts?.visible
     mockPaneUrl = opts?.url
     mockOnRectChange = opts?.onRectChange
-    return { getRect: () => mockRect, setVisible: jest.fn() }
+    mockReadyCallback = onReady
+    useEffect(() => {
+      if (mockWebviewReady) onReady?.()
+    }, [onReady])
+    return { getRect: () => mockRect, setVisible: jest.fn(), refreshBounds: mockRefreshBounds }
   },
 }))
 jest.mock("@/hooks/browser/use-browser-loading", () => ({
@@ -176,8 +211,11 @@ beforeEach(() => {
   mockPhase = "idle"
   mockHasPainted = false
   mockRegionVisible = true
+  mockWebviewReady = true
+  mockReadyCallback = undefined
   mockWebviewVisible = undefined
   mockPaneUrl = undefined
+  mockRefreshBounds.mockClear()
   mockBeginLoad.mockClear()
   mockSetSelectMode.mockClear()
   mockClearSelection.mockClear()
@@ -305,6 +343,13 @@ it("falls back to the sandboxed WebPreview URL bar + iframe outside Tauri", () =
   const iframe = container.querySelector("iframe")
   expect(iframe).toHaveAttribute("src", "https://localhost:3000")
   expect(iframe).toHaveAttribute("sandbox")
+})
+
+it("opens the caller-provided URL in the sandboxed web fallback", () => {
+  mockTauri = false
+  const { container } = renderPane(<BrowserPreviewPane initialUrl="https://example.com/docs" />)
+
+  expect(container.querySelector("iframe")).toHaveAttribute("src", "https://example.com/docs")
 })
 
 it("renders the empty state and URL bar in Tauri", () => {
@@ -721,6 +766,21 @@ it("keeps the native webview hidden while a modal / off-screen state covers the 
   expect(mockWebviewVisible).toBe(false)
 })
 
+it("parks the native webview while its workspace is collapsed and restores it when reopened", () => {
+  mockHasPainted = true
+  const { rerender } = renderPane(<BrowserPreviewPane />)
+  commitUrl("localhost:3000")
+  expect(mockWebviewVisible).toBe(true)
+
+  mockRegionVisible = false
+  rerender(<TooltipProvider>{<BrowserPreviewPane />}</TooltipProvider>)
+  expect(mockWebviewVisible).toBe(false)
+
+  mockRegionVisible = true
+  rerender(<TooltipProvider>{<BrowserPreviewPane />}</TooltipProvider>)
+  expect(mockWebviewVisible).toBe(true)
+})
+
 it("publishes the pane rect through the callback only after a URL is committed", () => {
   const { setActivePaneRect } = jest.requireMock("@/lib/browser/pane-rect") as {
     setActivePaneRect: jest.Mock
@@ -775,6 +835,15 @@ describe("recorder panel wiring", () => {
       "data-page-url",
       "http://localhost:3000/"
     )
+  })
+
+  it("refreshes native bounds after the recorder body collapses", () => {
+    renderPane(<BrowserPreviewPane />)
+    mockRefreshBounds.mockClear()
+
+    fireEvent.click(screen.getByRole("button", { name: "toggle recorder layout" }))
+
+    expect(mockRefreshBounds).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -850,6 +919,23 @@ describe("inspection rail", () => {
 })
 
 describe("zoom", () => {
+  it("waits for the embedded owner lease before applying native setup", async () => {
+    mockHasPainted = true
+    mockWebviewReady = false
+    renderPane(<BrowserPreviewPane />)
+
+    commitUrl("localhost:3000")
+
+    expect(browserClient.embedSetZoom).not.toHaveBeenCalled()
+    expect(browserClient.embedSetPanelLabels).not.toHaveBeenCalled()
+
+    mockWebviewReady = true
+    act(() => mockReadyCallback?.())
+
+    await waitFor(() => expect(browserClient.embedSetZoom).toHaveBeenCalledWith(1))
+    expect(browserClient.embedSetPanelLabels).toHaveBeenCalled()
+  })
+
   it("applies persisted zoom once the page is live and re-applies on change", async () => {
     mockHasPainted = true
     window.localStorage.setItem("cognia.browser.zoom", "1.5")

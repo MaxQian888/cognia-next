@@ -29,7 +29,12 @@ struct EmbeddedBrowserOwner {
 }
 
 #[derive(Default)]
-pub struct EmbeddedBrowserLease(parking_lot::Mutex<Option<EmbeddedBrowserOwner>>);
+pub struct EmbeddedBrowserLease {
+    owner: parking_lot::Mutex<Option<EmbeddedBrowserOwner>>,
+    /// `None` means no child WebView has been created. `Some(None)` records a
+    /// direct WebView; `Some(Some(url))` records its immutable proxy endpoint.
+    webview_proxy_url: parking_lot::Mutex<Option<Option<String>>>,
+}
 
 impl EmbeddedBrowserLease {
     /// Reserve the singleton for an invoking window. A renderer reload gets a
@@ -39,7 +44,7 @@ impl EmbeddedBrowserLease {
         if owner_token.trim().is_empty() {
             return Err("embedded browser owner token is required".to_string());
         }
-        let mut owner = self.0.lock();
+        let mut owner = self.owner.lock();
         match owner.as_ref() {
             Some(current) if current.window_label != window_label => {
                 Err("embedded browser is owned by another Cognia surface".to_string())
@@ -56,7 +61,7 @@ impl EmbeddedBrowserLease {
     }
 
     fn assert_owner(&self, owner_token: &str, window_label: &str) -> Result<(), String> {
-        match self.0.lock().as_ref() {
+        match self.owner.lock().as_ref() {
             Some(current)
                 if current.token == owner_token && current.window_label == window_label =>
             {
@@ -68,7 +73,7 @@ impl EmbeddedBrowserLease {
     }
 
     fn release(&self, owner_token: &str, window_label: &str) -> Result<(), String> {
-        let mut owner = self.0.lock();
+        let mut owner = self.owner.lock();
         match owner.as_ref() {
             Some(current)
                 if current.token == owner_token && current.window_label == window_label =>
@@ -87,13 +92,39 @@ impl EmbeddedBrowserLease {
         }
     }
 
+    fn requires_webview_recreation(&self, next_proxy_url: &Option<url::Url>) -> bool {
+        let current = self.webview_proxy_url.lock();
+        let next = next_proxy_url.as_ref().map(url::Url::as_str);
+        match current.as_ref() {
+            Some(current) => current.as_deref() != next,
+            None => false,
+        }
+    }
+
+    fn record_webview_proxy(&self, proxy_url: &Option<url::Url>) {
+        *self.webview_proxy_url.lock() =
+            Some(proxy_url.as_ref().map(|url| url.as_str().to_string()));
+    }
+
+    fn clear_webview_proxy(&self) {
+        *self.webview_proxy_url.lock() = None;
+    }
+
     pub(crate) fn release_window(&self, window_label: &str) {
-        let mut owner = self.0.lock();
-        if owner
-            .as_ref()
-            .is_some_and(|current| current.window_label == window_label)
-        {
-            *owner = None;
+        let released = {
+            let mut owner = self.owner.lock();
+            if owner
+                .as_ref()
+                .is_some_and(|current| current.window_label == window_label)
+            {
+                *owner = None;
+                true
+            } else {
+                false
+            }
+        };
+        if released {
+            self.clear_webview_proxy();
         }
     }
 }
@@ -128,6 +159,100 @@ fn logical_rect(x: f64, y: f64, width: f64, height: f64) -> tauri::Rect {
     }
 }
 
+fn resolve_webview_proxy_url(
+    target: &url::Url,
+    proxy: &crate::proxy_config::ProxyConfig,
+) -> Result<Option<url::Url>, String> {
+    if proxy.should_bypass(target.as_str()) {
+        return Ok(None);
+    }
+    let Some(proxy_url) = proxy.proxy_url() else {
+        return Ok(None);
+    };
+    let parsed = url::Url::parse(&proxy_url)
+        .map_err(|error| format!("invalid browser proxy URL: {error}"))?;
+    if !matches!(parsed.scheme(), "http" | "socks5") {
+        return Err(format!(
+            "embedded browser does not support {} proxy URLs",
+            parsed.scheme()
+        ));
+    }
+    Ok(Some(parsed))
+}
+
+#[cfg(desktop)]
+fn add_embed_webview(
+    app: &AppHandle,
+    target: url::Url,
+    proxy_url: Option<url::Url>,
+    bounds: tauri::Rect,
+) -> Result<(), String> {
+    use tauri::webview::WebviewBuilder;
+    use tauri::{Manager, WebviewUrl};
+
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+    let nav_app = app.clone();
+    let nav_label = EMBED_LABEL.to_string();
+    let mut builder = WebviewBuilder::new(EMBED_LABEL, WebviewUrl::External(target))
+        .initialization_script(overlay::OVERLAY_JS)
+        .on_navigation(move |url| handle_navigation(&nav_app, &nav_label, url.as_str()));
+    if let Some(proxy_url) = proxy_url {
+        builder = builder.proxy_url(proxy_url);
+    }
+    let webview = window
+        .add_child(builder, bounds.position, bounds.size)
+        .map_err(|error| format!("embed webview: {error}"))?;
+    // Bounds are driven explicitly from the reserved-rect observer.
+    let _ = webview.set_auto_resize(false);
+    Ok(())
+}
+
+#[cfg(desktop)]
+async fn close_embed_webview(app: &AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+
+    if let Some(webview) = app.get_webview(EMBED_LABEL) {
+        webview.close().map_err(|error| error.to_string())?;
+        for _ in 0..200 {
+            if app.get_webview(EMBED_LABEL).is_none() {
+                return Ok(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        return Err("timed out waiting for embedded browser destruction".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(desktop)]
+async fn navigate_existing_embed(
+    app: &AppHandle,
+    lease: &EmbeddedBrowserLease,
+    target: url::Url,
+    proxy_url: Option<url::Url>,
+) -> Result<(), String> {
+    use tauri::Manager;
+
+    let webview = app
+        .get_webview(EMBED_LABEL)
+        .ok_or_else(|| "embedded preview is not open".to_string())?;
+    if !lease.requires_webview_recreation(&proxy_url) {
+        return webview.navigate(target).map_err(|error| error.to_string());
+    }
+
+    // Proxy configuration is immutable after WebView creation. Keep its
+    // current bounds — including the off-screen zero-size parked state — while
+    // replacing the native child under the same owner lease.
+    let bounds = webview.bounds().map_err(|error| error.to_string())?;
+    close_embed_webview(app).await?;
+    lease.clear_webview_proxy();
+    add_embed_webview(app, target, proxy_url.clone(), bounds)?;
+    lease.record_webview_proxy(&proxy_url);
+    Ok(())
+}
+
 /// Create (or re-navigate) the embedded preview at the given logical bounds.
 #[tauri::command]
 pub async fn browser_embed_create(
@@ -144,45 +269,30 @@ pub async fn browser_embed_create(
     let parsed = validate_external_url(&url)?;
     let window_label = invoking_window.label().to_string();
     let newly_claimed = lease.claim(&owner_token, &window_label)?;
-    let result = (|| -> Result<String, String> {
+    let result: Result<String, String> = async {
         #[cfg(desktop)]
         {
-            use tauri::webview::WebviewBuilder;
-            use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl};
-
-            if let Some(wv) = app.get_webview(EMBED_LABEL) {
-                // Native navigation (not eval'd `location.assign`) so it works even
-                // when the current page's JS context is broken, blank, or blocked.
-                wv.navigate(parsed).map_err(|e| e.to_string())?;
-                Ok(EMBED_LABEL.to_string())
+            let proxy_url = resolve_webview_proxy_url(&parsed, &crate::proxy_config::current())?;
+            if app.get_webview(EMBED_LABEL).is_some() {
+                navigate_existing_embed(&app, lease.inner(), parsed, proxy_url).await?;
             } else {
-                let window = app
-                    .get_window("main")
-                    .ok_or_else(|| "main window not found".to_string())?;
-                let nav_app = app.clone();
-                let nav_label = EMBED_LABEL.to_string();
-                let builder = WebviewBuilder::new(EMBED_LABEL, WebviewUrl::External(parsed))
-                    .initialization_script(overlay::OVERLAY_JS)
-                    .on_navigation(move |u| handle_navigation(&nav_app, &nav_label, u.as_str()));
-                let webview = window
-                    .add_child(
-                        builder,
-                        LogicalPosition::new(x, y),
-                        LogicalSize::new(width, height),
-                    )
-                    .map_err(|e| format!("embed webview: {e}"))?;
-                // We drive bounds explicitly from the reserved-rect observer, so opt out
-                // of parent-resize auto-tracking (which would fight our set_bounds).
-                let _ = webview.set_auto_resize(false);
-                Ok(EMBED_LABEL.to_string())
+                add_embed_webview(
+                    &app,
+                    parsed,
+                    proxy_url.clone(),
+                    logical_rect(x, y, width, height),
+                )?;
+                lease.record_webview_proxy(&proxy_url);
             }
+            Ok(EMBED_LABEL.to_string())
         }
         #[cfg(not(desktop))]
         {
             let _ = (parsed, x, y, width, height);
             Err("embedded browser preview is only available on desktop".to_string())
         }
-    })();
+    }
+    .await;
     if result.is_err() {
         lease.rollback_claim(&owner_token, &window_label, newly_claimed);
     } else if newly_claimed {
@@ -837,13 +947,8 @@ pub async fn browser_embed_navigate(
     lease.assert_owner(&owner_token, invoking_window.label())?;
     #[cfg(desktop)]
     {
-        use tauri::Manager;
-        // Native navigation (not eval'd `location.assign`) so it works even
-        // when the current page's JS context is broken, blank, or blocked.
-        app.get_webview(EMBED_LABEL)
-            .ok_or_else(|| "embedded preview is not open".to_string())?
-            .navigate(parsed)
-            .map_err(|e| e.to_string())
+        let proxy_url = resolve_webview_proxy_url(&parsed, &crate::proxy_config::current())?;
+        navigate_existing_embed(&app, lease.inner(), parsed, proxy_url).await
     }
     #[cfg(not(desktop))]
     {
@@ -1096,24 +1201,15 @@ pub async fn browser_embed_destroy(
     lease.assert_owner(&owner_token, window_label)?;
     #[cfg(desktop)]
     {
-        use tauri::Manager;
-        if let Some(wv) = app.get_webview(EMBED_LABEL) {
-            wv.close().map_err(|e| e.to_string())?;
-            for _ in 0..200 {
-                if app.get_webview(EMBED_LABEL).is_none() {
-                    lease.release(&owner_token, window_label)?;
-                    return Ok(());
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-            return Err("timed out waiting for embedded browser destruction".to_string());
-        }
+        close_embed_webview(&app).await?;
+        lease.clear_webview_proxy();
         lease.release(&owner_token, window_label)?;
         Ok(())
     }
     #[cfg(not(desktop))]
     {
         let _ = app;
+        lease.clear_webview_proxy();
         lease.release(&owner_token, window_label)?;
         Ok(())
     }
@@ -1126,6 +1222,131 @@ mod tests {
     #[test]
     fn embed_label_is_stable() {
         assert_eq!(EMBED_LABEL, "browser-embed");
+    }
+
+    #[test]
+    fn webview_proxy_routes_baidu_through_the_active_proxy() {
+        use crate::proxy_config::{ProxyConfig, ProxyMode, ProxyProtocol};
+
+        let target = url::Url::parse("https://www.baidu.com/").unwrap();
+        let proxy = ProxyConfig {
+            mode: ProxyMode::Manual,
+            protocol: ProxyProtocol::Http,
+            host: "127.0.0.1".to_string(),
+            port: 7890,
+            ..ProxyConfig::default()
+        };
+
+        assert_eq!(
+            resolve_webview_proxy_url(&target, &proxy)
+                .unwrap()
+                .map(|url| url.to_string()),
+            Some("http://127.0.0.1:7890/".to_string())
+        );
+    }
+
+    #[test]
+    fn webview_proxy_honors_the_target_bypass_list() {
+        use crate::proxy_config::{ProxyConfig, ProxyMode, ProxyProtocol};
+
+        let target = url::Url::parse("https://www.baidu.com/").unwrap();
+        let proxy = ProxyConfig {
+            mode: ProxyMode::Manual,
+            protocol: ProxyProtocol::Http,
+            host: "127.0.0.1".to_string(),
+            port: 7890,
+            bypass: vec![".baidu.com".to_string()],
+            ..ProxyConfig::default()
+        };
+
+        assert_eq!(resolve_webview_proxy_url(&target, &proxy).unwrap(), None);
+    }
+
+    #[test]
+    fn webview_proxy_rejects_unsupported_https_proxy_endpoints() {
+        use crate::proxy_config::{ProxyConfig, ProxyMode, ProxyProtocol};
+
+        let target = url::Url::parse("https://www.baidu.com/").unwrap();
+        let proxy = ProxyConfig {
+            mode: ProxyMode::Manual,
+            protocol: ProxyProtocol::Https,
+            host: "proxy.example.com".to_string(),
+            port: 8443,
+            ..ProxyConfig::default()
+        };
+
+        assert_eq!(
+            resolve_webview_proxy_url(&target, &proxy).unwrap_err(),
+            "embedded browser does not support https proxy URLs"
+        );
+    }
+
+    #[test]
+    fn webview_proxy_skips_inactive_configuration() {
+        let target = url::Url::parse("https://www.baidu.com/").unwrap();
+
+        assert_eq!(
+            resolve_webview_proxy_url(&target, &crate::proxy_config::ProxyConfig::default())
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn webview_proxy_accepts_socks5_endpoints() {
+        use crate::proxy_config::{ProxyConfig, ProxyMode, ProxyProtocol};
+
+        let target = url::Url::parse("https://www.baidu.com/").unwrap();
+        let proxy = ProxyConfig {
+            mode: ProxyMode::Manual,
+            protocol: ProxyProtocol::Socks5,
+            host: "127.0.0.1".to_string(),
+            port: 1080,
+            ..ProxyConfig::default()
+        };
+
+        assert_eq!(
+            resolve_webview_proxy_url(&target, &proxy)
+                .unwrap()
+                .map(|url| url.to_string()),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+    }
+
+    #[test]
+    fn webview_proxy_rejects_malformed_proxy_urls() {
+        use crate::proxy_config::{ProxyConfig, ProxyMode, ProxyProtocol};
+
+        let target = url::Url::parse("https://www.baidu.com/").unwrap();
+        let proxy = ProxyConfig {
+            mode: ProxyMode::Manual,
+            protocol: ProxyProtocol::Http,
+            host: "bad host".to_string(),
+            port: 7890,
+            ..ProxyConfig::default()
+        };
+
+        assert!(resolve_webview_proxy_url(&target, &proxy)
+            .unwrap_err()
+            .starts_with("invalid browser proxy URL:"));
+    }
+
+    #[test]
+    fn webview_proxy_transition_requires_recreation_after_creation() {
+        let lease = EmbeddedBrowserLease::default();
+        let direct = None;
+        let proxy_a = Some(url::Url::parse("http://127.0.0.1:7890").unwrap());
+        let proxy_b = Some(url::Url::parse("socks5://127.0.0.1:1080").unwrap());
+
+        assert!(!lease.requires_webview_recreation(&direct));
+        lease.record_webview_proxy(&direct);
+        assert!(!lease.requires_webview_recreation(&direct));
+        assert!(lease.requires_webview_recreation(&proxy_a));
+
+        lease.record_webview_proxy(&proxy_a);
+        assert!(!lease.requires_webview_recreation(&proxy_a));
+        assert!(lease.requires_webview_recreation(&direct));
+        assert!(lease.requires_webview_recreation(&proxy_b));
     }
 
     #[test]

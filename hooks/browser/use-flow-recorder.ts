@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { EmbeddedEngine } from "@/lib/browser/agent-engine"
+import { EmbeddedEngine, type BrowserEngine } from "@/lib/browser/agent-engine"
 import { BROWSER_EVENTS, type BrowserLoaded, type BrowserNavigated } from "@/lib/browser/protocol"
-import { FlowRecorder } from "@/lib/browser/recording/recorder"
+import { FlowRecorder, type RecordingDriver } from "@/lib/browser/recording/recorder"
 import {
   requiredSecrets,
   type RecordedFlow,
@@ -28,6 +28,8 @@ export interface UseFlowRecorder {
   removeStep: (index: number) => void
   replay: (flow: RecordedFlow, secrets?: Record<string, string>) => Promise<boolean>
   stopReplay: () => void
+  noteNavigation: (url: string) => void
+  noteLoaded: () => Promise<void>
   /** Secret keys the given flow needs before it can replay. */
   secretsFor: (flow: RecordedFlow) => string[]
 }
@@ -35,6 +37,9 @@ export interface UseFlowRecorder {
 export interface UseFlowRecorderOptions {
   /** Injected clock — `Date.now` is lint-banned and this keeps tests assertable. */
   now?: () => number
+  engine?: BrowserEngine
+  driver?: RecordingDriver
+  listenToPaneEvents?: boolean
 }
 
 /**
@@ -46,23 +51,24 @@ export interface UseFlowRecorderOptions {
  * StrictMode mount→unmount→mount race.
  */
 export function useFlowRecorder(options: UseFlowRecorderOptions = {}): UseFlowRecorder {
-  const { now } = options
+  const { now, driver, engine: injectedEngine, listenToPaneEvents = true } = options
   const [recording, setRecording] = useState(false)
   const [steps, setSteps] = useState<RecordedStep[]>([])
   const [replayProgress, setReplayProgress] = useState<ReplayStepResult | null>(null)
   const [replaying, setReplaying] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
-  const engine = useMemo(() => new EmbeddedEngine(), [])
+  const embeddedEngine = useMemo(() => new EmbeddedEngine(), [])
+  const engine = injectedEngine ?? embeddedEngine
 
   const recorder = useMemo(
-    () => new FlowRecorder({ now: now ?? (() => Date.now()), onChange: setSteps }),
-    [now]
+    () => new FlowRecorder({ now: now ?? (() => Date.now()), onChange: setSteps, driver }),
+    [driver, now]
   )
 
   // The page buffers element interactions but cannot report its own
   // navigations, and it loses its buffer whenever a document is replaced.
   useEffect(() => {
-    if (!isTauri()) return
+    if (!listenToPaneEvents || !isTauri()) return
     let cancelled = false
     const subs: Array<() => void> = []
     const add = async <T>(event: string, handler: (p: T) => void) => {
@@ -76,7 +82,7 @@ export function useFlowRecorder(options: UseFlowRecorderOptions = {}): UseFlowRe
       cancelled = true
       for (const unlisten of subs) safeUnlisten(unlisten)
     }
-  }, [recorder])
+  }, [listenToPaneEvents, recorder])
 
   // A take must not outlive the pane, or the page stays armed with nobody
   // draining it.
@@ -125,6 +131,8 @@ export function useFlowRecorder(options: UseFlowRecorderOptions = {}): UseFlowRe
   )
 
   const stopReplay = useCallback(() => abortRef.current?.abort(), [])
+  const noteNavigation = useCallback((url: string) => recorder.noteNavigation(url), [recorder])
+  const noteLoaded = useCallback(() => recorder.noteLoaded(), [recorder])
 
   const secretsFor = useCallback((flow: RecordedFlow) => requiredSecrets(flow), [])
 
@@ -139,6 +147,8 @@ export function useFlowRecorder(options: UseFlowRecorderOptions = {}): UseFlowRe
     removeStep,
     replay,
     stopReplay,
+    noteNavigation,
+    noteLoaded,
     secretsFor,
   }
 }

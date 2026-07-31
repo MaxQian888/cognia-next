@@ -5,7 +5,7 @@ import { act, render } from "@testing-library/react"
 import { useRef } from "react"
 
 import type { ElementRect } from "@/lib/browser/protocol"
-import { useElementRect } from "./use-element-rect"
+import { readElementRect, useElementRect } from "./use-element-rect"
 
 let rectValue = { left: 0, top: 0, width: 0, height: 0 }
 const origRAF = global.requestAnimationFrame
@@ -50,6 +50,19 @@ function Probe({
   const rect = useElementRect(ref, onChange, { trackState })
   return <div ref={ref} data-rect={rect ? `${rect.width}x${rect.height}` : "none"} />
 }
+
+it("reads and rounds an element rect through the public measurement helper", () => {
+  const element = document.createElement("div")
+  element.getBoundingClientRect = () =>
+    ({
+      left: 10.4,
+      top: 20.6,
+      width: 100.5,
+      height: 40.4,
+    }) as DOMRect
+
+  expect(readElementRect(element)).toEqual({ x: 10, y: 21, width: 101, height: 40 })
+})
 
 it("measures on mount and reports the rounded rect", () => {
   rectValue = { left: 10.4, top: 20.6, width: 100, height: 40 }

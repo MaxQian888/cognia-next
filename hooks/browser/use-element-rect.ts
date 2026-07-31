@@ -4,7 +4,7 @@ import { type RefObject, useCallback, useEffect, useRef, useState } from "react"
 
 import type { ElementRect } from "@/lib/browser/protocol"
 
-function readRect(el: HTMLElement): ElementRect {
+export function readElementRect(el: HTMLElement): ElementRect {
   const r = el.getBoundingClientRect()
   return {
     x: Math.round(r.left),
@@ -52,7 +52,7 @@ export function useElementRect(
   const measure = useCallback(() => {
     const el = ref.current
     if (!el) return
-    const next = readRect(el)
+    const next = readElementRect(el)
     if (rectsEqual(rectRef.current, next)) return
     rectRef.current = next
     if (trackStateRef.current) setRect(next)

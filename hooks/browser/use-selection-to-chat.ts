@@ -160,20 +160,19 @@ export function useSelectionToChat() {
   )
 
   /**
-   * Capture the preview region and ship it to chat as an image + a short
-   * context line. Returns false when no chat session is available.
+   * Ship a host-neutral browser engine's PNG bytes to chat. Embedded capture
+   * and remote Chromium both converge here so streaming-session steering and
+   * attachment construction cannot drift.
    */
-  const sendScreenshot = useCallback(
-    async (rect: ElementRect, options: SendScreenshotOptions = {}): Promise<boolean> => {
+  const sendScreenshotBytes = useCallback(
+    async (bytes: string, options: SendScreenshotOptions = {}): Promise<boolean> => {
       const sessionId = options.sessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) return false
-
-      const shot = await browserClient.embedCapture(rect)
-      if (!shot?.bytes) throw new Error("Screenshot capture returned no image")
+      if (!bytes) throw new Error("Screenshot capture returned no image")
       const text = options.pageUrl
         ? `Screenshot of the in-app browser preview at ${options.pageUrl}.`
         : "Screenshot of the in-app browser preview."
-      const { content } = await buildSendContent(text, [screenshotToFile(shot.bytes)])
+      const { content } = await buildSendContent(text, [screenshotToFile(bytes)])
 
       const status = useChatStore.getState().sessions[sessionId]?.status
       if (status === "streaming" || status === "awaiting_approval") {
@@ -183,6 +182,22 @@ export function useSelectionToChat() {
       return true
     },
     [send, interruptAndSteer]
+  )
+
+  /**
+   * Capture the embedded preview region and ship it through the shared image
+   * delivery path. Returns false when no chat session is available.
+   */
+  const sendScreenshot = useCallback(
+    async (rect: ElementRect, options: SendScreenshotOptions = {}): Promise<boolean> => {
+      const sessionId = options.sessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) return false
+
+      const shot = await browserClient.embedCapture(rect)
+      if (!shot?.bytes) throw new Error("Screenshot capture returned no image")
+      return sendScreenshotBytes(shot.bytes, { ...options, sessionId })
+    },
+    [sendScreenshotBytes]
   )
 
   /**
@@ -205,5 +220,12 @@ export function useSelectionToChat() {
     [send]
   )
 
-  return { sendComment, queueAnnotation, sendAnnotations, sendScreenshot, sendText }
+  return {
+    sendComment,
+    queueAnnotation,
+    sendAnnotations,
+    sendScreenshot,
+    sendScreenshotBytes,
+    sendText,
+  }
 }

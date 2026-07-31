@@ -6,11 +6,13 @@ import { browserClient } from "@/lib/browser/client"
 import type { ElementRect } from "@/lib/browser/protocol"
 import { isTauri } from "@/lib/tauri"
 
-import { useElementRect } from "./use-element-rect"
+import { readElementRect, useElementRect } from "./use-element-rect"
 
 export interface UseBrowserPaneWebview {
   /** Read the latest reserved-div rect without subscribing to re-renders. */
   getRect: () => ElementRect | null
+  /** Re-measure the reserved div after a known React layout change. */
+  refreshBounds: () => void
   /** Show/hide the embedded webview (e.g. when an app modal overlaps it). */
   setVisible: (visible: boolean) => Promise<void>
 }
@@ -19,6 +21,8 @@ export interface UseBrowserPaneWebviewOptions {
   url: string | null
   /** Stable diagnostic owner for the process-wide embedded-webview lease. */
   ownerId?: string
+  /** Fires after this pane owns a successfully created native webview. */
+  onReady?: () => void
   /**
    * Fires on every reserved-rect change (rAF-coalesced). Rect tracking is
    * entirely ref-driven — a scroll/resize burst never re-renders the caller.
@@ -62,7 +66,7 @@ export function useBrowserPaneWebview(
   ref: RefObject<HTMLElement | null>,
   options: UseBrowserPaneWebviewOptions
 ): UseBrowserPaneWebview {
-  const { url, onRectChange, visible = true, ownerId = "browser-preview" } = options
+  const { url, onReady, onRectChange, visible = true, ownerId = "browser-preview" } = options
   const leaseTokenRef = useRef(`${ownerId}:${crypto.randomUUID()}`)
   const retryAttemptRef = useRef(0)
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -72,7 +76,11 @@ export function useBrowserPaneWebview(
   const rectRef = useRef<ElementRect | null>(null)
   const urlRef = useRef(url)
   const visibleRef = useRef(visible)
+  const onReadyRef = useRef(onReady)
   const onRectChangeRef = useRef(onRectChange)
+  useEffect(() => {
+    onReadyRef.current = onReady
+  }, [onReady])
   useEffect(() => {
     onRectChangeRef.current = onRectChange
   }, [onRectChange])
@@ -91,6 +99,7 @@ export function useBrowserPaneWebview(
       void browserClient.embedCreate(target, rect).then(
         () => {
           retryAttemptRef.current = 0
+          onReadyRef.current?.()
           // Created visible at `rect`; if the caller wants it hidden (e.g. the
           // first-load placeholder is showing), park it immediately.
           if (!visibleRef.current) {
@@ -183,6 +192,12 @@ export function useBrowserPaneWebview(
 
   const getRect = useCallback(() => rectRef.current, [])
 
+  const refreshBounds = useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    onRect(readElementRect(el))
+  }, [onRect, ref])
+
   const setVisible = useCallback(async (visible: boolean) => {
     if (!isTauri() || !createdRef.current) return
     await browserClient
@@ -190,5 +205,5 @@ export function useBrowserPaneWebview(
       .catch(() => {})
   }, [])
 
-  return { getRect, setVisible }
+  return { getRect, refreshBounds, setVisible }
 }

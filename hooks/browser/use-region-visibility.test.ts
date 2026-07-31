@@ -33,11 +33,23 @@ beforeEach(() => {
 function mountRegion() {
   const wrap = document.createElement("div")
   const el = document.createElement("div")
+  el.getBoundingClientRect = () => new DOMRect(100, 100, 400, 300)
   wrap.appendChild(el)
   document.body.appendChild(wrap)
   const ref = { current: el } as React.RefObject<HTMLElement>
   const view = renderHook(() => useRegionVisibility(ref))
   return { ...view, el, wrap }
+}
+
+function mountPortalElement(slot: string, rect: DOMRect) {
+  const portal = document.createElement("div")
+  portal.dataset.radixPortal = ""
+  const content = document.createElement("div")
+  content.dataset.slot = slot
+  content.getBoundingClientRect = () => rect
+  portal.appendChild(content)
+  document.body.appendChild(portal)
+  return portal
 }
 
 it("is visible by default", () => {
@@ -66,6 +78,120 @@ it("hides when an ancestor becomes inert", async () => {
   await act(async () => {
     wrap.setAttribute("inert", "")
   })
+  expect(result.current).toBe(false)
+})
+
+it.each(["dialog-overlay", "alert-dialog-overlay", "sheet-overlay", "drawer-overlay"])(
+  "hides while a modal %s is mounted, even without aria-hidden on the region",
+  async (slot) => {
+    const { result } = mountRegion()
+    let portal: HTMLElement | null = null
+
+    await act(async () => {
+      portal = mountPortalElement(slot, new DOMRect(0, 0, 1200, 800))
+    })
+    expect(result.current).toBe(false)
+
+    await act(async () => {
+      portal?.remove()
+    })
+    expect(result.current).toBe(true)
+  }
+)
+
+it.each(["tooltip-content", "select-content"] as const)(
+  "hides while an intersecting %s portal is open, and restores when it closes",
+  async (slot) => {
+    const { result } = mountRegion()
+    let portal: HTMLElement | null = null
+
+    await act(async () => {
+      portal = mountPortalElement(slot, new DOMRect(120, 120, 160, 80))
+    })
+    expect(result.current).toBe(false)
+
+    await act(async () => {
+      portal?.remove()
+    })
+    expect(result.current).toBe(true)
+  }
+)
+
+it("restores visibility when a mounted overlay transitions to the closed state", async () => {
+  const { result } = mountRegion()
+  let overlay: HTMLElement | null = null
+
+  await act(async () => {
+    const portal = mountPortalElement("dialog-overlay", new DOMRect(0, 0, 1200, 800))
+    overlay = portal.querySelector<HTMLElement>('[data-slot="dialog-overlay"]')
+    overlay?.setAttribute("data-state", "open")
+  })
+  expect(result.current).toBe(false)
+
+  await act(async () => {
+    overlay?.setAttribute("data-state", "closed")
+  })
+  expect(result.current).toBe(true)
+})
+
+it("hides for a native dialog and restores when its open attribute is removed", async () => {
+  const { result } = mountRegion()
+  const dialog = document.createElement("dialog")
+
+  await act(async () => {
+    dialog.setAttribute("open", "")
+    document.body.appendChild(dialog)
+  })
+  expect(result.current).toBe(false)
+
+  await act(async () => {
+    dialog.removeAttribute("open")
+  })
+  expect(result.current).toBe(true)
+})
+
+it("hides for a custom aria-modal dialog and restores when it closes", async () => {
+  const { result } = mountRegion()
+  const dialog = document.createElement("div")
+  dialog.setAttribute("role", "dialog")
+
+  await act(async () => {
+    dialog.setAttribute("aria-modal", "true")
+    document.body.appendChild(dialog)
+  })
+  expect(result.current).toBe(false)
+
+  await act(async () => {
+    dialog.setAttribute("aria-modal", "false")
+  })
+  expect(result.current).toBe(true)
+})
+
+it("stays visible when a floating overlay does not cover the region", async () => {
+  const { result } = mountRegion()
+
+  await act(async () => {
+    mountPortalElement("tooltip-content", new DOMRect(0, 0, 80, 40))
+  })
+
+  expect(result.current).toBe(true)
+})
+
+it.each([
+  "combobox-content",
+  "context-menu-content",
+  "dropdown-menu-content",
+  "hover-card-content",
+  "menubar-content",
+  "navigation-menu-content",
+  "popover-content",
+])("hides while an intersecting %s portal is open", async (slot) => {
+  const { result } = mountRegion()
+
+  await act(async () => {
+    mountPortalElement(slot, new DOMRect(120, 120, 160, 80))
+  })
+
   expect(result.current).toBe(false)
 })
 

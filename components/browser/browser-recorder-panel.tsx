@@ -14,7 +14,14 @@ import {
   Trash2,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { useCallback, useState, type Dispatch, type SetStateAction } from "react"
+import {
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react"
 import { toast } from "sonner"
 
 import { useFlowRecorder, type UseFlowRecorder } from "@/hooks/browser/use-flow-recorder"
@@ -49,6 +56,10 @@ export interface BrowserRecorderPanelProps {
    * that time is assertable from a test.
    */
   now?: () => number
+  /** Re-measure the sibling native preview after this panel changes height. */
+  onLayoutChange?: () => void
+  /** Host-specific recorder; absent keeps the embedded desktop recorder. */
+  recorder?: UseFlowRecorder
 }
 
 /** Render a step as one human-readable line for the step list. */
@@ -325,15 +336,24 @@ export function BrowserRecorderPanel({
   pageUrl,
   onSendToChat,
   now = Date.now,
+  onLayoutChange,
+  recorder: providedRecorder,
 }: BrowserRecorderPanelProps) {
   const t = useTranslations("browser")
   const stepLabel = useStepLabel()
-  const recorder = useFlowRecorder()
+  const embeddedRecorder = useFlowRecorder()
+  const recorder = providedRecorder ?? embeddedRecorder
   const [flow, setFlow] = useState<RecordedFlow | null>(null)
   const [name, setName] = useState("")
   const [assertion, setAssertion] = useState("")
   const [secrets, setSecrets] = useState<Record<string, string>>({})
   const [expanded, setExpanded] = useState(true)
+  const previousExpandedRef = useRef(expanded)
+  useLayoutEffect(() => {
+    if (previousExpandedRef.current === expanded) return
+    previousExpandedRef.current = expanded
+    onLayoutChange?.()
+  }, [expanded, onLayoutChange])
   /**
    * The flows saved for the loaded origin. `useLiveQuery` re-runs this whenever
    * `browserRecordings` is written, so saving, renaming and deleting all land in

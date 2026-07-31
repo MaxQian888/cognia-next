@@ -150,6 +150,34 @@ describe("pane events", () => {
     expect(unlisten).toHaveBeenCalled()
   })
 
+  it("uses an injected engine and recording driver without subscribing to desktop events", async () => {
+    const driver = {
+      start: jest.fn().mockResolvedValue(undefined),
+      resume: jest.fn().mockResolvedValue(undefined),
+      stop: jest.fn().mockResolvedValue(undefined),
+      drain: jest.fn().mockResolvedValue([]),
+    }
+    const engine = { id: "remote" }
+    const { result } = renderHook(() =>
+      useFlowRecorder({
+        now,
+        driver,
+        engine: engine as never,
+        listenToPaneEvents: false,
+      })
+    )
+
+    await act(() => result.current.start(BASE))
+    act(() => result.current.noteNavigation(`${BASE}/remote`))
+    await act(() => result.current.noteLoaded())
+    await act(() => result.current.replay(flow()))
+
+    expect(onEvent).not.toHaveBeenCalled()
+    expect(driver.resume).toHaveBeenCalled()
+    expect(result.current.steps[1]).toMatchObject({ url: `${BASE}/remote` })
+    expect(replay).toHaveBeenCalledWith(expect.anything(), engine, expect.anything())
+  })
+
   // A take that outlives the pane leaves the page armed with nobody draining it.
   it("cancels an in-flight take on unmount", async () => {
     const { result, unmount } = renderHook(() => useFlowRecorder({ now }))

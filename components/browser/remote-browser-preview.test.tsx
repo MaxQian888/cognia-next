@@ -20,25 +20,87 @@ jest.mock("@/lib/db/browser-profiles", () => ({
   listBrowserProfiles: () => Promise.resolve([]),
   touchBrowserProfile: jest.fn().mockResolvedValue(undefined),
 }))
+const sendScreenshotBytes = jest.fn().mockResolvedValue(true)
+const sendComment = jest.fn().mockResolvedValue(true)
+const sendText = jest.fn().mockResolvedValue(true)
+jest.mock("@/hooks/browser/use-selection-to-chat", () => ({
+  useSelectionToChat: () => ({ sendScreenshotBytes, sendComment, sendText }),
+}))
+jest.mock("@/components/browser/browser-recorder-panel", () => ({
+  BrowserRecorderPanel: () => <div data-testid="remote-browser-recorder" />,
+}))
+const openExternal = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/tauri/opener", () => ({
+  openExternal: (...args: unknown[]) => openExternal(...args),
+}))
 
 const navigate = jest.fn().mockResolvedValue(undefined)
+const back = jest.fn().mockResolvedValue(undefined)
+const forward = jest.fn().mockResolvedValue(undefined)
+const reload = jest.fn().mockResolvedValue(undefined)
 const activatePage = jest.fn().mockResolvedValue(undefined)
 const closePage = jest.fn().mockResolvedValue(undefined)
 const setZoom = jest.fn().mockResolvedValue({ ok: true, zoom: 1.1 })
 const find = jest.fn().mockResolvedValue({ matches: 2, index: 0 })
 const findClear = jest.fn().mockResolvedValue(undefined)
+const screenshot = jest.fn().mockResolvedValue({
+  bytes: "REMOTE_PNG",
+  width: 1280,
+  height: 720,
+})
+const snapshot = jest.fn().mockResolvedValue({
+  generation: 1,
+  url: "https://example.com/current",
+  title: "Current",
+  nodes: [
+    {
+      ref: "e1",
+      role: "button",
+      name: "Buy",
+      tag: "button",
+      rect: { x: 0, y: 0, width: 1, height: 1 },
+      value: null,
+      state: { disabled: false, checked: null, expanded: null },
+    },
+  ],
+})
+const evaluate = jest.fn().mockResolvedValue({
+  ok: true,
+  value: JSON.stringify({
+    ok: true,
+    selection: {
+      paneId: "remote",
+      selector: "#buy",
+      domPath: "body > button",
+      tagName: "BUTTON",
+      id: "buy",
+      classes: null,
+      rect: { x: 0, y: 0, width: 1, height: 1 },
+      outerHTML: '<button id="buy">Buy</button>',
+      text: "Buy",
+      pageUrl: "https://example.com/current",
+      pageTitle: "Current",
+    },
+  }),
+})
 const listPages = jest
   .fn()
   .mockResolvedValue([{ id: "page-1", url: "https://example.com", title: "Example", active: true }])
 jest.mock("@/lib/browser/remote-chromium-engine", () => ({
   RemoteChromiumEngine: jest.fn().mockImplementation(() => ({
     navigate,
+    back,
+    forward,
+    reload,
     activatePage,
     closePage,
     listPages,
     setZoom,
     find,
     findClear,
+    screenshot,
+    snapshot,
+    evaluate,
   })),
 }))
 // History dropdown renders inline via the shared manual mock.
@@ -188,6 +250,193 @@ it("zooms and searches the remote page through the engine", async () => {
     target: { value: "abc" },
   })
   await waitFor(() => expect(find).toHaveBeenCalledWith("abc", { forward: true }))
+})
+
+it("reuses the shared navigation controls with the remote engine", async () => {
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(streamOptions).not.toBeNull())
+  act(() => streamOptions?.onState?.("connected"))
+
+  fireEvent.click(screen.getByRole("button", { name: "browser.actions.back" }))
+  fireEvent.click(screen.getByRole("button", { name: "browser.actions.forward" }))
+  fireEvent.click(screen.getByRole("button", { name: "browser.actions.reload" }))
+
+  await waitFor(() => {
+    expect(back).toHaveBeenCalledTimes(1)
+    expect(forward).toHaveBeenCalledTimes(1)
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
+})
+
+it("forwards wheel input while the human owns the remote lease", async () => {
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(streamOptions).not.toBeNull())
+  act(() => {
+    streamOptions?.onLease?.({ epoch: 3, controller: { kind: "human", id: "device-1" } })
+  })
+
+  fireEvent.wheel(screen.getByRole("application", { name: "browser.remote.canvas" }), {
+    deltaX: 4,
+    deltaY: 120,
+  })
+
+  expect(sendInput).toHaveBeenCalledWith({
+    kind: "mouse",
+    payload: { type: "mouseWheel", deltaX: 4, deltaY: 120 },
+  })
+})
+
+it("keeps the address bar synchronized with in-page remote navigation", async () => {
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(streamOptions).not.toBeNull())
+
+  act(() => {
+    streamOptions?.onEvent?.({
+      kind: "pages.changed",
+      pages: [
+        {
+          id: "page-1",
+          url: "https://example.com/after-click",
+          title: "After",
+          active: true,
+        },
+      ],
+      activePageId: "page-1",
+    })
+  })
+
+  expect(screen.getByRole("textbox", { name: "browser.remote.url" })).toHaveValue(
+    "https://example.com/after-click"
+  )
+})
+
+it("captures through the remote engine and reuses the chat screenshot pipeline", async () => {
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(streamOptions).not.toBeNull())
+  act(() => {
+    streamOptions?.onState?.("connected")
+    streamOptions?.onEvent?.({
+      kind: "pages.changed",
+      pages: [
+        {
+          id: "page-1",
+          url: "https://example.com/current",
+          title: "Current",
+          active: true,
+        },
+      ],
+      activePageId: "page-1",
+    })
+  })
+
+  fireEvent.click(screen.getByRole("button", { name: "browser.actions.screenshot" }))
+
+  await waitFor(() =>
+    expect(sendScreenshotBytes).toHaveBeenCalledWith("REMOTE_PNG", {
+      sessionId: "chat-1",
+      pageUrl: "https://example.com/current",
+    })
+  )
+})
+
+it("opens the active remote page through the shared external opener", async () => {
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(streamOptions).not.toBeNull())
+  act(() => {
+    streamOptions?.onEvent?.({
+      kind: "pages.changed",
+      pages: [
+        {
+          id: "page-1",
+          url: "https://example.com/current",
+          title: "Current",
+          active: true,
+        },
+      ],
+      activePageId: "page-1",
+    })
+  })
+
+  fireEvent.click(screen.getByRole("button", { name: "browser.actions.openExternal" }))
+
+  expect(openExternal).toHaveBeenCalledWith("https://example.com/current")
+})
+
+it("selects a remote element by snapshot ref and sends it through the shared comment pipeline", async () => {
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(streamOptions).not.toBeNull())
+  act(() => streamOptions?.onState?.("connected"))
+
+  fireEvent.click(screen.getByRole("button", { name: "browser.actions.selectElement" }))
+  const canvas = screen.getByRole("application", { name: "browser.remote.canvas" })
+  Object.defineProperty(canvas, "getBoundingClientRect", {
+    value: () => ({ left: 0, top: 0, width: 100, height: 100 }),
+  })
+  await act(async () => {
+    fireEvent(
+      canvas,
+      new MouseEvent("pointerdown", { bubbles: true, clientX: 50, clientY: 50, button: 0 })
+    )
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+
+  expect(snapshot).toHaveBeenCalledWith({ includeText: true })
+  expect(evaluate).toHaveBeenCalledWith('window.__cogniaSelectionForRef("e1")')
+  expect(screen.getByRole("textbox", { name: "browser.comment.title" })).toBeInTheDocument()
+  expect(sendInput).not.toHaveBeenCalledWith({
+    kind: "mouse",
+    payload: expect.objectContaining({ type: "mousePressed" }),
+  })
+
+  fireEvent.change(screen.getByRole("textbox", { name: "browser.comment.title" }), {
+    target: { value: "Make this clearer" },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "browser.comment.send" }))
+
+  await waitFor(() =>
+    expect(sendComment).toHaveBeenCalledWith(
+      expect.objectContaining({ selector: "#buy" }),
+      "Make this clearer",
+      { sessionId: "chat-1", pageUrl: "https://example.com/current" }
+    )
+  )
 })
 
 it("switches and closes pages through the host-neutral engine", async () => {

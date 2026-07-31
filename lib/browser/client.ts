@@ -52,6 +52,14 @@ function requiredEmbedOwnerToken(): string {
   return embedOwnerToken
 }
 
+function withEmbedOwnerToken<T>(call: (ownerToken: string) => Promise<T>): Promise<T> {
+  try {
+    return call(requiredEmbedOwnerToken())
+  } catch (error) {
+    return Promise.reject(error)
+  }
+}
+
 export const browserClient = {
   setEmbedOwnerToken: (token: string | null) => {
     embedOwnerToken = token
@@ -83,10 +91,12 @@ export const browserClient = {
     transport.call<void>("browser_embed_reload", { ownerToken: requiredEmbedOwnerToken() }),
   /** Native page zoom on the embedded webview (persists across navigations). */
   embedSetZoom: (zoom: number) =>
-    transport.call<void>("browser_embed_set_zoom", {
-      zoom,
-      ownerToken: requiredEmbedOwnerToken(),
-    }),
+    withEmbedOwnerToken((ownerToken) =>
+      transport.call<void>("browser_embed_set_zoom", {
+        zoom,
+        ownerToken,
+      })
+    ),
   embedSetSelectMode: (on: boolean) =>
     transport.call<void>("browser_embed_set_select_mode", {
       on,

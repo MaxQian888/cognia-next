@@ -12,6 +12,15 @@ beforeEach(() => {
 })
 
 describe("browserClient (embedded pane)", () => {
+  it("rejects instead of throwing synchronously when the owner lease is missing", async () => {
+    browserClient.setEmbedOwnerToken(null)
+
+    const pending = browserClient.embedSetZoom(1.5)
+
+    await expect(pending).rejects.toThrow("Embedded browser owner lease is not acquired")
+    expect(call).not.toHaveBeenCalled()
+  })
+
   it("embedCreate flattens the rect alongside the url", async () => {
     call.mockResolvedValueOnce("browser-embed")
     await expect(browserClient.embedCreate("http://localhost:3000/", rect)).resolves.toBe(

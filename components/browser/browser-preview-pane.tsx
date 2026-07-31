@@ -1,8 +1,6 @@
 "use client"
 
 import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
   CameraIcon,
   CheckIcon,
   ExternalLinkIcon,
@@ -11,7 +9,6 @@ import {
   LockIcon,
   MoreHorizontalIcon,
   MousePointerSquareDashedIcon,
-  RotateCwIcon,
   SearchIcon,
   SendIcon,
   Trash2Icon,
@@ -29,15 +26,11 @@ import {
 import { BrowserCookieImportAction } from "@/components/browser/browser-cookie-import-action"
 import { BrowserFindBarSection, isFindShortcut } from "@/components/browser/browser-find-bar"
 import { BrowserHistoryMenu } from "@/components/browser/browser-history-menu"
+import { BrowserNavigationControls } from "@/components/browser/browser-navigation-controls"
 import { BrowserRecorderPanel } from "@/components/browser/browser-recorder-panel"
+import { BrowserWebFallback } from "@/components/browser/browser-web-fallback"
 import { BrowserZoomControl, MAX_ZOOM, MIN_ZOOM } from "@/components/browser/browser-zoom-control"
 import { RemoteBrowserPreview } from "@/components/browser/remote-browser-preview"
-import {
-  WebPreview,
-  WebPreviewBody,
-  WebPreviewNavigation,
-  WebPreviewUrl,
-} from "@/components/ai-elements/web-preview"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -180,6 +173,7 @@ export function BrowserPreviewPane({
     const stored = Number(window.localStorage.getItem(ZOOM_STORAGE_KEY))
     return Number.isFinite(stored) && stored >= MIN_ZOOM && stored <= MAX_ZOOM ? stored : 1
   })
+  const [webviewReady, setWebviewReady] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
   const { recent: recentHistory, push: pushHistory, clear: clearHistory } = useBrowserHistory()
   const annotationQueue =
@@ -211,9 +205,11 @@ export function BrowserPreviewPane({
   const regionVisible = useRegionVisibility(reservedRef)
   const shouldShowLivePage = !!committedUrl && hasPainted && regionVisible
 
-  const { getRect } = useBrowserPaneWebview(reservedRef, {
+  const handleWebviewReady = useCallback(() => setWebviewReady(true), [])
+  const { getRect, refreshBounds } = useBrowserPaneWebview(reservedRef, {
     url: committedUrl,
     ownerId,
+    onReady: handleWebviewReady,
     onRectChange: handleRectChange,
     visible: shouldShowLivePage,
   })
@@ -243,8 +239,8 @@ export function BrowserPreviewPane({
   // Re-apply zoom whenever the page becomes live (covers webview recreation)
   // or the user changes it. Native zoom persists across in-page navigations.
   useEffect(() => {
-    if (shouldShowLivePage) void browserClient.embedSetZoom(zoom).catch(() => {})
-  }, [shouldShowLivePage, zoom])
+    if (shouldShowLivePage && webviewReady) void browserClient.embedSetZoom(zoom).catch(() => {})
+  }, [shouldShowLivePage, webviewReady, zoom])
   useEffect(() => {
     void deleteExpiredBrowserAnnotations(new Date().getTime())
   }, [])
@@ -254,11 +250,11 @@ export function BrowserPreviewPane({
   const panelDetailsLabel = t("panel.details")
   const panelCollapseLabel = t("panel.collapse")
   useEffect(() => {
-    if (!isTauri() || !committedUrl) return
+    if (!isTauri() || !committedUrl || !webviewReady) return
     void browserClient
       .embedSetPanelLabels({ details: panelDetailsLabel, collapse: panelCollapseLabel })
       .catch(() => {})
-  }, [committedUrl, panelDetailsLabel, panelCollapseLabel])
+  }, [committedUrl, panelDetailsLabel, panelCollapseLabel, webviewReady])
 
   // The preview's real location (follows in-page navigations and redirects).
   const currentUrl = navigated?.url ?? committedUrl
@@ -513,14 +509,7 @@ export function BrowserPreviewPane({
         />
       )
     }
-    return (
-      <WebPreview className="h-full rounded-none border-0" data-testid="browser-web-preview">
-        <WebPreviewNavigation>
-          <WebPreviewUrl placeholder={t("url.placeholder")} aria-label={t("url.placeholder")} />
-        </WebPreviewNavigation>
-        <WebPreviewBody className="bg-background" title={t("empty.title")} />
-      </WebPreview>
-    )
+    return <BrowserWebFallback initialUrl={normalizedInitialUrl ?? undefined} />
   }
 
   // Read-mode address: only while the field still mirrors the live location.
@@ -638,41 +627,21 @@ export function BrowserPreviewPane({
             <div className="browser-progress-bar h-full w-1/3 rounded-full bg-primary" />
           </div>
         )}
-        <div className="flex shrink-0 items-center">
-          <TooltipIconButton
-            tooltip={t("actions.back")}
-            aria-label={t("actions.back")}
-            disabled={!committedUrl}
-            onClick={() => {
-              beginLoad()
-              void browserClient.embedBack()
-            }}
-          >
-            <ArrowLeftIcon />
-          </TooltipIconButton>
-          <TooltipIconButton
-            tooltip={t("actions.forward")}
-            aria-label={t("actions.forward")}
-            disabled={!committedUrl}
-            onClick={() => {
-              beginLoad()
-              void browserClient.embedForward()
-            }}
-          >
-            <ArrowRightIcon />
-          </TooltipIconButton>
-          <TooltipIconButton
-            tooltip={t("actions.reload")}
-            aria-label={t("actions.reload")}
-            disabled={!committedUrl}
-            onClick={() => {
-              beginLoad()
-              void browserClient.embedReload()
-            }}
-          >
-            <RotateCwIcon />
-          </TooltipIconButton>
-        </div>
+        <BrowserNavigationControls
+          disabled={!committedUrl}
+          onBack={() => {
+            beginLoad()
+            void browserClient.embedBack()
+          }}
+          onForward={() => {
+            beginLoad()
+            void browserClient.embedForward()
+          }}
+          onReload={() => {
+            beginLoad()
+            void browserClient.embedReload()
+          }}
+        />
         <form onSubmit={commitUrl} className="min-w-0 flex-1">
           <div className="relative">
             <SchemeIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -990,6 +959,7 @@ export function BrowserPreviewPane({
 
       <BrowserRecorderPanel
         pageUrl={currentUrl ?? null}
+        onLayoutChange={refreshBounds}
         onSendToChat={(markdown) => void sendText(markdown, { sessionId })}
       />
     </div>

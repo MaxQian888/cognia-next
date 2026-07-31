@@ -63,6 +63,25 @@ describe("start", () => {
     await recorder(onChange).start(BASE)
     expect(onChange).toHaveBeenCalledWith([{ act: "navigate", at: 0, url: BASE }])
   })
+
+  it("uses an injected host driver instead of the embedded browser client", async () => {
+    const driver = {
+      start: jest.fn().mockResolvedValue(undefined),
+      resume: jest.fn().mockResolvedValue(undefined),
+      stop: jest.fn().mockResolvedValue(undefined),
+      drain: jest.fn().mockResolvedValue([clickStep("#remote")]),
+    }
+    const rec = new FlowRecorder({ now, driver })
+
+    await rec.start(BASE)
+    const flow = await rec.stop()
+
+    expect(driver.start).toHaveBeenCalled()
+    expect(driver.drain).toHaveBeenCalled()
+    expect(driver.stop).toHaveBeenCalled()
+    expect(flow?.steps).toContainEqual(expect.objectContaining({ act: "click" }))
+    expect(startRecord).not.toHaveBeenCalled()
+  })
 })
 
 describe("polling", () => {

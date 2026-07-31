@@ -17,6 +17,7 @@ jest.mock("@/lib/browser/client", () => ({
   },
 }))
 jest.mock("./use-element-rect", () => ({
+  ...jest.requireActual("./use-element-rect"),
   useElementRect: (_ref: unknown, onChange?: (r: ElementRect) => void) => {
     mockOnRect = onChange
     if (onChange) mockOnRects.push(onChange)
@@ -47,6 +48,24 @@ it("creates the embedded webview once url and rect are known", () => {
   renderHook(() => useBrowserPaneWebview(ref, { url: "http://localhost:3000/" }))
   deliverRect()
   expect(browserClient.embedCreate).toHaveBeenCalledWith("http://localhost:3000/", RECT)
+})
+
+it("reports readiness only after native creation succeeds", async () => {
+  let resolveCreate!: (paneId: string) => void
+  ;(browserClient.embedCreate as jest.Mock).mockImplementationOnce(
+    () =>
+      new Promise<string>((resolve) => {
+        resolveCreate = resolve
+      })
+  )
+  const onReady = jest.fn()
+  renderHook(() => useBrowserPaneWebview(ref, { url: "http://localhost:3000/", onReady }))
+
+  deliverRect()
+  expect(onReady).not.toHaveBeenCalled()
+
+  await act(async () => resolveCreate("browser-embed"))
+  expect(onReady).toHaveBeenCalledTimes(1)
 })
 
 it("creates when the url arrives after the rect", () => {
@@ -92,6 +111,40 @@ it("exposes the latest rect via getRect", () => {
   expect(result.current.getRect()).toBeNull()
   deliverRect()
   expect(result.current.getRect()).toEqual(RECT)
+})
+
+it("re-measures and syncs native bounds after a known React layout change", () => {
+  const element = document.createElement("div")
+  element.getBoundingClientRect = () =>
+    ({
+      left: 5.4,
+      top: 6.6,
+      width: 200,
+      height: 150,
+    }) as DOMRect
+  const elementRef = { current: element }
+  const { result } = renderHook(() =>
+    useBrowserPaneWebview(elementRef, { url: "http://localhost:3000/" })
+  )
+  deliverRect()
+  ;(browserClient.embedSetBounds as jest.Mock).mockClear()
+
+  act(() => result.current.refreshBounds())
+
+  expect(browserClient.embedSetBounds).toHaveBeenCalledWith({
+    x: 5,
+    y: 7,
+    width: 200,
+    height: 150,
+  })
+})
+
+it("does not refresh bounds before the reserved element mounts", () => {
+  const { result } = renderHook(() => useBrowserPaneWebview(ref, { url: null }))
+
+  act(() => result.current.refreshBounds())
+
+  expect(browserClient.embedSetBounds).not.toHaveBeenCalled()
 })
 
 it("navigates (not re-creates) when the url changes", () => {

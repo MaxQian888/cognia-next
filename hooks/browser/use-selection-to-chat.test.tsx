@@ -192,6 +192,20 @@ describe("sendScreenshot", () => {
     expect(mockSend.mock.calls[0][2]).toEqual({ sessionId: "other" })
   })
 
+  it("sends bytes captured by a host-neutral browser engine without recapturing", async () => {
+    const { result } = renderHook(() => useSelectionToChat())
+    const ok = await result.current.sendScreenshotBytes("REMOTE_PNG", {
+      pageUrl: "https://example.com/",
+    })
+
+    expect(ok).toBe(true)
+    expect(mockCapture).not.toHaveBeenCalled()
+    expect(mockBuild).toHaveBeenCalledWith(
+      "Screenshot of the in-app browser preview at https://example.com/.",
+      [expect.objectContaining({ url: "data:image/png;base64,REMOTE_PNG" })]
+    )
+  })
+
   it("throws when the capture yields no image", async () => {
     mockCapture.mockResolvedValueOnce({ bytes: "", width: 0, height: 0 })
     const { result } = renderHook(() => useSelectionToChat())
