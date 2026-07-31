@@ -35,13 +35,18 @@ describe("PluginDevtoolsPane", () => {
 
   it("renders the local-load author surfaces (dropzone, validator, hot-reload)", () => {
     render(<PluginDevtoolsPane />)
-    expect(screen.getByTestId("local-plugin-dropzone-stub")).toBeInTheDocument()
-    expect(screen.getByTestId("manifest-validator-stub")).toBeInTheDocument()
-    expect(screen.getByTestId("hot-reload-diagnostics-stub")).toBeInTheDocument()
+    const setupGrid = screen.getByTestId("plugin-devtools-setup-grid")
+    const monitoringGrid = screen.getByTestId("plugin-devtools-monitoring-grid")
+
+    expect(setupGrid).toContainElement(screen.getByTestId("local-plugin-dropzone-stub"))
+    expect(monitoringGrid).toContainElement(screen.getByTestId("manifest-validator-stub"))
+    expect(monitoringGrid).toContainElement(screen.getByTestId("hot-reload-diagnostics-stub"))
   })
 
   it("renders the cognia CLI status card", () => {
     render(<PluginDevtoolsPane />)
-    expect(screen.getByTestId("cognia-cli-status-card-stub")).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-devtools-setup-grid")).toContainElement(
+      screen.getByTestId("cognia-cli-status-card-stub")
+    )
   })
 })

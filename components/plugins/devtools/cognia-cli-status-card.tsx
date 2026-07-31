@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { useCogniaCliStatus } from "@/hooks/plugins/use-cognia-cli-status"
 import { openPath, openUrl } from "@/lib/native/opener"
+import { cn } from "@/lib/utils"
 import { InstalledMarker } from "@/components/plugins/_shared/installed-marker"
 import { CogniaCliInstallDialog } from "./cognia-cli-install-dialog"
 
@@ -39,31 +40,40 @@ export function CogniaCliStatusCard({ className }: { className?: string }) {
   const [dialogOpen, setDialogOpen] = useState(false)
 
   return (
-    <Card className={className} data-testid="cognia-cli-status-card">
-      <div className="p-4 space-y-3">
-        <div className="flex items-start gap-2">
-          <TerminalIcon
-            className="size-4 mt-0.5 shrink-0 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <div className="min-w-0 flex-1 space-y-0.5">
-            <h3 className="text-sm font-semibold">{t("title")}</h3>
-            <p className="text-xs text-muted-foreground">{t("description")}</p>
+    <Card
+      className={cn(
+        "gap-0 overflow-hidden border-border/70 py-0 shadow-sm transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md",
+        className
+      )}
+      data-testid="cognia-cli-status-card"
+    >
+      <div className="flex h-full flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
+            <TerminalIcon className="size-4 text-muted-foreground" aria-hidden="true" />
+          </div>
+          <div className="min-w-0 space-y-1">
+            <h3 className="text-sm font-semibold tracking-tight">{t("title")}</h3>
+            <p className="max-w-xl text-xs leading-relaxed text-muted-foreground">
+              {t("description")}
+            </p>
           </div>
         </div>
 
-        {!status.supported ? (
-          <InstalledMarker desktopOnly />
-        ) : status.loading ? (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2Icon className="size-3.5 animate-spin" aria-hidden="true" />
-            {t("probing")}
-          </div>
-        ) : status.installed ? (
-          <InstalledState status={status} t={t} />
-        ) : (
-          <MissingState onInstall={() => setDialogOpen(true)} t={t} />
-        )}
+        <div className="shrink-0 sm:max-w-[52%]">
+          {!status.supported ? (
+            <InstalledMarker desktopOnly />
+          ) : status.loading ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2Icon className="size-3.5 animate-spin" aria-hidden="true" />
+              {t("probing")}
+            </div>
+          ) : status.installed ? (
+            <InstalledState status={status} t={t} />
+          ) : (
+            <MissingState onInstall={() => setDialogOpen(true)} t={t} />
+          )}
+        </div>
       </div>
 
       <CogniaCliInstallDialog

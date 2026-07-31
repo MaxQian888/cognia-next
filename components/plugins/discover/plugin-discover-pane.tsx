@@ -10,7 +10,10 @@ import { PluginMarketplace } from "../marketplace/plugin-marketplace"
 
 export function PluginDiscoverPane() {
   return (
-    <div className="h-full min-h-0 overflow-y-auto p-4" data-testid="plugin-discover-pane">
+    <div
+      className="h-full min-h-0 min-w-0 max-w-full overflow-x-clip overflow-y-auto p-3 sm:p-4"
+      data-testid="plugin-discover-pane"
+    >
       <PluginMarketplace />
     </div>
   )

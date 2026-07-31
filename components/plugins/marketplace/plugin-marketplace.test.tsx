@@ -123,6 +123,13 @@ describe("PluginMarketplace", () => {
   it("renders the section toggle group", async () => {
     render(<PluginMarketplace />)
     await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
+    expect(screen.getByTestId("plugin-marketplace-toolbar")).toHaveClass("min-w-0")
+    expect(screen.getByTestId("plugin-marketplace-sections-scroller")).toHaveClass(
+      "overflow-x-auto"
+    )
+    expect(screen.getByTestId("plugin-marketplace-sections-scroller")).not.toHaveClass(
+      "sm:overflow-visible"
+    )
     expect(screen.getByText("sections.featured")).toBeInTheDocument()
     expect(screen.getByText("sections.popular")).toBeInTheDocument()
     expect(screen.getByText("sections.recent")).toBeInTheDocument()

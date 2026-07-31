@@ -1,8 +1,8 @@
 "use client"
 
 // Permissions sub-tab — inline twin of the modal PluginPermissionReview.
-// Renders the same Table shape with declared / optional / granted columns
-// + per-row tier select + grant/revoke buttons, using the exported
+// Renders the same responsive permission rows with declaration metadata,
+// grant state, tier select, and grant/revoke buttons, using the exported
 // `PermissionRow` from `plugin-permission-review.tsx` so behavior can't
 // drift between the two surfaces.
 //
@@ -86,41 +86,33 @@ export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
     <div className="space-y-3">
       {trustCard}
       <Card className="p-0 overflow-hidden">
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="min-w-[8rem]">{t("colPermission")}</TableHead>
-                <TableHead className="hidden md:table-cell min-w-[6rem] text-center">
-                  {t("colDeclared")}
-                </TableHead>
-                <TableHead className="hidden md:table-cell min-w-[6rem] text-center">
-                  {t("colOptional")}
-                </TableHead>
-                <TableHead className="min-w-[5rem] text-center">{t("colGranted")}</TableHead>
-                <TableHead className="min-w-[9rem]">{t("colTier")}</TableHead>
-                <TableHead className="min-w-[6rem] text-right">{t("colActions")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {allListed.map((perm) => (
-                <PermissionRow
-                  key={perm}
-                  perm={perm}
-                  declared={declared.includes(perm)}
-                  optional={optional.includes(perm)}
-                  granted={granted.has(perm)}
-                  dangerous={perms.isDangerous(perm)}
-                  onGrant={() => perms.grant(pluginId, perm, { grantedBy: "user" })}
-                  onRevoke={() => perms.revoke(pluginId, perm)}
-                  tier={perms.getTier(pluginId, perm)}
-                  onTierChange={(tier) => perms.setTier(pluginId, perm, tier)}
-                  description={justifications[perm] ?? perms.descriptions[perm] ?? perm}
-                />
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <Table className="table-fixed">
+          <TableHeader className="hidden sm:table-header-group">
+            <TableRow>
+              <TableHead>{t("colPermission")}</TableHead>
+              <TableHead className="w-20 text-center">{t("colGranted")}</TableHead>
+              <TableHead className="w-40">{t("colTier")}</TableHead>
+              <TableHead className="w-24 text-right">{t("colActions")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {allListed.map((perm) => (
+              <PermissionRow
+                key={perm}
+                perm={perm}
+                declared={declared.includes(perm)}
+                optional={optional.includes(perm)}
+                granted={granted.has(perm)}
+                dangerous={perms.isDangerous(perm)}
+                onGrant={() => perms.grant(pluginId, perm, { grantedBy: "user" })}
+                onRevoke={() => perms.revoke(pluginId, perm)}
+                tier={perms.getTier(pluginId, perm)}
+                onTierChange={(tier) => perms.setTier(pluginId, perm, tier)}
+                description={justifications[perm] ?? perms.descriptions[perm] ?? perm}
+              />
+            ))}
+          </TableBody>
+        </Table>
       </Card>
 
       <PluginApprovedBinariesCard pluginId={pluginId} />

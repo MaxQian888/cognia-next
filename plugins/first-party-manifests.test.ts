@@ -123,7 +123,6 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   ],
   "computer-use": [
     "field_missing:tools",
-    "field_missing:native-anthropic-tool",
     "field_missing:subagent",
     "field_missing:agent-team-template",
   ],

@@ -121,6 +121,20 @@ describe("PluginScheduledJobs", () => {
     expect(screen.queryByText("gamma")).not.toBeInTheDocument()
   })
 
+  it("renders labels for every available status filter", () => {
+    mockJobs = [
+      makeJob({ id: "1", pluginId: "alpha", status: "active" }),
+      makeJob({ id: "2", pluginId: "beta", status: "paused" }),
+      makeJob({ id: "3", pluginId: "gamma", status: "disabled" }),
+    ]
+    render(<PluginScheduledJobs />)
+
+    expect(screen.getByRole("button", { name: "status.all 3" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "status.active 1" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "status.paused 1" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "status.disabled 1" })).toBeInTheDocument()
+  })
+
   it("hides the handler column on narrow viewports via hidden sm:table-cell", () => {
     mockJobs = [makeJob({ pluginId: "plugin_x", handler: "myHandler", cron: "0 * * * *" })]
     render(<PluginScheduledJobs />)

@@ -129,6 +129,53 @@ export interface PluginTemplatePackageContribution {
   assets?: readonly TemplatePackageAsset[]
 }
 
+export const WORKFLOW_NODE_GROUP_PAYLOAD_KIND = "cognia.workflow/node-group/v1" as const
+
+export type WorkflowNodeGroupNode = {
+  id: string
+  type: string
+  typeVersion: number
+  position: { x: number; y: number }
+  data: {
+    label: string
+    params?: { [key: string]: TemplateJson }
+    notes?: string
+    disabled?: boolean
+    locked?: boolean
+    errorHandling?: { [key: string]: TemplateJson }
+  }
+  parentId?: string
+  width?: number
+  height?: number
+}
+
+export type WorkflowNodeGroupEdge = {
+  id: string
+  source: string
+  sourceHandle?: string
+  target: string
+  targetHandle?: string
+  label?: string
+  data?: {
+    kind?: "default" | "conditional" | "parallel" | "loop" | "error"
+  }
+}
+
+/**
+ * A reusable authoring-time graph fragment. The editor expands it into normal
+ * workflow nodes/edges under the existing visual `annotation.group` frame;
+ * the runtime never sees a second executor or graph representation.
+ */
+export type WorkflowNodeGroupPayload = {
+  kind: typeof WORKFLOW_NODE_GROUP_PAYLOAD_KIND
+  nodes: WorkflowNodeGroupNode[]
+  edges: WorkflowNodeGroupEdge[]
+}
+
+export type WorkflowNodeGroupDefinition = TemplateDefinitionEnvelope<WorkflowNodeGroupPayload> & {
+  domain: "workflow"
+}
+
 const PACKAGE_ID = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/i
 const DEFINITION_ID = /^[a-z0-9](?:[a-z0-9._:-]{0,126}[a-z0-9])?$/i
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
@@ -282,6 +329,94 @@ export const defineWorkflowTemplate = <
   definition: T
 ): T => defineDomainTemplate("workflow", definition)
 
+function assertWorkflowNodeGroupPayload(payload: WorkflowNodeGroupPayload): void {
+  if (payload?.kind !== WORKFLOW_NODE_GROUP_PAYLOAD_KIND) {
+    throw new Error(
+      `Workflow node group payload kind must be "${WORKFLOW_NODE_GROUP_PAYLOAD_KIND}"`
+    )
+  }
+  if (!Array.isArray(payload.nodes) || payload.nodes.length === 0) {
+    throw new Error("Workflow node group must contain at least one node")
+  }
+  if (payload.nodes.length > 256) {
+    throw new Error("Workflow node group cannot contain more than 256 nodes")
+  }
+  if (!Array.isArray(payload.edges) || payload.edges.length > 1024) {
+    throw new Error("Workflow node group cannot contain more than 1024 edges")
+  }
+
+  const nodeIds = new Set<string>()
+  for (const node of payload.nodes) {
+    if (
+      !node ||
+      typeof node.id !== "string" ||
+      !node.id ||
+      typeof node.type !== "string" ||
+      !node.type ||
+      !Number.isInteger(node.typeVersion) ||
+      node.typeVersion < 1 ||
+      !node.position ||
+      !Number.isFinite(node.position.x) ||
+      !Number.isFinite(node.position.y) ||
+      !node.data ||
+      typeof node.data.label !== "string"
+    ) {
+      throw new Error("Workflow node group contains an invalid node")
+    }
+    if (nodeIds.has(node.id)) {
+      throw new Error(`Workflow node group contains duplicate node id "${node.id}"`)
+    }
+    nodeIds.add(node.id)
+  }
+
+  const edgeIds = new Set<string>()
+  for (const edge of payload.edges) {
+    if (
+      !edge ||
+      typeof edge.id !== "string" ||
+      !edge.id ||
+      typeof edge.source !== "string" ||
+      typeof edge.target !== "string" ||
+      !nodeIds.has(edge.source) ||
+      !nodeIds.has(edge.target)
+    ) {
+      throw new Error("Workflow node group contains an invalid or dangling edge")
+    }
+    if (edgeIds.has(edge.id)) {
+      throw new Error(`Workflow node group contains duplicate edge id "${edge.id}"`)
+    }
+    edgeIds.add(edge.id)
+  }
+}
+
+/** Validate and retain the exact definition type supplied by a plugin author. */
+export function defineWorkflowNodeGroup<const T extends WorkflowNodeGroupDefinition>(
+  definition: T
+): T {
+  const validated = defineDomainTemplate("workflow", definition)
+  assertWorkflowNodeGroupPayload(validated.payload)
+  return validated
+}
+
+/**
+ * Batch authoring helper. Validation is all-or-nothing and identities must be
+ * unique so the matching `ctx.templates.registerMany()` call is atomic.
+ */
+export function defineWorkflowNodeGroups<const T extends readonly WorkflowNodeGroupDefinition[]>(
+  definitions: T
+): T {
+  const identities = new Set<string>()
+  for (const definition of definitions) {
+    defineWorkflowNodeGroup(definition)
+    const identity = `${definition.id}@${definition.version ?? `${definition.status}:${definition.revision}`}`
+    if (identities.has(identity)) {
+      throw new Error(`Duplicate workflow node group definition "${identity}"`)
+    }
+    identities.add(identity)
+  }
+  return definitions
+}
+
 export const defineSubagentTemplate = <
   const TPayload extends TemplateJson,
   const T extends DomainTemplate<"subagent", TPayload>,
@@ -312,6 +447,8 @@ export const defineSkillTemplate = <
 
 export interface PluginTemplatesAPI {
   register(definition: TemplateDefinitionEnvelope): () => void
+  /** Register multiple definitions atomically with one catalog notification. */
+  registerMany(definitions: readonly TemplateDefinitionEnvelope[]): () => void
   query(query?: TemplateCatalogQuery): readonly TemplateDefinitionEnvelope[]
   get(id: string, version?: string | null): TemplateDefinitionEnvelope | undefined
   list(): readonly TemplateDefinitionEnvelope[]

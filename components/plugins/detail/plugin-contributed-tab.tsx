@@ -116,7 +116,11 @@ export function PluginContributedTab({ pluginId }: Props) {
   const sections: Section[] = [
     {
       key: "tools",
-      items: registry.getToolsByPlugin(pluginId).map((tool) => tool.name),
+      items: registry
+        .getToolsByPlugin(pluginId)
+        .map((tool) =>
+          tool.name === "eval_project_v2" ? t("toolLabels.eval_project_v2") : tool.name
+        ),
     },
     {
       key: "modes",

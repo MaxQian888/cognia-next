@@ -70,7 +70,7 @@ export function createTemplatesPanel(ctx: PluginContext) {
 
     if (templates === null) {
       return (
-        <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
+        <div className="flex h-full w-full min-w-0 max-w-full items-center justify-center overflow-x-hidden p-6 text-sm text-muted-foreground">
           Loading templates…
         </div>
       )
@@ -78,7 +78,7 @@ export function createTemplatesPanel(ctx: PluginContext) {
 
     if (templates.length === 0) {
       return (
-        <div className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
+        <div className="flex h-full w-full min-w-0 max-w-full flex-col items-center justify-center gap-1 overflow-x-hidden p-6 text-center">
           <p className="text-sm font-medium">No prompt templates yet</p>
           <p className="text-xs text-muted-foreground">
             Save one with <code>/template-add &lt;name&gt; &lt;body&gt;</code>.
@@ -88,13 +88,13 @@ export function createTemplatesPanel(ctx: PluginContext) {
     }
 
     return (
-      <ul className="flex h-full flex-col gap-1 overflow-y-auto p-2">
+      <ul className="flex h-full w-full min-w-0 max-w-full flex-col gap-1 overflow-x-hidden overflow-y-auto p-2">
         {templates.map((entry) => (
-          <li key={entry.name}>
+          <li key={entry.name} className="min-w-0 max-w-full">
             <button
               type="button"
               onClick={() => void copy(entry)}
-              className="flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              className="flex w-full min-w-0 max-w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
               <span className="w-full truncate text-sm font-medium">{entry.name}</span>
               <span className="w-full truncate text-xs text-muted-foreground">{entry.body}</span>

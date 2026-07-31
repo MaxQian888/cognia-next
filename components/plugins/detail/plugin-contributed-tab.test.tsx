@@ -131,6 +131,19 @@ describe("PluginContributedTab", () => {
     expect(screen.queryByTestId("contributed-themes")).not.toBeInTheDocument()
   })
 
+  it("localizes the Eval Lab tool label without renaming other plugin tools", () => {
+    mockGetToolsByPlugin.mockReturnValue([
+      { name: "eval_project_v2" },
+      { name: "plugin_specific_tool" },
+    ])
+
+    render(<PluginContributedTab pluginId="p1" />)
+
+    expect(screen.getByText("toolLabels.eval_project_v2")).toBeInTheDocument()
+    expect(screen.getByText("plugin_specific_tool")).toBeInTheDocument()
+    expect(screen.queryByText("eval_project_v2")).not.toBeInTheDocument()
+  })
+
   it("enumerates the plugin's contributed lifecycle hooks", () => {
     mockGetHooksByPlugin.mockReturnValue(["onEnable", "onMessageSend"])
     render(<PluginContributedTab pluginId="p1" />)

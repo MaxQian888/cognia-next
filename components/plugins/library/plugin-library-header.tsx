@@ -6,10 +6,10 @@
 //   - Library sub-filter chips (All / Enabled / Updates / Configurable / Errored)
 //   - View-mode toggle (list / card)
 //   - Filter sheet trigger
-//   - Plugin panel toolbar (Install split-button / Check updates / Sync registry)
 //
-// Lives inside the FeaturePageShell's `toolbar` slot so it stays stuck to
-// the top of the center pane on every breakpoint.
+// Lives inside the FeaturePageHeader controls slot. Primary and page-level
+// actions are hosted by the header's fixed action tier so they remain visible
+// when this dense controls row scrolls horizontally.
 
 import { useTranslations } from "next-intl"
 import { ArrowDownUpIcon, FilterIcon, SearchIcon } from "lucide-react"
@@ -25,20 +25,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { PluginCategorySheet } from "../dialogs/plugin-category-sheet"
-import { PluginPanelToolbar } from "../plugin-panel-toolbar"
 import { PluginActiveFilters } from "./plugin-active-filters"
 import { PluginLibrarySubFilter } from "./plugin-library-sub-filter"
 import { PluginLibraryViewToggle } from "./plugin-library-view-toggle"
 
 const SORT_MODES: readonly PluginSortMode[] = ["name", "updated", "usage", "rating"]
 
-interface Props {
-  onCheckUpdates?: () => void
-  onSyncRegistry?: () => Promise<void> | void
-  syncing?: boolean
-}
-
-export function PluginLibraryHeader({ onCheckUpdates, onSyncRegistry, syncing }: Props) {
+export function PluginLibraryHeader() {
   const t = useTranslations("plugins.panel")
   const tSort = useTranslations("plugins.filterSheet")
   // Narrow selectors — subscribing to the whole `filters` object would
@@ -102,11 +95,6 @@ export function PluginLibraryHeader({ onCheckUpdates, onSyncRegistry, syncing }:
           </SelectContent>
         </Select>
         <PluginLibraryViewToggle />
-        <PluginPanelToolbar
-          onCheckUpdates={onCheckUpdates}
-          onSyncRegistry={onSyncRegistry}
-          syncing={syncing}
-        />
       </div>
       <PluginLibrarySubFilter />
       <PluginActiveFilters />

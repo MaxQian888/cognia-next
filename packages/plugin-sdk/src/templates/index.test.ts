@@ -3,6 +3,8 @@ import {
   defineTemplate,
   defineTemplatePackage,
   defineSkillTemplate,
+  defineWorkflowNodeGroup,
+  defineWorkflowNodeGroups,
   validateTemplateDefinition,
 } from "./index"
 
@@ -63,5 +65,102 @@ describe("@cognia/plugin-sdk/templates", () => {
         assets: [],
       })
     ).toThrow(/no definitions/i)
+  })
+
+  it("defines one or many workflow node-group templates", () => {
+    const definition = {
+      apiVersion: TEMPLATE_API_VERSION,
+      id: "demo:review-group",
+      domain: "workflow" as const,
+      status: "published" as const,
+      revision: 1,
+      version: "1.0.0",
+      metadata: { name: "Review group" },
+      payload: {
+        kind: "cognia.workflow/node-group/v1" as const,
+        nodes: [
+          {
+            id: "prompt",
+            type: "ai.prompt",
+            typeVersion: 1,
+            position: { x: 0, y: 0 },
+            data: { label: "Review", params: { prompt: "Review this change" } },
+          },
+        ],
+        edges: [],
+      },
+      inputs: [],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop" as const, "web" as const] },
+      provenance: { source: "plugin" as const, pluginId: "demo" },
+      contentHash: "a".repeat(64),
+      createdAt: 1,
+      updatedAt: 1,
+    }
+
+    expect(defineWorkflowNodeGroup(definition)).toBe(definition)
+    expect(defineWorkflowNodeGroups([definition] as const)).toEqual([definition])
+  })
+
+  it("rejects malformed or duplicate workflow node-group definitions", () => {
+    const base = {
+      apiVersion: TEMPLATE_API_VERSION,
+      id: "demo:invalid-group",
+      domain: "workflow" as const,
+      status: "published" as const,
+      revision: 1,
+      version: "1.0.0",
+      metadata: { name: "Invalid group" },
+      payload: {
+        kind: "cognia.workflow/node-group/v1" as const,
+        nodes: [],
+        edges: [],
+      },
+      inputs: [],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop" as const] },
+      provenance: { source: "plugin" as const, pluginId: "demo" },
+      contentHash: "a".repeat(64),
+      createdAt: 1,
+      updatedAt: 1,
+    }
+
+    expect(() => defineWorkflowNodeGroup(base)).toThrow(/at least one node/i)
+    expect(() =>
+      defineWorkflowNodeGroups([
+        {
+          ...base,
+          payload: {
+            ...base.payload,
+            nodes: [
+              {
+                id: "one",
+                type: "ai.prompt",
+                typeVersion: 1,
+                position: { x: 0, y: 0 },
+                data: { label: "One" },
+              },
+            ],
+          },
+        },
+        {
+          ...base,
+          payload: {
+            ...base.payload,
+            nodes: [
+              {
+                id: "two",
+                type: "io.output",
+                typeVersion: 1,
+                position: { x: 0, y: 0 },
+                data: { label: "Two" },
+              },
+            ],
+          },
+        },
+      ] as never)
+    ).toThrow(/duplicate/i)
   })
 })

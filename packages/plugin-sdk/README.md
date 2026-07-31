@@ -46,6 +46,8 @@ export default definePlugin({
 - `@cognia/plugin-sdk/hooks`: lifecycle hook payloads and hook interfaces.
 - `@cognia/plugin-sdk/permissions`: public permission values and permission types.
 - `@cognia/plugin-sdk/extensions`: extension-point constants and contribution types.
+- `@cognia/plugin-sdk/templates`: unified template definitions, node-group helpers, package
+  helpers, and the runtime `PluginTemplatesAPI` contract.
 - `@cognia/plugin-sdk/api/tool` and `/api/native-anthropic-tool`: explicit compatibility
   subpaths resolving to the safe author surface in the published package.
 

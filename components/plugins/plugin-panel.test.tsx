@@ -114,23 +114,27 @@ jest.mock("@/lib/db/schema", () => ({
 // section / which detail content is mounted).
 jest.mock("@/components/feature-shell/feature-page-shell", () => ({
   FeaturePageShell: ({
-    toolbar,
+    header,
     leftPane,
     rightPane,
     children,
   }: {
-    toolbar?: React.ReactNode
+    header?: React.ReactNode
     leftPane?: { content: React.ReactNode }
     rightPane?: { content: React.ReactNode }
     children: React.ReactNode
   }) => (
     <div data-testid="feature-page-shell">
-      <div data-testid="shell-toolbar">{toolbar}</div>
+      <div data-testid="shell-header">{header}</div>
       <div data-testid="shell-left">{leftPane?.content}</div>
       <div data-testid="shell-center">{children}</div>
       <div data-testid="shell-right">{rightPane?.content}</div>
     </div>
   ),
+}))
+
+jest.mock("./devtools/plugin-devtools-pane", () => ({
+  PluginDevtoolsPane: () => <div data-testid="plugin-devtools-pane" />,
 }))
 
 import { PluginPanel } from "./plugin-panel"
@@ -196,6 +200,15 @@ describe("PluginPanel (3-pane shell)", () => {
     usePluginsStore.setState({ activeSection: "governance" })
     render(<PluginPanel />)
     expect(screen.getByTestId("plugin-governance-pane")).toBeInTheDocument()
+    expect(screen.getByTestId("shell-right")).toBeEmptyDOMElement()
+  })
+
+  it("uses the full workspace and hides plugin detail when activeSection=devtools", () => {
+    usePluginsStore.setState({ activeSection: "devtools" })
+    render(<PluginPanel />)
+
+    expect(screen.getByTestId("plugin-devtools-pane")).toBeInTheDocument()
+    expect(screen.getByTestId("shell-right")).toBeEmptyDOMElement()
   })
 
   it("opens the rollback dialog when the store target is set", () => {

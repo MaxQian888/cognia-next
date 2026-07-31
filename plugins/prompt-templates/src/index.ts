@@ -24,6 +24,7 @@ import { createTemplatesPanel } from "./templates-panel"
 import manifestJson from "../plugin.json"
 
 const KEY_PREFIX = "template:"
+let disposeTemplatesPanel: (() => void) | undefined
 
 async function storeTemplate(ctx: PluginContext, name: string, body: string): Promise<void> {
   await ctx.storage?.set?.(`${KEY_PREFIX}${name}`, body)
@@ -68,7 +69,7 @@ const definition: PluginDefinition = {
     // is the surface a user browses their saved templates from. Registered on
     // the `session` resource: that is the dock's fallback when no artifact is
     // open, i.e. the rail's default state.
-    const disposePanel = ctx.contextPanels?.register?.({
+    disposeTemplatesPanel = ctx.contextPanels?.register?.({
       id: "templates",
       activity: "templates",
       label: "Prompt Templates",
@@ -138,8 +139,11 @@ const definition: PluginDefinition = {
             return false
         }
       },
-      onDeactivate: () => disposePanel?.(),
     }
+  },
+  deactivate: () => {
+    disposeTemplatesPanel?.()
+    disposeTemplatesPanel = undefined
   },
 }
 

@@ -37,6 +37,7 @@ import { unregisterScheduledTasksForPlugin } from "@/lib/plugin/bridge/scheduled
 import { usePluginMarketplace, PluginsViewProvider } from "@/hooks/plugins"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
+import { PlugIcon } from "lucide-react"
 
 // Dialog hosts — all driven by store targets, mounted once at the panel root.
 import { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
@@ -48,11 +49,13 @@ import { PluginConflictDialog } from "./dialogs/plugin-conflict-dialog"
 import { PluginUpdateDialog } from "./dialogs/plugin-update-dialog"
 import { PluginRollbackDialog } from "./dialogs/plugin-rollback-dialog"
 import { PluginExtensionSlot } from "./plugin-extension-slot"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 
 // 3-pane shell pieces.
 import { PluginNavSidebar } from "./plugin-nav-sidebar"
 import { PluginLibraryPane } from "./library/plugin-library-pane"
 import { PluginLibraryHeader } from "./library/plugin-library-header"
+import { PluginPanelToolbar } from "./plugin-panel-toolbar"
 import { PluginDiscoverPane } from "./discover/plugin-discover-pane"
 import { PluginGovernancePane } from "./governance/plugin-governance-pane"
 import { PluginDevtoolsPane } from "./devtools/plugin-devtools-pane"
@@ -268,18 +271,10 @@ interface NewShellLayoutProps {
 
 function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLayoutProps) {
   const t = useTranslations("plugins.sections")
+  const tPage = useTranslations("plugins")
   const activeSection = usePluginsStore((s) => s.activeSection)
 
-  const toolbar =
-    activeSection === "library" ? (
-      <PluginLibraryHeader
-        onCheckUpdates={onCheckUpdates}
-        onSyncRegistry={onSyncRegistry}
-        syncing={syncing}
-      />
-    ) : (
-      <SectionHeader />
-    )
+  const controls = activeSection === "library" ? <PluginLibraryHeader /> : undefined
 
   const center =
     activeSection === "library" ? (
@@ -295,7 +290,24 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
   return (
     <FeaturePageShell
       storageId="plugins"
-      toolbar={toolbar}
+      header={
+        <FeaturePageHeader
+          icon={<PlugIcon />}
+          title={tPage("title")}
+          description={tPage("description")}
+          context={t(activeSection)}
+          controls={controls}
+          actions={
+            activeSection === "library" ? (
+              <PluginPanelToolbar
+                onCheckUpdates={onCheckUpdates}
+                onSyncRegistry={onSyncRegistry}
+                syncing={syncing}
+              />
+            ) : undefined
+          }
+        />
+      }
       leftPane={{
         label: t("library"),
         content: <PluginNavSidebar />,
@@ -306,30 +318,24 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
         minSize: 12,
         maxSize: 24,
       }}
-      rightPane={{
-        label: t("detailSheetLabel"),
-        // README-centric detail reads better with width — give it a wider
-        // default/max than the old tabbed pane (the shell still collapses it
-        // into a Sheet on narrow viewports).
-        content: <PluginDetailPane />,
-        defaultSize: 46,
-        minSize: 30,
-        maxSize: 60,
-      }}
+      rightPane={
+        activeSection === "devtools" || activeSection === "governance"
+          ? undefined
+          : {
+              label: t("detailSheetLabel"),
+              // README-centric detail reads better with width — give it a wider
+              // default/max than the old tabbed pane (the shell still collapses
+              // it into a Sheet on narrow viewports).
+              content: <PluginDetailPane />,
+              defaultSize: 46,
+              minSize: 30,
+              maxSize: 60,
+            }
+      }
     >
       {center}
       <PluginExtensionSlot point="settings.plugins" className="border-t px-4 py-3 empty:hidden" />
     </FeaturePageShell>
-  )
-}
-
-function SectionHeader() {
-  const t = useTranslations("plugins.sections")
-  const activeSection = usePluginsStore((s) => s.activeSection)
-  return (
-    <div className="flex w-full items-center px-2 py-1.5 text-sm font-medium">
-      {t(activeSection)}
-    </div>
   )
 }
 

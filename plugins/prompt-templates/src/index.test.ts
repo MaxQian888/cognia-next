@@ -114,7 +114,6 @@ describe("prompt-templates (built-in)", () => {
     const { ctx, contextPanels } = makeCtx()
     const hooks = (await promptTemplatesPlugin.activate?.(ctx)) as unknown as {
       onCommand: (command: string, argv: string[]) => Promise<boolean>
-      onDeactivate: () => void
     }
 
     expect(contextPanels.setBadge).toHaveBeenLastCalledWith("templates", 0)
@@ -127,11 +126,13 @@ describe("prompt-templates (built-in)", () => {
   it("unregisters the panel when the plugin deactivates", async () => {
     const { ctx, disposePanel } = makeCtx()
     const hooks = (await promptTemplatesPlugin.activate?.(ctx)) as unknown as {
-      onDeactivate: () => void
+      onCommand: (command: string, argv: string[]) => Promise<boolean>
+      onDeactivate?: () => void
     }
 
+    expect(hooks.onDeactivate).toBeUndefined()
     expect(disposePanel).not.toHaveBeenCalled()
-    hooks.onDeactivate()
+    await promptTemplatesPlugin.deactivate?.(ctx)
     expect(disposePanel).toHaveBeenCalledTimes(1)
   })
 
@@ -172,7 +173,7 @@ describe("prompt-templates (built-in)", () => {
   })
 
   it("leaves command teardown to the manager", async () => {
-    expect(promptTemplatesPlugin.deactivate).toBeUndefined()
+    expect(promptTemplatesPlugin.deactivate).toEqual(expect.any(Function))
     expect(unregisterMock).not.toHaveBeenCalled()
   })
 })

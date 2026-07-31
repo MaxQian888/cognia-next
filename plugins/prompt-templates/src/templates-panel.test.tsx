@@ -51,6 +51,8 @@ describe("templates panel", () => {
     render(<Panel {...renderProps} />)
 
     const row = await screen.findByRole("button", { name: /greeting/ })
+    expect(row.closest("ul")).toHaveClass("w-full", "min-w-0", "max-w-full", "overflow-x-hidden")
+    expect(row).toHaveClass("min-w-0", "max-w-full")
     await userEvent.click(row)
 
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("hello there"))
@@ -77,7 +79,12 @@ describe("templates panel", () => {
     const Panel = createTemplatesPanel(ctx)
     render(<Panel {...renderProps} />)
 
-    expect(await screen.findByText("No prompt templates yet")).toBeInTheDocument()
+    expect((await screen.findByText("No prompt templates yet")).parentElement).toHaveClass(
+      "w-full",
+      "min-w-0",
+      "max-w-full",
+      "overflow-x-hidden"
+    )
   })
 
   it("re-reads storage on re-activation, since slash commands write while it is hidden", async () => {

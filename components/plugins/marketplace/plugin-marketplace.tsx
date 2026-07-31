@@ -140,7 +140,8 @@ export function PluginMarketplace() {
     })
   }
 
-  const allResults = market.state.kind === "ready" ? market.state.results : []
+  const allResults =
+    market.state.kind === "ready" && Array.isArray(market.state.results) ? market.state.results : []
 
   const sectionEntries = (() => {
     switch (section) {
@@ -216,35 +217,56 @@ export function PluginMarketplace() {
   const showDiscovery = section === "all" && market.query.trim() === ""
 
   return (
-    <div className="space-y-4">
+    <div className="w-full min-w-0 max-w-full space-y-4 overflow-x-clip">
       <PluginMarketplaceModeBanner />
       {showDiscovery && <PluginDiscovery onInstall={(id, version) => onInstallById(id, version)} />}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        {/* Same Input, two data sources. The Open VSX hook debounces
-            internally, so Enter is a redundant-but-harmless refresh there. */}
-        <Input
-          placeholder={isVscodeSection ? tv("searchPlaceholder") : t("searchPlaceholder")}
-          value={isVscodeSection ? openVsx.query : market.query}
-          onChange={(e) =>
-            isVscodeSection ? openVsx.setQuery(e.target.value) : market.setQuery(e.target.value)
-          }
-          onKeyDown={(e) => {
-            if (e.key !== "Enter") return
-            if (isVscodeSection) openVsx.refresh()
-            else void market.refresh()
-          }}
-          className="w-full sm:max-w-md"
-        />
-        <div className="flex items-center gap-2 min-w-0">
+      <div
+        className="min-w-0 space-y-2 rounded-xl border bg-card/40 p-2.5 shadow-xs"
+        data-testid="plugin-marketplace-toolbar"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          {/* Same Input, two data sources. The Open VSX hook debounces
+              internally, so Enter is a redundant-but-harmless refresh there. */}
+          <Input
+            placeholder={isVscodeSection ? tv("searchPlaceholder") : t("searchPlaceholder")}
+            aria-label={isVscodeSection ? tv("searchPlaceholder") : t("searchPlaceholder")}
+            value={isVscodeSection ? openVsx.query : market.query}
+            onChange={(e) =>
+              isVscodeSection ? openVsx.setQuery(e.target.value) : market.setQuery(e.target.value)
+            }
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return
+              if (isVscodeSection) openVsx.refresh()
+              else void market.refresh()
+            }}
+            className="min-w-0 flex-1 bg-background/80 sm:max-w-lg"
+          />
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSourcesDialogOpen(true)}
+              aria-label={t("manageSources")}
+              data-testid="plugin-marketplace-manage-sources"
+            >
+              <GitBranchIcon className="size-3.5 lg:mr-1.5" />
+              <span className="hidden lg:inline">{t("manageSources")}</span>
+            </Button>
+            <PluginComparisonTrigger />
+          </div>
+        </div>
+        <div className="flex min-w-0 items-center">
           <ScrollShadowRow
-            className="flex-1 min-w-0"
-            scrollerClassName="-mx-1 px-1 sm:overflow-visible sm:mx-0 sm:px-0"
+            className="min-w-0 flex-1"
+            scrollerClassName="-mx-0.5 px-0.5 pb-0.5"
             testId="plugin-marketplace-sections"
           >
             <ToggleGroup
               type="single"
               value={section}
               onValueChange={(v) => v && setSection(v as Section)}
+              variant="outline"
+              size="sm"
               className="w-max"
             >
               <ToggleGroupItem value="all">{t("sections.all")}</ToggleGroupItem>
@@ -257,17 +279,6 @@ export function PluginMarketplace() {
               <ToggleGroupItem value="vscode">{t("sections.vscode")}</ToggleGroupItem>
             </ToggleGroup>
           </ScrollShadowRow>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setSourcesDialogOpen(true)}
-            aria-label={t("manageSources")}
-            data-testid="plugin-marketplace-manage-sources"
-          >
-            <GitBranchIcon className="size-3.5 lg:mr-1.5" />
-            <span className="hidden lg:inline">{t("manageSources")}</span>
-          </Button>
-          <PluginComparisonTrigger />
         </div>
       </div>
 

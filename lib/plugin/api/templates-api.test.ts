@@ -41,6 +41,56 @@ describe("PluginTemplatesAPI", () => {
     expect(api.list()).toEqual([])
   })
 
+  it("registers a validated template batch atomically", async () => {
+    const catalog = new TemplateCatalog()
+    const api = createTemplatesAPI("demo.plugin", {
+      catalog,
+      service: {} as never,
+      hasPermission: () => true,
+      confirm: async () => true,
+    })
+    const first = await pluginTemplate()
+    const second = await createTemplateDefinition({
+      ...first,
+      id: "demo.plugin:skill.extract",
+      metadata: { name: "Extract" },
+      payload: { content: "Extract" },
+    })
+    const listener = jest.fn()
+    api.subscribe(listener)
+
+    const dispose = api.registerMany([first, second])
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(api.list().map((definition) => definition.id)).toEqual([
+      "demo.plugin:skill.extract",
+      "demo.plugin:skill.summary",
+    ])
+
+    dispose()
+    expect(api.list()).toEqual([])
+  })
+
+  it("does not publish a partial batch when one definition is invalid", async () => {
+    const catalog = new TemplateCatalog()
+    const api = createTemplatesAPI("demo.plugin", {
+      catalog,
+      service: {} as never,
+      hasPermission: () => true,
+      confirm: async () => true,
+    })
+    const valid = await pluginTemplate()
+    const spoofed = {
+      ...valid,
+      id: "another.plugin:skill.summary",
+      provenance: { ...valid.provenance, pluginId: "another.plugin" },
+    }
+
+    expect(() => api.registerMany([valid, spoofed])).toThrow(/provenance|prefixed/i)
+    expect(catalog.getSnapshot().definitions).toEqual([])
+    expect(catalog.getRevision()).toBe(0)
+  })
+
   it("exposes a live read-only catalog and tears subscriptions down with the plugin", async () => {
     const catalog = new TemplateCatalog()
     const api = createTemplatesAPI("demo.plugin", {

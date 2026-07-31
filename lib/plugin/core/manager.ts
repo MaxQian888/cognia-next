@@ -806,6 +806,13 @@ export class PluginManager {
     )
   }
 
+  private isRetiredBuiltin(plugin: Plugin): boolean {
+    return (
+      plugin.path?.startsWith("builtin://") === true &&
+      getBrowserBuiltinRegistryEntry(plugin.manifest.id) === undefined
+    )
+  }
+
   private recordPluginVerification(
     pluginId: string,
     params: {
@@ -1204,6 +1211,10 @@ export class PluginManager {
             // (e.g. desktop-native built-ins on the browser/mobile shell) —
             // each would throw in loadPlugin and fire a failure toast at boot.
             !this.isBlockedByRuntimeProfile(plugin.manifest) &&
+            // Removed first-party plugins can survive in the persisted store
+            // across an app upgrade. A builtin:// path is not fetchable, so
+            // only entries still present in the static registry may restore.
+            !this.isRetiredBuiltin(plugin) &&
             // Same for renderer-JS plugins awaiting the user's frontend trust
             // grant: enabling would throw PluginFrontendTrustError and toast
             // on EVERY boot until re-trusted. They stay visible in /plugins
@@ -2253,6 +2264,28 @@ export class PluginManager {
       return
     }
 
+    // Reject an incompatible runtime before dependency activation or Dexie
+    // schema registration. `loadPlugin` repeats these guards at its direct-call
+    // boundary, but enablePlugin performs schema work before calling it.
+    const compatibility = this.applyCompatibilityPolicy(plugin.manifest, "enable")
+    if (compatibility.blocked) {
+      const messages = compatibility.diagnostics
+        .filter((item) => item.severity === "error")
+        .map((item) => `${item.code}: ${item.message}`)
+      throw new Error(`Incompatible plugin: ${messages.join("; ")}`)
+    }
+    const runtimeDiagnostics = this.collectRuntimeProfileDiagnostics(plugin.manifest)
+    const blockingRuntimeDiagnostics = runtimeDiagnostics.filter(
+      (item) => item.severity === "error"
+    )
+    if (blockingRuntimeDiagnostics.length > 0) {
+      throw new Error(
+        `Runtime incompatible plugin: ${blockingRuntimeDiagnostics
+          .map((item) => `${item.code}: ${item.message}`)
+          .join("; ")}`
+      )
+    }
+
     // Required-dependency gate (load-order, ADR-0017/0032 parity): reject a
     // missing / disabled / version-mismatched / cyclic required dependency
     // before doing any load work. Runs outside the try below so the typed
@@ -3247,6 +3280,10 @@ export class PluginManager {
       // throw in loadPlugin and spam an activation-failure toast on every
       // matching event. They remain enable-able manually from `/plugins`.
       if (this.isBlockedByRuntimeProfile(plugin.manifest)) {
+        continue
+      }
+
+      if (this.isRetiredBuiltin(plugin)) {
         continue
       }
 

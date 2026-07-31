@@ -18,9 +18,16 @@ import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
+  ActivityIcon,
   BugIcon,
+  CodeXmlIcon,
+  GaugeIcon,
+  GitBranchIcon,
+  RadioTowerIcon,
   RefreshCcwIcon,
   RotateCcwIcon,
+  ScanSearchIcon,
+  TerminalSquareIcon,
   Trash2Icon,
   TimerIcon,
   ZapIcon,
@@ -57,7 +64,6 @@ import {
 import { usePluginHotReload } from "@/lib/plugin/devtools/hot-reload.client"
 import { listPlugins } from "@/lib/db/plugins"
 import { isTauri } from "@/lib/tauri"
-import { ScrollShadowRow } from "./scroll-shadow-row"
 import {
   clearAllTriggerAudit,
   getTriggerAuditRevision,
@@ -120,48 +126,86 @@ export function PluginDevtoolsPanel() {
   }
 
   return (
-    <Tabs defaultValue="logs" className="space-y-3">
-      <ScrollShadowRow scrollerClassName="-mx-1 px-1" testId="plugin-devtools-tabs">
-        <TabsList className="inline-flex h-9 w-max whitespace-nowrap">
-          <TabsTrigger value="logs">{t("tabs.logs")}</TabsTrigger>
-          <TabsTrigger value="bus">{t("tabs.bus")}</TabsTrigger>
-          <TabsTrigger value="hooks">{t("tabs.hooks")}</TabsTrigger>
-          <TabsTrigger value="profiler">{t("tabs.profiler")}</TabsTrigger>
-          <TabsTrigger value="hotReload">{t("tabs.hotReload")}</TabsTrigger>
-          <TabsTrigger value="inspect">{t("tabs.inspect")}</TabsTrigger>
-          <TabsTrigger value="triggers">{t("tabs.triggers")}</TabsTrigger>
-          <TabsTrigger value="cli">{t("tabs.cli")}</TabsTrigger>
-        </TabsList>
-      </ScrollShadowRow>
-
-      <TabsContent value="logs" className="mt-0">
-        <LogsPane />
-      </TabsContent>
-      <TabsContent value="bus" className="mt-0">
-        <BusPane />
-      </TabsContent>
-      <TabsContent value="hooks" className="mt-0">
-        <HookHistoryPane />
-      </TabsContent>
-      <TabsContent value="profiler" className="mt-0">
-        <ProfilerPane />
-      </TabsContent>
-      <TabsContent value="hotReload" className="mt-0">
-        <HotReloadPane />
-      </TabsContent>
-      <TabsContent value="inspect" className="mt-0">
-        <InspectPane />
-      </TabsContent>
-      <TabsContent value="triggers" className="mt-0">
-        <TriggersPane />
-      </TabsContent>
-      <TabsContent value="cli" className="mt-0">
-        <div className="space-y-3">
-          <CogniaCliStatusCard />
-          <CogniaCliLauncher />
+    <Card className="gap-0 overflow-hidden border-border/70 py-0 shadow-sm">
+      <div className="flex items-center gap-3 border-b px-4 py-3">
+        <div className="flex size-9 items-center justify-center rounded-lg border bg-muted/50">
+          <BugIcon className="size-4 text-muted-foreground" aria-hidden="true" />
         </div>
-      </TabsContent>
-    </Tabs>
+        <h2 className="text-sm font-semibold tracking-tight">{t("title")}</h2>
+      </div>
+
+      <Tabs defaultValue="logs" className="min-w-0 gap-0">
+        <div className="border-b bg-muted/15 p-2">
+          <TabsList
+            className="grid h-auto w-full grid-cols-2 gap-1 p-1 sm:grid-cols-4 2xl:grid-cols-8"
+            data-testid="plugin-devtools-tabs"
+          >
+            <TabsTrigger value="logs">
+              <ActivityIcon aria-hidden="true" />
+              <span className="truncate">{t("tabs.logs")}</span>
+            </TabsTrigger>
+            <TabsTrigger value="bus">
+              <RadioTowerIcon aria-hidden="true" />
+              <span className="truncate">{t("tabs.bus")}</span>
+            </TabsTrigger>
+            <TabsTrigger value="hooks">
+              <GitBranchIcon aria-hidden="true" />
+              <span className="truncate">{t("tabs.hooks")}</span>
+            </TabsTrigger>
+            <TabsTrigger value="profiler">
+              <GaugeIcon aria-hidden="true" />
+              <span className="truncate">{t("tabs.profiler")}</span>
+            </TabsTrigger>
+            <TabsTrigger value="hotReload">
+              <RotateCcwIcon aria-hidden="true" />
+              <span className="truncate">{t("tabs.hotReload")}</span>
+            </TabsTrigger>
+            <TabsTrigger value="inspect">
+              <ScanSearchIcon aria-hidden="true" />
+              <span className="truncate">{t("tabs.inspect")}</span>
+            </TabsTrigger>
+            <TabsTrigger value="triggers">
+              <CodeXmlIcon aria-hidden="true" />
+              <span className="truncate">{t("tabs.triggers")}</span>
+            </TabsTrigger>
+            <TabsTrigger value="cli">
+              <TerminalSquareIcon aria-hidden="true" />
+              <span className="truncate">{t("tabs.cli")}</span>
+            </TabsTrigger>
+          </TabsList>
+        </div>
+
+        <div className="min-w-0 p-3 md:p-4">
+          <TabsContent value="logs" className="mt-0 min-w-0">
+            <LogsPane />
+          </TabsContent>
+          <TabsContent value="bus" className="mt-0 min-w-0">
+            <BusPane />
+          </TabsContent>
+          <TabsContent value="hooks" className="mt-0 min-w-0">
+            <HookHistoryPane />
+          </TabsContent>
+          <TabsContent value="profiler" className="mt-0 min-w-0">
+            <ProfilerPane />
+          </TabsContent>
+          <TabsContent value="hotReload" className="mt-0 min-w-0">
+            <HotReloadPane />
+          </TabsContent>
+          <TabsContent value="inspect" className="mt-0 min-w-0">
+            <InspectPane />
+          </TabsContent>
+          <TabsContent value="triggers" className="mt-0 min-w-0">
+            <TriggersPane />
+          </TabsContent>
+          <TabsContent value="cli" className="mt-0 min-w-0">
+            <div className="space-y-3">
+              <CogniaCliStatusCard />
+              <CogniaCliLauncher />
+            </div>
+          </TabsContent>
+        </div>
+      </Tabs>
+    </Card>
   )
 }
 
@@ -466,7 +510,7 @@ export function ProfilerPane() {
                     <div className="flex items-center justify-between gap-2 text-xs">
                       <code className="font-mono truncate">{op}</code>
                       <span className="text-muted-foreground shrink-0 tabular-nums">
-                        {avg.toFixed(2)}ms · {count}×
+                        {`${avg.toFixed(2)}ms · ${count}×`}
                       </span>
                     </div>
                     <Progress value={share} aria-label={op} />

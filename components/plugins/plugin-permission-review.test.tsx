@@ -79,19 +79,25 @@ describe("PluginPermissionReview", () => {
     expect(guard.getPluginPermissions("p_review")).toEqual([])
   })
 
-  it("applies mobile-first w-[95vw] width to DialogContent", () => {
+  it("keeps the dialog within the viewport while allowing a wider desktop layout", () => {
     render(<PluginPermissionReview />)
     const dialog = screen.getByRole("dialog")
-    expect(dialog.className).toContain("w-[95vw]")
+    expect(dialog.className).toContain("w-[calc(100%-2rem)]")
+    expect(dialog.className).toContain("sm:max-w-3xl")
   })
 
-  it("hides Declared and Optional columns on narrow viewports via hidden md:table-cell", () => {
+  it("moves manifest and optional state into the permission summary instead of wide columns", () => {
     render(<PluginPermissionReview />)
-    const declaredHeader = screen.getByText("colDeclared").closest("th")
-    const optionalHeader = screen.getByText("colOptional").closest("th")
-    expect(declaredHeader?.className).toContain("hidden")
-    expect(declaredHeader?.className).toContain("md:table-cell")
-    expect(optionalHeader?.className).toContain("hidden")
-    expect(optionalHeader?.className).toContain("md:table-cell")
+    expect(screen.queryByRole("columnheader", { name: "colDeclared" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("columnheader", { name: "colOptional" })).not.toBeInTheDocument()
+    expect(screen.getAllByText("colDeclared")).not.toHaveLength(0)
+    expect(screen.getAllByText("colOptional")).not.toHaveLength(0)
+  })
+
+  it("uses stacked permission rows below the small breakpoint", () => {
+    render(<PluginPermissionReview />)
+    const permissionRow = screen.getByText("clipboard:read").closest("tr")
+    expect(permissionRow?.className).toContain("grid")
+    expect(permissionRow?.className).toContain("sm:table-row")
   })
 })

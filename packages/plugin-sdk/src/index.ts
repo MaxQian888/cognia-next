@@ -18,6 +18,10 @@ export type {
   TemplateInstantiationResult,
   TemplatePackageManifest,
   TemplatePreflightPlan,
+  WorkflowNodeGroupDefinition,
+  WorkflowNodeGroupEdge,
+  WorkflowNodeGroupNode,
+  WorkflowNodeGroupPayload,
 } from "./templates"
 export type * from "./api/integration"
 export type { PluginModalProps } from "./api/modal-mount"
@@ -56,7 +60,14 @@ export {
   PLUGIN_CHARACTER_PACK_SOFT_LIMIT,
 } from "./define/define-character-pack"
 export { defineWorkflowTemplate } from "./define/define-workflow-template"
-export { defineTemplate, defineTemplatePackage, verifyTemplateDefinitionHash } from "./templates"
+export {
+  defineTemplate,
+  defineTemplatePackage,
+  defineWorkflowNodeGroup,
+  defineWorkflowNodeGroups,
+  verifyTemplateDefinitionHash,
+  WORKFLOW_NODE_GROUP_PAYLOAD_KIND,
+} from "./templates"
 export { defineAgentTool } from "./define/define-agent-tool"
 export { defineTool } from "./define/define-tool"
 export { defineGuardrail } from "./define/define-guardrail"

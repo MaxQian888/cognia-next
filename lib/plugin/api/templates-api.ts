@@ -55,6 +55,30 @@ function requirePermission(
   }
 }
 
+function assertDynamicPluginTemplate(
+  pluginId: string,
+  definition: TemplateDefinitionEnvelope
+): void {
+  if (definition.provenance.source !== "plugin" || definition.provenance.pluginId !== pluginId) {
+    throw new Error(`Template provenance must identify the active plugin "${pluginId}"`)
+  }
+  if (!definition.id.startsWith(`${pluginId}:`)) {
+    throw new Error(`Dynamic template id must be prefixed with "${pluginId}:"`)
+  }
+  if (!definition.version || definition.status !== "published") {
+    throw new Error("Plugins may dynamically register immutable published releases only")
+  }
+  const validation = validateTemplateDefinition(definition)
+  if (!validation.ok) {
+    throw new Error(
+      `Plugin template is invalid: ${validation.issues
+        .filter((issue) => issue.severity === "error")
+        .map((issue) => issue.message)
+        .join("; ")}`
+    )
+  }
+}
+
 export function createTemplatesAPI(
   pluginId: string,
   deps: CreateTemplatesAPIDependencies
@@ -64,28 +88,16 @@ export function createTemplatesAPI(
   return {
     register(definition) {
       requirePermission(deps, "templates:contribute")
-      if (
-        definition.provenance.source !== "plugin" ||
-        definition.provenance.pluginId !== pluginId
-      ) {
-        throw new Error(`Template provenance must identify the active plugin "${pluginId}"`)
-      }
-      if (!definition.id.startsWith(`${pluginId}:`)) {
-        throw new Error(`Dynamic template id must be prefixed with "${pluginId}:"`)
-      }
-      if (!definition.version || definition.status !== "published") {
-        throw new Error("Plugins may dynamically register immutable published releases only")
-      }
-      const validation = validateTemplateDefinition(definition)
-      if (!validation.ok) {
-        throw new Error(
-          `Plugin template is invalid: ${validation.issues
-            .filter((issue) => issue.severity === "error")
-            .map((issue) => issue.message)
-            .join("; ")}`
-        )
-      }
+      assertDynamicPluginTemplate(pluginId, definition)
       return deps.catalog.register(sourceId, definition)
+    },
+
+    registerMany(definitions) {
+      requirePermission(deps, "templates:contribute")
+      for (const definition of definitions) {
+        assertDynamicPluginTemplate(pluginId, definition)
+      }
+      return deps.catalog.registerMany(sourceId, definitions)
     },
 
     list() {

@@ -38,6 +38,10 @@ test.describe("plugin workspace — desktop (1440)", () => {
     await page.goto("/plugins?section=library", { waitUntil: "domcontentloaded" })
     const shell = page.getByTestId("feature-shell-plugins")
     await expect(shell).toBeVisible({ timeout: 15_000 })
+    await expect(shell.locator('[data-slot="feature-page-header"]')).toHaveAttribute(
+      "data-variant",
+      "management"
+    )
 
     // Nav sidebar, center pane, and library content all laid out.
     const nav = page.getByTestId("plugin-nav-library")

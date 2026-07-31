@@ -1912,6 +1912,53 @@ describe("PluginManager", () => {
       )
     })
 
+    it("does not mutate Dexie schema for a runtime-incompatible plugin", async () => {
+      const { applyPluginTables } = jest.requireMock("@/lib/plugin/dexie/bridge") as {
+        applyPluginTables: jest.Mock
+      }
+      applyPluginTables.mockClear()
+
+      const pluginId = "desktop-only-dexie-fixture"
+      const store = {
+        plugins: {
+          [pluginId]: {
+            manifest: {
+              ...createManifest(pluginId),
+              dexie: { tables: [{ name: "items", schema: "++id" }] },
+              runtimeCompatibility: {
+                browser: {
+                  availability: "blocked" as const,
+                  reason: "Requires a desktop runtime.",
+                },
+              },
+            },
+            status: "installed",
+            source: "builtin",
+            path: pluginId,
+            config: {},
+          },
+        } as Record<string, Plugin>,
+        registerPluginHooks: jest.fn(),
+        registerPluginTool: jest.fn(),
+        registerPluginCommand: jest.fn(),
+        setPluginError: jest.fn(),
+        setPluginVerificationSnapshot: jest.fn(),
+      }
+
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({
+        pluginDirectory: "",
+        runtimeProfile: "browser",
+        compatibilityMode: "block",
+      })
+      const loadSpy = jest.spyOn(manager, "loadPlugin")
+
+      await expect(manager.enablePlugin(pluginId)).rejects.toThrow(/Incompatible plugin/i)
+
+      expect(applyPluginTables).not.toHaveBeenCalled()
+      expect(loadSpy).not.toHaveBeenCalled()
+    })
+
     it("registers a WASM plugin's declared tools so the agent can call them", async () => {
       const wasmManifest: PluginManifest = {
         id: "demo.wasm.tools",
@@ -2737,12 +2784,33 @@ describe("PluginManager", () => {
       expect(enableSpy).not.toHaveBeenCalled()
     })
 
+    it("does not activate a retired builtin that is absent from the bundled registry", async () => {
+      const retired: Plugin = {
+        manifest: {
+          ...createManifest("github-delivery"),
+          activationEvents: ["startup"],
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://github-delivery",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "github-delivery": retired } })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("startup")
+
+      expect(enableSpy).not.toHaveBeenCalled()
+    })
+
     it("still activates a browser-blocked plugin on the tauri profile (desktop unaffected)", async () => {
       // Runtime-profile gating is browser-only; on desktop the same builtin
       // must continue to auto-activate exactly as before.
       const nativeOnly: Plugin = {
         manifest: {
-          ...createManifest("cognia-native-only"),
+          ...createManifest("cognia-computer-use"),
           activationEvents: ["startup"],
           runtimeCompatibility: {
             browser: { availability: "blocked", reason: "Requires native desktop APIs" },
@@ -2750,17 +2818,17 @@ describe("PluginManager", () => {
         },
         status: "installed",
         source: "builtin",
-        path: "builtin://cognia-native-only",
+        path: "builtin://cognia-computer-use",
         config: {},
       }
-      mockGetState.mockReturnValue({ plugins: { "cognia-native-only": nativeOnly } })
+      mockGetState.mockReturnValue({ plugins: { "cognia-computer-use": nativeOnly } })
 
       const manager = new PluginManager({ pluginDirectory: "/plugins" })
       const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
 
       await manager.handleActivationEvent("startup")
 
-      expect(enableSpy).toHaveBeenCalledWith("cognia-native-only", "activation:startup")
+      expect(enableSpy).toHaveBeenCalledWith("cognia-computer-use", "activation:startup")
     })
   })
 
@@ -2804,6 +2872,27 @@ describe("PluginManager", () => {
 
       expect(enableSpy).toHaveBeenCalledWith("cognia-web-tools")
       expect(enableSpy).not.toHaveBeenCalledWith("cognia-computer-use")
+    })
+
+    it("skips a retired builtin left in persisted state", async () => {
+      const retired: Plugin = {
+        manifest: {
+          ...createManifest("github-delivery"),
+          activationEvents: ["startup"],
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://github-delivery",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "github-delivery": retired } })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
+
+      expect(enableSpy).not.toHaveBeenCalled()
     })
   })
 
