@@ -8,6 +8,8 @@ import { create } from "zustand"
 import { temporal } from "zundo"
 import type { EditorStore } from "@/lib/workflow/editor/store"
 
+const mockInspectorMountEffect = jest.fn()
+
 // Mock the three lazy-loaded tabs + the eagerly-imported InspectorPanel so
 // the test focuses on the sidebar's own tab-switch + memo behaviour without
 // loading the chat / templates / changelog dependency graphs.
@@ -23,8 +25,25 @@ jest.mock("./changelog-tab", () => ({
 jest.mock("./problems-tab", () => ({
   ProblemsTab: () => <div data-testid="mock-problems-tab" />,
 }))
+jest.mock("./runs-tab", () => ({
+  RunsTab: () => <div data-testid="mock-runs-tab" />,
+}))
+jest.mock("./settings-tab", () => ({
+  SettingsTab: () => <div data-testid="mock-settings-tab" />,
+}))
+jest.mock("@/components/context-workbench/context-comments-panel", () => ({
+  ContextCommentsPanel: ({ anchor }: { anchor?: { kind: string } }) => (
+    <div data-testid="mock-comments-panel" data-anchor-kind={anchor?.kind} />
+  ),
+}))
 jest.mock("../inspector-panel", () => ({
-  InspectorPanel: () => <div data-testid="mock-inspector-panel" />,
+  InspectorPanel: ({ useStore }: { useStore: EditorStore }) => {
+    const { useEffect } = jest.requireActual<typeof import("react")>("react")
+    useEffect(() => {
+      mockInspectorMountEffect(useStore)
+    }, [useStore])
+    return <div data-testid="mock-inspector-panel" />
+  },
 }))
 jest.mock("../edge-inspector", () => ({
   EdgeInspector: () => <div data-testid="mock-edge-inspector" />,
@@ -46,6 +65,7 @@ const MESSAGES = {
       focus: "Focus",
       narrow: "Narrow",
       pin: "Pin",
+      retry: "Retry",
       unpin: "Unpin",
       wide: "Wide",
     },
@@ -121,6 +141,7 @@ function harness(
 
 describe("RightSidebar", () => {
   beforeEach(() => {
+    mockInspectorMountEffect.mockReset()
     window.localStorage.setItem(
       "cognia-context-workbench-surfaces-v1",
       JSON.stringify({ workflow: false })
@@ -143,6 +164,82 @@ describe("RightSidebar", () => {
     expect(await screen.findByTestId("mock-chat-tab")).toBeInTheDocument()
     act(() => setSelectionCount(store, 1))
     expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
+  })
+
+  it("does not remount a retained panel when its mount effect updates workflow metadata", () => {
+    window.localStorage.setItem(
+      "cognia-context-workbench-surfaces-v1",
+      JSON.stringify({ workflow: true })
+    )
+    const store = makeFakeStore({
+      selectedNodeIds: ["n1"],
+      selectedEdgeIds: [],
+      baseWorkflow: { id: "wf_mount_effect", name: "Mount effect" },
+    })
+    mockInspectorMountEffect.mockImplementation((mountedStore: EditorStore) => {
+      const current = mountedStore.getState().baseWorkflow
+      ;(mountedStore as unknown as { setState: (s: Partial<FakeState>) => void }).setState({
+        baseWorkflow: { ...current, name: `${current.name}!` },
+      })
+    })
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined)
+
+    harness(store)
+
+    expect(
+      consoleError.mock.calls.some((args) =>
+        args.some((arg) => String(arg).includes("Maximum update depth exceeded"))
+      )
+    ).toBe(false)
+    expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
+    expect(mockInspectorMountEffect).toHaveBeenCalledTimes(1)
+    consoleError.mockRestore()
+  })
+
+  it("renders every workflow panel through a stable runtime-backed component", async () => {
+    window.localStorage.setItem(
+      "cognia-context-workbench-surfaces-v1",
+      JSON.stringify({ workflow: true })
+    )
+    const store = makeFakeStore({
+      selectedNodeIds: [],
+      selectedEdgeIds: [],
+      baseWorkflow: { id: "wf_all_panels", name: "All panels" },
+    })
+    const user = userEvent.setup()
+    harness(store)
+
+    await screen.findByTestId("mock-chat-tab")
+    await user.click(screen.getByRole("button", { name: "Runs" }))
+    expect(await screen.findByTestId("mock-runs-tab")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Changes" }))
+    expect(await screen.findByTestId("mock-changelog-tab")).toBeInTheDocument()
+
+    act(() => setSelectionCount(store, 1))
+    await user.click(screen.getByRole("button", { name: "Comments" }))
+    expect(screen.getByTestId("mock-comments-panel")).toHaveAttribute(
+      "data-anchor-kind",
+      "workflow-node"
+    )
+    act(() => {
+      setSelectionCount(store, 0)
+      setEdgeSelectionCount(store, 1)
+    })
+    expect(screen.getByTestId("mock-comments-panel")).toHaveAttribute(
+      "data-anchor-kind",
+      "workflow-edge"
+    )
+
+    await user.click(screen.getByRole("button", { name: "Templates" }))
+    expect(await screen.findByTestId("mock-templates-tab")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Inspector" }))
+    await user.click(screen.getByRole("tab", { name: "Problems" }))
+    expect(await screen.findByTestId("mock-problems-tab")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }))
+    expect(await screen.findByTestId("mock-settings-tab")).toBeInTheDocument()
   })
 
   it("opts the shared workbench into the sidebar background scope", () => {

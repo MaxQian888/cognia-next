@@ -62,6 +62,11 @@ import { runDiagnostics } from "@/lib/workflow/diagnostics/engine"
 import { EMPTY_DIAGNOSTICS, type DiagnosticsResult } from "@/lib/workflow/diagnostics/types"
 import { listRegisteredKinds } from "@/lib/workflow/nodes/registry"
 import { isTauri } from "@/lib/platform/detect"
+import type { WorkflowNodeGroupDefinition } from "@cognia/plugin-sdk/templates"
+import {
+  materializeWorkflowNodeGroup,
+  type MaterializedWorkflowNodeGroup,
+} from "@/lib/workflow/node-groups/materialize"
 
 export interface EditorStateSnapshot {
   nodes: RFWorkflowNode[]
@@ -461,6 +466,15 @@ export interface EditorState extends EditorStateSnapshot {
    * selection bounding box (with padding). Returns the new group's id.
    */
   groupSelected: (ids: string[]) => string | null
+  /**
+   * Expand a unified-template node group into the current graph in one store
+   * mutation. All ids are rebased, internal edges are structurally validated,
+   * and the existing `annotation.group` frame is selected after insertion.
+   */
+  insertNodeGroup: (
+    definition: WorkflowNodeGroupDefinition,
+    position: { x: number; y: number }
+  ) => Pick<MaterializedWorkflowNodeGroup, "groupId" | "nodeIds">
   /** Select every node + edge in the workflow. */
   selectAll: () => void
 
@@ -1457,6 +1471,33 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             dirty: true,
           })
           return id
+        },
+
+        insertNodeGroup: (definition, position) => {
+          const materialized = materializeWorkflowNodeGroup(definition, position)
+          const state = get()
+          const nextNodes = [...state.nodes, ...materialized.nodes]
+          const nextEdges = [...state.edges]
+          for (const edge of materialized.edges) {
+            const validation = validateConnection(edge, nextNodes, nextEdges, {
+              errorPolicy: state.baseWorkflow.settings.errorPolicy,
+            })
+            if (!validation.valid) {
+              throw new Error(validation.reason ?? `Invalid node-group edge "${edge.id}"`)
+            }
+            nextEdges.push(edge)
+          }
+          set({
+            nodes: nextNodes,
+            edges: nextEdges,
+            selectedNodeIds: [materialized.groupId],
+            selectedEdgeIds: [],
+            dirty: true,
+          })
+          return {
+            groupId: materialized.groupId,
+            nodeIds: materialized.nodeIds,
+          }
         },
 
         selectAll: () => {

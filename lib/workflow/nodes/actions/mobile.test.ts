@@ -17,6 +17,7 @@ function device(overrides: Partial<PairedDeviceRow>): PairedDeviceRow {
     lastSeenAt: 1,
     capabilities: ["camera", "geolocation"],
     ...overrides,
+    allowRemoteTerminal: overrides.allowRemoteTerminal ?? false,
   }
 }
 

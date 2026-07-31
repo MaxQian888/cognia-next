@@ -14,7 +14,7 @@
  * `rw` transaction, which serialises racing claimants.
  */
 
-import { getDb } from "@/lib/db/schema"
+import { getDb, withDbReopenRetry } from "@/lib/db/schema"
 import type { WorkflowRunLease } from "@/types/workflow/visual"
 
 /** Default lease TTL. Heartbeats renew at TTL/3, so a dead executor's
@@ -50,19 +50,21 @@ export async function claimRunLease(
 ): Promise<ClaimOutcome> {
   const ownerId = opts.ownerId ?? getExecutorId()
   const ttlMs = opts.ttlMs ?? DEFAULT_LEASE_TTL_MS
-  const db = getDb()
-  return db.transaction("rw", db.workflowRuns, async () => {
-    const row = await db.workflowRuns.get(runId)
-    if (!row) return "not-found"
-    const now = opts.nowMs ?? Date.now()
-    if (isLive(row.lease, now) && row.lease.ownerId !== ownerId) return "held"
-    const lease: WorkflowRunLease = {
-      ownerId,
-      claimedAt: row.lease?.ownerId === ownerId ? row.lease.claimedAt : now,
-      expiresAt: now + ttlMs,
-    }
-    await db.workflowRuns.update(runId, { lease })
-    return "claimed"
+  return withDbReopenRetry(() => {
+    const db = getDb()
+    return db.transaction("rw", db.workflowRuns, () =>
+      db.workflowRuns.get(runId).then((row) => {
+        if (!row) return "not-found" as const
+        const now = opts.nowMs ?? Date.now()
+        if (isLive(row.lease, now) && row.lease.ownerId !== ownerId) return "held" as const
+        const lease: WorkflowRunLease = {
+          ownerId,
+          claimedAt: row.lease?.ownerId === ownerId ? row.lease.claimedAt : now,
+          expiresAt: now + ttlMs,
+        }
+        return db.workflowRuns.update(runId, { lease }).then(() => "claimed" as const)
+      })
+    )
   })
 }
 
@@ -73,15 +75,19 @@ export async function renewRunLease(
 ): Promise<boolean> {
   const ownerId = opts.ownerId ?? getExecutorId()
   const ttlMs = opts.ttlMs ?? DEFAULT_LEASE_TTL_MS
-  const db = getDb()
-  return db.transaction("rw", db.workflowRuns, async () => {
-    const row = await db.workflowRuns.get(runId)
-    if (!row?.lease || row.lease.ownerId !== ownerId) return false
-    const now = opts.nowMs ?? Date.now()
-    await db.workflowRuns.update(runId, {
-      lease: { ...row.lease, expiresAt: now + ttlMs },
-    })
-    return true
+  return withDbReopenRetry(() => {
+    const db = getDb()
+    return db.transaction("rw", db.workflowRuns, () =>
+      db.workflowRuns.get(runId).then((row) => {
+        if (!row?.lease || row.lease.ownerId !== ownerId) return false
+        const now = opts.nowMs ?? Date.now()
+        return db.workflowRuns
+          .update(runId, {
+            lease: { ...row.lease, expiresAt: now + ttlMs },
+          })
+          .then(() => true)
+      })
+    )
   })
 }
 
@@ -90,17 +96,21 @@ export async function releaseRunLease(
   runId: string,
   ownerId: string = getExecutorId()
 ): Promise<void> {
-  const db = getDb()
-  await db.transaction("rw", db.workflowRuns, async () => {
-    const row = await db.workflowRuns.get(runId)
-    if (!row?.lease || row.lease.ownerId !== ownerId) return
-    // Dexie `update` silently ignores `undefined` — use `modify` to delete.
-    await db.workflowRuns
-      .where("id")
-      .equals(runId)
-      .modify((r) => {
-        delete r.lease
+  await withDbReopenRetry(() => {
+    const db = getDb()
+    return db.transaction("rw", db.workflowRuns, () =>
+      db.workflowRuns.get(runId).then((row) => {
+        if (!row?.lease || row.lease.ownerId !== ownerId) return
+        // Dexie `update` silently ignores `undefined` — use `modify` to delete.
+        return db.workflowRuns
+          .where("id")
+          .equals(runId)
+          .modify((candidate) => {
+            delete candidate.lease
+          })
+          .then(() => undefined)
       })
+    )
   })
 }
 

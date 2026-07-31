@@ -1102,6 +1102,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       />
       <ResizablePrimitive.Group
         orientation="horizontal"
+        resizeTargetMinimumSize={{ coarse: 28, fine: 20 }}
         className="flex flex-1 overflow-hidden"
         id="cognia-workflow-editor-layout"
       >
@@ -1187,7 +1188,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
             {/* Stays grabbable over a persistent rail — dragging this edge
                 outward is how the collapsed workbench is reopened. */}
             <ResizablePrimitive.Separator
-              className={`relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none ${rightCollapsed && !railPersistent ? "hidden" : ""}`}
+              className={`relative z-20 flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-5 after:-translate-x-1/2 focus-visible:outline-none ${rightCollapsed && !railPersistent ? "hidden" : ""}`}
               onPointerDown={() => {
                 rightDragStartCollapsedRef.current = rightCollapsed
               }}

@@ -28,6 +28,9 @@ jest.mock("@/lib/db/settings", () => ({
     defaultProvider: "openai",
     providerSettings: { openai: { apiKey: "k" } },
     customProviders: [],
+    modelMappings: [],
+    routingConfig: { strategy: "reliability", maxFallbackAttempts: 2 },
+    autoRouting: { enabled: true, defaultSelection: "auto" },
   }),
 }))
 
@@ -112,6 +115,9 @@ describe("runAgentTurn", () => {
         toolsEnabled: true,
         timeoutMs: 600_000,
         defaultProvider: "openai",
+        modelMappings: [],
+        routingConfig: expect.objectContaining({ strategy: "reliability" }),
+        autoRouting: expect.objectContaining({ defaultSelection: "auto" }),
       })
     )
   })

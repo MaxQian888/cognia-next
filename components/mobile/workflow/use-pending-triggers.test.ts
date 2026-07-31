@@ -37,6 +37,8 @@ const job = (
     createdAt: 0,
     nextAttemptAt: 0,
     idempotencyKey: "k",
+    accountId: "acct_mobile",
+    targetId: "mobile-companion",
   }) as MobileOutboundJobRow
 
 beforeEach(() => {

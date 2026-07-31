@@ -18,6 +18,8 @@ import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 import type { ProviderOutcome } from "@/lib/claude/provider-telemetry"
 import type { CircuitBreakerStateValue } from "@cognia/provider-types/circuit-breaker"
 import type { ApiFlavor } from "@cognia/provider-types/provider"
+import type { RoutingPlan, RoutingSurface } from "@cognia/provider-types/auto-router"
+import { RoutingAttemptController } from "@cognia/provider-routing/routing-attempt-controller"
 
 export interface ResolvedCreds {
   protocol: LlmConfig["provider"]
@@ -26,12 +28,7 @@ export interface ResolvedCreds {
   apiFlavor?: ApiFlavor
 }
 
-export interface RoutingSelection {
-  providerId: string
-  modelId: string
-  fallbackEntries: ModelMappingEntry[]
-  reason: string
-}
+export type RoutingSelection = RoutingPlan
 
 export interface RoutedPromptDeps {
   /** Pick primary + fallback chain for the alias/prompt. Null = no route. */
@@ -52,6 +49,7 @@ export interface RoutedPromptDeps {
     outputTokens: number
   }) => Promise<number | undefined>
   now: () => number
+  maxFallbackAttempts?: number
 }
 
 export interface RoutedPromptInput {
@@ -82,7 +80,9 @@ export interface RoutedPromptOutput {
 }
 
 /** Build the production deps. Imported lazily so tests never touch stores. */
-export async function defaultRoutedPromptDeps(): Promise<RoutedPromptDeps> {
+export async function defaultRoutedPromptDeps(
+  surface: RoutingSurface = "workflow"
+): Promise<RoutedPromptDeps> {
   const [{ getSettings }, { buildRoutingEngine }, { createLlmClient }] = await Promise.all([
     import("@/lib/db/settings"),
     import("@cognia/provider-routing/build-preview-engine"),
@@ -109,10 +109,16 @@ export async function defaultRoutedPromptDeps(): Promise<RoutedPromptDeps> {
     selectRoute: async ({ modelAlias, promptText, estimatedInputTokens }) => {
       let result
       try {
-        result = engine.selectProvider({
-          model: modelAlias,
+        result = await engine.planRoute({
+          surface,
+          selection: modelAlias ? { kind: "alias", alias: modelAlias } : { kind: "auto" },
           promptText,
           estimatedInputTokens,
+          candidateAliases: settings.autoRouting?.candidateAliases,
+          thresholds: settings.autoRouting?.thresholds,
+          strategy: settings.routingConfig?.strategy,
+          dataPolicy: settings.autoRouting?.dataPolicy,
+          shadowMode: settings.autoRouting?.shadowMode,
         })
       } catch {
         // RoutingNoCandidatesError: alias matched but every deployment is
@@ -120,12 +126,7 @@ export async function defaultRoutedPromptDeps(): Promise<RoutedPromptDeps> {
         return null
       }
       if (!result) return null
-      return {
-        providerId: result.providerId,
-        modelId: result.modelId,
-        fallbackEntries: result.fallbackEntries ?? [],
-        reason: result.reason,
-      }
+      return result
     },
     resolveCreds: async (providerId) => {
       const resolution = resolveFeatureProvider(
@@ -169,6 +170,7 @@ export async function defaultRoutedPromptDeps(): Promise<RoutedPromptDeps> {
         },
       }),
     now: () => Date.now(),
+    maxFallbackAttempts: settings.routingConfig?.maxFallbackAttempts ?? 3,
   }
 }
 
@@ -197,43 +199,25 @@ export async function runRoutedPrompt(
     )
   }
 
-  // Resolve credentials for the whole chain up-front and keep only usable
-  // entries — a provider with no key must NOT abort the walk (the chain
-  // exists precisely to route around it).
-  const chain: ModelMappingEntry[] = [
-    { providerId: route.providerId, modelId: route.modelId },
-    ...route.fallbackEntries.filter(
-      (e) => !(e.providerId === route.providerId && e.modelId === route.modelId)
-    ),
-  ]
-  const usable: Array<{ entry: ModelMappingEntry; creds: ResolvedCreds }> = []
+  const chain: ModelMappingEntry[] = route.orderedCandidates
+  const controller = new RoutingAttemptController(route, deps.maxFallbackAttempts ?? 3, deps.now)
   const skipped: string[] = []
-  for (const entry of chain) {
+  const errors: string[] = []
+  let attempts = 0
+  let entry = controller.begin()
+  while (entry) {
     if (deps.getCircuitBreakerState(entry.providerId) === "open") {
       skipped.push(`${entry.providerId} (circuit open)`)
+      entry = controller.failAndAdvance()
       continue
     }
     const creds = await deps.resolveCreds(entry.providerId)
     if (!creds) {
       skipped.push(`${entry.providerId} (no credentials)`)
+      entry = controller.failAndAdvance()
       continue
     }
-    usable.push({ entry, creds })
-  }
-  if (skipped.length > 0) {
-    input.log("warn", `ai.prompt (routed): skipped ${skipped.join(", ")}`)
-  }
-  if (usable.length === 0) {
-    throw nonRetryable(
-      `ai.prompt (routed): no usable provider in the chain ` +
-        `[${chain.map((e) => e.providerId).join(" → ")}]. ` +
-        `Configure API keys in Settings → Providers.`
-    )
-  }
-
-  const errors: string[] = []
-  for (let i = 0; i < usable.length; i++) {
-    const { entry, creds } = usable[i]
+    attempts++
     const started = deps.now()
     try {
       const client = deps.makeClient({
@@ -244,7 +228,7 @@ export async function runRoutedPrompt(
         apiFlavor: creds.apiFlavor,
         defaultTemperature: input.temperature,
       })
-      const completion = await complete(client, input)
+      const completion = await complete(client, input, () => controller.commit())
       const usage = client.getUsageSnapshot?.() ?? {
         inputTokens: 0,
         outputTokens: 0,
@@ -264,14 +248,18 @@ export async function runRoutedPrompt(
         tokensUsed: usage.totalTokens,
         estimatedCostUsd: costUsd,
       })
+      controller.complete()
+      if (skipped.length > 0) {
+        input.log("warn", `ai.prompt (routed): skipped ${skipped.join(", ")}`)
+      }
       return {
         provider: entry.providerId,
         model: entry.modelId,
         completion,
         usage,
         costUsd,
-        attempts: i + 1,
-        routingReason: route.reason,
+        attempts,
+        routingReason: route.reasonCodes.join(", "),
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -283,21 +271,38 @@ export async function runRoutedPrompt(
         errorMessage: message,
       })
       errors.push(`${entry.providerId}:${entry.modelId} → ${message}`)
-      if (i < usable.length - 1) {
+      const next = controller.failAndAdvance()
+      if (next) {
         input.log("warn", `ai.prompt (routed): ${entry.providerId} failed, trying next provider`)
       }
+      entry = next
     }
   }
 
+  if (skipped.length > 0) {
+    input.log("warn", `ai.prompt (routed): skipped ${skipped.join(", ")}`)
+  }
+  if (attempts === 0) {
+    throw nonRetryable(
+      `ai.prompt (routed): no usable provider in the chain ` +
+        `[${chain.map((candidate) => candidate.providerId).join(" → ")}]. ` +
+        `Configure API keys in Settings → Providers.`
+    )
+  }
   throw new Error(`ai.prompt (routed): all providers failed.\n${errors.join("\n")}`)
 }
 
 /** Stream when both sides support it; fall back to one-shot complete(). */
-async function complete(client: LlmClient, input: RoutedPromptInput): Promise<string> {
+async function complete(
+  client: LlmClient,
+  input: RoutedPromptInput,
+  onCommit: () => void
+): Promise<string> {
   const options = { system: input.systemPrompt, temperature: input.temperature }
   if (input.onDelta && client.stream) {
     let full = ""
     for await (const delta of client.stream(input.userPrompt, options)) {
+      onCommit()
       full += delta
       input.onDelta(delta)
     }

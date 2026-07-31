@@ -1,6 +1,6 @@
 import type { Skill } from "@cognia/agent-config-types"
 
-import { getDb } from "@/lib/db/schema"
+import { getDb, withDbReopenRetry } from "@/lib/db/schema"
 import { upsertSkillByCanonicalId, workflowSkillBody } from "@/lib/db/skills"
 import { migrateWorkflow } from "@/lib/workflow/definition/migrate"
 import type { VisualWorkflow, WorkflowInterface } from "@/types/workflow/visual"
@@ -135,31 +135,67 @@ export async function publishWorkflowLifecycle(
   workflowId: string,
   at: number
 ): Promise<PublishWorkflowResult> {
-  const db = getDb()
-  return db.transaction("rw", db.workflows, db.skills, async () => {
-    const stored = await db.workflows.get(workflowId)
-    if (!stored) throw new Error(`publishWorkflow: workflow ${workflowId} not found`)
+  const skillBeforePublish = await findWorkflowSkill(workflowId)
+  try {
+    return await withDbReopenRetry(() => {
+      const db = getDb()
+      return db.transaction("rw", db.workflows, db.skills, () =>
+        Promise.all([db.workflows.get(workflowId), db.skills.toArray()]).then(
+          ([stored, skills]) => {
+            if (!stored) throw new Error(`publishWorkflow: workflow ${workflowId} not found`)
 
-    const existing = migrateWorkflow(stored)
-    const workflowInterface = derivePublishedInterface(existing)
-    const toolName = toolNameForWorkflow(existing)
-    const workflow: VisualWorkflow = {
-      ...existing,
-      interface: workflowInterface,
-      published: { at, toolName },
-      updatedAt: Date.now(),
+            const existing = migrateWorkflow(stored)
+            const workflowInterface = derivePublishedInterface(existing)
+            const toolName = toolNameForWorkflow(existing)
+            const workflow: VisualWorkflow = {
+              ...existing,
+              interface: workflowInterface,
+              published: { at, toolName },
+              updatedAt: Date.now(),
+            }
+            const canonicalId = workflowSkillCanonicalId(workflowId)
+            const existingSkill = skills.find((skill) => skill.canonicalId === canonicalId)
+            return db.workflows
+              .put(workflow)
+              .then(() => syncWorkflowSkill(workflow, existingSkill))
+              .then(({ skill, created }) => ({
+                toolName,
+                workflowInterface,
+                skillId: skill.id,
+                created,
+              }))
+          }
+        )
+      )
+    })
+  } catch (error) {
+    // fake-indexeddb can report a late PrematureCommitError after both writes
+    // are already durable. Accept that race only when the full publication
+    // projection (workflow contract + generated Skill) is present and exact.
+    const db = getDb()
+    const [stored, skill] = await Promise.all([
+      db.workflows.get(workflowId),
+      findWorkflowSkill(workflowId),
+    ])
+    if (!stored || !skill) throw error
+    const workflow = migrateWorkflow(stored)
+    const workflowInterface = derivePublishedInterface(workflow)
+    const toolName = toolNameForWorkflow(workflow)
+    if (
+      workflow.published?.at !== at ||
+      workflow.published.toolName !== toolName ||
+      !workflowInterfacesEqual(workflow.interface, workflowInterface) ||
+      workflowSkillNeedsSync(skill, workflow)
+    ) {
+      throw error
     }
-    await db.workflows.put(workflow)
-
-    const existingSkill = await findWorkflowSkill(workflowId)
-    const { skill, created } = await syncWorkflowSkill(workflow, existingSkill)
     return {
       toolName,
       workflowInterface,
       skillId: skill.id,
-      created,
+      created: skillBeforePublish === undefined,
     }
-  })
+  }
 }
 
 /** Explicitly remove a workflow's callable contract and generated Skill. */
@@ -284,9 +320,27 @@ export interface WorkflowPublicationReconciliationResult {
  */
 export async function reconcileWorkflowPublications(): Promise<WorkflowPublicationReconciliationResult> {
   const db = getDb()
+  const [workflowSnapshot, skillSnapshot] = await Promise.all([
+    db.workflows.toArray(),
+    db.skills.toArray(),
+  ])
+  const needsReconciliation =
+    workflowSnapshot.some((workflow) => Boolean(workflow.published)) ||
+    skillSnapshot.some(
+      (skill) => skill.kind === "workflow" || workflowIdFromSkillCanonicalId(skill.canonicalId)
+    )
+  if (!needsReconciliation) {
+    return { synchronized: 0, invalidated: 0, removedSkills: 0 }
+  }
+
   return db.transaction("rw", db.workflows, db.skills, async () => {
-    const workflows = (await db.workflows.toArray()).map(migrateWorkflow)
-    const skills = await db.skills.toArray()
+    // Schedule both initial reads before awaiting either result. Some
+    // IndexedDB implementations auto-commit a readwrite transaction as soon as
+    // its request queue drains; a sequential read leaves a gap before the
+    // second request and makes the reconciliation writes fail with
+    // TransactionInactiveError.
+    const [workflowRows, skills] = await Promise.all([db.workflows.toArray(), db.skills.toArray()])
+    const workflows = workflowRows.map(migrateWorkflow)
     const workflowById = new Map(workflows.map((workflow) => [workflow.id, workflow]))
     const skillByCanonicalId = new Map<string, Skill>()
     for (const skill of skills) {

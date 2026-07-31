@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
-import { WorkflowIcon } from "lucide-react"
+import { PlusIcon, WorkflowIcon } from "lucide-react"
 import {
   DndContext,
   DragOverlay,
@@ -17,6 +17,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core"
 import { Skeleton } from "@/components/ui/skeleton"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { listChildFolders, getFolderPath } from "@/lib/db/workflow-folders"
 import {
   createWorkflow,
@@ -213,24 +214,26 @@ export function WorkflowLibrary() {
       onDragEnd={handleDragEnd}
     >
       <div className="flex h-full flex-col">
-        <header className="flex items-center gap-3 border-b px-6 py-4">
-          <span className="rounded-md bg-primary/10 p-2 text-primary">
-            <WorkflowIcon className="size-5" aria-hidden="true" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <h1 className="text-xl font-semibold leading-tight">{t("title")}</h1>
-            <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-          </div>
-        </header>
+        <FeaturePageHeader
+          icon={<WorkflowIcon />}
+          title={t("title")}
+          description={currentFolderId === ROOT_FOLDER_ID ? t("subtitle") : undefined}
+          context={
+            currentFolderId !== ROOT_FOLDER_ID ? (
+              <WorkflowFolderBreadcrumb path={folderPath ?? []} />
+            ) : undefined
+          }
+          primaryAction={{
+            id: "new-workflow",
+            label: t("new"),
+            icon: PlusIcon,
+            onSelect: () => setLocalCreateOpen(true),
+            testId: "workflow-new",
+          }}
+          controls={<WorkflowLibraryToolbar onImportFiles={handleImportFiles} />}
+        />
         <LibraryStatBar />
         <WorkflowBulkActionBar />
-        <WorkflowLibraryToolbar
-          onNewWorkflow={() => setLocalCreateOpen(true)}
-          onImportFiles={handleImportFiles}
-        />
-        <div className="border-b px-6 py-2">
-          <WorkflowFolderBreadcrumb path={folderPath ?? []} />
-        </div>
         {currentFolderId === ROOT_FOLDER_ID ? (
           <div className="max-h-[40%] shrink-0 overflow-y-auto">
             <WorkflowPinnedSection />

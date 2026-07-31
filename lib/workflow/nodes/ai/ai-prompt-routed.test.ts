@@ -26,14 +26,26 @@ function makeDeps(overrides: Partial<RoutedPromptDeps> = {}): {
   outcomes: ProviderOutcome[]
 } {
   const outcomes: ProviderOutcome[] = []
+  const orderedCandidates = [
+    { providerId: "p1", modelId: "m1" },
+    { providerId: "p2", modelId: "m2" },
+    { providerId: "p3", modelId: "m3" },
+  ].map((entry) => ({
+    ...entry,
+    deploymentId: `${entry.providerId}::${entry.modelId}`,
+    reasonCodes: [],
+  }))
   const route: RoutingSelection = {
-    providerId: "p1",
-    modelId: "m1",
-    fallbackEntries: [
-      { providerId: "p2", modelId: "m2" },
-      { providerId: "p3", modelId: "m3" },
-    ],
-    reason: "test route",
+    decisionId: "decision",
+    surface: "workflow",
+    requested: { kind: "alias", alias: "fast" },
+    strategy: "reliability",
+    selected: orderedCandidates[0],
+    orderedCandidates,
+    reasonCodes: ["alias-match"],
+    rejected: [],
+    replayPolicy: "pre-commit-only",
+    createdAt: 1,
   }
   const creds: ResolvedCreds = { protocol: "openai", apiKey: "k" }
   const deps: RoutedPromptDeps = {
@@ -69,7 +81,7 @@ describe("runRoutedPrompt", () => {
     expect(out.usage.totalTokens).toBe(15)
     expect(out.costUsd).toBe(0.001)
     expect(out.attempts).toBe(1)
-    expect(out.routingReason).toBe("test route")
+    expect(out.routingReason).toBe("alias-match")
     expect(outcomes).toEqual([
       expect.objectContaining({
         providerId: "p1",
@@ -198,6 +210,23 @@ describe("runRoutedPrompt", () => {
     expect(streamingClient.complete).not.toHaveBeenCalled()
   })
 
+  it("does not replay another provider after the first visible delta", async () => {
+    const makeClient = jest.fn(() => ({
+      complete: jest.fn(),
+      stream: async function* () {
+        yield "visible"
+        throw new Error("stream failed")
+      },
+      getUsageSnapshot: () => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0 }),
+    }))
+    const { deps } = makeDeps({ makeClient })
+
+    await expect(runRoutedPrompt({ ...baseInput, onDelta: jest.fn() }, deps)).rejects.toThrow(
+      /all providers failed/
+    )
+    expect(makeClient).toHaveBeenCalledTimes(1)
+  })
+
   it("falls back to complete() when onDelta is absent", async () => {
     const client = okClient("plain")
     const { deps } = makeDeps({ makeClient: jest.fn(() => client) })
@@ -206,14 +235,26 @@ describe("runRoutedPrompt", () => {
     expect(client.complete).toHaveBeenCalled()
   })
 
-  it("dedupes the primary out of the fallback entries", async () => {
+  it("uses the plan's single primary only once", async () => {
     const makeClient = jest.fn(() => failClient("x"))
+    const selected = {
+      providerId: "p1",
+      modelId: "m1",
+      deploymentId: "p1::m1",
+      reasonCodes: [],
+    }
     const { deps } = makeDeps({
       selectRoute: jest.fn().mockResolvedValue({
-        providerId: "p1",
-        modelId: "m1",
-        fallbackEntries: [{ providerId: "p1", modelId: "m1" }],
-        reason: "dup",
+        decisionId: "single",
+        surface: "workflow",
+        requested: { kind: "alias", alias: "fast" },
+        strategy: "reliability",
+        selected,
+        orderedCandidates: [selected],
+        reasonCodes: ["alias-match"],
+        rejected: [],
+        replayPolicy: "pre-commit-only",
+        createdAt: 1,
       }),
       makeClient,
     })

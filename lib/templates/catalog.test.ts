@@ -45,6 +45,28 @@ describe("TemplateCatalog", () => {
     unsubscribe()
   })
 
+  it("registers and tears down a batch with one catalog notification", async () => {
+    const catalog = new TemplateCatalog()
+    const listener = jest.fn()
+    catalog.subscribe(listener)
+
+    const dispose = catalog.registerMany("plugin:demo.plugin", [
+      await draft("skill.one", "plugin"),
+      await draft("skill.two", "plugin"),
+    ])
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(catalog.getSnapshot().definitions.map((definition) => definition.id)).toEqual([
+      "skill.one",
+      "skill.two",
+    ])
+
+    dispose()
+
+    expect(listener).toHaveBeenCalledTimes(2)
+    expect(catalog.getSnapshot().definitions).toEqual([])
+  })
+
   it("filters the unified view by domain, status, trust, platform, and text", async () => {
     const catalog = new TemplateCatalog()
     const definition = await draft("skill.research")

@@ -162,6 +162,8 @@ export interface RunWorkflowInput {
    * recursively trigger its own catch handlers.
    */
   suppressCatch?: boolean
+  /** Called after the durable run row exists, before any step executes. */
+  onPersisted?: (runId: string) => void
 }
 
 export interface RunWorkflowResult {
@@ -265,6 +267,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   }
   // If we're resuming, the row may already exist — Dexie's `put` handles both.
   await getDb().workflowRuns.put(runRow)
+  input.onPersisted?.(runId)
 
   // 2a′. Claim the execution lease (ADR 0061 P4). The transaction serialises
   // racing claimants; losing the race here (a concurrent resume beat us

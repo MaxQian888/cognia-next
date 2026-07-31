@@ -22,11 +22,11 @@
  *     mounted so they can apply more than one back-to-back).
  */
 
-import { useMemo, useState } from "react"
-import { useTranslations } from "next-intl"
+import { useMemo, useState, useSyncExternalStore } from "react"
+import { useLocale, useTranslations } from "next-intl"
 import { useShallow } from "zustand/react/shallow"
 import { toast } from "sonner"
-import { ChevronRightIcon, SparklesIcon, XIcon } from "lucide-react"
+import { BoxesIcon, ChevronRightIcon, SparklesIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -43,6 +43,9 @@ import {
 import { useProposalStore } from "@/lib/workflow/editor/proposal-store"
 import { workflowEditorRevision } from "@/lib/workflow/editor/editor-revision"
 import { templateToProposalOps } from "@/plugins/workflow-ai/src/tools/template-tools"
+import { templateCatalog } from "@/lib/templates/catalog"
+import { isWorkflowNodeGroupDefinition } from "@/lib/workflow/node-groups/materialize"
+import type { WorkflowNodeGroupDefinition } from "@cognia/plugin-sdk/templates"
 
 interface Props {
   useStore: EditorStore
@@ -51,7 +54,17 @@ interface Props {
 
 export function TemplatesTab({ useStore, workflowId }: Props) {
   const t = useTranslations("workflowEditor.templates")
+  const locale = useLocale()
   const templates = useMemo(() => listCopilotTemplates(), [])
+  const templateSnapshot = useSyncExternalStore(
+    templateCatalog.subscribe,
+    templateCatalog.getSnapshot,
+    templateCatalog.getServerSnapshot
+  )
+  const nodeGroups = useMemo(
+    () => templateSnapshot.definitions.filter(isWorkflowNodeGroupDefinition),
+    [templateSnapshot]
+  )
   const [activeId, setActiveId] = useState<string | null>(null)
 
   const activeTemplate = useMemo(
@@ -62,7 +75,7 @@ export function TemplatesTab({ useStore, workflowId }: Props) {
   if (!workflowId) {
     return (
       <div
-        className="flex h-full w-full flex-col items-center justify-center p-6 text-center text-sm text-muted-foreground"
+        className="flex h-full w-full min-w-0 max-w-full flex-col items-center justify-center overflow-x-hidden p-6 text-center text-sm text-muted-foreground"
         data-testid="workflow-templates-tab-empty"
       >
         <p>{t("emptyState")}</p>
@@ -81,13 +94,53 @@ export function TemplatesTab({ useStore, workflowId }: Props) {
     )
   }
 
+  const insertNodeGroup = (definition: WorkflowNodeGroupDefinition): void => {
+    const state = useStore.getState()
+    const zoom = Math.max(state.viewport.zoom, 0.01)
+    const position = {
+      x: (-state.viewport.x + 160) / zoom,
+      y: (-state.viewport.y + 120) / zoom,
+    }
+    const localized =
+      definition.metadata.localized?.[locale] ??
+      definition.metadata.localized?.[locale.split("-")[0]]
+    const name = localized?.name ?? definition.metadata.name
+    try {
+      state.insertNodeGroup(definition, position)
+      toast.success(t("nodeGroups.inserted", { name }))
+    } catch (error) {
+      toast.error(
+        t("nodeGroups.failed", {
+          name,
+          message: error instanceof Error ? error.message : String(error),
+        })
+      )
+    }
+  }
+
   return (
     <div
-      className="flex h-full w-full flex-col gap-2 overflow-y-auto p-3"
+      className="flex h-full w-full min-w-0 max-w-full flex-col gap-2 overflow-x-hidden overflow-y-auto p-3"
       data-testid="workflow-templates-tab"
     >
       <p className="text-xs text-muted-foreground">{t("tabHelp")}</p>
-      {templates.length === 0 ? (
+      {nodeGroups.length > 0 ? (
+        <section className="flex flex-col gap-2" data-testid="workflow-node-groups">
+          <div className="pt-1">
+            <h3 className="text-xs font-medium">{t("nodeGroups.heading")}</h3>
+            <p className="text-[11px] text-muted-foreground">{t("nodeGroups.help")}</p>
+          </div>
+          {nodeGroups.map((definition) => (
+            <NodeGroupRow
+              key={`${definition.id}@${definition.version ?? definition.revision}`}
+              definition={definition}
+              locale={locale}
+              onInsert={insertNodeGroup}
+            />
+          ))}
+        </section>
+      ) : null}
+      {templates.length === 0 && nodeGroups.length === 0 ? (
         <p className="py-6 text-center text-sm text-muted-foreground">{t("emptyState")}</p>
       ) : (
         templates.map((tpl) => (
@@ -122,6 +175,44 @@ export function TemplatesTab({ useStore, workflowId }: Props) {
         ))
       )}
     </div>
+  )
+}
+
+function NodeGroupRow({
+  definition,
+  locale,
+  onInsert,
+}: {
+  definition: WorkflowNodeGroupDefinition
+  locale: string
+  onInsert: (definition: WorkflowNodeGroupDefinition) => void
+}) {
+  const localized =
+    definition.metadata.localized?.[locale] ?? definition.metadata.localized?.[locale.split("-")[0]]
+  const name = localized?.name ?? definition.metadata.name
+  const description = localized?.description ?? definition.metadata.description
+
+  return (
+    <button
+      type="button"
+      className={cn(
+        "flex w-full items-start gap-2 rounded-md border bg-card px-3 py-2 text-left text-xs",
+        "hover:bg-accent/40 transition-colors"
+      )}
+      onClick={() => onInsert(definition)}
+      data-testid={`workflow-node-group-row-${definition.id}`}
+    >
+      <BoxesIcon className="mt-0.5 size-4 shrink-0 text-sky-500" aria-hidden="true" />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-medium">{name}</span>
+          <Badge variant="outline" className="text-[10px]">
+            {definition.payload.nodes.length}
+          </Badge>
+        </div>
+        {description ? <p className="text-muted-foreground">{description}</p> : null}
+      </div>
+    </button>
   )
 }
 
@@ -193,7 +284,7 @@ function SlotForm({ template, useStore, workflowId, onClose }: SlotFormProps) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex h-full w-full flex-col gap-3 overflow-y-auto p-3"
+      className="flex h-full w-full min-w-0 max-w-full flex-col gap-3 overflow-x-hidden overflow-y-auto p-3"
       data-testid={`workflow-templates-form-${template.id}`}
     >
       <div className="flex items-center justify-between gap-2">

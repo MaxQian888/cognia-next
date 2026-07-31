@@ -72,6 +72,44 @@ export class TemplateCatalog {
     }
   }
 
+  /**
+   * Add a batch to one source atomically. Freezing and duplicate checks happen
+   * before mutation, and subscribers observe one revision regardless of batch
+   * size. This is the hot path for plugin-contributed template collections.
+   */
+  registerMany(sourceId: string, definitions: readonly TemplateDefinitionEnvelope[]): () => void {
+    if (definitions.length === 0) return () => undefined
+    const source = this.sources.get(sourceId) ?? new Map<string, TemplateDefinitionEnvelope>()
+    const additions = new Map<string, TemplateDefinitionEnvelope>()
+    for (const definition of definitions) {
+      const key = catalogKey(definition)
+      if (source.has(key) || additions.has(key)) {
+        throw new Error(`Template source "${sourceId}" already contains "${key}"`)
+      }
+      additions.set(key, freezeDefinition(definition))
+    }
+    for (const [key, definition] of additions) source.set(key, definition)
+    this.sources.set(sourceId, source)
+    this.changed()
+
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      const current = this.sources.get(sourceId)
+      if (!current) return
+      let removed = false
+      for (const [key, registered] of additions) {
+        if (current.get(key) !== registered) continue
+        current.delete(key)
+        removed = true
+      }
+      if (!removed) return
+      if (current.size === 0) this.sources.delete(sourceId)
+      this.changed()
+    }
+  }
+
   upsert(sourceId: string, definition: TemplateDefinitionEnvelope): void {
     const source = this.sources.get(sourceId) ?? new Map<string, TemplateDefinitionEnvelope>()
     if (definition.version === null) {

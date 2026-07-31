@@ -23,10 +23,12 @@
 
 import {
   Activity,
+  createContext,
   lazy,
   memo,
   Suspense,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -427,6 +429,124 @@ function WorkflowPanelLoading() {
   )
 }
 
+interface WorkflowPanelRuntime {
+  editorRevision: string
+  handleOpenSettings: (tab?: string) => void
+  reactFlowInstance?: ReactFlowInstance | null
+  selectedEdgeIds: string[]
+  selectedNodeIds: string[]
+  useStore: EditorStore
+  workflowId: string
+  workflowName: string
+}
+
+// ContextWorkbench treats `renderer` as a component type. Keep those types
+// module-scoped so workflow updates do not remount retained panels.
+const WorkflowPanelRuntimeContext = createContext<WorkflowPanelRuntime | null>(null)
+
+function useWorkflowPanelRuntime(): WorkflowPanelRuntime {
+  const runtime = useContext(WorkflowPanelRuntimeContext)
+  if (!runtime) throw new Error("Workflow panel rendered outside its sidebar host")
+  return runtime
+}
+
+function WorkflowChatPanel() {
+  const runtime = useWorkflowPanelRuntime()
+  return (
+    <Suspense fallback={<WorkflowPanelLoading />}>
+      <WorkflowEditorChatTab
+        useStore={runtime.useStore}
+        workflowId={runtime.workflowId}
+        workflowName={runtime.workflowName}
+        onOpenWorkflowSettings={runtime.handleOpenSettings}
+      />
+    </Suspense>
+  )
+}
+
+function WorkflowCommentsPanel() {
+  const runtime = useWorkflowPanelRuntime()
+  return (
+    <ContextCommentsPanel
+      resource={{ kind: "workflow", id: runtime.workflowId }}
+      revision={runtime.editorRevision}
+      anchor={
+        runtime.selectedNodeIds[0]
+          ? {
+              kind: "workflow-node",
+              nodeId: runtime.selectedNodeIds[0],
+              revision: runtime.editorRevision,
+            }
+          : runtime.selectedEdgeIds[0]
+            ? {
+                kind: "workflow-edge",
+                edgeId: runtime.selectedEdgeIds[0],
+                revision: runtime.editorRevision,
+              }
+            : undefined
+      }
+    />
+  )
+}
+
+function WorkflowInspectorPanel() {
+  const runtime = useWorkflowPanelRuntime()
+  return runtime.selectedNodeIds.length === 0 && runtime.selectedEdgeIds.length > 0 ? (
+    <EdgeInspector useStore={runtime.useStore} className="border-l-0" />
+  ) : (
+    <InspectorPanel useStore={runtime.useStore} className="border-l-0" />
+  )
+}
+
+function WorkflowProblemsPanel() {
+  const runtime = useWorkflowPanelRuntime()
+  return (
+    <Suspense fallback={<WorkflowPanelLoading />}>
+      <ProblemsTab useStore={runtime.useStore} reactFlowInstance={runtime.reactFlowInstance} />
+    </Suspense>
+  )
+}
+
+function WorkflowRunsPanel() {
+  const runtime = useWorkflowPanelRuntime()
+  return (
+    <Suspense fallback={<WorkflowPanelLoading />}>
+      <RunsTab
+        useStore={runtime.useStore}
+        workflowId={runtime.workflowId}
+        reactFlowInstance={runtime.reactFlowInstance}
+      />
+    </Suspense>
+  )
+}
+
+function WorkflowTemplatesPanel() {
+  const runtime = useWorkflowPanelRuntime()
+  return (
+    <Suspense fallback={<WorkflowPanelLoading />}>
+      <TemplatesTab useStore={runtime.useStore} workflowId={runtime.workflowId} />
+    </Suspense>
+  )
+}
+
+function WorkflowSettingsPanel() {
+  const runtime = useWorkflowPanelRuntime()
+  return (
+    <Suspense fallback={<WorkflowPanelLoading />}>
+      <SettingsTab useStore={runtime.useStore} />
+    </Suspense>
+  )
+}
+
+function WorkflowChangelogPanel() {
+  const runtime = useWorkflowPanelRuntime()
+  return (
+    <Suspense fallback={<WorkflowPanelLoading />}>
+      <ChangelogTab useStore={runtime.useStore} workflowId={runtime.workflowId} />
+    </Suspense>
+  )
+}
+
 function WorkflowContextWorkbench({
   useStore,
   className,
@@ -509,16 +629,7 @@ function WorkflowContextWorkbench({
         order: 10,
         appliesTo: (resource) => resource.kind === "workflow",
         retention: "stateful",
-        renderer: () => (
-          <Suspense fallback={<WorkflowPanelLoading />}>
-            <WorkflowEditorChatTab
-              useStore={useStore}
-              workflowId={workflowId}
-              workflowName={workflowName}
-              onOpenWorkflowSettings={handleOpenSettings}
-            />
-          </Suspense>
-        ),
+        renderer: WorkflowChatPanel,
       },
       {
         id: "comments",
@@ -529,27 +640,7 @@ function WorkflowContextWorkbench({
         appliesTo: (resource) => resource.kind === "workflow",
         retention: "stateful",
         getBadge: () => unresolvedCommentCount,
-        renderer: () => (
-          <ContextCommentsPanel
-            resource={{ kind: "workflow", id: workflowId }}
-            revision={editorRevision}
-            anchor={
-              selectedNodeIds[0]
-                ? {
-                    kind: "workflow-node",
-                    nodeId: selectedNodeIds[0],
-                    revision: editorRevision,
-                  }
-                : selectedEdgeIds[0]
-                  ? {
-                      kind: "workflow-edge",
-                      edgeId: selectedEdgeIds[0],
-                      revision: editorRevision,
-                    }
-                  : undefined
-            }
-          />
-        ),
+        renderer: WorkflowCommentsPanel,
       },
       {
         id: "inspector",
@@ -560,12 +651,7 @@ function WorkflowContextWorkbench({
         appliesTo: (resource) => resource.kind === "workflow",
         retention: "stateful",
         getBadge: () => inspectorCount,
-        renderer: () =>
-          selectedNodeIds.length === 0 && selectedEdgeIds.length > 0 ? (
-            <EdgeInspector useStore={useStore} className="border-l-0" />
-          ) : (
-            <InspectorPanel useStore={useStore} className="border-l-0" />
-          ),
+        renderer: WorkflowInspectorPanel,
       },
       {
         id: "problems",
@@ -576,11 +662,7 @@ function WorkflowContextWorkbench({
         appliesTo: (resource) => resource.kind === "workflow",
         retention: "stateful",
         getBadge: () => errorCount + warningCount,
-        renderer: () => (
-          <Suspense fallback={<WorkflowPanelLoading />}>
-            <ProblemsTab useStore={useStore} reactFlowInstance={reactFlowInstance} />
-          </Suspense>
-        ),
+        renderer: WorkflowProblemsPanel,
       },
       {
         id: "runs",
@@ -591,15 +673,7 @@ function WorkflowContextWorkbench({
         appliesTo: (resource) => resource.kind === "workflow",
         retention: "stateful",
         preferredMode: "wide",
-        renderer: () => (
-          <Suspense fallback={<WorkflowPanelLoading />}>
-            <RunsTab
-              useStore={useStore}
-              workflowId={workflowId}
-              reactFlowInstance={reactFlowInstance}
-            />
-          </Suspense>
-        ),
+        renderer: WorkflowRunsPanel,
       },
       {
         id: "templates",
@@ -609,11 +683,7 @@ function WorkflowContextWorkbench({
         order: 50,
         appliesTo: (resource) => resource.kind === "workflow",
         retention: "stateful",
-        renderer: () => (
-          <Suspense fallback={<WorkflowPanelLoading />}>
-            <TemplatesTab useStore={useStore} workflowId={workflowId} />
-          </Suspense>
-        ),
+        renderer: WorkflowTemplatesPanel,
       },
       {
         id: "settings",
@@ -624,11 +694,7 @@ function WorkflowContextWorkbench({
         appliesTo: (resource) => resource.kind === "workflow",
         retention: "stateful",
         preferredMode: "wide",
-        renderer: () => (
-          <Suspense fallback={<WorkflowPanelLoading />}>
-            <SettingsTab useStore={useStore} />
-          </Suspense>
-        ),
+        renderer: WorkflowSettingsPanel,
       },
       {
         id: "changelog",
@@ -639,57 +705,67 @@ function WorkflowContextWorkbench({
         appliesTo: (resource) => resource.kind === "workflow",
         retention: "stateful",
         preferredMode: "wide",
-        renderer: () => (
-          <Suspense fallback={<WorkflowPanelLoading />}>
-            <ChangelogTab useStore={useStore} workflowId={workflowId} />
-          </Suspense>
-        ),
+        renderer: WorkflowChangelogPanel,
       },
     ],
-    [
-      errorCount,
-      editorRevision,
-      handleOpenSettings,
-      inspectorCount,
-      reactFlowInstance,
-      selectedEdgeIds,
-      selectedNodeIds,
-      useStore,
-      unresolvedCommentCount,
-      warningCount,
-      workflowId,
-      workflowName,
-    ]
+    [errorCount, inspectorCount, unresolvedCommentCount, warningCount]
   )
   const handleExitFocus = useCallback(() => {
     requestAnimationFrame(() => void reactFlowInstance?.fitView({ padding: 0.2, duration: 0 }))
   }, [reactFlowInstance])
 
-  const resource: ContextResource = {
-    kind: "workflow",
-    workflowId,
-    editorRevision,
-    selection: {
+  const resource = useMemo<ContextResource>(
+    () => ({
       kind: "workflow",
-      nodeIds: selectedNodeIds,
-      edgeIds: selectedEdgeIds,
-    },
-    capabilities: resolveContextCapabilities({ kind: "workflow" }),
-  }
+      workflowId,
+      editorRevision,
+      selection: {
+        kind: "workflow",
+        nodeIds: selectedNodeIds,
+        edgeIds: selectedEdgeIds,
+      },
+      capabilities: resolveContextCapabilities({ kind: "workflow" }),
+    }),
+    [editorRevision, selectedEdgeIds, selectedNodeIds, workflowId]
+  )
+  const panelRuntime = useMemo<WorkflowPanelRuntime>(
+    () => ({
+      editorRevision,
+      handleOpenSettings,
+      reactFlowInstance,
+      selectedEdgeIds,
+      selectedNodeIds,
+      useStore,
+      workflowId,
+      workflowName,
+    }),
+    [
+      editorRevision,
+      handleOpenSettings,
+      reactFlowInstance,
+      selectedEdgeIds,
+      selectedNodeIds,
+      useStore,
+      workflowId,
+      workflowName,
+    ]
+  )
 
   return (
-    <ContextWorkbench
-      workbenchInstanceId={workbenchInstanceId}
-      resource={resource}
-      panels={panels}
-      placement={placement}
-      onExitFocus={handleExitFocus}
-      onCollapse={onCollapse}
-      onEnsureVisible={onEnsureVisible}
-      railOnly={railOnly}
-      manageOwnWidth={false}
-      className={cn("w-full", className)}
-    />
+    <WorkflowPanelRuntimeContext.Provider value={panelRuntime}>
+      <ContextWorkbench
+        workbenchInstanceId={workbenchInstanceId}
+        resource={resource}
+        panels={panels}
+        placement={placement}
+        onExitFocus={handleExitFocus}
+        onCollapse={onCollapse}
+        onEnsureVisible={onEnsureVisible}
+        railOnly={railOnly}
+        manageOwnWidth={false}
+        className={cn("w-full", className)}
+      />
+    </WorkflowPanelRuntimeContext.Provider>
   )
 }
 

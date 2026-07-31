@@ -523,10 +523,12 @@ describe("WorkflowEditorCanvas — persistent workbench rail", () => {
   it("hands the sidebar both halves of the collapse contract", () => {
     renderWithProviders(<WorkflowEditorCanvas workflow={buildSample()} />)
     const sidebar = screen.getByTestId("right-sidebar")
+    const rightResizeHandle = screen.getAllByRole("separator").at(-1)
 
     // The desktop branch used to pass neither, so its collapse fell through to
     // the per-scope `mode: "collapsed"` while the panel around it had its own
     // zero-width collapse — two owners for one column.
+    expect(rightResizeHandle).toHaveClass("after:w-5", "z-20")
     expect(sidebar).toHaveAttribute("data-has-collapse", "true")
     expect(sidebar).toHaveAttribute("data-has-ensure-visible", "true")
     // Nothing is collapsed on a fresh editor.

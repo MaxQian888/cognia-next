@@ -157,6 +157,9 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
             customProviders: settings.customProviders as NonNullable<
               Parameters<typeof executeAgent>[1]
             >["customProviders"],
+            modelMappings: settings.modelMappings,
+            routingConfig: settings.routingConfig,
+            autoRouting: settings.autoRouting,
           }
         : {}),
     }

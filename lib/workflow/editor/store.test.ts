@@ -5,6 +5,10 @@ import { createEditorStore, EDITOR_HISTORY_LIMIT } from "./store"
 import type { VisualWorkflow, WorkflowNodeKind } from "@/types/workflow/visual"
 import { addPluginCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
 import { workflowEditorRevision } from "./editor-revision"
+import {
+  TEMPLATE_API_VERSION,
+  type WorkflowNodeGroupDefinition,
+} from "@cognia/plugin-sdk/templates"
 
 function emptyWorkflow(): VisualWorkflow {
   return {
@@ -22,6 +26,46 @@ function emptyWorkflow(): VisualWorkflow {
       retryDefaults: { attempts: 3, backoff: "exponential", baseMs: 1000 },
     },
     viewport: { x: 0, y: 0, zoom: 1 },
+  }
+}
+
+function nodeGroupDefinition(): WorkflowNodeGroupDefinition {
+  return {
+    apiVersion: TEMPLATE_API_VERSION,
+    id: "demo:review",
+    domain: "workflow",
+    status: "published",
+    revision: 1,
+    version: "1.0.0",
+    metadata: { name: "Review group" },
+    payload: {
+      kind: "cognia.workflow/node-group/v1",
+      nodes: [
+        {
+          id: "prompt",
+          type: "ai.prompt",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "Review", params: { prompt: "Review this" } },
+        },
+        {
+          id: "output",
+          type: "io.output",
+          typeVersion: 1,
+          position: { x: 300, y: 0 },
+          data: { label: "Output", params: {} },
+        },
+      ],
+      edges: [{ id: "edge", source: "prompt", target: "output" }],
+    },
+    inputs: [],
+    dependencies: [],
+    capabilities: [],
+    compatibility: { platforms: ["desktop", "web", "mobile"] },
+    provenance: { source: "plugin", pluginId: "demo" },
+    contentHash: "a".repeat(64),
+    createdAt: 1,
+    updatedAt: 1,
   }
 }
 
@@ -835,6 +879,38 @@ describe("editor store — productivity actions", () => {
     it("returns null when the ids don't match any nodes", () => {
       const { useStore } = seedTwoConnected()
       expect(useStore.getState().groupSelected(["does-not-exist"])).toBeNull()
+    })
+  })
+
+  describe("insertNodeGroup", () => {
+    it("inserts the full group in one undoable store mutation", () => {
+      const useStore = createEditorStore(emptyWorkflow())
+      const existingId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+      useStore.temporal.getState().clear()
+
+      const result = useStore.getState().insertNodeGroup(nodeGroupDefinition(), { x: 500, y: 400 })
+
+      expect(result.nodeIds).toHaveLength(2)
+      expect(useStore.getState().nodes).toHaveLength(4)
+      expect(useStore.getState().edges).toHaveLength(1)
+      expect(useStore.getState().selectedNodeIds).toEqual([result.groupId])
+      expect(useStore.temporal.getState().pastStates).toHaveLength(1)
+
+      useStore.temporal.getState().undo()
+      expect(useStore.getState().nodes.map((node) => node.id)).toEqual([existingId])
+      expect(useStore.getState().edges).toEqual([])
+    })
+
+    it("rejects an invalid group without partially mutating the graph", () => {
+      const useStore = createEditorStore(emptyWorkflow())
+      const invalid = nodeGroupDefinition()
+      invalid.payload.edges = [{ id: "dangling", source: "missing", target: "output" }]
+
+      expect(() => useStore.getState().insertNodeGroup(invalid, { x: 0, y: 0 })).toThrow(
+        /outside the group/i
+      )
+      expect(useStore.getState().nodes).toEqual([])
+      expect(useStore.getState().edges).toEqual([])
     })
   })
 

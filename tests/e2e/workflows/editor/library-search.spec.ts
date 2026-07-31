@@ -18,6 +18,10 @@ test.describe("workflow editor — library search", () => {
     await seedWorkflow(page, "ai-prompt")
 
     await page.goto("/workflows")
+    await expect(page.locator('[data-slot="feature-page-header"]')).toHaveAttribute(
+      "data-variant",
+      "management"
+    )
     const search = page.getByPlaceholder(/search/i).first()
     await expect(search).toBeVisible()
     await search.fill("Branch")

@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 
 const FULL_DOMAINS: TemplateDomain[] = [
   "agentTeam",
@@ -256,14 +257,14 @@ export function TemplateStudio() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 p-4" data-testid="template-studio">
-      <header className="flex flex-wrap items-center gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">{t("title")}</h1>
-          <p className="text-sm text-muted-foreground">{t("description")}</p>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          {platform === "mobile" ? null : (
-            <>
+      <FeaturePageHeader
+        icon={<FileArchiveIcon />}
+        title={t("title")}
+        description={t("description")}
+        className="rounded-xl border shadow-sm"
+        actions={
+          platform === "mobile" ? null : (
+            <div className="flex items-center gap-2">
               <input
                 ref={importRef}
                 type="file"
@@ -279,10 +280,10 @@ export function TemplateStudio() {
                 <PlusIcon className="size-4" />
                 {t("actions.newDraft")}
               </Button>
-            </>
-          )}
-        </div>
-      </header>
+            </div>
+          )
+        }
+      />
 
       {platform === "mobile" ? (
         <Alert>

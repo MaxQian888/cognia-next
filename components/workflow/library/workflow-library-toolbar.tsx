@@ -1,13 +1,13 @@
 "use client"
 
 // Toolbar for the workflow library: debounced search + filter + sort + view
-// toggle, plus the "New folder" / "New workflow" actions. The search box keeps
+// toggle, plus the "New folder" and import actions. The search box keeps
 // a local controlled value for responsiveness and writes through to the store
 // query on a 200ms trailing debounce so filtering doesn't run every keystroke.
 
 import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { FolderPlusIcon, PlusIcon, SearchIcon, UploadIcon } from "lucide-react"
+import { FolderPlusIcon, SearchIcon, UploadIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
@@ -17,14 +17,10 @@ import { WorkflowSortMenu } from "./workflow-sort-menu"
 import { WorkflowFilterBar } from "./workflow-filter-bar"
 
 export interface WorkflowLibraryToolbarProps {
-  onNewWorkflow: () => void
   onImportFiles: (files: FileList) => void
 }
 
-export function WorkflowLibraryToolbar({
-  onNewWorkflow,
-  onImportFiles,
-}: WorkflowLibraryToolbarProps) {
+export function WorkflowLibraryToolbar({ onImportFiles }: WorkflowLibraryToolbarProps) {
   const t = useTranslations("workflows.library")
   const currentFolderId = useWorkflowLibraryStore((s) => s.currentFolderId)
   const openCreateFolder = useWorkflowLibraryStore((s) => s.openCreateFolder)
@@ -35,8 +31,8 @@ export function WorkflowLibraryToolbar({
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b px-6 py-3">
-      <div className="relative min-w-[200px] flex-1 sm:max-w-md">
+    <div className="flex min-w-[min(100%,28rem)] flex-1 flex-wrap items-center justify-end gap-2">
+      <div className="relative min-w-56 flex-[1_1_18rem] 2xl:max-w-md">
         <SearchIcon className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           value={text}
@@ -45,7 +41,7 @@ export function WorkflowLibraryToolbar({
             call(e.target.value)
           }}
           placeholder={t("searchPlaceholder")}
-          className="pl-9"
+          className="h-8 bg-background/80 pl-9 shadow-xs"
           aria-label={t("searchPlaceholder")}
           data-testid="workflow-library-search"
         />
@@ -69,23 +65,21 @@ export function WorkflowLibraryToolbar({
         variant="outline"
         size="sm"
         onClick={() => fileInputRef.current?.click()}
+        aria-label={t("import.button")}
         data-testid="workflow-import"
       >
-        <UploadIcon className="size-4 sm:mr-1.5" />
-        <span className="hidden sm:inline">{t("import.button")}</span>
+        <UploadIcon className="size-4 2xl:mr-1.5" />
+        <span className="hidden 2xl:inline">{t("import.button")}</span>
       </Button>
       <Button
         variant="outline"
         size="sm"
         onClick={() => openCreateFolder(currentFolderId)}
+        aria-label={t("newFolder")}
         data-testid="workflow-new-folder"
       >
-        <FolderPlusIcon className="size-4 sm:mr-1.5" />
-        <span className="hidden sm:inline">{t("newFolder")}</span>
-      </Button>
-      <Button size="sm" onClick={onNewWorkflow} data-testid="workflow-new">
-        <PlusIcon className="size-4 sm:mr-1.5" />
-        <span className="hidden sm:inline">{t("new")}</span>
+        <FolderPlusIcon className="size-4 2xl:mr-1.5" />
+        <span className="hidden 2xl:inline">{t("newFolder")}</span>
       </Button>
     </div>
   )

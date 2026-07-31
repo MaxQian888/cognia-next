@@ -417,6 +417,15 @@ const FIXTURES = {
       method: "POST",
       hmacSecret: "shh",
     }),
+  "trigger-integration-event": () =>
+    triggerOnly("E2E Integration Event Trigger", "trigger.integration.event", "Integration Event", {
+      pluginId: "github-integration",
+      integrationId: "github",
+      accountId: "acct_fixture",
+      eventTypes: ["repository.updated"],
+      resourceKind: "repository",
+      resourceId: "cognia-next",
+    }),
   "trigger-chat": () =>
     triggerOnly("E2E Chat Trigger", "trigger.chat.message", "Chat", {
       characterId: CHARACTER_ID,

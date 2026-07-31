@@ -11,9 +11,8 @@
  *   3. Pass `triggeredBy` so the IM progress-runner can subscribe.
  *
  * Returning a thin `{runId}` instead of the full `RunWorkflowResult`
- * because the caller (bus dispatcher for `wf_approve`) does NOT block on
- * completion — the run starts, the progress-runner fan-out begins, and
- * the caller returns immediately. Completion shows up as a final-summary
+ * because the caller (bus dispatcher for `wf_approve`) waits only for the
+ * durable run row, not completion. Completion shows up as a final-summary
  * card pushed by the runner, not as a tool response.
  */
 
@@ -36,9 +35,7 @@ export type StartWorkflowFromIMResult =
 
 /**
  * Start a workflow on behalf of an IM user. Returns as soon as the run row
- * is persisted and the orchestrator promise is in flight; the call site
- * MUST NOT await the promise (the IM bus dispatcher needs to acknowledge
- * the user's tap synchronously). Run-status fan-out is handled by
+ * is persisted while the orchestrator continues in the background. Run-status fan-out is handled by
  * `lib/connectors/a2ui-bridge/workflow-progress-runner.ts`, which Dexie-
  * live-queries `workflowRunEvents` for any run whose `triggeredBy.source`
  * is `"im"`.
@@ -68,18 +65,25 @@ export async function startWorkflowFromIM(
   // promise needed.
   const runId = "run_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
 
-  // Fire-and-forget: the orchestrator persists the run row inline before
-  // the first step executes, so by the time the awaited Dexie write
-  // completes the row exists for the runner's liveQuery to pick up.
-  // Awaiting the FULL run would block the caller for the entire workflow
-  // duration — not what we want.
-  void runWorkflow({
+  // Detach after the orchestrator persists its run row. Awaiting the FULL run
+  // would block the caller for the entire workflow duration.
+  let markPersisted: () => void = () => undefined
+  const persisted = new Promise<void>((resolve) => {
+    markPersisted = resolve
+  })
+  const execution = runWorkflow({
     workflow,
     trigger,
     runId,
     signal: input.signal,
     triggeredBy: input.triggeredFrom,
+    onPersisted: markPersisted,
   })
+  // A valid run resolves `persisted` immediately after its durable row lands.
+  // A validation/preflight failure can finish before creating that row, so the
+  // execution promise is the second race arm and prevents this handoff from
+  // hanging. The race also owns the rejection handler for the detached run.
+  await Promise.race([persisted, execution.then(() => undefined)])
 
   return { ok: true, runId }
 }
