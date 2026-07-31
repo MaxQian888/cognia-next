@@ -1,4 +1,4 @@
-import { E2BWorkspaceBackend } from "./workspace-backend"
+import { E2BWorkspaceBackend, resolveSandboxConnection } from "./workspace-backend"
 
 function makeSandbox(id: string) {
   const exec = jest.fn(async ({ cmd }: { cmd: string }) => {
@@ -31,6 +31,53 @@ describe("E2BWorkspaceBackend", () => {
     expect(calls.some((c) => c.startsWith("mkdir -p"))).toBe(true)
     expect(calls.some((c) => c.includes("git clone"))).toBe(true)
     expect(calls.some((c) => c.includes("ghs_test"))).toBe(true)
+  })
+
+  it("passes AgentENV apiUrl to the SDK factory as domain", async () => {
+    const sandbox = makeSandbox("sb-agentenv")
+    const sandboxFactory = jest.fn(async () => sandbox)
+    const backend = new E2BWorkspaceBackend({
+      apiKey: "key-1",
+      apiUrl: "http://127.0.0.1:8000",
+      sandboxFactory,
+    })
+    await backend.clone({
+      repoFullName: "octo/hello-world",
+      branch: "main",
+      token: "ghs_test",
+    })
+    expect(sandboxFactory).toHaveBeenCalledWith({
+      apiKey: "key-1",
+      domain: "http://127.0.0.1:8000",
+    })
+  })
+
+  it("prefers trimmed live plugin configuration over construction defaults", () => {
+    expect(
+      resolveSandboxConnection({
+        apiKey: "fallback-key",
+        apiUrl: "https://fallback.example",
+        connection: () => ({
+          apiKey: " live-key ",
+          domain: " http://agentenv.local:8000 ",
+        }),
+      })
+    ).toEqual({
+      apiKey: "live-key",
+      domain: "http://agentenv.local:8000",
+    })
+  })
+
+  it("falls back to explicit options and omits blank values", () => {
+    expect(
+      resolveSandboxConnection({
+        apiKey: " ",
+        domain: "",
+        apiUrl: " http://127.0.0.1:8000 ",
+      })
+    ).toEqual({
+      domain: "http://127.0.0.1:8000",
+    })
   })
 
   it("cleans up the sandbox when clone exec fails", async () => {

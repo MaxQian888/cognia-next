@@ -1,10 +1,5 @@
 import type { PluginContext } from "@/types/plugin"
 
-jest.mock("@/lib/slash-commands/registry", () => ({
-  registerSlashCommand: jest.fn(),
-  unregisterCommandsByPlugin: jest.fn(),
-}))
-
 jest.mock("@/lib/github/workspace", () => ({ setE2BBackend: jest.fn() }))
 jest.mock("@/lib/sandbox/microvm-bridge", () => ({ setMicrovmExec: jest.fn() }))
 
@@ -16,48 +11,98 @@ jest.mock("./workspace-backend", () => ({
 const fakeExec = { kind: "microvm-exec" }
 jest.mock("./microvm-exec", () => ({ buildMicrovmExec: jest.fn(() => fakeExec) }))
 
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import { setE2BBackend } from "@/lib/github/workspace"
 import { setMicrovmExec } from "@/lib/sandbox/microvm-bridge"
+import { E2BWorkspaceBackend } from "./workspace-backend"
+import { buildMicrovmExec } from "./microvm-exec"
 import e2bSandbox from "./index"
 
-const registerMock = registerSlashCommand as jest.Mock
-const unregisterMock = unregisterCommandsByPlugin as jest.Mock
 const setE2BBackendMock = setE2BBackend as jest.Mock
 const setMicrovmExecMock = setMicrovmExec as jest.Mock
+const E2BWorkspaceBackendMock = E2BWorkspaceBackend as jest.Mock
+const buildMicrovmExecMock = buildMicrovmExec as jest.Mock
 
-function makeCtx(opts: { workspace?: boolean } = {}) {
+function makeCtx(opts: { workspace?: boolean; config?: Record<string, unknown> } = {}) {
   const presets: Array<{ id: string }> = []
   const unregister = jest.fn()
   const registerBackend = jest.fn(() => ({ unregister }))
+  const showToast = jest.fn()
+  const config = opts.config ?? {}
+  const configUnsubscribe = jest.fn()
   const ctx: Partial<PluginContext> = {
     pluginId: "cognia-e2b-sandbox",
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } as never,
+    config,
+    configuration: {
+      getAll: () => config,
+      onChange: (_listener: (next: Record<string, unknown>) => void) => {
+        return configUnsubscribe
+      },
+    } as never,
     agent: {
       registerMcpServerPreset: (preset: { id: string }) => {
         presets.push(preset)
       },
     } as never,
+    ui: { showToast } as never,
     workspace: opts.workspace ? ({ registerBackend } as never) : undefined,
   }
-  return { ctx: ctx as PluginContext, presets, registerBackend, unregister }
+  return {
+    ctx: ctx as PluginContext,
+    presets,
+    registerBackend,
+    unregister,
+    showToast,
+    configUnsubscribe,
+  }
 }
 
 beforeEach(() => {
-  registerMock.mockReset()
-  unregisterMock.mockReset()
   setE2BBackendMock.mockReset()
   setMicrovmExecMock.mockReset()
+  E2BWorkspaceBackendMock.mockClear()
+  buildMicrovmExecMock.mockClear()
 })
 
 describe("e2b-sandbox (built-in)", () => {
-  it("activate registers the e2b MCP preset and declares its slash command", async () => {
-    const { ctx, presets } = makeCtx({ workspace: true })
-    await e2bSandbox.activate?.(ctx)
+  it("declares plugin config and exposes AgentENV's API URL in the MCP preset", () => {
+    const manifest = e2bSandbox.manifest as unknown as {
+      capabilities: string[]
+      activationEvents: string[]
+      commands: Array<{ id: string; name: string }>
+      configSchema?: { properties?: Record<string, unknown> }
+      mcpServerPresets: Array<{
+        id: string
+        config: { env?: Record<string, string> }
+        fields: Array<{ key: string; placement: string; secret?: boolean }>
+      }>
+    }
+    expect(manifest.capabilities).toContain("configuration")
+    expect(manifest.activationEvents).toContain("onCommand:sandbox")
+    expect(manifest.commands).toContainEqual(expect.objectContaining({ id: "sandbox" }))
+    expect(manifest.configSchema?.properties).toHaveProperty("apiUrl")
+    const preset = manifest.mcpServerPresets[0]
+    expect(preset.id).toBe("e2b-sandbox")
+    expect(preset.config.env).toHaveProperty("E2B_API_URL")
+    const byKey = Object.fromEntries(preset.fields.map((f) => [f.key, f]))
+    expect(byKey.E2B_API_KEY).toMatchObject({ placement: "env", secret: true })
+    expect(byKey.E2B_API_URL).toMatchObject({ placement: "env" })
+  })
+
+  it("activate registers the e2b MCP preset and handles the managed /sandbox command", async () => {
+    const { ctx, presets, showToast } = makeCtx({ workspace: true })
+    const hooks = await e2bSandbox.activate?.(ctx)
     expect(presets).toEqual([expect.objectContaining({ id: "e2b-sandbox" })])
-    // The slash command is manifest-declared now; the plugin must not touch
-    // the registry itself.
-    expect(registerMock).not.toHaveBeenCalled()
+    await expect(hooks?.onCommand?.("sandbox", [])).resolves.toBe(true)
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringContaining("Settings → Plugins → E2B Sandbox"),
+      "info"
+    )
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringContaining("Settings → MCP Servers"),
+      "info"
+    )
+    await expect(hooks?.onCommand?.("other", [])).resolves.toBe(false)
     await e2bSandbox.deactivate?.(ctx)
   })
 
@@ -89,31 +134,10 @@ describe("e2b-sandbox (built-in)", () => {
     expect(setMicrovmExecMock).toHaveBeenLastCalledWith(null)
   })
 
-  it("declares its slash command instead of registering it imperatively", async () => {
-    const { ctx } = makeCtx()
-    const hooks = await e2bSandbox.activate?.(ctx)
-    // The manager owns registration for manifest-declared commands; a plugin
-    // touching the registry itself skips namespacing, conflict detection,
-    // aliases, the command-palette entry and teardown.
-    expect(registerMock).not.toHaveBeenCalled()
-    expect(typeof hooks?.onCommand).toBe("function")
-    const commands = (e2bSandbox.manifest as { commands?: Array<{ id: string }> }).commands
-    expect(commands?.map((c) => c.id)).toEqual(["sandbox"])
-  })
-
-  it("handles its own command and declines others", async () => {
-    const { ctx } = makeCtx()
-    const showToast = jest.fn()
-    ;(ctx as { ui?: unknown }).ui = { showToast }
-    const hooks = await e2bSandbox.activate?.(ctx)
-    expect(await hooks?.onCommand?.("not-mine", [])).toBe(false)
-    expect(showToast).not.toHaveBeenCalled()
-    expect(await hooks?.onCommand?.("sandbox", [])).toBe(true)
-    expect(showToast).toHaveBeenCalled()
-  })
-
-  it("declares lazy activation for its command", () => {
-    const events = (e2bSandbox.manifest as { activationEvents?: string[] }).activationEvents
-    expect(events).toContain("onCommand:sandbox")
+  it("deactivate unsubscribes from plugin config changes", async () => {
+    const { ctx, configUnsubscribe } = makeCtx({ workspace: true })
+    await e2bSandbox.activate?.(ctx)
+    await e2bSandbox.deactivate?.(ctx)
+    expect(configUnsubscribe).toHaveBeenCalledTimes(1)
   })
 })
