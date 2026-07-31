@@ -31,6 +31,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 
+use crate::sandbox::launcher::push_loopback_proxy_network_rule;
 use crate::sandbox::traits::SandboxedExec;
 use crate::sandbox::types::{
     NetworkPolicy, SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy, SandboxResult,
@@ -450,9 +451,7 @@ fn push_network(out: &mut String, policy: &NetworkPolicy, proxy_port: Option<u16
                 // loopback filtering proxy, which applies the host allowlist and
                 // performs DNS + egress itself. A command that tries to skip the
                 // proxy and connect directly is blocked by the `(deny default)`.
-                out.push_str(&format!(
-                    "(allow network-outbound (remote tcp \"localhost:{port}\"))\n"
-                ));
+                push_loopback_proxy_network_rule(out, port);
             }
             None => {
                 // Allowlist requested but no proxy port was provisioned — fail

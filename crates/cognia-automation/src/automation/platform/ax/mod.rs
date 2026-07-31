@@ -265,7 +265,7 @@ impl AutomationBackend for AxBackend {
         window_hint: Option<&ElementInfo>,
         opts: ScreenshotOpts,
     ) -> Result<ApplicationScreenshot> {
-        screen_capture::capture_application_window_active(
+        screen_capture::capture_application_window(
             &self.capture_stream,
             app.process_id,
             window_hint,

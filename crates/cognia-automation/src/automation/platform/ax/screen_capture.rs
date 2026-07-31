@@ -116,15 +116,7 @@ impl Drop for ActiveWindowCapture {
     }
 }
 
-pub fn capture_application_window(
-    process_id: u32,
-    window_hint: Option<&ElementInfo>,
-    opts: &ScreenshotOpts,
-) -> Result<ApplicationScreenshot> {
-    capture_application_window_active(&Mutex::new(None), process_id, window_hint, opts)
-}
-
-pub(super) fn capture_application_window_active(
+pub(super) fn capture_application_window(
     active: &Mutex<Option<ActiveWindowCapture>>,
     process_id: u32,
     window_hint: Option<&ElementInfo>,
@@ -352,6 +344,21 @@ mod tests {
     }
 
     #[test]
+    fn application_capture_entry_point_rejects_display_overrides() {
+        let active = Mutex::new(None);
+        let opts = ScreenshotOpts {
+            monitor_id: Some("1".into()),
+            ..ScreenshotOpts::default()
+        };
+
+        let error = capture_application_window(&active, 42, None, &opts).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("reject region/monitor overrides"));
+    }
+
+    #[test]
     #[ignore = "requires a signed macOS process with Screen Recording permission"]
     fn captures_a_live_application_window() {
         use crate::automation::backend::AutomationBackend;
@@ -372,9 +379,9 @@ mod tests {
         let roots = backend
             .read_application_tree(&application, TreeOpts::default())
             .unwrap();
-        let capture =
-            capture_application_window(process_id, roots.first(), &ScreenshotOpts::default())
-                .unwrap();
+        let capture = backend
+            .screenshot_application(&application, roots.first(), ScreenshotOpts::default())
+            .unwrap();
         assert!(capture.window_id.is_some());
         assert!(capture.screenshot.width > 0);
         assert!(capture.screenshot.height > 0);

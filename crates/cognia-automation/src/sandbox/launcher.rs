@@ -150,6 +150,29 @@ pub fn sandbox_exec_prefix(scope: &LaunchScope) -> Vec<String> {
     ]
 }
 
+/// Render a macOS sandbox that changes only network behavior. Filesystem,
+/// process, and IPC access keep the caller's ordinary permissions, while all
+/// outbound network access is denied except one loopback proxy port.
+pub fn sandbox_exec_network_proxy_prefix(proxy_port: u16) -> Vec<String> {
+    let mut profile = String::from("(version 1)\n(allow default)\n(deny network*)\n");
+    push_loopback_proxy_network_rule(&mut profile, proxy_port);
+    vec![
+        "/usr/bin/sandbox-exec".to_string(),
+        "-p".to_string(),
+        profile,
+        "--".to_string(),
+    ]
+}
+
+/// Append the shared macOS SBPL rule that permits exactly one loopback proxy
+/// port. Both one-shot allowlist sandboxes and the generic agent proxy launcher
+/// use this renderer so the kernel-enforced boundary cannot drift.
+pub(crate) fn push_loopback_proxy_network_rule(out: &mut String, proxy_port: u16) {
+    out.push_str(&format!(
+        "(allow network-outbound (remote tcp \"localhost:{proxy_port}\"))\n"
+    ));
+}
+
 /// SBPL profile for an interactive launch — mirrors `MacOsSandboxBackend`'s
 /// one-shot profile (deny-by-default + system reads + scoped read/write +
 /// network gate).
@@ -387,6 +410,16 @@ mod tests {
         assert_eq!(p[1], "-p");
         assert!(p[2].starts_with("(version 1)\n(deny default)"));
         assert_eq!(p[3], "--");
+    }
+
+    #[test]
+    fn network_only_proxy_profile_does_not_change_filesystem_access() {
+        let p = sandbox_exec_network_proxy_prefix(7890);
+        assert!(p[2].contains("(allow default)"));
+        assert!(p[2].contains("(deny network*)"));
+        assert!(p[2].contains("(allow network-outbound (remote tcp \"localhost:7890\"))"));
+        assert!(!p[2].contains("file-read"));
+        assert!(!p[2].contains("file-write"));
     }
 
     #[test]
