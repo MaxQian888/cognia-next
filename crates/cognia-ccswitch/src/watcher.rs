@@ -206,6 +206,9 @@ mod tests {
     fn start_errors_when_dir_missing() {
         // Point cc-switch at a non-existent dir via the env override so start()
         // hits the "data dir does not exist" branch without needing an AppHandle.
+        let _env_guard = crate::paths::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         let missing = tmp.path().join("does-not-exist");
         let prev = std::env::var("CC_SWITCH_HOME").ok();

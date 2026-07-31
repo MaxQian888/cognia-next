@@ -23,6 +23,9 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+#[cfg(test)]
+pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Where the DB path came from. Surfaced in `CcswitchStatus` so the
 /// Overview tab can label the active source.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -189,6 +192,7 @@ mod tests {
 
     fn scoped_env(key: &str, value: Option<&str>) -> impl Drop {
         struct Guard {
+            _lock: std::sync::MutexGuard<'static, ()>,
             key: String,
             prev: Option<String>,
         }
@@ -200,12 +204,16 @@ mod tests {
                 }
             }
         }
+        let lock = TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let prev = std::env::var(key).ok();
         match value {
             Some(v) => std::env::set_var(key, v),
             None => std::env::remove_var(key),
         }
         Guard {
+            _lock: lock,
             key: key.to_string(),
             prev,
         }
