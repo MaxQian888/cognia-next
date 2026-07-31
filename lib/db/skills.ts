@@ -62,7 +62,7 @@ export type SkillDraft = Pick<Skill, "name" | "content"> &
     resources?: Array<Omit<SkillResourceDraft, "skillId">>
   }
 
-export async function createSkill(draft: SkillDraft): Promise<Skill> {
+export function createSkill(draft: SkillDraft): Promise<Skill> {
   const now = Date.now()
   const skill: Skill = {
     id: newId(),
@@ -90,18 +90,23 @@ export async function createSkill(draft: SkillDraft): Promise<Skill> {
     createdAt: now,
     updatedAt: now,
   }
-  await getDb().skills.put(skill)
-  if (draft.resources && draft.resources.length > 0) {
-    await replaceResourcesForSkill(skill.id, draft.resources)
-  }
-  return skill
+  return getDb()
+    .skills.put(skill)
+    .then(() =>
+      draft.resources && draft.resources.length > 0
+        ? replaceResourcesForSkill(skill.id, draft.resources)
+        : undefined
+    )
+    .then(() => skill)
 }
 
-export async function updateSkill(
+export function updateSkill(
   id: string,
   patch: Partial<Omit<Skill, "id" | "createdAt" | "isBuiltIn">>
 ): Promise<void> {
-  await getDb().skills.update(id, { ...patch, updatedAt: Date.now() })
+  return getDb()
+    .skills.update(id, { ...patch, updatedAt: Date.now() })
+    .then(() => undefined)
 }
 
 export async function deleteSkill(id: string): Promise<void> {
@@ -252,7 +257,7 @@ export function inferSource(skill: Skill): SkillSource {
  * "find-by-canonicalId, replace, never duplicate" semantics live in one
  * place rather than two slightly-different copies.
  */
-export async function upsertSkillByCanonicalId(input: {
+export function upsertSkillByCanonicalId(input: {
   draft: SkillDraft
   canonicalId: string
   /**
@@ -265,11 +270,11 @@ export async function upsertSkillByCanonicalId(input: {
 }): Promise<{ skill: Skill; created: boolean }> {
   const { draft, canonicalId, existingByCanonicalId } = input
   const db = getDb()
-  const existing = existingByCanonicalId
-    ? existingByCanonicalId.get(canonicalId)
-    : (await db.skills.toArray()).find((s) => s.canonicalId === canonicalId)
-  if (existing) {
-    await updateSkill(existing.id, {
+  const persist = (existing: Skill | undefined): Promise<{ skill: Skill; created: boolean }> => {
+    if (!existing) {
+      return createSkill({ ...draft, canonicalId }).then((skill) => ({ skill, created: true }))
+    }
+    return updateSkill(existing.id, {
       name: draft.name,
       description: draft.description,
       content: draft.content,
@@ -291,14 +296,17 @@ export async function upsertSkillByCanonicalId(input: {
       kind: draft.kind ?? existing.kind,
       workflowId: draft.workflowId ?? existing.workflowId,
     })
-    if (draft.resources) {
-      await replaceResourcesForSkill(existing.id, draft.resources)
-    }
-    const refreshed = await db.skills.get(existing.id)
-    return { skill: refreshed ?? existing, created: false }
+      .then(() =>
+        draft.resources ? replaceResourcesForSkill(existing.id, draft.resources) : undefined
+      )
+      .then(() => db.skills.get(existing.id))
+      .then((refreshed) => ({ skill: refreshed ?? existing, created: false }))
   }
-  const created = await createSkill({ ...draft, canonicalId })
-  return { skill: created, created: true }
+  if (existingByCanonicalId) return persist(existingByCanonicalId.get(canonicalId))
+  return db.skills
+    .toArray()
+    .then((skills) => skills.find((skill) => skill.canonicalId === canonicalId))
+    .then(persist)
 }
 
 /** What to do when a draft's name collides with an existing custom skill. */

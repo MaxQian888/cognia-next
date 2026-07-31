@@ -27,11 +27,16 @@ export async function appendAssignmentEvent(
   input: AppendAssignmentEventInput
 ): Promise<ConversationAssignmentEventRow> {
   const db = getDb()
+  const latest = await db.conversationAssignmentEvents
+    .where("[conversationKey+at]")
+    .between([input.conversationKey, 0], [input.conversationKey, Infinity])
+    .reverse()
+    .first()
   const row: ConversationAssignmentEventRow = {
     id: newId(),
     conversationKey: input.conversationKey,
     kind: input.kind,
-    at: input.at ?? Date.now(),
+    at: input.at ?? Math.max(Date.now(), (latest?.at ?? 0) + 1),
     ...(input.fields ? { fields: input.fields } : {}),
   }
   await db.conversationAssignmentEvents.add(row)

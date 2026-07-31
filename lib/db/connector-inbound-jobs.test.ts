@@ -7,6 +7,7 @@ import {
   claimConnectorInboundJob,
   claimNextConnectorInboundJob,
   completeConnectorInboundJob,
+  countPendingConnectorInboundJobs,
   continueConnectorInboundJobSafely,
   dismissConnectorInboundJobRecovery,
   enqueueConnectorInboundJob,
@@ -97,6 +98,31 @@ describe("connector inbound jobs", () => {
     expect(first.job.sourceMessageId).toBe("42")
   })
 
+  it("converges when another delivery wins the unique insert race", async () => {
+    const db = getDb()
+    const actualAdd = db.connectorInboundJobs.add.bind(db.connectorInboundJobs)
+    jest.spyOn(db.connectorInboundJobs, "add").mockImplementationOnce(async (row) => {
+      await actualAdd(row)
+      throw new Error("ConstraintError")
+    })
+
+    const result = await ensureConnectorInboundJob(event("om-race", 10), "queue", { now: 100 })
+
+    expect(result.inserted).toBe(false)
+    expect(result.job.sourceMessageId).toBe("om-race")
+    expect(await db.connectorInboundJobs.count()).toBe(1)
+  })
+
+  it("surfaces an insert failure when no competing durable row exists", async () => {
+    jest
+      .spyOn(getDb().connectorInboundJobs, "add")
+      .mockRejectedValueOnce(new Error("storage unavailable"))
+
+    await expect(
+      ensureConnectorInboundJob(event("om-failed-insert", 10), "queue", { now: 100 })
+    ).rejects.toThrow("storage unavailable")
+  })
+
   it("updates the durable payload, claims a specific job, and exposes recoverable work", async () => {
     const initial = await enqueueConnectorInboundJob(event("om-update", 10), "queue", { now: 100 })
     const transformed = {
@@ -112,6 +138,34 @@ describe("connector inbound jobs", () => {
     await expect(
       claimConnectorInboundJob(initial.id, { leaseOwner: "runner", leaseMs: 100, now: 300 })
     ).resolves.toEqual(expect.objectContaining({ status: "running", event: transformed }))
+  })
+
+  it("does not mutate or claim missing and terminal jobs", async () => {
+    await expect(countPendingConnectorInboundJobs("missing-conversation")).resolves.toBe(0)
+    await expect(
+      claimConnectorInboundJob("missing-job", { leaseOwner: "runner", leaseMs: 100, now: 1 })
+    ).resolves.toBeUndefined()
+    await expect(
+      claimNextConnectorInboundJob("missing-conversation", {
+        leaseOwner: "runner",
+        leaseMs: 100,
+        now: 1,
+      })
+    ).resolves.toBeUndefined()
+    await updateConnectorInboundJobPayload("missing-job", event("missing", 1), "steer")
+
+    const terminal = await enqueueConnectorInboundJob(event("om-terminal", 10), "queue")
+    await completeConnectorInboundJob(terminal.id)
+    await updateConnectorInboundJobPayload(terminal.id, event("om-terminal", 20), "steer")
+
+    await expect(
+      claimConnectorInboundJob(terminal.id, { leaseOwner: "runner", leaseMs: 100, now: 1 })
+    ).resolves.toBeUndefined()
+    await expect(bindConnectorInboundJobExecutionRun(terminal.id, "run-late")).resolves.toBe(false)
+    expect(await getDb().connectorInboundJobs.get(terminal.id)).toMatchObject({
+      status: "completed",
+      dispatchMode: "queue",
+    })
   })
 
   it("records non-executing overflow and ambiguous execution recovery states", async () => {

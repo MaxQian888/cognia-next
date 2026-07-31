@@ -32,10 +32,8 @@ export async function append(entry: ConnectorAuditDraft): Promise<AuditEntry> {
     message: entry.message,
     fields: entry.fields,
   }
-  await db.transaction("rw", db.connectorAudit, async () => {
-    await db.connectorAudit.add(row)
-    await pruneOldest(AUDIT_CAP)
-  })
+  await db.connectorAudit.add(row)
+  await pruneOldest(AUDIT_CAP, db.connectorAudit)
   return row
 }
 
@@ -57,16 +55,16 @@ export async function listRecent(adapterId?: string, limit = 100): Promise<Audit
 
 /**
  * Prune oldest rows so the table holds exactly `keep` entries.
- * Caller must wrap in a `db.transaction("rw", ...)`.
+ * Safe to call after an append; concurrent callers converge on the same cap
+ * because deleting an already-deleted primary key is a no-op.
  */
-async function pruneOldest(keep: number): Promise<void> {
-  const db = getDb()
-  const total = await db.connectorAudit.count()
+async function pruneOldest(keep: number, table = getDb().connectorAudit): Promise<void> {
+  const total = await table.count()
   if (total <= keep) return
   const overflow = total - keep
-  const oldest = await db.connectorAudit.orderBy("at").limit(overflow).primaryKeys()
+  const oldest = await table.orderBy("at").limit(overflow).primaryKeys()
   if (oldest.length > 0) {
-    await db.connectorAudit.bulkDelete(oldest as string[])
+    await table.bulkDelete(oldest as string[])
   }
 }
 

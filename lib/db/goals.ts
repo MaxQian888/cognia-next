@@ -16,7 +16,7 @@
 import Dexie from "dexie"
 import type { Goal, GoalEvent, GoalEventKind, GoalEventPayload, GoalStatus } from "@/types/goal"
 import { isTerminalGoalStatus } from "@/types/goal"
-import { getDb } from "./schema"
+import { getDb, withDbReopenRetry } from "./schema"
 import { DEFAULT_PROJECT_ID, resolveSessionProjectId } from "./project-scope"
 import { getSettings } from "./settings"
 
@@ -138,11 +138,26 @@ export async function updateGoal(id: string, patch: GoalUpdatePatch): Promise<vo
  * single transaction so a crash mid-delete can't leave orphans.
  */
 export async function deleteGoal(id: string): Promise<void> {
-  const db = getDb()
-  await db.transaction("rw", db.chatGoals, db.chatGoalEvents, async () => {
-    await db.chatGoalEvents.where("goalId").equals(id).delete()
-    await db.chatGoals.delete(id)
-  })
+  try {
+    await withDbReopenRetry(async () => {
+      const db = getDb()
+      await db.transaction("rw", db.chatGoals, db.chatGoalEvents, async () => {
+        await Promise.all([
+          db.chatGoalEvents.where("goalId").equals(id).delete(),
+          db.chatGoals.delete(id),
+        ])
+      })
+    })
+  } catch (error) {
+    // A premature-commit report can arrive after both deletes committed. Only
+    // accept that race as success when the complete cascade is durable.
+    const db = getDb()
+    const [goal, eventCount] = await Promise.all([
+      db.chatGoals.get(id),
+      db.chatGoalEvents.where("goalId").equals(id).count(),
+    ])
+    if (goal || eventCount > 0) throw error
+  }
 }
 
 /**
@@ -182,7 +197,6 @@ export interface AppendEventInput {
  * the per-goal cap-prune so the table can't blow up under heavy looping.
  */
 export async function appendGoalEvent(input: AppendEventInput): Promise<GoalEvent> {
-  const db = getDb()
   const row: GoalEvent = {
     id: input.id ?? crypto.randomUUID(),
     goalId: input.goalId,
@@ -190,9 +204,13 @@ export async function appendGoalEvent(input: AppendEventInput): Promise<GoalEven
     ts: input.ts ?? Date.now(),
     payload: input.payload,
   }
-  await db.transaction("rw", db.chatGoalEvents, async () => {
-    await db.chatGoalEvents.add(row)
-    await pruneEventsForGoal(input.goalId, EVENTS_PER_GOAL_CAP)
+  await withDbReopenRetry(() => {
+    const db = getDb()
+    return db.transaction("rw", db.chatGoalEvents, () =>
+      db.chatGoalEvents
+        .put(row)
+        .then(() => pruneEventsForGoal(input.goalId, EVENTS_PER_GOAL_CAP, db))
+    )
   })
   return row
 }
@@ -220,19 +238,29 @@ export async function countGoalEvents(goalId: string): Promise<number> {
  * Prune oldest events for a single goal so it holds at most `keep` entries.
  * Caller wraps in a transaction.
  */
-async function pruneEventsForGoal(goalId: string, keep: number): Promise<void> {
-  const db = getDb()
-  const total = await db.chatGoalEvents.where("goalId").equals(goalId).count()
-  if (total <= keep) return
-  const overflow = total - keep
-  const oldest = await db.chatGoalEvents
-    .where("[goalId+ts]")
-    .between([goalId, -Infinity], [goalId, Infinity])
-    .limit(overflow)
-    .primaryKeys()
-  if (oldest.length > 0) {
-    await db.chatGoalEvents.bulkDelete(oldest as string[])
-  }
+function pruneEventsForGoal(
+  goalId: string,
+  keep: number,
+  db: ReturnType<typeof getDb> = getDb()
+): Promise<void> {
+  return db.chatGoalEvents
+    .where("goalId")
+    .equals(goalId)
+    .count()
+    .then((total) => {
+      if (total <= keep) return
+      const overflow = total - keep
+      return db.chatGoalEvents
+        .where("[goalId+ts]")
+        .between([goalId, -Infinity], [goalId, Infinity])
+        .limit(overflow)
+        .primaryKeys()
+        .then((oldest) =>
+          oldest.length > 0
+            ? db.chatGoalEvents.bulkDelete(oldest as string[]).then(() => undefined)
+            : undefined
+        )
+    })
 }
 
 /** Test-only escape hatch. */

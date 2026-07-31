@@ -1,7 +1,7 @@
 import type { ActiveRunDispatchMode } from "@/types/connectors/policy"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { ConnectorInboundJobRow } from "./connector-types"
-import { getDb } from "./schema"
+import { getDb, withDbReopenRetry } from "./schema"
 
 const PENDING_STATUSES = new Set<ConnectorInboundJobRow["status"]>(["queued", "steering"])
 
@@ -23,14 +23,7 @@ export async function ensureConnectorInboundJob(
   dispatchMode: ActiveRunDispatchMode,
   options: { now?: number; historyOnly?: boolean } = {}
 ): Promise<ConnectorInboundEnqueueResult> {
-  const db = getDb()
   const platformMessageId = scopedPlatformMessageId(event)
-  const existing = await db.connectorInboundJobs
-    .where("[adapterId+platformMessageId]")
-    .equals([event.adapterId, platformMessageId])
-    .first()
-  if (existing) return { job: existing, inserted: false }
-
   const now = options.now ?? Date.now()
   const row: ConnectorInboundJobRow = {
     id: inboundJobId(event.adapterId, platformMessageId),
@@ -46,20 +39,28 @@ export async function ensureConnectorInboundJob(
     createdAt: now,
     updatedAt: now,
   }
-  try {
-    await db.connectorInboundJobs.add(row)
-    return { job: row, inserted: true }
-  } catch (error) {
-    // Another transport delivery may win the unique insert between the read
-    // and add. Dexie uses different constraint error classes in browser and
-    // fake-indexeddb, so resolve by identity before deciding whether to throw.
-    const duplicate = await db.connectorInboundJobs
+  return withDbReopenRetry(async () => {
+    const db = getDb()
+    const existing = await db.connectorInboundJobs
       .where("[adapterId+platformMessageId]")
       .equals([event.adapterId, platformMessageId])
       .first()
-    if (!duplicate) throw error
-    return { job: duplicate, inserted: false }
-  }
+    if (existing) return { job: existing, inserted: false }
+    try {
+      await db.connectorInboundJobs.add(row)
+      return { job: row, inserted: true }
+    } catch (error) {
+      // Another transport delivery may win the unique insert between the read
+      // and add. Dexie uses different constraint error classes in browser and
+      // fake-indexeddb, so resolve by identity before deciding whether to throw.
+      const duplicate = await db.connectorInboundJobs
+        .where("[adapterId+platformMessageId]")
+        .equals([event.adapterId, platformMessageId])
+        .first()
+      if (!duplicate) throw error
+      return { job: duplicate, inserted: false }
+    }
+  })
 }
 
 export async function enqueueConnectorInboundJob(
@@ -99,13 +100,16 @@ export async function updateConnectorInboundJobPayload(
   dispatchMode: ActiveRunDispatchMode,
   options: { now?: number } = {}
 ): Promise<void> {
-  const current = await getDb().connectorInboundJobs.get(id)
-  if (!current || !PENDING_STATUSES.has(current.status)) return
-  await getDb().connectorInboundJobs.update(id, {
-    event,
-    dispatchMode,
-    status: dispatchMode === "steer" ? "steering" : "queued",
-    updatedAt: options.now ?? Date.now(),
+  await withDbReopenRetry(async () => {
+    const db = getDb()
+    const current = await db.connectorInboundJobs.get(id)
+    if (!current || !PENDING_STATUSES.has(current.status)) return
+    await db.connectorInboundJobs.update(id, {
+      event,
+      dispatchMode,
+      status: dispatchMode === "steer" ? "steering" : "queued",
+      updatedAt: options.now ?? Date.now(),
+    })
   })
 }
 
@@ -113,21 +117,23 @@ export async function claimConnectorInboundJob(
   id: string,
   options: { leaseOwner: string; leaseMs: number; now?: number }
 ): Promise<ConnectorInboundJobRow | undefined> {
-  const db = getDb()
-  return db.transaction("rw", db.connectorInboundJobs, async () => {
-    const current = await db.connectorInboundJobs.get(id)
-    if (!current || !PENDING_STATUSES.has(current.status)) return undefined
-    const now = options.now ?? Date.now()
-    const claimed: ConnectorInboundJobRow = {
-      ...current,
-      status: "running",
-      leaseOwner: options.leaseOwner,
-      leaseExpiresAt: now + options.leaseMs,
-      attempts: current.attempts + 1,
-      updatedAt: now,
-    }
-    await db.connectorInboundJobs.put(claimed)
-    return claimed
+  return withDbReopenRetry(() => {
+    const db = getDb()
+    return db.transaction("rw", db.connectorInboundJobs, () =>
+      db.connectorInboundJobs.get(id).then((current) => {
+        if (!current || !PENDING_STATUSES.has(current.status)) return undefined
+        const now = options.now ?? Date.now()
+        const claimed: ConnectorInboundJobRow = {
+          ...current,
+          status: "running",
+          leaseOwner: options.leaseOwner,
+          leaseExpiresAt: now + options.leaseMs,
+          attempts: current.attempts + 1,
+          updatedAt: now,
+        }
+        return db.connectorInboundJobs.put(claimed).then(() => claimed)
+      })
+    )
   })
 }
 
@@ -135,21 +141,31 @@ export async function claimNextConnectorInboundJob(
   conversationKey: string,
   options: { leaseOwner: string; leaseMs: number; now?: number }
 ): Promise<ConnectorInboundJobRow | undefined> {
-  const db = getDb()
-  return db.transaction("rw", db.connectorInboundJobs, async () => {
-    const next = (await listPendingConnectorInboundJobs(conversationKey))[0]
-    if (!next) return undefined
-    const now = options.now ?? Date.now()
-    const claimed: ConnectorInboundJobRow = {
-      ...next,
-      status: "running",
-      leaseOwner: options.leaseOwner,
-      leaseExpiresAt: now + options.leaseMs,
-      attempts: next.attempts + 1,
-      updatedAt: now,
-    }
-    await db.connectorInboundJobs.put(claimed)
-    return claimed
+  return withDbReopenRetry(() => {
+    const db = getDb()
+    return db.transaction("rw", db.connectorInboundJobs, () =>
+      db.connectorInboundJobs
+        .where("conversationKey")
+        .equals(conversationKey)
+        .filter((row) => PENDING_STATUSES.has(row.status))
+        .toArray()
+        .then((rows) => {
+          const next = rows.sort(
+            (a, b) => a.receivedAt - b.receivedAt || a.createdAt - b.createdAt
+          )[0]
+          if (!next) return undefined
+          const now = options.now ?? Date.now()
+          const claimed: ConnectorInboundJobRow = {
+            ...next,
+            status: "running",
+            leaseOwner: options.leaseOwner,
+            leaseExpiresAt: now + options.leaseMs,
+            attempts: next.attempts + 1,
+            updatedAt: now,
+          }
+          return db.connectorInboundJobs.put(claimed).then(() => claimed)
+        })
+    )
   })
 }
 
@@ -164,7 +180,7 @@ export async function completeConnectorInboundJob(
     updatedAt: options.now ?? Date.now(),
   }
   if (options.executionRunId !== undefined) changes.executionRunId = options.executionRunId
-  await getDb().connectorInboundJobs.update(id, changes)
+  await withDbReopenRetry(() => getDb().connectorInboundJobs.update(id, changes))
 }
 
 /**
@@ -177,15 +193,19 @@ export async function bindConnectorInboundJobExecutionRun(
   executionRunId: string,
   options: { now?: number } = {}
 ): Promise<boolean> {
-  const db = getDb()
-  return db.transaction("rw", db.connectorInboundJobs, async () => {
-    const current = await db.connectorInboundJobs.get(id)
-    if (!current || current.status !== "running") return false
-    await db.connectorInboundJobs.update(id, {
-      executionRunId,
-      updatedAt: options.now ?? Date.now(),
-    })
-    return true
+  return withDbReopenRetry(() => {
+    const db = getDb()
+    return db.transaction("rw", db.connectorInboundJobs, () =>
+      db.connectorInboundJobs.get(id).then((current) => {
+        if (!current || current.status !== "running") return false
+        return db.connectorInboundJobs
+          .update(id, {
+            executionRunId,
+            updatedAt: options.now ?? Date.now(),
+          })
+          .then(() => true)
+      })
+    )
   })
 }
 
@@ -200,11 +220,13 @@ export async function stampConnectorInboundJobPrincipal(
   stamp: { accountId: string; principalId: string },
   options: { now?: number } = {}
 ): Promise<void> {
-  await getDb().connectorInboundJobs.update(id, {
-    accountId: stamp.accountId,
-    principalId: stamp.principalId,
-    updatedAt: options.now ?? Date.now(),
-  })
+  await withDbReopenRetry(() =>
+    getDb().connectorInboundJobs.update(id, {
+      accountId: stamp.accountId,
+      principalId: stamp.principalId,
+      updatedAt: options.now ?? Date.now(),
+    })
+  )
 }
 
 export async function markConnectorInboundJobHistoryOnly(
@@ -212,13 +234,15 @@ export async function markConnectorInboundJobHistoryOnly(
   reason: string,
   options: { now?: number } = {}
 ): Promise<void> {
-  await getDb().connectorInboundJobs.update(id, {
-    status: "history_only",
-    recoveryReason: reason,
-    leaseOwner: undefined,
-    leaseExpiresAt: undefined,
-    updatedAt: options.now ?? Date.now(),
-  })
+  await withDbReopenRetry(() =>
+    getDb().connectorInboundJobs.update(id, {
+      status: "history_only",
+      recoveryReason: reason,
+      leaseOwner: undefined,
+      leaseExpiresAt: undefined,
+      updatedAt: options.now ?? Date.now(),
+    })
+  )
 }
 
 export async function markConnectorInboundJobRecoveryRequired(
@@ -226,14 +250,16 @@ export async function markConnectorInboundJobRecoveryRequired(
   reason: string,
   options: { error?: string; now?: number } = {}
 ): Promise<void> {
-  await getDb().connectorInboundJobs.update(id, {
-    status: "recovery_required",
-    recoveryReason: reason,
-    lastError: options.error,
-    leaseOwner: undefined,
-    leaseExpiresAt: undefined,
-    updatedAt: options.now ?? Date.now(),
-  })
+  await withDbReopenRetry(() =>
+    getDb().connectorInboundJobs.update(id, {
+      status: "recovery_required",
+      recoveryReason: reason,
+      lastError: options.error,
+      leaseOwner: undefined,
+      leaseExpiresAt: undefined,
+      updatedAt: options.now ?? Date.now(),
+    })
+  )
 }
 
 export async function recoverStaleConnectorInboundJobs(

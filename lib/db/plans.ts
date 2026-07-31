@@ -21,7 +21,7 @@ import type {
 } from "@/types/agent/plan"
 import { OPEN_PLAN_STATUSES, isTerminalPlanStatus } from "@/types/agent/plan"
 import Dexie from "dexie"
-import { getDb } from "./schema"
+import { getDb, withDbReopenRetry } from "./schema"
 import { resolveScopeProjectId, resolveSessionProjectId } from "./project-scope"
 
 const EVENTS_PER_PLAN_CAP = 2000
@@ -126,24 +126,37 @@ export async function updatePlan(id: string, patch: PlanUpdatePatch): Promise<vo
  * a crash mid-delete can't leave orphans.
  */
 export async function deletePlan(id: string): Promise<void> {
-  const db = getDb()
-  await db.transaction("rw", db.agentPlans, db.agentPlanEvents, async () => {
-    await db.agentPlanEvents.where("planId").equals(id).delete()
-    await db.agentPlans.delete(id)
+  await withDbReopenRetry(() => {
+    const db = getDb()
+    return db.transaction("rw", db.agentPlans, db.agentPlanEvents, () =>
+      Promise.all([
+        db.agentPlanEvents.where("planId").equals(id).delete(),
+        db.agentPlans.delete(id),
+      ]).then(() => undefined)
+    )
   })
 }
 
 /** Cascade-delete every plan (and its events) for a given session. */
 export async function deletePlansForSession(sessionId: string): Promise<void> {
-  const db = getDb()
-  await db.transaction("rw", db.agentPlans, db.agentPlanEvents, async () => {
-    const ids = await db.agentPlans.where("sessionId").equals(sessionId).primaryKeys()
-    if (ids.length === 0) return
-    await db.agentPlanEvents
-      .where("planId")
-      .anyOf(ids as string[])
-      .delete()
-    await db.agentPlans.bulkDelete(ids as string[])
+  await withDbReopenRetry(() => {
+    const db = getDb()
+    return db.transaction("rw", db.agentPlans, db.agentPlanEvents, () =>
+      db.agentPlans
+        .where("sessionId")
+        .equals(sessionId)
+        .primaryKeys()
+        .then((ids) => {
+          if (ids.length === 0) return
+          return Promise.all([
+            db.agentPlanEvents
+              .where("planId")
+              .anyOf(ids as string[])
+              .delete(),
+            db.agentPlans.bulkDelete(ids as string[]),
+          ]).then(() => undefined)
+        })
+    )
   })
 }
 
@@ -166,7 +179,6 @@ export interface AppendPlanEventInput {
  * per-plan cap-prune so the table can't blow up under heavy looping.
  */
 export async function appendPlanEvent(input: AppendPlanEventInput): Promise<PlanEvent> {
-  const db = getDb()
   const row: PlanEvent = {
     id: input.id ?? crypto.randomUUID(),
     planId: input.planId,
@@ -174,9 +186,13 @@ export async function appendPlanEvent(input: AppendPlanEventInput): Promise<Plan
     ts: input.ts ?? Date.now(),
     payload: input.payload,
   }
-  await db.transaction("rw", db.agentPlanEvents, async () => {
-    await db.agentPlanEvents.add(row)
-    await pruneEventsForPlan(input.planId, EVENTS_PER_PLAN_CAP)
+  await withDbReopenRetry(() => {
+    const db = getDb()
+    return db.transaction("rw", db.agentPlanEvents, () =>
+      db.agentPlanEvents
+        .put(row)
+        .then(() => pruneEventsForPlan(input.planId, EVENTS_PER_PLAN_CAP, db))
+    )
   })
   return row
 }
@@ -200,19 +216,29 @@ export async function countPlanEvents(planId: string): Promise<number> {
  * Prune oldest events for a single plan so it holds at most `keep` entries.
  * Caller wraps in a transaction.
  */
-async function pruneEventsForPlan(planId: string, keep: number): Promise<void> {
-  const db = getDb()
-  const total = await db.agentPlanEvents.where("planId").equals(planId).count()
-  if (total <= keep) return
-  const overflow = total - keep
-  const oldest = await db.agentPlanEvents
-    .where("[planId+ts]")
-    .between([planId, -Infinity], [planId, Infinity])
-    .limit(overflow)
-    .primaryKeys()
-  if (oldest.length > 0) {
-    await db.agentPlanEvents.bulkDelete(oldest as string[])
-  }
+function pruneEventsForPlan(
+  planId: string,
+  keep: number,
+  db: ReturnType<typeof getDb> = getDb()
+): Promise<void> {
+  return db.agentPlanEvents
+    .where("planId")
+    .equals(planId)
+    .count()
+    .then((total) => {
+      if (total <= keep) return
+      const overflow = total - keep
+      return db.agentPlanEvents
+        .where("[planId+ts]")
+        .between([planId, -Infinity], [planId, Infinity])
+        .limit(overflow)
+        .primaryKeys()
+        .then((oldest) =>
+          oldest.length > 0
+            ? db.agentPlanEvents.bulkDelete(oldest as string[]).then(() => undefined)
+            : undefined
+        )
+    })
 }
 
 /** Test-only escape hatch. */

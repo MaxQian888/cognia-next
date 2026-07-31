@@ -26,15 +26,72 @@ declare global {
   interface Window {
     __cogniaResetDb?: () => Promise<void>
     __cogniaTestGlobalsReady?: boolean
+    __cogniaPluginRuntimeReady?: boolean
   }
 }
 
 export async function waitForTestGlobals(page: Page, timeoutMs = 10_000): Promise<void> {
+  for (let recoveryAttempt = 0; recoveryAttempt <= 1; recoveryAttempt += 1) {
+    const stateHandle = await page.waitForFunction(
+      () => {
+        if ((window as { __cogniaTestGlobalsReady?: boolean }).__cogniaTestGlobalsReady) {
+          return "ready"
+        }
+        if (document.querySelector('[data-testid="db-upgrade-blocked-dialog"]')) {
+          return "blocked"
+        }
+        return false
+      },
+      undefined,
+      { timeout: timeoutMs }
+    )
+    const state = await stateHandle.jsonValue()
+    if (state === "ready") return
+
+    if (recoveryAttempt === 1) {
+      throw new Error("Database upgrade stayed blocked after the prescribed reload")
+    }
+    await page.getByTestId("db-upgrade-blocked-reload").click()
+    await page.waitForLoadState("domcontentloaded")
+  }
+}
+
+/**
+ * Wait until plugin discovery, core seeding, and any dynamic Dexie schema
+ * restoration have settled. Chat E2E must not start a turn while that boot
+ * transaction is still closing/reopening the active account database.
+ */
+export async function waitForPluginRuntimeReady(page: Page, timeoutMs = 30_000): Promise<void> {
   await page.waitForFunction(
-    () => Boolean((window as { __cogniaTestGlobalsReady?: boolean }).__cogniaTestGlobalsReady),
+    () => Boolean((window as { __cogniaPluginRuntimeReady?: boolean }).__cogniaPluginRuntimeReady),
     undefined,
     { timeout: timeoutMs }
   )
+
+  // A first-ever database boot can finish the requested plugin schema upgrade
+  // just after the bounded blocked-connection warning has already opened its
+  // recovery dialog. The prescribed Reload is required to clear that modal and
+  // reopen every consumer on the now-current schema before a chat turn starts.
+  const blockedDialog = page.getByTestId("db-upgrade-blocked-dialog")
+  const blocked = await blockedDialog
+    // The schema retry loop gives other holders ~15 s to yield. Wait through
+    // that complete window so a slow, contended boot cannot surface the modal
+    // after this helper has already released a chat test.
+    .waitFor({ state: "visible", timeout: 17_000 })
+    .then(() => true)
+    .catch(() => false)
+  if (blocked) {
+    await page.getByTestId("db-upgrade-blocked-reload").click()
+    await page.waitForLoadState("domcontentloaded")
+    await waitForTestGlobals(page, timeoutMs)
+    await page.waitForFunction(
+      () =>
+        Boolean((window as { __cogniaPluginRuntimeReady?: boolean }).__cogniaPluginRuntimeReady),
+      undefined,
+      { timeout: timeoutMs }
+    )
+    await expect(blockedDialog).toBeHidden({ timeout: timeoutMs })
+  }
 }
 
 /**

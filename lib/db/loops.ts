@@ -10,7 +10,7 @@
 
 import type { Loop, LoopEvent, LoopEventKind, LoopEventPayload, LoopStatus } from "@/types/loop"
 import { isTerminalLoopStatus } from "@/types/loop"
-import { getDb } from "./schema"
+import { getDb, withDbReopenRetry } from "./schema"
 import { resolveSessionProjectId } from "./project-scope"
 
 const EVENTS_PER_LOOP_CAP = 5000
@@ -91,16 +91,32 @@ export async function updateLoop(id: string, patch: LoopUpdatePatch): Promise<vo
   if (patch.status && isTerminalLoopStatus(patch.status) && patch.endedAt == null) {
     next.endedAt = now
   }
-  await getDb().loops.update(id, next)
+  await withDbReopenRetry(() =>
+    getDb()
+      .loops.update(id, next)
+      .then(() => undefined)
+  )
 }
 
 /** Cascade-delete: the loop AND every event for it, in one transaction. */
 export async function deleteLoop(id: string): Promise<void> {
-  const db = getDb()
-  await db.transaction("rw", db.loops, db.loopEvents, async () => {
-    await db.loopEvents.where("loopId").equals(id).delete()
-    await db.loops.delete(id)
-  })
+  try {
+    await withDbReopenRetry(() => {
+      const db = getDb()
+      return db.transaction("rw", db.loops, db.loopEvents, () =>
+        Promise.all([db.loopEvents.where("loopId").equals(id).delete(), db.loops.delete(id)]).then(
+          () => undefined
+        )
+      )
+    })
+  } catch (error) {
+    const db = getDb()
+    const [loop, eventCount] = await Promise.all([
+      db.loops.get(id),
+      db.loopEvents.where("loopId").equals(id).count(),
+    ])
+    if (loop || eventCount > 0) throw error
+  }
 }
 
 /**
@@ -110,13 +126,17 @@ export async function deleteLoop(id: string): Promise<void> {
  * deleted rows so the caller can do exactly that.
  */
 export async function deleteLoopsForSession(sessionId: string): Promise<Loop[]> {
-  const db = getDb()
-  const rows = await db.loops.where("sessionId").equals(sessionId).toArray()
+  const rows = await getDb().loops.where("sessionId").equals(sessionId).toArray()
   if (rows.length === 0) return []
   const ids = rows.map((r) => r.id)
-  await db.transaction("rw", db.loops, db.loopEvents, async () => {
-    await db.loopEvents.where("loopId").anyOf(ids).delete()
-    await db.loops.bulkDelete(ids)
+  await withDbReopenRetry(() => {
+    const db = getDb()
+    return db.transaction("rw", db.loops, db.loopEvents, () =>
+      Promise.all([
+        db.loopEvents.where("loopId").anyOf(ids).delete(),
+        db.loops.bulkDelete(ids),
+      ]).then(() => undefined)
+    )
   })
   return rows
 }
@@ -140,7 +160,6 @@ export interface AppendLoopEventInput {
  * per-loop cap-prune so heavy looping can't blow the table up.
  */
 export async function appendLoopEvent(input: AppendLoopEventInput): Promise<LoopEvent> {
-  const db = getDb()
   const row: LoopEvent = {
     id: input.id ?? crypto.randomUUID(),
     loopId: input.loopId,
@@ -148,10 +167,25 @@ export async function appendLoopEvent(input: AppendLoopEventInput): Promise<Loop
     ts: input.ts ?? Date.now(),
     payload: input.payload,
   }
-  await db.transaction("rw", db.loopEvents, async () => {
-    await db.loopEvents.add(row)
-    await pruneEventsForLoop(input.loopId, EVENTS_PER_LOOP_CAP)
-  })
+  try {
+    await withDbReopenRetry(() => {
+      const currentDb = getDb()
+      return currentDb.transaction("rw", currentDb.loopEvents, () =>
+        // `put` keeps the retry idempotent if the first transaction committed
+        // before Dexie observed the connection-close race.
+        currentDb.loopEvents
+          .put(row)
+          .then(() => pruneEventsForLoop(input.loopId, EVENTS_PER_LOOP_CAP, currentDb))
+      )
+    })
+  } catch (error) {
+    // IndexedDB may commit the write while Dexie reports a premature commit.
+    // Verify the durable postcondition before surfacing a false failure, and
+    // finish the bounded-log prune that the interrupted callback may have
+    // skipped.
+    if (!(await getDb().loopEvents.get(row.id))) throw error
+    await withDbReopenRetry(() => pruneEventsForLoop(input.loopId, EVENTS_PER_LOOP_CAP))
+  }
   return row
 }
 
@@ -166,19 +200,29 @@ export async function listLoopEvents(loopId: string, limit = 200): Promise<LoopE
 }
 
 /** Prune oldest events so a loop holds at most `keep` entries. */
-async function pruneEventsForLoop(loopId: string, keep: number): Promise<void> {
-  const db = getDb()
-  const total = await db.loopEvents.where("loopId").equals(loopId).count()
-  if (total <= keep) return
-  const overflow = total - keep
-  const oldest = await db.loopEvents
-    .where("[loopId+ts]")
-    .between([loopId, -Infinity], [loopId, Infinity])
-    .limit(overflow)
-    .primaryKeys()
-  if (oldest.length > 0) {
-    await db.loopEvents.bulkDelete(oldest as string[])
-  }
+function pruneEventsForLoop(
+  loopId: string,
+  keep: number,
+  db: ReturnType<typeof getDb> = getDb()
+): Promise<void> {
+  return db.loopEvents
+    .where("loopId")
+    .equals(loopId)
+    .count()
+    .then((total) => {
+      if (total <= keep) return
+      const overflow = total - keep
+      return db.loopEvents
+        .where("[loopId+ts]")
+        .between([loopId, -Infinity], [loopId, Infinity])
+        .limit(overflow)
+        .primaryKeys()
+        .then((oldest) =>
+          oldest.length > 0
+            ? db.loopEvents.bulkDelete(oldest as string[]).then(() => undefined)
+            : undefined
+        )
+    })
 }
 
 /** Test-only escape hatch. */
