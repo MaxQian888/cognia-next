@@ -8,8 +8,10 @@
 // is synchronous (reads the in-memory settings store) so it can run inline in
 // `use-claude-chat.send`.
 
-import { isCapacitor } from "@/lib/platform/detect"
+import { detectPlatform } from "@/lib/platform/detect"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { useSettingsStore } from "@/stores/settings/settings-store"
+import { isStandaloneRuntimeTarget, resolveRuntimeTarget } from "./runtime-target"
 
 export type MobileRuntimeMode = "paired" | "standalone"
 
@@ -24,10 +26,17 @@ export async function setMobileRuntimeMode(mode: MobileRuntimeMode): Promise<voi
 }
 
 /**
- * True when chat/search/documents should run standalone in the webview against
- * the user's own provider keys — i.e. the Capacitor shell with mode=standalone.
- * Off the Capacitor shell (desktop/web) this is always false.
+ * True when chat/search/documents should run standalone in the current
+ * webview against the user's own provider keys. This includes both the
+ * explicit Capacitor standalone mode and an ordinary browser with no
+ * Companion target.
  */
 export function isStandaloneChatMode(): boolean {
-  return isCapacitor() && getMobileRuntimeMode() === "standalone"
+  return isStandaloneRuntimeTarget(
+    resolveRuntimeTarget({
+      platform: detectPlatform(),
+      mobileRuntimeMode: getMobileRuntimeMode(),
+      webCompanionConfigured: hasWebCompanionTarget(),
+    })
+  )
 }
