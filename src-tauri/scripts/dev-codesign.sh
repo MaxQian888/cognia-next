@@ -3,9 +3,8 @@
 # Stable-signing helper for local macOS development.
 #
 # Cargo's target runner invokes this as
-# `dev-codesign.sh <path-to-binary> [args…]`; Tauri's cargo wrapper invokes it
-# as `dev-codesign.sh --sign-only <path-to-binary>`. Both modes re-sign the
-# freshly-built `cognia-next` binary with the stable self-signed identity from
+# `dev-codesign.sh <path-to-binary> [args…]`. It re-signs the freshly-built
+# `cognia-next` binary with the stable self-signed identity from
 # `dev-codesign-setup.sh`, keeping its designated requirement constant across
 # rebuilds so the login keychain stops re-prompting.
 #
@@ -17,11 +16,7 @@
 set -euo pipefail
 
 IDENTITY="${COGNIA_DEV_SIGNING_IDENTITY:-Cognia Dev Signing}"
-sign_only=false
-if [ "${1:-}" = "--sign-only" ]; then
-  sign_only=true
-  shift
-fi
+DEV_KEYCHAIN="${COGNIA_DEV_SIGNING_KEYCHAIN:-$HOME/Library/Keychains/cognia-dev-signing.keychain-db}"
 bin="${1:?dev-codesign: missing binary path}"
 
 # NOTE: gate on `find-identity -p codesigning` WITHOUT `-v`. A self-signed dev
@@ -30,15 +25,29 @@ bin="${1:?dev-codesign: missing binary path}"
 # would make this shim silently never fire.
 if [ "$(basename "$bin")" = "cognia-next" ] \
   && command -v codesign >/dev/null 2>&1 \
-  && command -v security >/dev/null 2>&1 \
-  && security find-identity -p codesigning 2>/dev/null | grep -qF "$IDENTITY"; then
-  if ! codesign --force --sign "$IDENTITY" "$bin" >/dev/null 2>&1; then
+  && command -v security >/dev/null 2>&1; then
+  codesign_keychain=()
+  signing_identity="$IDENTITY"
+  if [ -f "$DEV_KEYCHAIN" ] \
+    && security unlock-keychain -p "" "$DEV_KEYCHAIN" >/dev/null 2>&1; then
+    dedicated_identity="$(
+      security find-identity -p codesigning "$DEV_KEYCHAIN" 2>/dev/null \
+        | awk -v identity="$IDENTITY" 'index($0, "\"" identity "\"") { print $2; exit }'
+    )"
+  else
+    dedicated_identity=""
+  fi
+  if [ -n "$dedicated_identity" ]; then
+    signing_identity="$dedicated_identity"
+    codesign_keychain=(--keychain "$DEV_KEYCHAIN")
+  elif ! security find-identity -p codesigning 2>/dev/null | grep -qF "$IDENTITY"; then
+    exec "$@"
+  fi
+
+  if ! codesign --force "${codesign_keychain[@]}" --sign "$signing_identity" "$bin" >/dev/null 2>&1; then
     echo "dev-codesign: could not sign $bin; refusing to run unsigned" >&2
     exit 1
   fi
 fi
 
-if [ "$sign_only" = true ]; then
-  exit 0
-fi
 exec "$@"

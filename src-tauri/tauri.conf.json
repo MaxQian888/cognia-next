@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "pnpm plugin-node:prepare && node scripts/dev/free-port.mjs 3000 && pnpm dev",
-    "beforeBuildCommand": "pnpm plugin-node:prepare && pnpm build"
+    "beforeDevCommand": "pnpm terminal-host:prepare:dev && pnpm plugin-node:prepare && node scripts/dev/free-port.mjs 3000 && pnpm dev",
+    "beforeBuildCommand": "pnpm terminal-host:prepare && pnpm plugin-node:prepare && pnpm build"
   },
   "app": {
     "macOSPrivateApi": true,
@@ -38,6 +38,7 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
+    "externalBin": ["binaries/cognia-server"],
     "targets": "all",
     "resources": [
       "../sidecar/claude-host.mjs",
