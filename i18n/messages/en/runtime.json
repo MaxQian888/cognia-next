@@ -1,0 +1,33 @@
+{
+  "surfaceBoundary": {
+    "backToChat": "Back to chat",
+    "diagnose": "Open diagnostics",
+    "pairHost": "Pair or switch host",
+    "readOnly": "Read-only mode: {reason}",
+    "reasons": {
+      "companion-not-paired": "This target has no usable pairing credentials.",
+      "connection-offline": "The current host is offline. This action will not be replayed automatically.",
+      "host-admin-only": "This operation is restricted to host administrators.",
+      "host-manifest-missing": "The host did not provide a compatible capability manifest.",
+      "host-protocol": "The host protocol is not compatible with this browser.",
+      "legacy-readonly": "This legacy data space is preserved for search and export only.",
+      "missing-grant": "This browser has not been granted the required device permission.",
+      "offline-cache": "Cached data remains available while the host is offline.",
+      "offline-queue": "This low-risk idempotent action will remain in the visible target queue.",
+      "operation-unavailable": "The active target does not advertise a healthy implementation for this operation.",
+      "requires-companion": "This capability needs a paired desktop or cloud host.",
+      "service-only": "This operation can only run inside a trusted service.",
+      "unknown-command": "This operation is not present in the shared command manifest.",
+      "vault-locked": "Unlock the local Vault before using this target."
+    },
+    "states": {
+      "incompatible": "Host upgrade required",
+      "offline": "Host offline",
+      "requires-grant": "Device permission required",
+      "requires-pairing": "Pairing required",
+      "requires-unlock": "Vault locked",
+      "unsupported": "Capability unavailable on this target"
+    },
+    "unlockVault": "Unlock Vault"
+  }
+}

@@ -1,4 +1,18 @@
 {
+  "accessory": {
+    "alt": "Alt",
+    "ctrl": "Ctrl+C",
+    "down": "Down",
+    "esc": "Esc",
+    "hideKeyboard": "Hide keyboard",
+    "label": "Terminal keyboard controls",
+    "left": "Left",
+    "paste": "Paste",
+    "right": "Right",
+    "showKeyboard": "Show keyboard",
+    "tab": "Tab",
+    "up": "Up"
+  },
   "back": "Back",
   "empty": {
     "action": "Start session",

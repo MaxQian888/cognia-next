@@ -1,0 +1,43 @@
+{
+  "actions": {
+    "openFullSourceControl": "Open full Source Control",
+    "openSourceControl": "Source Control",
+    "openWorkspace": "Open workspace"
+  },
+  "analysis": {
+    "contextConfigured": "{count} of {total} project context sources configured",
+    "contextLabel": "Project context",
+    "multiRoot": "{count} workspace roots are mounted",
+    "scopeLabel": "Workspace scope",
+    "scmChanges": "{count} working tree changes need attention",
+    "scmClean": "Working tree is clean",
+    "scmConflicts": "{count} merge conflicts need resolution",
+    "scmLoading": "Source Control status is loading",
+    "scmNotRepo": "The selected root is not a Git repository",
+    "scmUnavailable": "Source Control requires the desktop app",
+    "singleRoot": "One workspace root is mounted",
+    "sourceControlLabel": "Source Control",
+    "title": "Project analysis"
+  },
+  "noDescription": "No project description yet.",
+  "panelTitle": "Project",
+  "roots": {
+    "primary": "Primary",
+    "title": "Workspace roots"
+  },
+  "sourceControl": {
+    "clean": "No uncommitted changes",
+    "loading": "Loading repository status…",
+    "notRepository": "This workspace root is not a Git repository.",
+    "title": "Source Control",
+    "unavailable": "Source Control status and actions are available in the desktop app."
+  },
+  "summary": {
+    "conversations": "Conversations",
+    "knowledge": "Knowledge files",
+    "messages": "Messages",
+    "roots": "Roots",
+    "title": "Project information"
+  },
+  "workspaceBadge": "Conversation workspace"
+}

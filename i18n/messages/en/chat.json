@@ -311,6 +311,8 @@
     "modelPicker": {
       "autoBadge": "Auto",
       "autoBadgeHint": "Auto routing is on — each prompt picks a model tier by difficulty.",
+      "autoEnableHint": "Select to enable reliability-first routing for this conversation",
+      "autoModel": "Auto",
       "autoToggle": "Auto routing",
       "autoToggleHint": "Pick a model tier per prompt by difficulty",
       "capReasoning": "Reasoning",
@@ -321,6 +323,7 @@
       "liveSwitchFailed": "Couldn't switch the live model",
       "liveSwitched": "Switched to {model}",
       "noProviders": "No providers configured",
+      "routingGroup": "Routing",
       "searchPlaceholder": "Search models…",
       "switchModelAria": "Switch model"
     },
@@ -338,6 +341,7 @@
     "placeholderDisabled": "Select a session to start chatting…",
     "popover": {
       "agentsSection": "Agents",
+      "argumentTitle": "Complete /{name}",
       "bashEmpty": "'<empty>'",
       "bashHintPrefix": "Press",
       "bashHintSuffix": "to run as a shell command.",
@@ -356,6 +360,9 @@
       "fileTitle": "Reference a file or folder",
       "filesSection": "Files",
       "memoryTitle": "Append to memory",
+      "multiCommandHint": "Commands can be combined by line. After choosing one, start a new line and type / again.",
+      "multiSkillHint": "You can attach multiple skills. Type @skill: again or use the Skills button to add more.",
+      "noArgumentMatches": "No parameter options match \"{query}\".",
       "noCommandMatches": "No commands match \"/{query}\".",
       "noCommands": "No commands available.",
       "noFiles": "No files match \"{query}\".",
@@ -371,10 +378,16 @@
       "pinnedSection": "Pinned",
       "presetTitle": "Apply a prompt preset",
       "recentSection": "Recent",
+      "resultCount": "{count, plural, one {# command} other {# commands}}",
+      "searchArgumentsAria": "Search parameters for /{name}",
+      "searchArgumentsPlaceholder": "Search parameter options…",
+      "searchAria": "Search slash commands",
+      "searchPlaceholder": "Search commands…",
       "searching": "Searching…",
       "searchingShort": "searching…",
       "skillTitle": "Enable a skill",
       "slashTitle": "Slash command",
+      "suggestionCount": "{count, plural, one {# option} other {# options}}",
       "unpinAction": "Unpin /{name}",
       "wfEdgeTitle": "Reference an edge",
       "wfNodeTitle": "Reference a node",
@@ -505,18 +518,9 @@
     }
   },
   "concurrent": {
-    "artifactsOpen": "{count, plural, one {# artifact} other {# artifacts}} in this conversation",
-    "artifactsPendingReview": "{count, plural, one {# artifact} other {# artifacts}} in this conversation, {pending, plural, one {# awaiting review} other {# awaiting review}}",
-    "awaitingApproval": "Awaiting approval",
-    "closeTab": "Close {title}",
-    "errored": "Error",
     "exitSplit": "Exit split view",
-    "newTab": "New conversation",
-    "openConversations": "Open conversations",
     "overCapacity": "Concurrency limit reached ({max} streaming). Wait for one to finish or stop another conversation.",
-    "splitView": "Split view",
-    "streaming": "Streaming",
-    "untitled": "Untitled"
+    "splitView": "Split view"
   },
   "copy": {
     "success": "Copied to clipboard"

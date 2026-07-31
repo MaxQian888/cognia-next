@@ -461,6 +461,7 @@
     "deleteConfirmCancel": "Cancel",
     "deleteConfirmDescription": "This permanently removes \"{title}\" and its ingested chunks. This cannot be undone.",
     "deleteConfirmTitle": "Delete source?",
+    "deleteFailed": "Could not delete the source: {message}",
     "emptyHint": "No sources yet. Click Add source to paste in some text or import a file.",
     "errorPrefix": "⚠",
     "filterAll": "All",

@@ -208,6 +208,11 @@
   "url": {
     "placeholder": "http://localhost:3000"
   },
+  "webFallback": {
+    "enableRemote": "启用云端浏览器",
+    "frameTitle": "网页预览",
+    "notice": "部分网站会阻止嵌入式预览。请在外部打开页面，或启用云端浏览器以进行完整交互。"
+  },
   "zoom": {
     "in": "放大",
     "level": "{percent}%",

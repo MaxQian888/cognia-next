@@ -213,6 +213,17 @@
     "title": "允许远程控制",
     "toggleAria": "切换 {label} 的远程控制"
   },
+  "remoteTerminal": {
+    "blocked": "终端访问权限未更改（{reason}）。",
+    "col": "终端访问",
+    "description": "允许此设备查看、恢复并控制由主机持有的终端会话。此权限独立于远程控制和智能体控制。",
+    "disabledToast": "已为 {label} 关闭终端访问。",
+    "enabledToast": "已为 {label} 启用终端访问。",
+    "operationFailed": "无法保存终端访问权限。",
+    "reason": "确认授予 {label} 终端访问权限",
+    "title": "允许终端访问",
+    "toggleAria": "切换 {label} 的终端访问权限"
+  },
   "resume": {
     "blocked": "恢复未完成（{reason}）。",
     "description": "该设备的 JWT 会被移出拒绝名单并恢复访问。",

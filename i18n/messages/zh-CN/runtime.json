@@ -1,0 +1,33 @@
+{
+  "surfaceBoundary": {
+    "backToChat": "返回聊天",
+    "diagnose": "打开诊断",
+    "pairHost": "配对或切换主机",
+    "readOnly": "只读模式：{reason}",
+    "reasons": {
+      "companion-not-paired": "当前目标没有可用的配对凭证。",
+      "connection-offline": "当前主机离线，此操作不会自动重放。",
+      "host-admin-only": "此操作仅限主机管理员。",
+      "host-manifest-missing": "主机没有提供兼容的能力清单。",
+      "host-protocol": "主机协议与此浏览器不兼容。",
+      "legacy-readonly": "此旧版数据空间仅保留搜索和导出能力。",
+      "missing-grant": "此浏览器尚未获得所需的设备权限。",
+      "offline-cache": "主机离线期间仍可读取缓存数据。",
+      "offline-queue": "此低风险幂等操作会保留在当前目标的可见队列中。",
+      "operation-unavailable": "当前目标未声明此操作存在健康的实现。",
+      "requires-companion": "此能力需要已配对的桌面或云主机。",
+      "service-only": "此操作只能在可信服务中运行。",
+      "unknown-command": "共享命令清单中不存在此操作。",
+      "vault-locked": "使用此目标前请先解锁本地 Vault。"
+    },
+    "states": {
+      "incompatible": "需要升级主机",
+      "offline": "主机离线",
+      "requires-grant": "需要设备授权",
+      "requires-pairing": "需要配对",
+      "requires-unlock": "Vault 已锁定",
+      "unsupported": "当前目标不支持此能力"
+    },
+    "unlockVault": "解锁 Vault"
+  }
+}

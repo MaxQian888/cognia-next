@@ -10,7 +10,7 @@
     "scopeLabel": "Scope",
     "signInCta": "Sign in",
     "signOut": "Sign out",
-    "signedOutBody": "Authorize cognia-next with your Claude account.",
+    "signedOutBody": "Authorize Cognia with your Claude account.",
     "signedOutTitle": "Not signed in",
     "unknownEmail": "Signed in (no email reported)"
   },
@@ -360,7 +360,7 @@
       "openAuthorize": "Open authorization page",
       "signIn": "Sign in"
     },
-    "awaitingCode": "Authorize cognia-next on the page that just opened, then paste the displayed code back here.",
+    "awaitingCode": "Authorize Cognia on the page that just opened, then paste the displayed code back here.",
     "chooseMode": "Choose which Claude account to authorize.",
     "codeFieldLabel": "Authorization code (or full callback URL)",
     "codeFieldPlaceholder": "Paste the code or URL the redirect page showed you",

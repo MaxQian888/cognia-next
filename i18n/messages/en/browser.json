@@ -208,6 +208,11 @@
   "url": {
     "placeholder": "http://localhost:3000"
   },
+  "webFallback": {
+    "enableRemote": "Enable cloud browser",
+    "frameTitle": "Web page preview",
+    "notice": "Some sites block embedded previews. Open the page externally or enable the cloud browser for full interaction."
+  },
   "zoom": {
     "in": "Zoom in",
     "level": "{percent}%",

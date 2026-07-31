@@ -1,4 +1,22 @@
 {
+  "chatRuntime": {
+    "title": "Chat is read-only right now",
+    "states": {
+      "available": "Chat is available.",
+      "readOnly": "Cached conversations remain available, but sending is disabled.",
+      "queued": "This action will be sent when the current host reconnects.",
+      "offline": "The current host is offline. Drafts stay in this browser and are not sent automatically.",
+      "requiresUnlock": "Unlock the local Vault to use this host.",
+      "requiresPairing": "Pair this browser with a host, or switch to standalone mode.",
+      "requiresGrant": "This device is missing the host permission required for chat.",
+      "incompatible": "The current host does not provide a compatible chat protocol.",
+      "unsupported": "Chat is not implemented for the current runtime target."
+    },
+    "actions": {
+      "pair": "Pair a host",
+      "connectionSettings": "Connection settings"
+    }
+  },
   "barCustomize": {
     "dragHint": "Drag to reorder",
     "hidden": "Hidden",
@@ -18,10 +36,13 @@
       "layoutControls": "Views menu",
       "navArrows": "Back / forward",
       "notifications": "Notifications",
+      "panelToggle": "Panel toggle",
       "perf": "Performance monitor",
+      "primarySidebarToggle": "Primary Side Bar toggle",
       "quickActions": "Quick actions",
       "runStatus": "Run state",
       "search": "Search & title",
+      "secondarySidebarToggle": "Secondary Side Bar toggle",
       "sync": "Sync status",
       "usage": "Usage & limits",
       "workspace": "Workspace"
@@ -52,6 +73,7 @@
       "pin": "Pin",
       "pinSuccess": "{count, plural, one {Pinned # conversation} other {Pinned # conversations}}",
       "selectedCount": "{count, plural, one {# selected} other {# selected}}",
+      "share": "Share",
       "unarchive": "Unarchive",
       "unarchiveSuccess": "{count, plural, one {Restored # conversation} other {Restored # conversations}}",
       "unpin": "Unpin",
@@ -124,6 +146,7 @@
     "empty": "No matches found.",
     "groups": {
       "actions": "Actions",
+      "messages": "Messages",
       "navigate": "Go to",
       "newChat": "New chat with character",
       "pluginActions": "Plugin actions",
@@ -134,6 +157,12 @@
       "workspaces": "Switch workspace"
     },
     "placeholder": "Type a command or session name…",
+    "search": {
+      "coverage": "Search is still indexing older history; some matches may be missing.",
+      "error": "Message search is temporarily unavailable.",
+      "jumpFailed": "The matching message could not be opened.",
+      "loading": "Searching message history…"
+    },
     "title": "Command palette",
     "titles": {
       "chatWith": "Chat with {name}"
@@ -558,6 +587,7 @@
     "deleteConfirmBody": "This permanently removes the conversation and all its messages. This cannot be undone.",
     "deleteConfirmBranches": "{count, plural, =1 {Its 1 branch will be kept as a conversation of its own.} other {Its # branches will be kept as conversations of their own.}}",
     "deleteConfirmTitle": "Delete “{title}”?",
+    "deselect": "Deselect",
     "dragHandle": "Drag to reorder or move to a folder",
     "moveToFolder": "Move to folder",
     "openInTerminal": "Open in terminal",
@@ -567,6 +597,7 @@
     "pinned": "Pinned",
     "removeFromFolder": "Remove from folder",
     "rename": "Rename",
+    "select": "Select",
     "unarchive": "Unarchive",
     "unpin": "Unpin",
     "untitled": "(untitled)"
@@ -644,10 +675,10 @@
       "themeSystem": "System",
       "title": "Customize Layout",
       "toggleGuildRail": "Toggle Guild Rail",
+      "togglePanel": "Toggle Panel",
       "toggleRightSidebar": "Toggle Right Sidebar",
       "toggleSidebar": "Toggle Sidebar",
       "toggleStatusBar": "Toggle Status Bar",
-      "toggleTerminal": "Toggle Terminal",
       "zoomIn": "Zoom in",
       "zoomLabel": "Zoom",
       "zoomOut": "Zoom out",

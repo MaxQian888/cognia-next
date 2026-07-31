@@ -14,9 +14,10 @@
   "dock": {
     "clear": "清屏（Ctrl+L）",
     "closeConfirm": {
-      "body": "该标签页正在运行命令，现在关闭会终止该命令。仍要关闭吗？",
-      "cancel": "保持运行",
-      "confirm": "关闭标签页",
+      "body": "该主机托管会话仍在运行。你可以仅从此设备断开，或为所有已连接客户端终止会话。",
+      "cancel": "保持连接",
+      "detach": "从此设备断开",
+      "terminate": "为所有人终止",
       "title": "关闭正在运行的终端？"
     },
     "closePane": "关闭分屏",
@@ -25,6 +26,7 @@
     "newSession": "新建终端",
     "resize": "拖动调整终端 dock 高度（方向键亦可）",
     "restore": "还原终端面板大小",
+    "detachError": "无法断开终端：{message}",
     "spawnDenied": "终端被插件拦截",
     "spawnError": "无法打开终端：{message}",
     "splitRight": "向右分屏（Ctrl+\\）"
@@ -68,6 +70,18 @@
     },
     "title": "命令历史"
   },
+  "hostState": {
+    "openSettings": "打开设置",
+    "retry": "重试",
+    "state": {
+      "incompatible": "终端主机与当前应用版本不兼容。",
+      "offline": "终端主机离线。",
+      "reconnecting": "正在重新连接终端主机…",
+      "resource_limited": "终端主机已达到资源上限。",
+      "unauthorized": "此设备没有远程终端权限。",
+      "unpaired": "请先配对此设备，再打开远程终端。"
+    }
+  },
   "popup": {
     "hint": "↑↓ 选择 · Enter 接受 · Esc 关闭",
     "label": "补全候选",
@@ -94,6 +108,16 @@
     "next": "下一个匹配",
     "placeholder": "在终端中查找",
     "previous": "上一个匹配"
+  },
+  "sessionState": {
+    "fullHost": "完整主机权限",
+    "integrationDegraded": "Shell 集成不可用",
+    "readOnly": "只读",
+    "replayGap": "序列 {firstAvailable} 之前的输出已不可用。",
+    "replayGapMarker": "由于回放缓冲区已截断，更早的终端输出不可用。",
+    "sandboxed": "已沙箱化",
+    "takeControl": "接管控制",
+    "takeoverConfirm": "要接管此会话吗？当前控制者将变为只读。"
   },
   "shellPicker": {
     "auto": "默认 Shell",

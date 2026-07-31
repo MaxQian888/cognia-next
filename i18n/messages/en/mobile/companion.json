@@ -213,6 +213,17 @@
     "title": "Allow remote control",
     "toggleAria": "Toggle remote control for {label}"
   },
+  "remoteTerminal": {
+    "blocked": "Terminal access was not changed ({reason}).",
+    "col": "Terminal access",
+    "description": "Lets this device view, resume, and control host-owned terminal sessions. This permission is independent from remote control and agent control.",
+    "disabledToast": "Terminal access disabled for {label}.",
+    "enabledToast": "Terminal access enabled for {label}.",
+    "operationFailed": "The terminal permission could not be saved.",
+    "reason": "Confirm granting terminal access to {label}",
+    "title": "Allow terminal access",
+    "toggleAria": "Toggle terminal access for {label}"
+  },
   "resume": {
     "blocked": "Resume not completed ({reason}).",
     "description": "The device's JWT is removed from the deny-list and regains access.",

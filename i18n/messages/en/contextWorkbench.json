@@ -131,6 +131,38 @@
   "proposalReview": "Proposal review",
   "resourceChat": "AI conversation",
   "sessionSidechat": "Side chat",
+  "sessionSources": {
+    "description": "Files, web pages, retrieved context, and tools used in this conversation.",
+    "emptyDescription": "Files, citations, retrieved context, and tool activity will appear here as the conversation develops.",
+    "emptyTitle": "No sources yet",
+    "filters": {
+      "all": "All",
+      "files": "Files",
+      "other": "Other",
+      "web": "Web"
+    },
+    "labels": {
+      "anthropic": "Web",
+      "document": "Document",
+      "file": "File",
+      "footnote": "Note",
+      "memory": "Memory",
+      "tool": "Tool",
+      "twinRag": "Twin",
+      "twinStyle": "Style",
+      "web": "Web"
+    },
+    "messageLabel": "Message {n}",
+    "noResultsDescription": "Try another keyword or source type.",
+    "noResultsTitle": "No matching sources",
+    "searchLabel": "Search conversation sources",
+    "searchPlaceholder": "Search files, web pages, and tools…",
+    "title": "Conversation sources"
+  },
+  "sidechatPlaceholder": {
+    "description": "Open a conversation first, then use Side chat to investigate something without adding noise to the main thread.",
+    "title": "No conversation is open"
+  },
   "unavailable": {
     "comments": {
       "description": "This resource does not currently provide comment threads. Other workbench activities remain available.",

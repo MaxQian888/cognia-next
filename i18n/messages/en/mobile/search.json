@@ -8,11 +8,18 @@
   "groups": {
     "actions": "Actions",
     "characters": "Characters",
+    "messages": "Messages",
     "sessions": "Chats",
     "teams": "Teams",
     "workflows": "Workflows"
   },
   "placeholder": "Search or jump to…",
+  "search": {
+    "coverage": "Older history is still being indexed; some matches may be missing.",
+    "error": "Message search is temporarily unavailable.",
+    "jumpFailed": "The matching message could not be opened.",
+    "loading": "Searching message history…"
+  },
   "title": "Search",
   "titles": {
     "chatWith": "Chat with {name}"

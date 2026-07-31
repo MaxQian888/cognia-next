@@ -12,7 +12,7 @@
     "providers": "Providers",
     "skills": "Skills"
   },
-  "description": "Read providers, MCP servers, prompts and skills from your local CCSwitch installation. Switching a provider here updates cognia-next's bundled SDK and (optionally) propagates to selected external agents.",
+  "description": "Read providers, MCP servers, prompts and skills from your local CCSwitch installation. Switching a provider here updates Cognia's bundled SDK and (optionally) propagates to selected external agents.",
   "dialog": {
     "agentsSection": "Also write to",
     "apiKey": "API key",
@@ -39,7 +39,7 @@
     "emptyBody": "CCSwitch's mcp_servers table is empty.",
     "emptyTitle": "No MCP servers in CCSwitch",
     "errorTitle": "Could not list MCP servers",
-    "headerHint": "Selected MCP servers are imported into cognia-next's MCP store using the existing 'skip / overwrite / duplicate' semantics.",
+    "headerHint": "Selected MCP servers are imported into Cognia's MCP store using the existing 'skip / overwrite / duplicate' semantics.",
     "importBtn": "Import {count, plural, =0 {nothing} =1 {1 server} other {# servers}}",
     "importing": "Importing…",
     "listTitle": "MCP servers in CCSwitch",
@@ -52,20 +52,20 @@
       "skip": "Keep existing",
       "skipDesc": "Don't touch existing rows. Recommended."
     },
-    "strategyBody": "When a server with the same name already exists in cognia-next.",
+    "strategyBody": "When a server with the same name already exists in Cognia.",
     "strategyTitle": "On name collision"
   },
   "overview": {
-    "activeBody": "The provider whose API key + base URL match cognia-next's current settings.",
-    "activeTitle": "Active in cognia-next",
+    "activeBody": "The provider whose API key + base URL match Cognia's current settings.",
+    "activeTitle": "Active in Cognia",
     "dbPath": "Database",
-    "detectedBody": "cognia-next will read this database read-only. CCSwitch remains the editor.",
+    "detectedBody": "Cognia will read this database read-only. CCSwitch remains the editor.",
     "detectedTitle": "CCSwitch detected",
-    "driftBody": "cognia-next and at least one external agent disagree on the active provider. Pick one in the Providers tab to reconcile.",
+    "driftBody": "Cognia and at least one external agent disagree on the active provider. Pick one in the Providers tab to reconcile.",
     "driftTitle": "Drift detected",
     "errorTitle": "Could not read CCSwitch's database",
     "noActive": "No CCSwitch provider matches",
-    "noActiveBody": "cognia-next is using a manually-entered API key, or a provider whose key/URL don't match any CCSwitch record.",
+    "noActiveBody": "Cognia is using a manually-entered API key, or a provider whose key/URL don't match any CCSwitch record.",
     "notFoundBody": "We couldn't find ~/.cc-switch/cc-switch.db. Install CCSwitch and add at least one provider, then come back.",
     "notFoundTitle": "CCSwitch not detected",
     "recheck": "Re-check",
@@ -74,14 +74,14 @@
       "manual": "Manual override",
       "redirect": "From CCSwitch redirect"
     },
-    "webModeBody": "CCSwitch interop reads a local SQLite database. Run cognia-next in desktop mode (`pnpm tauri dev`) to use this section.",
+    "webModeBody": "CCSwitch interop reads a local SQLite database. Run Cognia in desktop mode (`pnpm tauri dev`) to use this section.",
     "webModeTitle": "Desktop only"
   },
   "prompts": {
     "emptyBody": "CCSwitch's prompts table is empty.",
     "emptyTitle": "No prompts in CCSwitch",
     "errorTitle": "Could not list prompts",
-    "headerHint": "Each selected prompt becomes a new cognia-next prompt preset (category 'custom').",
+    "headerHint": "Each selected prompt becomes a new Cognia prompt preset (category 'custom').",
     "importBtn": "Import {count, plural, =0 {nothing} =1 {1 prompt} other {# prompts}}",
     "importing": "Importing…",
     "listTitle": "Prompts in CCSwitch",
@@ -116,7 +116,7 @@
     "emptyTitle": "No skills in CCSwitch",
     "errorTitle": "Could not list skills",
     "externalBadge": "external file",
-    "headerHint": "Skills with inline content become new cognia-next skills. Rows pointing at an external file (greyed) need to be re-imported via Settings → Skills.",
+    "headerHint": "Skills with inline content become new Cognia skills. Rows pointing at an external file (greyed) need to be re-imported via Settings → Skills.",
     "importBtn": "Import {count, plural, =0 {nothing} =1 {1 skill} other {# skills}}",
     "importing": "Importing…",
     "listTitle": "Skills in CCSwitch",
@@ -137,7 +137,7 @@
     "propagationTitle": "Default propagation",
     "save": "Save",
     "saving": "Saving…",
-    "watchDbBody": "Re-poll cc-switch.db whenever the cognia-next window regains focus, so the active provider badge stays fresh.",
+    "watchDbBody": "Re-poll cc-switch.db whenever the Cognia window regains focus, so the active provider badge stays fresh.",
     "watchDbLabel": "Re-check on focus"
   },
   "tabs": {

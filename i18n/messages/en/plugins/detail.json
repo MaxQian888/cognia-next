@@ -24,6 +24,9 @@
     "nativeAnthropicTools": "Native Anthropic tools",
     "skills": "Skills",
     "themes": "Themes",
+    "toolLabels": {
+      "eval_project_v2": "Run evaluation project"
+    },
     "tools": "Agent tools",
     "workflowNodes": "Workflow nodes",
     "workflowTriggers": "Workflow triggers"

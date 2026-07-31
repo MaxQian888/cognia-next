@@ -88,6 +88,14 @@
   "loadingSlow": "比平常久——可能是设备解锁安全存储较慢。你可以改为手动完成配对。",
   "loadingTitle": "正在检查既有配对…",
   "manualDivider": "或手动粘贴",
+  "networkError": {
+    "browserBlocked": "浏览器阻止了连接。请检查服务器的 HTTPS 证书，以及 CORS 或私有网络访问（PNA）设置。",
+    "browserPolicy": "浏览器因 CORS 或私有网络访问（PNA）策略阻止了请求。请在服务器上允许当前网页来源后重试。",
+    "certificate": "无法验证服务器的 HTTPS 证书。请检查主机名、信任链和有效期后重试。",
+    "offline": "当前设备处于离线状态，请恢复网络后重试。",
+    "unknown": "配对请求失败：{message}",
+    "unreachable": "无法连接桌面服务器。请检查地址、Companion 是否已启用，以及当前网络能否访问该服务器。"
+  },
   "offlineSubtitle": "暂时无法联系到桌面，请确认桌面已唤醒且与手机处于同一网络。",
   "offlineTitle": "连接已断开",
   "payloadError": {
@@ -137,6 +145,7 @@
     "codeHint": "在服务器上运行 “cognia-server pair” 生成配对码，或从桌面端 设置 → 伴侣 中复制。",
     "formCardDescription": "粘贴配对载荷，或输入服务器签发的 6 位配对码——两者共用同一枚 5 分钟有效的配对令牌。",
     "formCardTitle": "配对此浏览器",
+    "httpsRequired": "浏览器配对必须使用 HTTPS，避免配对凭据以明文发送。请输入 HTTPS Companion 地址。",
     "intro": "将此浏览器连接到你的 cognia 服务器。粘贴配对载荷或输入 6 位配对码即可登录。",
     "pasteHint": "粘贴完整的 cgnp2|… 载荷（服务器地址会自动填入），或直接粘贴配对 JWT。",
     "storageNotice": "设备凭据保存在此浏览器的 localStorage 中：能访问此浏览器配置文件、或向此源注入脚本的人都可以使用它。请在可信设备上配对，用完及时退出登录。",

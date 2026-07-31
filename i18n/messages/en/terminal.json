@@ -14,9 +14,10 @@
   "dock": {
     "clear": "Clear terminal (Ctrl+L)",
     "closeConfirm": {
-      "body": "This tab is still running a command. Closing it now will terminate the command. Close it anyway?",
-      "cancel": "Keep running",
-      "confirm": "Close tab",
+      "body": "This host-owned session is still running. Detach it from this device or terminate it for every attached client.",
+      "cancel": "Keep attached",
+      "detach": "Detach from this device",
+      "terminate": "Terminate for everyone",
       "title": "Close running terminal?"
     },
     "closePane": "Close pane",
@@ -25,6 +26,7 @@
     "newSession": "New terminal",
     "resize": "Drag to resize the terminal dock (arrow keys also work)",
     "restore": "Restore terminal panel size",
+    "detachError": "Couldn't detach terminal: {message}",
     "spawnDenied": "Terminal blocked by a plugin",
     "spawnError": "Couldn't open terminal: {message}",
     "splitRight": "Split terminal right (Ctrl+\\)"
@@ -68,6 +70,18 @@
     },
     "title": "Command history"
   },
+  "hostState": {
+    "openSettings": "Open settings",
+    "retry": "Retry",
+    "state": {
+      "incompatible": "The terminal host is incompatible with this app build.",
+      "offline": "The terminal host is offline.",
+      "reconnecting": "Reconnecting to the terminal host…",
+      "resource_limited": "The terminal host has reached its resource limit.",
+      "unauthorized": "This device is not allowed to use remote terminals.",
+      "unpaired": "Pair this device before opening a remote terminal."
+    }
+  },
   "popup": {
     "hint": "↑↓ navigate · Enter accept · Esc close",
     "label": "Completion suggestions",
@@ -94,6 +108,16 @@
     "next": "Next match",
     "placeholder": "Find in terminal",
     "previous": "Previous match"
+  },
+  "sessionState": {
+    "fullHost": "Full host",
+    "integrationDegraded": "Shell integration unavailable",
+    "readOnly": "Read-only",
+    "replayGap": "Output before sequence {firstAvailable} is no longer available.",
+    "replayGapMarker": "Earlier terminal output is unavailable because the replay buffer was truncated.",
+    "sandboxed": "Sandboxed",
+    "takeControl": "Take control",
+    "takeoverConfirm": "Take control of this session? The current controller will become read-only."
   },
   "shellPicker": {
     "auto": "Default shell",

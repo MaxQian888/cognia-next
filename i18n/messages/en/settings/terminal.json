@@ -116,10 +116,42 @@
     "ai": "AI autocomplete",
     "appearance": "Appearance",
     "behavior": "Behavior",
+    "host": "Durable terminal host",
     "productivity": "Productivity",
     "shell": "Shell & session"
   },
   "heading": "Integrated terminal",
+  "host": {
+    "diagnostics": {
+      "helper": "Collect bounded transport lifecycle, version, overflow, and error-code diagnostics. Terminal input, output, credentials, and full identifiers are never collected.",
+      "label": "Share terminal diagnostics"
+    },
+    "maxRemoteSessions": {
+      "helper": "Maximum sessions each paired device may create remotely.",
+      "label": "Remote sessions per device"
+    },
+    "maxSessions": {
+      "helper": "Maximum number of live local and SSH sessions owned by this host.",
+      "label": "Live sessions"
+    },
+    "operationFailed": "The terminal host setting could not be saved.",
+    "remoteAccess": {
+      "helper": "Allow independently authorized paired devices to attach over LAN or WAN.",
+      "label": "Remote terminal access"
+    },
+    "replayPerSession": {
+      "helper": "Maximum in-memory replay retained for each live session, in MiB.",
+      "label": "Replay per session (MiB)"
+    },
+    "replayTotal": {
+      "helper": "Maximum in-memory replay retained across all live sessions, in MiB.",
+      "label": "Total replay memory (MiB)"
+    },
+    "startAtLogin": {
+      "helper": "Start the lightweight terminal host when you sign in so remote sessions are reachable before Cognia opens.",
+      "label": "Start host at login"
+    }
+  },
   "letterSpacing": {
     "label": "Letter spacing (px)"
   },
@@ -156,6 +188,7 @@
     "remove": "Remove profile",
     "setDefault": "Set as default",
     "shellLabel": "Shell",
+    "syncError": "Could not synchronize terminal profiles with the terminal host",
     "title": "Launch profiles"
   },
   "projectOverride": {
@@ -252,6 +285,7 @@
       "credentialRequired": "Enter a password before connecting.",
       "learned": "Connected and saved the host fingerprint",
       "removeFailed": "Could not remove the SSH host",
+      "syncFailed": "Could not synchronize SSH profiles with the terminal host",
       "verified": "Connected with a verified host fingerprint"
     }
   },

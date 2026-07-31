@@ -18,10 +18,34 @@ describe("i18n message loaders", () => {
     expect(zh).not.toBe(enMessages)
     // key parity: every en namespace exists in the lazily-loaded zh-CN bundle
     expect(Object.keys(zh)).toEqual(expect.arrayContaining(Object.keys(enMessages)))
+    expect(zh.artifacts.downloadAsWord).toBe("下载为 Word")
+    expect(zh.artifacts.downloadAsPdf).toBe("下载为 PDF")
   })
 
   it("falls back to the default loader for an unknown locale", async () => {
     // @ts-expect-error exercising the defensive fallback with an invalid locale
     await expect(loadMessages("fr")).resolves.toBe(enMessages)
+  })
+
+  it("provides labels for every plugin scheduled-job filter", async () => {
+    const zh = await loadMessages("zh-CN")
+    const expected = {
+      all: "All",
+      active: "Active",
+      paused: "Paused",
+      disabled: "Disabled",
+      expired: "Expired",
+    }
+
+    expect(enMessages.plugins.scheduledJobs.status).toMatchObject(expected)
+    expect(zh.plugins.scheduledJobs.status).toEqual(
+      expect.objectContaining({
+        all: expect.any(String),
+        active: expect.any(String),
+        paused: expect.any(String),
+        disabled: expect.any(String),
+        expired: expect.any(String),
+      })
+    )
   })
 })

@@ -169,6 +169,7 @@
     "delete": "Delete",
     "deleteBody": "This permanently removes the goal and its activity log.",
     "deleteConfirm": "Delete",
+    "deleteFailed": "Could not delete the goal: {message}",
     "deleteTitle": "Delete goal?",
     "dirAsc": "Ascending",
     "dirDesc": "Descending",

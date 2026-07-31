@@ -9,6 +9,11 @@
     "operationFailed": "Local account operation failed.",
     "passwordLabel": "Password",
     "passwordPlaceholder": "Password",
+    "recoveryContinue": "Continue",
+    "recoveryDescription": "Save this one-time recovery key before continuing. It can unlock your browser Vault if you forget the account password.",
+    "recoveryForm": "Save recovery key",
+    "recoverySaved": "I saved this recovery key",
+    "recoveryTitle": "Save your recovery key",
     "unknownAccount": "account",
     "unlockAccount": "Unlock",
     "unlockForm": "Unlock local account",
@@ -84,6 +89,14 @@
     "strong": "Strong",
     "tooShort": "Too short",
     "weak": "Weak"
+  },
+  "runtimeTarget": {
+    "active": "Active",
+    "heading": "Runtime target",
+    "legacyMixed": "Legacy mixed (read-only)",
+    "loadFailed": "Runtime targets could not be loaded.",
+    "switchFailed": "Runtime target could not be switched.",
+    "thisBrowser": "This browser"
   },
   "switcher": {
     "active": "Active account: {name}",

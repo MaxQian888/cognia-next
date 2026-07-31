@@ -219,6 +219,12 @@
     "applyCta": "Apply template",
     "cancel": "Cancel",
     "emptyState": "No templates registered.",
+    "nodeGroups": {
+      "failed": "Could not insert {name}: {message}",
+      "heading": "Node groups",
+      "help": "Insert a reusable graph fragment as one undoable group.",
+      "inserted": "Inserted {name}"
+    },
     "slotRequiredMissing": "Fill every required field to apply this template.",
     "tabHeading": "Templates",
     "tabHelp": "Apply a slot-filled scaffold via the proposal flow. Templates merge into the current workflow — they don't replace it."

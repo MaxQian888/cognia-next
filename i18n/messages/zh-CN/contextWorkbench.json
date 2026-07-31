@@ -131,6 +131,38 @@
   "proposalReview": "提案审阅",
   "resourceChat": "AI 会话",
   "sessionSidechat": "侧聊",
+  "sessionSources": {
+    "description": "集中查看本会话使用的文件、网页、检索上下文和工具。",
+    "emptyDescription": "随着会话进行，文件、引用、检索上下文和工具活动会显示在这里。",
+    "emptyTitle": "暂无来源",
+    "filters": {
+      "all": "全部",
+      "files": "文件",
+      "other": "其他",
+      "web": "网页"
+    },
+    "labels": {
+      "anthropic": "网页",
+      "document": "文档",
+      "file": "文件",
+      "footnote": "注释",
+      "memory": "记忆",
+      "tool": "工具",
+      "twinRag": "孪生",
+      "twinStyle": "风格",
+      "web": "网页"
+    },
+    "messageLabel": "第 {n} 条消息",
+    "noResultsDescription": "请尝试其他关键词或来源类型。",
+    "noResultsTitle": "没有匹配的来源",
+    "searchLabel": "搜索会话来源",
+    "searchPlaceholder": "搜索文件、网页和工具…",
+    "title": "会话来源"
+  },
+  "sidechatPlaceholder": {
+    "description": "请先打开一个会话，再使用侧聊调查旁支问题，避免打扰主对话。",
+    "title": "当前未打开会话"
+  },
   "unavailable": {
     "comments": {
       "description": "此资源暂不提供评论线程，其他工作台功能仍可使用。",

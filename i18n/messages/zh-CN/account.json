@@ -9,6 +9,11 @@
     "operationFailed": "本地账户操作失败。",
     "passwordLabel": "密码",
     "passwordPlaceholder": "密码",
+    "recoveryContinue": "继续",
+    "recoveryDescription": "继续前请保存这枚一次性恢复密钥。忘记账户密码时，可用它解锁浏览器 Vault。",
+    "recoveryForm": "保存恢复密钥",
+    "recoverySaved": "我已保存此恢复密钥",
+    "recoveryTitle": "保存恢复密钥",
     "unknownAccount": "账户",
     "unlockAccount": "解锁",
     "unlockForm": "解锁本地账户",
@@ -84,6 +89,14 @@
     "strong": "强",
     "tooShort": "太短",
     "weak": "弱"
+  },
+  "runtimeTarget": {
+    "active": "当前",
+    "heading": "运行目标",
+    "legacyMixed": "旧版混合数据（只读）",
+    "loadFailed": "无法加载运行目标。",
+    "switchFailed": "无法切换运行目标。",
+    "thisBrowser": "此浏览器"
   },
   "switcher": {
     "active": "当前账户：{name}",

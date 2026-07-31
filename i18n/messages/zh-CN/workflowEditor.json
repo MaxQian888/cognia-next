@@ -219,6 +219,12 @@
     "applyCta": "应用模板",
     "cancel": "取消",
     "emptyState": "尚未注册任何模板。",
+    "nodeGroups": {
+      "failed": "无法插入 {name}：{message}",
+      "heading": "节点组",
+      "help": "将可复用的图片段作为一个可撤销的节点组插入。",
+      "inserted": "已插入 {name}"
+    },
     "slotRequiredMissing": "填好所有必填项才能应用模板。",
     "tabHeading": "模板",
     "tabHelp": "用 slot 填空脚手架，通过提案流程合并进当前工作流——不会替换已有内容。"

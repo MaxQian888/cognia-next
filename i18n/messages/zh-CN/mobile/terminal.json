@@ -1,4 +1,18 @@
 {
+  "accessory": {
+    "alt": "Alt",
+    "ctrl": "Ctrl+C",
+    "down": "下",
+    "esc": "Esc",
+    "hideKeyboard": "隐藏键盘",
+    "label": "终端键盘控制",
+    "left": "左",
+    "paste": "粘贴",
+    "right": "右",
+    "showKeyboard": "显示键盘",
+    "tab": "Tab",
+    "up": "上"
+  },
   "back": "返回",
   "empty": {
     "action": "开始会话",

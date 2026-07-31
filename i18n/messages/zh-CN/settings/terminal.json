@@ -116,10 +116,42 @@
     "ai": "AI 自动补全",
     "appearance": "外观",
     "behavior": "行为",
+    "host": "持久终端主机",
     "productivity": "效率工具",
     "shell": "Shell 与会话"
   },
   "heading": "集成终端",
+  "host": {
+    "diagnostics": {
+      "helper": "仅收集有界的传输生命周期、版本、队列溢出与错误代码诊断；绝不收集终端输入、输出、凭据或完整标识符。",
+      "label": "共享终端诊断"
+    },
+    "maxRemoteSessions": {
+      "helper": "每台已配对设备可远程创建的会话上限。",
+      "label": "每台设备的远程会话数"
+    },
+    "maxSessions": {
+      "helper": "此主机持有的本地与 SSH 实时会话总上限。",
+      "label": "实时会话数"
+    },
+    "operationFailed": "无法保存终端主机设置。",
+    "remoteAccess": {
+      "helper": "允许已单独授权的配对设备通过局域网或广域网连接终端。",
+      "label": "远程终端访问"
+    },
+    "replayPerSession": {
+      "helper": "每个实时会话最多保留的内存回放量（MiB）。",
+      "label": "每个会话的回放（MiB）"
+    },
+    "replayTotal": {
+      "helper": "所有实时会话合计最多占用的内存回放量（MiB）。",
+      "label": "回放内存总量（MiB）"
+    },
+    "startAtLogin": {
+      "helper": "登录系统时启动轻量终端主机，使 Cognia 尚未打开时远程终端仍可连接。",
+      "label": "登录时启动主机"
+    }
+  },
   "letterSpacing": {
     "label": "字间距（px）"
   },
@@ -156,6 +188,7 @@
     "remove": "删除配置文件",
     "setDefault": "设为默认",
     "shellLabel": "Shell",
+    "syncError": "无法与终端主机同步终端配置",
     "title": "启动配置文件"
   },
   "projectOverride": {
@@ -252,6 +285,7 @@
       "credentialRequired": "连接前请输入密码。",
       "learned": "已连接并保存主机指纹",
       "removeFailed": "无法移除 SSH 主机",
+      "syncFailed": "无法与终端主机同步 SSH 配置",
       "verified": "已通过主机指纹校验并连接"
     }
   },

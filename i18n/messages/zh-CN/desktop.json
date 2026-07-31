@@ -1,4 +1,22 @@
 {
+  "chatRuntime": {
+    "title": "聊天当前为只读",
+    "states": {
+      "available": "聊天可用。",
+      "readOnly": "仍可查看缓存会话，但暂时不能发送消息。",
+      "queued": "当前主机重连后将发送此操作。",
+      "offline": "当前主机离线。草稿只保存在此浏览器中，不会自动发送。",
+      "requiresUnlock": "请先解锁本地 Vault，再使用当前主机。",
+      "requiresPairing": "请将此浏览器与主机配对，或切换到独立模式。",
+      "requiresGrant": "当前设备缺少主机授予的聊天权限。",
+      "incompatible": "当前主机未提供兼容的聊天协议。",
+      "unsupported": "当前运行目标尚未实现聊天能力。"
+    },
+    "actions": {
+      "pair": "配对主机",
+      "connectionSettings": "连接设置"
+    }
+  },
   "barCustomize": {
     "dragHint": "拖拽调整顺序",
     "hidden": "已隐藏",
@@ -18,10 +36,13 @@
       "layoutControls": "视图菜单",
       "navArrows": "前进 / 后退",
       "notifications": "通知",
+      "panelToggle": "底部面板开关",
       "perf": "性能监视",
+      "primarySidebarToggle": "左侧栏开关",
       "quickActions": "快捷开关",
       "runStatus": "运行状态",
       "search": "搜索与标题",
+      "secondarySidebarToggle": "右侧栏开关",
       "sync": "同步状态",
       "usage": "用量与额度",
       "workspace": "工作区"
@@ -52,6 +73,7 @@
       "pin": "置顶",
       "pinSuccess": "已置顶 {count} 个会话",
       "selectedCount": "已选 {count} 项",
+      "share": "分享",
       "unarchive": "取消归档",
       "unarchiveSuccess": "已恢复 {count} 个会话",
       "unpin": "取消置顶",
@@ -124,6 +146,7 @@
     "empty": "未找到匹配项。",
     "groups": {
       "actions": "操作",
+      "messages": "消息",
       "navigate": "前往",
       "newChat": "与角色开始新聊天",
       "pluginActions": "插件操作",
@@ -134,6 +157,12 @@
       "workspaces": "切换工作区"
     },
     "placeholder": "输入命令或会话名…",
+    "search": {
+      "coverage": "正在索引较早的历史记录，部分匹配项可能暂未显示。",
+      "error": "消息搜索暂时不可用。",
+      "jumpFailed": "无法打开匹配的消息。",
+      "loading": "正在搜索消息历史…"
+    },
     "title": "命令面板",
     "titles": {
       "chatWith": "与 {name} 的聊天"
@@ -558,6 +587,7 @@
     "deleteConfirmBody": "将永久删除此会话及其全部消息，且无法撤销。",
     "deleteConfirmBranches": "{count, plural, other {它的 # 个分支将作为独立会话保留。}}",
     "deleteConfirmTitle": "删除「{title}」？",
+    "deselect": "取消选择",
     "dragHandle": "拖拽以重新排序或移动到文件夹",
     "moveToFolder": "移动到文件夹",
     "openInTerminal": "在终端打开",
@@ -567,6 +597,7 @@
     "pinned": "已置顶",
     "removeFromFolder": "移出文件夹",
     "rename": "重命名",
+    "select": "选择",
     "unarchive": "取消归档",
     "unpin": "取消置顶",
     "untitled": "（无标题）"
@@ -644,10 +675,10 @@
       "themeSystem": "跟随系统",
       "title": "自定义布局",
       "toggleGuildRail": "切换工会侧栏",
+      "togglePanel": "切换面板",
       "toggleRightSidebar": "切换右侧栏",
       "toggleSidebar": "切换侧栏",
       "toggleStatusBar": "切换状态栏",
-      "toggleTerminal": "切换终端",
       "zoomIn": "放大",
       "zoomLabel": "缩放",
       "zoomOut": "缩小",

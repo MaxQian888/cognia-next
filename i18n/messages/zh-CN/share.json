@@ -18,6 +18,16 @@
   "limitLabel": "查看次数",
   "linkLabel": "分享链接",
   "maxViewsLabel": "最大查看次数",
+  "multiConversation": {
+    "count": "{count} 个会话",
+    "frameTitle": "会话",
+    "navigationLabel": "已分享的会话",
+    "next": "下一个会话",
+    "previous": "上一个会话",
+    "summary": "将分享 {count} 个会话",
+    "title": "分享的 {count} 个会话",
+    "untitled": "（无标题）"
+  },
   "myShares": {
     "burnBadge": "阅后即焚",
     "copy": "复制",

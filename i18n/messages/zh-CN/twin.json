@@ -461,6 +461,7 @@
     "deleteConfirmCancel": "取消",
     "deleteConfirmDescription": "将永久删除「{title}」及其已 ingest 的切片，无法撤销。",
     "deleteConfirmTitle": "删除数据源？",
+    "deleteFailed": "无法删除数据源：{message}",
     "emptyHint": "还没有任何数据源。点击「添加数据源」粘贴文本或导入文件。",
     "errorPrefix": "⚠",
     "filterAll": "全部",

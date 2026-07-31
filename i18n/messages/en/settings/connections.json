@@ -1329,7 +1329,7 @@
     "copyFailed": "Couldn't copy",
     "description": "Expose this desktop's adapter webhook receiver to the public internet so Slack / Lark / Discord interactions can reach it. Uses the cloudflared `--url` quick-tunnel.",
     "desktopOnly": "Tunnel control requires the desktop app",
-    "desktopOnlyHint": "The tunnel runs from the desktop app. Open cognia-next on your desktop to launch it.",
+    "desktopOnlyHint": "The tunnel runs from the desktop app. Open Cognia on your desktop to launch it.",
     "install": {
       "copyAria": "Copy {label} command",
       "description": "Run one of the following on your {platform} host, then start the tunnel.",
@@ -1376,7 +1376,7 @@
   },
   "webModeBanner": {
     "ariaLabel": "Web mode banner",
-    "body": "Adapters require the desktop app — open cognia-next on your desktop to configure connectors. Already-configured conversations sync read-only here."
+    "body": "Adapters require the desktop app — open Cognia on your desktop to configure connectors. Already-configured conversations sync read-only here."
   },
   "wechatOa": {
     "adapterCreated": "WeChat Official Account added",

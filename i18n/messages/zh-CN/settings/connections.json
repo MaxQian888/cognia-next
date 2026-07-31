@@ -1329,7 +1329,7 @@
     "copyFailed": "复制失败",
     "description": "把本机的适配器 webhook 接收端口暴露到公网，让 Slack / Lark / Discord 交互能够回到这里。使用 cloudflared 的 `--url` 临时隧道。",
     "desktopOnly": "隧道控制需要桌面端",
-    "desktopOnlyHint": "隧道由桌面端运行。请在桌面打开 cognia-next 后启动。",
+    "desktopOnlyHint": "隧道由桌面端运行。请在桌面打开 Cognia 后启动。",
     "install": {
       "copyAria": "复制 {label} 命令",
       "description": "在 {platform} 上执行以下任一命令，然后回来启动隧道。",
@@ -1376,7 +1376,7 @@
   },
   "webModeBanner": {
     "ariaLabel": "Web 模式提示",
-    "body": "适配器需要桌面端 — 请在桌面上打开 cognia-next 进行配置。已配置的会话会以只读形式同步过来。"
+    "body": "适配器需要桌面端 — 请在桌面上打开 Cognia 进行配置。已配置的会话会以只读形式同步过来。"
   },
   "wechatOa": {
     "adapterCreated": "已添加微信公众号",

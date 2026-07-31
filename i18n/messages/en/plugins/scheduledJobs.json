@@ -11,7 +11,10 @@
   "openScheduler": "Open scheduler",
   "status": {
     "active": "Active",
+    "all": "All",
+    "disabled": "Disabled",
     "error": "Error",
+    "expired": "Expired",
     "paused": "Paused"
   }
 }

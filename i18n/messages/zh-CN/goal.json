@@ -169,6 +169,7 @@
     "delete": "删除",
     "deleteBody": "这将永久删除该目标及其活动记录。",
     "deleteConfirm": "删除",
+    "deleteFailed": "无法删除目标：{message}",
     "deleteTitle": "删除目标？",
     "dirAsc": "升序",
     "dirDesc": "降序",

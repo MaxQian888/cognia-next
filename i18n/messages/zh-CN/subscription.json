@@ -2,7 +2,7 @@
   "account": {
     "errorTitle": "操作失败",
     "expiresLabel": "Token 过期",
-    "keychainNoticeBody": "Token 保存在系统钥匙串（macOS Keychain / Windows Credential Manager / Linux Secret Service）。cognia-next 不会写 ~/.claude/.credentials.json——那个文件归官方 Claude Code CLI 所有。",
+    "keychainNoticeBody": "Token 保存在系统钥匙串（macOS Keychain / Windows Credential Manager / Linux Secret Service）。Cognia 不会写 ~/.claude/.credentials.json——那个文件归官方 Claude Code CLI 所有。",
     "keychainNoticeTitle": "关于凭据存储",
     "modeLine": "{mode} 流程",
     "planLine": "{plan} · {mode}",
@@ -10,7 +10,7 @@
     "scopeLabel": "作用域",
     "signInCta": "登录",
     "signOut": "登出",
-    "signedOutBody": "用 Claude 账号授权 cognia-next。",
+    "signedOutBody": "用 Claude 账号授权 Cognia。",
     "signedOutTitle": "未登录",
     "unknownEmail": "已登录（服务器未返回邮箱）"
   },
@@ -360,7 +360,7 @@
       "openAuthorize": "打开授权页",
       "signIn": "登录"
     },
-    "awaitingCode": "在刚才打开的页面中授权 cognia-next，然后把显示的 code 粘贴回这里。",
+    "awaitingCode": "在刚才打开的页面中授权 Cognia，然后把显示的 code 粘贴回这里。",
     "chooseMode": "选择要授权的 Claude 账号类型。",
     "codeFieldLabel": "授权 code（或完整回调 URL）",
     "codeFieldPlaceholder": "粘贴跳转页给你的 code 或 URL",

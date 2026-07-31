@@ -18,6 +18,16 @@
   "limitLabel": "View limit",
   "linkLabel": "Share link",
   "maxViewsLabel": "Max views",
+  "multiConversation": {
+    "count": "{count, plural, one {1 conversation} other {# conversations}}",
+    "frameTitle": "Conversation",
+    "navigationLabel": "Shared conversations",
+    "next": "Next conversation",
+    "previous": "Previous conversation",
+    "summary": "{count, plural, one {1 conversation will be shared} other {# conversations will be shared}}",
+    "title": "{count, plural, one {Shared conversation} other {# shared conversations}}",
+    "untitled": "(untitled)"
+  },
   "myShares": {
     "burnBadge": "Burn after read",
     "copy": "Copy",

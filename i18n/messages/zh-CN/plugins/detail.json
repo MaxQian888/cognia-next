@@ -24,6 +24,9 @@
     "nativeAnthropicTools": "原生 Anthropic 工具",
     "skills": "技能",
     "themes": "主题",
+    "toolLabels": {
+      "eval_project_v2": "运行评测项目"
+    },
     "tools": "Agent 工具",
     "workflowNodes": "工作流节点",
     "workflowTriggers": "工作流触发器"
