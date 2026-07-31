@@ -21,9 +21,9 @@ const config: CapacitorConfig = {
     //
     // The Next.js dev server is reached at http://localhost:3000 from inside
     // the emulator by way of `adb reverse tcp:3000 tcp:3000` (run once per
-    // emulator session). Using the same hostname the desktop tauri dev uses
-    // means `next.config.ts`'s assetPrefix (`http://localhost:3000`) resolves
-    // correctly for both targets off a single dev server.
+    // emulator session). Using the same hostname as the page keeps Next.js
+    // lazy chunks on the current origin, so desktop and mobile can share one
+    // dev server.
     //
     // Comment out (or unset COGNIA_MOBILE_DEV) and re-run `cap sync` before
     // building a release / pushing this file.

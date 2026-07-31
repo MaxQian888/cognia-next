@@ -50,19 +50,19 @@
 		<string>_cognia._tcp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>cognia needs camera access to scan pairing QR codes, attach photos to chats, and capture documents for your digital twin.</string>
+	<string>Cognia needs camera access to scan pairing QR codes, attach photos to chats, and capture documents for your digital twin.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>cognia needs photo library access to attach images from your library to chats and back up albums.</string>
+	<string>Cognia needs photo library access to attach images from your library to chats and back up albums.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>cognia needs write access to save images from chats to your photo library.</string>
+	<string>Cognia needs write access to save images from chats to your photo library.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>cognia needs microphone access to record voice messages.</string>
+	<string>Cognia needs microphone access to record voice messages.</string>
 	<key>NSFaceIDUsageDescription</key>
-	<string>cognia uses Face ID to unlock the app and confirm sensitive actions (delete pairing, export backups).</string>
+	<string>Cognia uses Face ID to unlock the app and confirm sensitive actions (delete pairing, export backups).</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>cognia needs your current position for workflow location triggers (foreground only).</string>
+	<string>Cognia needs your current position for workflow location triggers (foreground only).</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>cognia needs to discover your paired desktop on this local network.</string>
+	<string>Cognia needs to discover your paired desktop on this local network.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

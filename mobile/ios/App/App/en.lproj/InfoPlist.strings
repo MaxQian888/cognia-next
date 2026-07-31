@@ -1,13 +1,13 @@
-"NSCameraUsageDescription" = "cognia needs camera access to scan pairing QR codes, attach photos to chats, and capture documents for your digital twin.";
+"NSCameraUsageDescription" = "Cognia needs camera access to scan pairing QR codes, attach photos to chats, and capture documents for your digital twin.";
 
-"NSPhotoLibraryUsageDescription" = "cognia needs photo library access to attach images from your library to chats and back up albums.";
+"NSPhotoLibraryUsageDescription" = "Cognia needs photo library access to attach images from your library to chats and back up albums.";
 
-"NSPhotoLibraryAddUsageDescription" = "cognia needs write access to save images from chats to your photo library.";
+"NSPhotoLibraryAddUsageDescription" = "Cognia needs write access to save images from chats to your photo library.";
 
-"NSMicrophoneUsageDescription" = "cognia needs microphone access to record voice messages.";
+"NSMicrophoneUsageDescription" = "Cognia needs microphone access to record voice messages.";
 
-"NSFaceIDUsageDescription" = "cognia uses Face ID to unlock the app and confirm sensitive actions (delete pairing, export backups).";
+"NSFaceIDUsageDescription" = "Cognia uses Face ID to unlock the app and confirm sensitive actions (delete pairing, export backups).";
 
-"NSLocationWhenInUseUsageDescription" = "cognia needs your current position for workflow location triggers (foreground only).";
+"NSLocationWhenInUseUsageDescription" = "Cognia needs your current position for workflow location triggers (foreground only).";
 
-"NSLocalNetworkUsageDescription" = "cognia needs to discover your paired desktop on this local network.";
+"NSLocalNetworkUsageDescription" = "Cognia needs to discover your paired desktop on this local network.";
