@@ -5,6 +5,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { motion, useReducedMotion } from "motion/react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
@@ -54,6 +55,7 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
   const [queuing, setQueuing] = useState(false)
   const [statusFilter, setStatusFilter] = useState<TwinSourceStatus | "all">("all")
   const [pendingDelete, setPendingDelete] = useState<TwinSource | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const sources = useLiveQuery(() => listTwinSourcesByTwin(twinId), [twinId], [])
   const pendingSources = useMemo(() => sources.filter((s) => s.status === "pending"), [sources])
 
@@ -83,7 +85,17 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
 
   const confirmDelete = async () => {
     if (!pendingDelete) return
-    await deleteTwinSource(pendingDelete.id)
+    setDeleting(true)
+    try {
+      await deleteTwinSource(pendingDelete.id)
+    } catch (error) {
+      toast.error(
+        t("deleteFailed", { message: error instanceof Error ? error.message : String(error) })
+      )
+      return
+    } finally {
+      setDeleting(false)
+    }
     setPendingDelete(null)
   }
 
@@ -229,7 +241,15 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
           <AlertDialogFooter>
             <AlertDialogCancel>{t("deleteConfirmCancel")}</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => void confirmDelete()}
+              onClick={(event) => {
+                // Keep the controlled dialog mounted until the async cascade
+                // has captured its source and completed. Radix otherwise
+                // closes the action immediately, clearing `pendingDelete`
+                // before the async handler can start in some event orderings.
+                event.preventDefault()
+                void confirmDelete()
+              }}
+              disabled={deleting}
               data-testid="twin-sources-delete-confirm"
             >
               {t("deleteConfirmAction")}

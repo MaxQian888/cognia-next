@@ -7,8 +7,17 @@
 
 import "fake-indexeddb/auto"
 import React from "react"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+
+const mockDeleteTwinSource = jest.fn()
+jest.mock("@/lib/db/twin-sources", () => {
+  const actual = jest.requireActual("@/lib/db/twin-sources")
+  return {
+    ...actual,
+    deleteTwinSource: (...args: unknown[]) => mockDeleteTwinSource(...args),
+  }
+})
 
 jest.mock("motion/react", () => {
   const MotionLi = React.forwardRef<HTMLLIElement, React.LiHTMLAttributes<HTMLLIElement>>(
@@ -54,7 +63,15 @@ import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createTwinSource, listTwinSourcesByTwin } from "@/lib/db/twin-sources"
 import { listTwinJobsByTwin } from "@/lib/db/twin-jobs"
 
+const mockToastError = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...args: unknown[]) => mockToastError(...args) } }))
+
 beforeEach(async () => {
+  mockToastError.mockClear()
+  const actualTwinSources = jest.requireActual(
+    "@/lib/db/twin-sources"
+  ) as typeof import("@/lib/db/twin-sources")
+  mockDeleteTwinSource.mockReset().mockImplementation(actualTwinSources.deleteTwinSource)
   await getDb().delete()
   __resetDbForTesting()
   getDb()
@@ -249,6 +266,44 @@ describe("TwinSourcesTab", () => {
     })
     expect(await listTwinSourcesByTwin("twin_alice")).toHaveLength(1)
   })
+
+  it("keeps the dialog open, disables duplicate submits, and reports a failed delete", async () => {
+    await createTwinSource({
+      id: "source_delete_failure",
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/keep-after-error.md",
+      title: "Keep after error",
+      bytes: 10,
+      fingerprint: "fp_keep_after_error",
+      redacted: false,
+    })
+    let rejectDelete: (error: Error) => void = () => undefined
+    const pendingDelete = new Promise<void>((_resolve, reject) => {
+      rejectDelete = reject
+    })
+    mockDeleteTwinSource.mockReturnValueOnce(pendingDelete)
+    render(<TwinSourcesTab twinId="twin_alice" />)
+    await screen.findByText("Keep after error")
+    await userEvent.click(screen.getByRole("button", { name: /^Delete$/i }))
+    const dialog = await screen.findByRole("alertdialog")
+    const confirm = within(dialog).getByRole("button", { name: /^Delete$/i })
+
+    fireEvent.click(confirm)
+    await waitFor(() => expect(confirm).toBeDisabled())
+    await act(async () => {
+      rejectDelete(new Error("database closed"))
+      await Promise.resolve()
+    })
+
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith("Could not delete the source: database closed")
+    )
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    expect(confirm).not.toBeDisabled()
+    expect(await listTwinSourcesByTwin("twin_alice")).toHaveLength(1)
+  }, 10_000)
 
   it("filters sources by status via the filter chips", async () => {
     await createTwinSource({

@@ -239,7 +239,7 @@ describe("TwinPanel", () => {
       systemPrompt: "you are alice",
       twinId: "twin_alice",
     })
-    await createTwinSource({
+    const source = await createTwinSource({
       twinId: "twin_alice",
       kind: "document",
       format: "markdown",
@@ -257,8 +257,11 @@ describe("TwinPanel", () => {
     // Deleting now requires confirming in an alert dialog.
     const dialog = await screen.findByRole("alertdialog")
     await userEvent.click(within(dialog).getByRole("button", { name: /^Delete$/i }))
+    await waitFor(async () => {
+      expect(await getDb().twinSources.get(source.id)).toBeUndefined()
+    })
     await waitFor(() => {
-      expect(screen.queryByText("Onboarding notes")).toBeNull()
+      expect(screen.queryByTestId(`twin-source-${source.id}-row`)).not.toBeInTheDocument()
     })
   })
 

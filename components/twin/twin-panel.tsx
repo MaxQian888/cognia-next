@@ -22,12 +22,14 @@ import { Suspense, useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { useTranslations } from "next-intl"
+import { BotIcon } from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { observeTwins, backfillTwinRegistryFromUsage, type DeleteTwinResult } from "@/lib/db/twins"
 import type { Twin } from "@/types/twin"
 import { TwinSourcesTab } from "./twin-sources-tab"
@@ -235,24 +237,19 @@ function TwinPanelInner() {
     <FeaturePageShell
       storageId="twin"
       centerClassName="@container/twin"
-      toolbar={
-        <div className="flex w-full min-w-0 items-center gap-2" data-testid="twin-toolbar">
-          <h1 className="shrink-0 text-sm font-semibold">{t("title")}</h1>
-          {twins !== undefined && effectiveTwinId ? (
-            <>
-              <TwinSelector
-                twins={twinList}
-                activeTwinId={effectiveTwinId}
-                onSelect={selectTwin}
-                onAfterCreate={(twin) => selectTwin(twin.id)}
-                onAfterDelete={handleAfterDelete}
-                onGuidedCreate={() => setWizardOpen(true)}
-              />
+      header={
+        <FeaturePageHeader
+          variant="compact"
+          icon={<BotIcon />}
+          title={t("title")}
+          testId="twin-toolbar"
+          status={
+            twins !== undefined && effectiveTwinId ? (
               <span
                 className={
                   workerStatus.active
-                    ? "shrink-0 text-xs text-emerald-600 dark:text-emerald-400"
-                    : "text-muted-foreground shrink-0 text-xs"
+                    ? "text-xs text-emerald-600 dark:text-emerald-400"
+                    : "text-xs text-muted-foreground"
                 }
                 title={
                   workerStatus.reasonKey ? t(`workerStatus.${workerStatus.reasonKey}`) : undefined
@@ -260,10 +257,26 @@ function TwinPanelInner() {
               >
                 {workerStatus.active ? t("workerActive") : t("workerIdle")}
               </span>
-              <TwinHeaderPluginSlot twinId={effectiveTwinId} tab={tab} />
-            </>
-          ) : null}
-        </div>
+            ) : undefined
+          }
+          actions={
+            <div className="flex min-w-0 items-center gap-2">
+              {twins !== undefined && effectiveTwinId ? (
+                <>
+                  <TwinSelector
+                    twins={twinList}
+                    activeTwinId={effectiveTwinId}
+                    onSelect={selectTwin}
+                    onAfterCreate={(twin) => selectTwin(twin.id)}
+                    onAfterDelete={handleAfterDelete}
+                    onGuidedCreate={() => setWizardOpen(true)}
+                  />
+                  <TwinHeaderPluginSlot twinId={effectiveTwinId} tab={tab} />
+                </>
+              ) : null}
+            </div>
+          }
+        />
       }
     >
       {center}
