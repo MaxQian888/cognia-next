@@ -9,6 +9,8 @@ const connect = jest.fn(async (..._args: unknown[]): Promise<unknown> => undefin
 const setPanelOpen = jest.fn()
 const toastSuccess = jest.fn((..._args: unknown[]) => undefined)
 const toastError = jest.fn((..._args: unknown[]) => undefined)
+const mockSyncHostProfiles = jest.fn(async (..._args: unknown[]) => undefined)
+let mockTauri = true
 let settings: { terminal?: Record<string, unknown> } | undefined = {}
 
 jest.mock("next-intl", () => ({
@@ -60,6 +62,10 @@ jest.mock("@/lib/terminal/ssh-credentials", () => ({
 jest.mock("@/lib/terminal/ssh-connect", () => ({
   connectSshFromDock: (...args: unknown[]) => connect(...args),
 }))
+jest.mock("@/lib/terminal/host-profiles", () => ({
+  syncTerminalHostProfiles: (...args: unknown[]) => mockSyncHostProfiles(...args),
+}))
+jest.mock("@/lib/tauri", () => ({ isTauri: () => mockTauri }))
 
 import { SshHosts } from "./ssh-hosts"
 
@@ -75,6 +81,8 @@ beforeEach(() => {
     hostKeyStatus: "learned",
     hostKeyFingerprint: "SHA256:abc",
   })
+  mockSyncHostProfiles.mockResolvedValue(undefined)
+  mockTauri = true
 })
 
 describe("SshHosts", () => {
@@ -372,5 +380,75 @@ describe("SshHosts", () => {
     expect(toastError).toHaveBeenCalledWith("toasts.removeFailed", {
       description: "keyring unavailable",
     })
+  })
+
+  it("debounces desktop host-profile sync and cancels pending sync on unmount", async () => {
+    jest.useFakeTimers()
+    settings = {
+      terminal: {
+        profiles: [{ id: "default", shell: "/bin/zsh" }],
+        enableShellIntegration: true,
+        forceUtf8: true,
+        sandboxed: false,
+        sshHosts: [],
+      },
+    }
+    const { unmount } = render(<SshHosts />)
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("ssh-hosts-add"))
+      await Promise.resolve()
+    })
+    act(() => jest.advanceTimersByTime(199))
+    expect(mockSyncHostProfiles).not.toHaveBeenCalled()
+    await act(async () => {
+      jest.advanceTimersByTime(1)
+      await Promise.resolve()
+    })
+    expect(mockSyncHostProfiles).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        enableShellIntegration: true,
+        forceUtf8: true,
+        sandboxed: false,
+        sshProfiles: [expect.objectContaining({ id: "ssh-1" })],
+      })
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("ssh-hosts-add"))
+      await Promise.resolve()
+    })
+    unmount()
+    act(() => jest.advanceTimersByTime(250))
+    expect(mockSyncHostProfiles).toHaveBeenCalledTimes(1)
+    jest.useRealTimers()
+  })
+
+  it("skips host-profile sync outside Tauri and reports native sync failures", async () => {
+    jest.useFakeTimers()
+    mockTauri = false
+    const first = render(<SshHosts />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("ssh-hosts-add"))
+      await Promise.resolve()
+      jest.advanceTimersByTime(250)
+    })
+    expect(mockSyncHostProfiles).not.toHaveBeenCalled()
+    first.unmount()
+
+    mockTauri = true
+    mockSyncHostProfiles.mockRejectedValueOnce(new Error("host unavailable"))
+    render(<SshHosts />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("ssh-hosts-add"))
+      await Promise.resolve()
+      jest.advanceTimersByTime(250)
+      await Promise.resolve()
+    })
+    expect(toastError).toHaveBeenCalledWith("toasts.syncFailed", {
+      description: "host unavailable",
+    })
+    jest.useRealTimers()
   })
 })

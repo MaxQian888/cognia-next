@@ -27,6 +27,18 @@ class TestableTerminalSession extends BaseTerminalSession {
     /* not used in this test */
   }
 
+  async detach(): Promise<void> {
+    /* not used in this test */
+  }
+
+  async takeControl(): Promise<void> {
+    this.dispatchControlState({ role: "controller", controllerId: "test" })
+  }
+
+  async releaseControl(): Promise<void> {
+    this.dispatchControlState({ role: "viewer", controllerId: null, reason: "released" })
+  }
+
   async kill(): Promise<void> {
     /* not used in this test */
   }
@@ -43,6 +55,10 @@ class TestableTerminalSession extends BaseTerminalSession {
 
   pushExit(code: number | null): void {
     this.handleExit(code)
+  }
+
+  pushReplayGap(): void {
+    this.dispatchReplayGap({ requestedAfter: 1, firstAvailable: 4, lastAvailable: 9 })
   }
 }
 
@@ -146,6 +162,28 @@ describe("BaseTerminalSession.onData", () => {
     const seen: Uint8Array[] = []
     session.onData((bytes) => seen.push(bytes))
     expect(seen).toHaveLength(0)
+  })
+})
+
+describe("BaseTerminalSession control state", () => {
+  it("publishes controller acquisition and release", async () => {
+    const session = makeSession()
+    const states: string[] = []
+    session.onControlState((state) => states.push(state.role))
+    await Promise.resolve()
+    await session.releaseControl()
+    await session.takeControl()
+    expect(states).toEqual(["controller", "viewer", "controller"])
+  })
+})
+
+describe("BaseTerminalSession replay gaps", () => {
+  it("surfaces missing output instead of silently presenting partial scrollback", () => {
+    const session = makeSession()
+    const gaps: number[] = []
+    session.onReplayGap((gap) => gaps.push(gap.firstAvailable))
+    session.pushReplayGap()
+    expect(gaps).toEqual([4])
   })
 })
 

@@ -22,11 +22,12 @@
 import { getPluginEventHooks } from "@/lib/plugin"
 
 import type { BaseTerminalSession } from "./base-session"
-import { selectTerminalTransport } from "./pick-transport"
+import { selectTerminalTransportChain } from "./pick-transport"
 import { TerminalSession } from "./session"
-import { registerLiveSession, unregisterLiveSession } from "./session-registry"
+import { getLiveSession, registerLiveSession, unregisterLiveSession } from "./session-registry"
 import { RemoteTerminalSession } from "./transport-ws"
 import type { SpawnRequest } from "./types"
+import { classifyTerminalHostError, type TerminalHostState } from "./host-state"
 
 export type SpawnOutcome =
   | { kind: "spawned"; sessionId: string; shell: string }
@@ -51,6 +52,7 @@ export interface TerminalStoreLike {
   pushPrompt(id: string, startMs: number): void
   closePrompt(id: string, endMs: number): void
   pushCommand(id: string, record: { cmd: string; exitCode: number | null; endedAt: number }): void
+  setHostState?(state: TerminalHostState, message?: string | null): void
   /** Used by `restartFromDock` to read the previous row's shell/cwd for respawn. */
   sessions: Record<
     string,
@@ -72,6 +74,8 @@ export interface SpawnFromDockInput {
   store: TerminalStoreLike
   /** Test seam — swap the spawn function in unit tests. */
   spawn?: typeof TerminalSession.spawn
+  /** Test seam for exercising ordered transport fallback. */
+  transportSpawns?: Array<(req: SpawnRequest) => Promise<BaseTerminalSession>>
   /** Test seam — swap the plugin hook bus. */
   hooks?: ReturnType<typeof getPluginEventHooks>
   /**
@@ -96,21 +100,22 @@ export interface SpawnFromDockInput {
  * `RemoteTerminalSession`. Plain browser → null (caller should not
  * have invoked the orchestrator).
  */
-function pickSpawnForTransport(): typeof TerminalSession.spawn | null {
-  switch (selectTerminalTransport()) {
-    case "tauri-channel":
-      return TerminalSession.spawn.bind(TerminalSession)
-    case "ws":
-      // The two classes are structurally compatible from the orchestrator's
-      // POV (`info`, `onIntegration`, `onExit`). A `bind` returns the same
-      // signature; the cast is safe because `RemoteTerminalSession` shares
-      // the public surface `spawn-orchestrator` consumes.
-      return RemoteTerminalSession.spawn.bind(
-        RemoteTerminalSession
-      ) as unknown as typeof TerminalSession.spawn
-    default:
-      return null
+function pickSpawnChain(): Array<(req: SpawnRequest) => Promise<BaseTerminalSession>> {
+  const chain: Array<(req: SpawnRequest) => Promise<BaseTerminalSession>> = []
+  for (const transport of selectTerminalTransportChain()) {
+    switch (transport) {
+      case "tauri-channel":
+        chain.push(TerminalSession.spawn.bind(TerminalSession))
+        break
+      case "ws":
+        chain.push(RemoteTerminalSession.spawn.bind(RemoteTerminalSession))
+        break
+      case "webrtc":
+        chain.push(RemoteTerminalSession.spawnWan.bind(RemoteTerminalSession))
+        break
+    }
   }
+  return chain
 }
 
 /**
@@ -122,13 +127,26 @@ function pickSpawnForTransport(): typeof TerminalSession.spawn | null {
  */
 const SPAWN_TIMEOUT_MS = 15_000
 
-/** Reject if `p` hasn't settled within `ms`. Clears its timer on settle. */
-function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+/** Reject if `p` hasn't settled within `ms`, cleaning up a late success. */
+function withTimeout<T>(
+  p: Promise<T>,
+  ms: number,
+  label: string,
+  onLateSuccess: (value: T) => void
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      reject(new Error(`${label} timed out after ${ms}ms`))
+    }, ms)
     p.then(
       (value) => {
         clearTimeout(timer)
+        if (timedOut) {
+          onLateSuccess(value)
+          return
+        }
         resolve(value)
       },
       (err) => {
@@ -147,8 +165,8 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
  */
 export async function spawnFromDock(input: SpawnFromDockInput): Promise<SpawnOutcome> {
   const hooks = input.hooks ?? getPluginEventHooks()
-  const spawnFn = input.spawn ?? pickSpawnForTransport()
-  if (!spawnFn) {
+  const spawnChain = input.spawn ? [input.spawn] : (input.transportSpawns ?? pickSpawnChain())
+  if (spawnChain.length === 0) {
     return { kind: "error", message: "terminal transport unavailable" }
   }
 
@@ -160,16 +178,37 @@ export async function spawnFromDock(input: SpawnFromDockInput): Promise<SpawnOut
 
   // 2. Spawn. Bounded by a timeout so a wedged backend surfaces as an
   // error the dock can toast, never an indefinite silent hang.
-  let session: TerminalSession
+  let session: BaseTerminalSession | null = null
+  let lastError: unknown = new Error("terminal transport unavailable")
   try {
-    session = await withTimeout(spawnFn(req as SpawnRequest), SPAWN_TIMEOUT_MS, "terminal spawn")
+    const attemptTimeout = Math.max(1, Math.floor(SPAWN_TIMEOUT_MS / spawnChain.length))
+    for (const spawn of spawnChain) {
+      try {
+        session = await withTimeout(
+          spawn(req as SpawnRequest),
+          attemptTimeout,
+          "terminal spawn",
+          (lateSession) => {
+            void lateSession.kill().catch((error) => {
+              console.warn("terminal spawn cleanup failed:", error)
+            })
+          }
+        )
+        break
+      } catch (error) {
+        lastError = error
+      }
+    }
+    if (!session) throw lastError
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    input.store.setHostState?.(classifyTerminalHostError(err), message)
     return { kind: "error", message }
   }
 
   // 3. Register.
   registerLiveSession(session)
+  input.store.setHostState?.("online")
   input.store.registerSession(
     {
       id: session.info.id,
@@ -365,6 +404,28 @@ export async function killFromDock(
       projectId: session.info.projectId,
       extensionId: session.info.extensionId,
     })
+  }
+  unregisterLiveSession(sessionId)
+  store.removeSession(sessionId)
+}
+
+/**
+ * Close this device's attachment while leaving the host-owned process alive.
+ * The session remains available to other viewers and can be listed and
+ * reattached after a renderer or application restart.
+ */
+export async function detachFromDock(
+  sessionId: string,
+  store: Pick<TerminalStoreLike, "removeSession">
+): Promise<void> {
+  const session = getLiveSession(sessionId)
+  if (session) {
+    try {
+      await session.detach()
+    } catch (err) {
+      console.warn(`spawn-orchestrator: detach threw for ${sessionId}:`, err)
+      throw err
+    }
   }
   unregisterLiveSession(sessionId)
   store.removeSession(sessionId)

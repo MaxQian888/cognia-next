@@ -2,7 +2,17 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+
+const mockUseMediaQuery = jest.fn((_query: string) => false)
+const mockResizableLayout = jest.fn((_key: string) => ({
+  defaultLayout: undefined,
+  onLayoutChanged: jest.fn(),
+}))
+jest.mock("@/hooks/ui", () => ({
+  useMediaQuery: (query: string) => mockUseMediaQuery(query),
+  useResizableLayout: (key: string) => mockResizableLayout(key),
+}))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -18,34 +28,54 @@ const mockSpawnFromDock = jest.fn(async () => ({
   sessionId: "s-new",
   shell: "/bin/bash",
 }))
-const mockKillFromDock = jest.fn(async () => undefined)
+const mockDetachFromDock = jest.fn(async () => undefined)
+const mockAccessoryInput = jest.fn(async () => undefined)
+const mockAccessoryPaste = jest.fn(async () => undefined)
+const mockKeyboardFocus = jest.fn()
+const mockKeyboardHide = jest.fn()
+const mockRehydrateTerminals = jest.fn(async () => ({ restored: 0, failed: 0 }))
+
+jest.mock("@/lib/terminal/rehydrate", () => ({
+  rehydrateTerminals: () => mockRehydrateTerminals(),
+}))
 jest.mock("@/lib/terminal/spawn-orchestrator", () => ({
   spawnFromDock: (...args: unknown[]) => mockSpawnFromDock(...(args as [])),
-  killFromDock: (...args: unknown[]) => mockKillFromDock(...(args as [])),
+  detachFromDock: (...args: unknown[]) => mockDetachFromDock(...(args as [])),
 }))
 
 // Skip the heavy xterm path — the instance is mounted but the wrapper
 // returns a div placeholder so we focus on the screen-level wiring.
-jest.mock("@/components/terminal/terminal-instance", () => ({
-  TerminalInstance: ({
-    sessionId,
-    fontSize,
-    scrollback,
-  }: {
-    sessionId: string
-    fontSize?: number
-    scrollback?: number
-  }) => (
-    <div
-      data-testid="terminal-instance-stub"
-      data-session-id={sessionId}
-      data-font-size={fontSize}
-      data-scrollback={scrollback}
-    />
-  ),
-}))
+jest.mock("@/components/terminal/terminal-instance", () => {
+  const React = jest.requireActual<typeof import("react")>("react")
+  const TerminalInstanceStub = React.forwardRef<
+    unknown,
+    { sessionId: string; fontSize?: number; scrollback?: number }
+  >(({ sessionId, fontSize, scrollback }, ref) => {
+    React.useImperativeHandle(ref, () => ({
+      sendInput: mockAccessoryInput,
+      pasteFromClipboard: mockAccessoryPaste,
+      focusKeyboard: mockKeyboardFocus,
+      hideKeyboard: mockKeyboardHide,
+    }))
+    return (
+      <div
+        data-testid="terminal-instance-stub"
+        data-session-id={sessionId}
+        data-font-size={fontSize}
+        data-scrollback={scrollback}
+      />
+    )
+  })
+  TerminalInstanceStub.displayName = "TerminalInstanceStub"
+  return { TerminalInstance: TerminalInstanceStub }
+})
 jest.mock("@/components/mobile/connection-state-badge", () => ({
   ConnectionStateBadge: () => <div data-testid="connection-state-badge-stub" />,
+}))
+jest.mock("@/components/artifacts/workspace-mode/project-overview-panel", () => ({
+  ProjectOverviewPanel: ({ projectId }: { projectId: string }) => (
+    <div data-testid="project-overview-stub" data-project-id={projectId} />
+  ),
 }))
 
 // Wave 2 — search + history overlays mounted on the mobile screen.
@@ -89,12 +119,24 @@ beforeEach(() => {
   useProjectStore.setState({ projects: [], activeProjectId: "proj-a" })
   useSettingsStore.setState({ settings: null })
   mockSpawnFromDock.mockClear()
-  mockKillFromDock.mockClear()
+  mockDetachFromDock.mockClear()
+  mockAccessoryInput.mockClear()
+  mockAccessoryPaste.mockClear()
+  mockKeyboardFocus.mockClear()
+  mockKeyboardHide.mockClear()
+  mockRehydrateTerminals.mockClear()
   routerBack.mockClear()
   mockTransport = "ws"
+  mockUseMediaQuery.mockReset().mockReturnValue(false)
+  mockResizableLayout.mockClear()
 })
 
 describe("MobileTerminalScreen", () => {
+  it("restores host-owned sessions when the mobile terminal opens", async () => {
+    render(<MobileTerminalScreen />)
+    await waitFor(() => expect(mockRehydrateTerminals).toHaveBeenCalledTimes(1))
+  })
+
   it("renders the empty state with action button when ws transport and no sessions", () => {
     render(<MobileTerminalScreen />)
     expect(screen.getByTestId("mobile-terminal-empty")).toBeInTheDocument()
@@ -158,11 +200,39 @@ describe("MobileTerminalScreen", () => {
     expect(screen.getByText("empty.unavailable")).toBeInTheDocument()
   })
 
-  it("calls killFromDock when a tab close is tapped", () => {
+  it("detaches without terminating when a tab close is tapped", () => {
     useTerminalStore.getState().registerSession(info())
     render(<MobileTerminalScreen />)
     fireEvent.click(screen.getByLabelText("close"))
-    expect(mockKillFromDock).toHaveBeenCalled()
+    expect(mockDetachFromDock).toHaveBeenCalled()
+  })
+
+  it("provides touch keys, paste, and explicit software-keyboard control", () => {
+    useTerminalStore.getState().registerSession(info())
+    render(<MobileTerminalScreen />)
+    expect(screen.getByTestId("mobile-terminal-accessory")).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText("accessory.up"))
+    fireEvent.click(screen.getByLabelText("accessory.paste"))
+    fireEvent.click(screen.getByLabelText("accessory.showKeyboard"))
+    fireEvent.click(screen.getByLabelText("accessory.hideKeyboard"))
+    expect(mockAccessoryInput).toHaveBeenCalledWith("\u001b[A")
+    expect(mockAccessoryPaste).toHaveBeenCalled()
+    expect(mockKeyboardFocus).toHaveBeenCalled()
+    expect(mockKeyboardHide).toHaveBeenCalled()
+  })
+
+  it("uses the persisted portrait or landscape workbench split on tablets", () => {
+    mockUseMediaQuery.mockImplementation((query) => query.includes("min-width"))
+    useProjectStore.setState({ projects: [{ id: "proj-a" }] as never, activeProjectId: "proj-a" })
+    const { unmount } = render(<MobileTerminalScreen />)
+    expect(screen.getByTestId("tablet-terminal-split")).toBeInTheDocument()
+    expect(screen.getByTestId("project-overview-stub")).toHaveAttribute("data-project-id", "proj-a")
+    expect(mockResizableLayout).toHaveBeenCalledWith("cognia-tablet-terminal-portrait")
+
+    unmount()
+    mockUseMediaQuery.mockReturnValue(true)
+    render(<MobileTerminalScreen />)
+    expect(mockResizableLayout).toHaveBeenCalledWith("cognia-tablet-terminal-landscape")
   })
 
   describe("Wave 2 — overlay parity", () => {

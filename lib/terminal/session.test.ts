@@ -59,6 +59,7 @@ describe("TerminalSession.spawn", () => {
     })
 
     const session = await TerminalSession.spawn({
+      profileId: "profile-1",
       shell: "/bin/bash",
       rows: 24,
       cols: 80,
@@ -70,6 +71,7 @@ describe("TerminalSession.spawn", () => {
       "terminal_spawn",
       expect.objectContaining({
         req: expect.objectContaining({ shell: "/bin/bash", rows: 24 }),
+        profileId: "profile-1",
         onEvent: expect.any(Object),
       })
     )
@@ -176,9 +178,27 @@ describe("event dispatch", () => {
     expect(consoleWarn).toHaveBeenCalled()
     consoleWarn.mockRestore()
   })
+
+  it("dispatches replay gaps and controller changes", async () => {
+    const session = await spawn()
+    const gaps: unknown[] = []
+    const controls: unknown[] = []
+    session.onReplayGap((gap) => gaps.push(gap))
+    session.onControlState((state) => controls.push(state))
+
+    fire({ kind: "replay_gap", requested_after: 3, first_available: 8, last_available: 12 })
+    fire({ kind: "controller_changed", controller: "mobile-device" })
+    fire({ kind: "controller_changed", controller: "desktop" })
+
+    expect(gaps).toEqual([{ requestedAfter: 3, firstAvailable: 8, lastAvailable: 12 }])
+    expect(controls).toEqual([
+      { role: "viewer", controllerId: "mobile-device", reason: "takeover" },
+      { role: "controller", controllerId: "desktop", reason: undefined },
+    ])
+  })
 })
 
-describe("write / resize / kill", () => {
+describe("write / resize / ownership / kill", () => {
   async function spawn(): Promise<TerminalSession> {
     mockInvoke.mockResolvedValueOnce({ session: baseInfo })
     return TerminalSession.spawn({ shell: "/bin/bash", rows: 24, cols: 80 })
@@ -239,6 +259,28 @@ describe("write / resize / kill", () => {
     mockInvoke.mockResolvedValueOnce(undefined)
     await session.kill()
     expect(mockInvoke).toHaveBeenLastCalledWith("terminal_kill", { id: "sess-1" })
+  })
+
+  it("detaches and transitions local control ownership", async () => {
+    const session = await spawn()
+    const controls: unknown[] = []
+    session.onControlState((state) => controls.push(state))
+    mockInvoke.mockResolvedValue(undefined)
+
+    await session.detach()
+    await session.takeControl()
+    await session.releaseControl()
+
+    expect(mockInvoke.mock.calls.slice(-3)).toEqual([
+      ["terminal_detach", { id: "sess-1" }],
+      ["terminal_take_control", { id: "sess-1" }],
+      ["terminal_release_control", { id: "sess-1" }],
+    ])
+    expect(controls).toEqual([
+      { role: "controller", controllerId: null },
+      { role: "controller", controllerId: "local" },
+      { role: "viewer", controllerId: null, reason: "released" },
+    ])
   })
 })
 

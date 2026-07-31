@@ -30,6 +30,7 @@ use webrtc::peer_connection::RTCPeerConnection;
 /// DataChannel label both peers agree on. Mirrored in
 /// `lib/signaling/types.ts:DATACHANNEL_LABEL`.
 pub const DATACHANNEL_LABEL: &str = "cognia.v2";
+pub const TERMINAL_DATACHANNEL_LABEL: &str = "cognia.terminal";
 pub const ICE_QUEUE_CAPACITY: usize = 256;
 pub const INBOUND_FRAME_QUEUE_CAPACITY: usize = 128;
 pub const STATE_QUEUE_CAPACITY: usize = 32;
@@ -56,6 +57,8 @@ pub struct PeerCallbacks {
     /// Inbound DataChannel binary messages (the RPC / event JSON
     /// envelopes from the mobile peer).
     pub inbound_data: mpsc::Sender<Vec<u8>>,
+    /// Handler for the isolated canonical binary terminal channel.
+    pub terminal_channel: Arc<dyn Fn(Arc<RTCDataChannel>) + Send + Sync>,
     /// `RTCPeerConnectionState` transitions for failure detection.
     pub state_change: mpsc::Sender<RTCPeerConnectionState>,
 }
@@ -120,12 +123,29 @@ impl PeerSession {
         // ── on_data_channel ────────────────────────────────────────────
         let dc_slot = Arc::clone(&dc);
         let inbound_tx = callbacks.inbound_data.clone();
+        let terminal_channel = Arc::clone(&callbacks.terminal_channel);
         let open_tx_dc = open_tx.clone();
         pc.on_data_channel(Box::new(move |channel: Arc<RTCDataChannel>| {
             let dc_slot = Arc::clone(&dc_slot);
             let inbound_tx = inbound_tx.clone();
+            let terminal_channel = Arc::clone(&terminal_channel);
             let open_tx_dc = open_tx_dc.clone();
             Box::pin(async move {
+                if channel.label() == TERMINAL_DATACHANNEL_LABEL {
+                    if !is_reliable_ordered_channel(
+                        channel.ordered(),
+                        channel.max_packet_lifetime(),
+                        channel.max_retransmits(),
+                    ) {
+                        log::warn!(
+                            "signaling::peer: rejecting unreliable terminal data channel"
+                        );
+                        let _ = channel.close().await;
+                        return;
+                    }
+                    terminal_channel(channel);
+                    return;
+                }
                 if channel.label() != DATACHANNEL_LABEL {
                     log::warn!(
                         "signaling::peer: ignoring data channel with unexpected label \"{}\"",
@@ -269,6 +289,14 @@ impl PeerSession {
     }
 }
 
+fn is_reliable_ordered_channel(
+    ordered: bool,
+    max_packet_lifetime: Option<u16>,
+    max_retransmits: Option<u16>,
+) -> bool {
+    ordered && max_packet_lifetime.is_none() && max_retransmits.is_none()
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PeerSendError {
     #[error("data channel is not open")]
@@ -301,6 +329,7 @@ mod tests {
             PeerCallbacks {
                 outbound_ice: ice_tx,
                 inbound_data: data_tx,
+                terminal_channel: Arc::new(|_| {}),
                 state_change: state_tx,
             },
             ice_rx,
@@ -317,6 +346,15 @@ mod tests {
         let err = session.send_bytes(vec![1, 2, 3]).await.unwrap_err();
         assert!(matches!(err, PeerSendError::ChannelClosed));
         session.close().await;
+    }
+
+    #[test]
+    fn terminal_channel_contract_is_unversioned_reliable_and_ordered() {
+        assert_eq!(TERMINAL_DATACHANNEL_LABEL, "cognia.terminal");
+        assert!(is_reliable_ordered_channel(true, None, None));
+        assert!(!is_reliable_ordered_channel(false, None, None));
+        assert!(!is_reliable_ordered_channel(true, Some(1000), None));
+        assert!(!is_reliable_ordered_channel(true, None, Some(3)));
     }
 
     #[tokio::test]

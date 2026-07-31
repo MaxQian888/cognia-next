@@ -18,6 +18,7 @@
 import type { ReactNode } from "react"
 
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -39,6 +40,7 @@ import { Switch } from "@/components/ui/switch"
 import { ClampedNumberInput } from "@/components/settings/common/clamped-number-input"
 import { DeferredTextInput } from "@/components/settings/common/deferred-text-input"
 import { useSettingsStore } from "@/stores/settings"
+import { isTauri, transport } from "@/lib/tauri"
 
 import { FontFamilyPicker } from "@/components/settings/appearance/components/font-family-picker"
 import { TerminalFontPreview } from "./terminal-font-preview"
@@ -49,12 +51,25 @@ import { TerminalProjectOverride } from "./terminal-project-override"
 type TerminalSettings = NonNullable<
   NonNullable<ReturnType<typeof useSettingsStore.getState>["settings"]>["terminal"]
 >
+type TerminalHostSettings = NonNullable<TerminalSettings["host"]>
+
+const MIB = 1024 * 1024
+const DEFAULT_HOST_SETTINGS: Required<TerminalHostSettings> = {
+  allowRemoteAccess: false,
+  startAtLogin: false,
+  diagnostics: false,
+  maxSessions: 32,
+  maxRemoteSessionsPerDevice: 8,
+  replayBytesPerSession: 8 * MIB,
+  totalReplayBytes: 128 * MIB,
+}
 
 /** Concrete (non-optional) font-weight union offered by the pickers. */
 type FontWeightOption =
   "normal" | "bold" | "100" | "200" | "300" | "400" | "500" | "600" | "700" | "800" | "900"
 
 const DEFAULT_VALUES: TerminalSettings = {
+  host: DEFAULT_HOST_SETTINGS,
   defaultShell: "",
   fontFamily: "",
   fontSize: 13,
@@ -232,6 +247,30 @@ export function TerminalCard() {
 
   function update(patch: Partial<TerminalSettings>): void {
     void save({ terminal: { ...terminal, ...patch } })
+  }
+
+  async function updateHost(patch: Partial<TerminalHostSettings>): Promise<void> {
+    const host: Required<TerminalHostSettings> = {
+      ...DEFAULT_HOST_SETTINGS,
+      ...(terminal.host ?? {}),
+      ...patch,
+    }
+    if (host.maxRemoteSessionsPerDevice > host.maxSessions) {
+      host.maxRemoteSessionsPerDevice = host.maxSessions
+    }
+    if (host.totalReplayBytes < host.replayBytesPerSession) {
+      host.totalReplayBytes = host.replayBytesPerSession
+    }
+    try {
+      if (isTauri()) {
+        await transport.call("terminal_host_service", {
+          action: { kind: "configure", settings: host },
+        })
+      }
+      await save({ terminal: { ...terminal, host } })
+    } catch {
+      toast.error(t("settings.terminal.host.operationFailed"))
+    }
   }
 
   /** Render a font-weight option: CSS keywords via i18n, numeric weights verbatim. */
@@ -1002,6 +1041,82 @@ export function TerminalCard() {
         </div>
       </Section>
 
+      <Section title={t("settings.terminal.groups.host")}>
+        <div className="grid gap-3 md:grid-cols-3">
+          {(
+            [
+              ["allowRemoteAccess", "remoteAccess"],
+              ["startAtLogin", "startAtLogin"],
+              ["diagnostics", "diagnostics"],
+            ] as const
+          ).map(([key, message]) => (
+            <div key={key} className="flex items-center justify-between gap-3 rounded border p-3">
+              <div className="space-y-0.5">
+                <Label className="text-xs">{t(`settings.terminal.host.${message}.label`)}</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  {t(`settings.terminal.host.${message}.helper`)}
+                </p>
+              </div>
+              <Switch
+                checked={terminal.host?.[key] ?? DEFAULT_HOST_SETTINGS[key]}
+                onCheckedChange={(checked) => void updateHost({ [key]: checked })}
+                aria-label={t(`settings.terminal.host.${message}.label`)}
+                data-testid={`terminal-host-${key}`}
+              />
+            </div>
+          ))}
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <HostNumberSetting
+            id="max-sessions"
+            label={t("settings.terminal.host.maxSessions.label")}
+            helper={t("settings.terminal.host.maxSessions.helper")}
+            value={terminal.host?.maxSessions ?? DEFAULT_HOST_SETTINGS.maxSessions}
+            min={1}
+            max={256}
+            onCommit={(maxSessions) => void updateHost({ maxSessions })}
+          />
+          <HostNumberSetting
+            id="max-remote-sessions"
+            label={t("settings.terminal.host.maxRemoteSessions.label")}
+            helper={t("settings.terminal.host.maxRemoteSessions.helper")}
+            value={
+              terminal.host?.maxRemoteSessionsPerDevice ??
+              DEFAULT_HOST_SETTINGS.maxRemoteSessionsPerDevice
+            }
+            min={1}
+            max={terminal.host?.maxSessions ?? DEFAULT_HOST_SETTINGS.maxSessions}
+            onCommit={(maxRemoteSessionsPerDevice) =>
+              void updateHost({ maxRemoteSessionsPerDevice })
+            }
+          />
+          <HostNumberSetting
+            id="replay-per-session"
+            label={t("settings.terminal.host.replayPerSession.label")}
+            helper={t("settings.terminal.host.replayPerSession.helper")}
+            value={
+              (terminal.host?.replayBytesPerSession ??
+                DEFAULT_HOST_SETTINGS.replayBytesPerSession) / MIB
+            }
+            min={1}
+            max={64}
+            onCommit={(value) => void updateHost({ replayBytesPerSession: value * MIB })}
+          />
+          <HostNumberSetting
+            id="replay-total"
+            label={t("settings.terminal.host.replayTotal.label")}
+            helper={t("settings.terminal.host.replayTotal.helper")}
+            value={
+              (terminal.host?.totalReplayBytes ?? DEFAULT_HOST_SETTINGS.totalReplayBytes) / MIB
+            }
+            min={1}
+            max={1024}
+            onCommit={(value) => void updateHost({ totalReplayBytes: value * MIB })}
+          />
+        </div>
+      </Section>
+
       <Section title={t("settings.terminal.groups.agents")}>
         <div className="flex items-center justify-between rounded border p-3">
           <div className="space-y-0.5">
@@ -1092,6 +1207,47 @@ export function TerminalCard() {
       <SshHosts />
 
       <TerminalProjectOverride />
+    </div>
+  )
+}
+
+function HostNumberSetting({
+  id,
+  label,
+  helper,
+  value,
+  min,
+  max,
+  onCommit,
+}: {
+  id: string
+  label: string
+  helper: string
+  value: number
+  min: number
+  max: number
+  onCommit: (value: number) => void
+}) {
+  const inputId = `terminal-host-${id}`
+  return (
+    <div className="flex items-center justify-between gap-3 rounded border p-3">
+      <div className="space-y-0.5">
+        <Label className="text-xs" htmlFor={inputId}>
+          {label}
+        </Label>
+        <p className="text-[11px] text-muted-foreground">{helper}</p>
+      </div>
+      <ClampedNumberInput
+        id={inputId}
+        min={min}
+        max={max}
+        integer
+        className="w-24"
+        value={value}
+        onCommit={onCommit}
+        aria-label={label}
+        data-testid={inputId}
+      />
     </div>
   )
 }

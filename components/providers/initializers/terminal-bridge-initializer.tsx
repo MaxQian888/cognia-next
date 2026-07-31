@@ -9,12 +9,10 @@
  * for coverage, but the runtime path was a TODO.
  *
  * Now: on mount, we install `createPtyShellSpawn()` (which routes spawn
- * calls into `lib/terminal/session.ts`) and a no-op `TerminalOutputSink`
- * (the legacy line-buffered panel is being removed in task #12; the
- * dock subscribes to bridge events via `subscribeTerminalEvents` and
- * the dock store directly).
+ * calls into `lib/terminal/session.ts`) and a no-op `TerminalOutputSink`;
+ * the integrated dock subscribes to bridge events and the dock store directly.
  *
- * Wave 1 — we also warm-import `dock-tool-handler` so the first
+ * We also warm-import `dock-tool-handler` so the first
  * `terminal_dock_*` MCP call from the agent doesn't pay a dynamic-import
  * round-trip mid-tool. The module is pure (no top-level side effects);
  * the cost is the bundle inclusion only.
@@ -36,6 +34,8 @@ import {
   type TerminalOutputSink,
 } from "@/lib/plugin/vscode-shim/terminal-bridge"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
+import { syncTerminalHostProfiles } from "@/lib/terminal/host-profiles"
 
 const noopSink: TerminalOutputSink = {
   appendLine() {
@@ -64,6 +64,26 @@ export function TerminalBridgeInitializer() {
     // the settings store), the lazy import in plugin-tool-ipc.ts still
     // works on the actual call.
     void import("@/lib/terminal/dock-tool-handler").catch(() => undefined)
+    const syncProfiles = () => {
+      const terminal = useSettingsStore.getState().settings?.terminal
+      void syncTerminalHostProfiles(terminal?.profiles, {
+        enableShellIntegration: terminal?.enableShellIntegration,
+        forceUtf8: terminal?.forceUtf8,
+        sandboxed: terminal?.sandboxed,
+        sshProfiles: terminal?.sshHosts,
+      }).catch(() => undefined)
+    }
+    let stopWaitingForSettings: (() => void) | undefined
+    if (useSettingsStore.getState().loaded) {
+      syncProfiles()
+    } else {
+      stopWaitingForSettings = useSettingsStore.subscribe((state) => {
+        if (!state.loaded) return
+        stopWaitingForSettings?.()
+        stopWaitingForSettings = undefined
+        syncProfiles()
+      })
+    }
     // 1C — reattach to PTY sessions that survived a webview reload. The
     // Rust process keeps them alive; this restores the dock tabs + live
     // streams (no-op on first launch / full restart). Best-effort.
@@ -71,6 +91,7 @@ export function TerminalBridgeInitializer() {
       .then((m) => m.rehydrateTerminals())
       .catch(() => undefined)
     return () => {
+      stopWaitingForSettings?.()
       // Drop the bridge state so a subsequent remount (e.g. after fast
       // refresh) installs a fresh spawn handle. In production this
       // effectively never runs — the initializer is mounted once at the

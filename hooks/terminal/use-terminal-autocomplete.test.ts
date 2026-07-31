@@ -65,6 +65,12 @@ function feedAll(feed: (c: string) => void, text: string) {
   for (const ch of text) feed(ch)
 }
 
+async function waitForAutocomplete(milliseconds: number) {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, milliseconds))
+  })
+}
+
 describe("useTerminalAutocomplete", () => {
   beforeEach(() => {
     __resetCompletionRegistryForTesting()
@@ -148,7 +154,7 @@ describe("useTerminalAutocomplete", () => {
   it("yields no suggestion when the session row is missing", async () => {
     const { result } = renderHook(() => useTerminalAutocomplete("does-not-exist"))
     act(() => feedAll(result.current.feed, "git "))
-    await new Promise((r) => setTimeout(r, 80))
+    await waitForAutocomplete(80)
     expect(result.current.ghost).toBe("")
   })
 
@@ -157,7 +163,7 @@ describe("useTerminalAutocomplete", () => {
     const { result } = renderHook(() => useTerminalAutocomplete("s2"))
     act(() => feedAll(result.current.feed, "ls "))
     // No history + AI off → no ghost, but must not throw.
-    await new Promise((r) => setTimeout(r, 80))
+    await waitForAutocomplete(80)
     expect(result.current.ghost).toBe("")
     delete mockTerminalState.sessions["s2"]
   })
@@ -169,7 +175,7 @@ describe("useTerminalAutocomplete", () => {
     act(() => feedAll(result.current.feed, "git "))
     await waitFor(() => expect(result.current.ghost).toBe("status"))
     act(() => result.current.openList())
-    await new Promise((r) => setTimeout(r, 80))
+    await waitForAutocomplete(80)
     expect(result.current.listOpen).toBe(false)
   })
 
@@ -182,7 +188,7 @@ describe("useTerminalAutocomplete", () => {
     }
     const { result } = renderHook(() => useTerminalAutocomplete("s3"))
     act(() => feedAll(result.current.feed, "rm"))
-    await new Promise((r) => setTimeout(r, 120))
+    await waitForAutocomplete(120)
     expect(result.current.ghost).toBe("")
     expect(result.current.candidates).toHaveLength(0)
     delete mockTerminalState.sessions["s3"]
@@ -194,7 +200,7 @@ describe("useTerminalAutocomplete", () => {
     expect(result.current.enabled).toBe(false)
     act(() => feedAll(result.current.feed, "git "))
     // Give the debounce window a chance — nothing should appear.
-    await new Promise((r) => setTimeout(r, 80))
+    await waitForAutocomplete(80)
     expect(result.current.ghost).toBe("")
     expect(result.current.accept()).toBeNull()
   })

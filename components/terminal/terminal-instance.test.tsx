@@ -3,7 +3,7 @@
  */
 
 import { createRef } from "react"
-import { render, act, fireEvent } from "@testing-library/react"
+import { render, act, fireEvent, screen, waitFor } from "@testing-library/react"
 
 // Mock the heavy xterm.js modules so the test doesn't need a real GPU /
 // canvas. Each constructor returns a stub with the methods the
@@ -12,6 +12,7 @@ const mockTermInstance: {
   loadAddon: jest.Mock
   open: jest.Mock
   write: jest.Mock
+  writeln: jest.Mock
   onData: jest.Mock
   onSelectionChange: jest.Mock
   onBell?: jest.Mock
@@ -19,6 +20,8 @@ const mockTermInstance: {
   getSelection: jest.Mock
   paste: jest.Mock
   clear: jest.Mock
+  focus: jest.Mock
+  blur: jest.Mock
   registerMarker?: jest.Mock
   registerDecoration?: jest.Mock
   registerLinkProvider?: jest.Mock
@@ -54,12 +57,15 @@ const mockTermInstance: {
   loadAddon: jest.fn(),
   open: jest.fn(),
   write: jest.fn(),
+  writeln: jest.fn(),
   onData: jest.fn(() => ({ dispose: jest.fn() })),
   onSelectionChange: jest.fn(() => ({ dispose: jest.fn() })),
   attachCustomKeyEventHandler: jest.fn(),
   getSelection: jest.fn(() => ""),
   paste: jest.fn(),
   clear: jest.fn(),
+  focus: jest.fn(),
+  blur: jest.fn(),
   registerMarker: jest.fn(() => ({})),
   registerDecoration: jest.fn(),
   clearTextureAtlas: jest.fn(),
@@ -147,10 +153,13 @@ const sessionRegistry: {
     onData: jest.Mock
     onIntegration: jest.Mock
     onExit: jest.Mock
+    onControlState: jest.Mock
+    onReplayGap: jest.Mock
     write: jest.Mock
     resize: jest.Mock
     kill: jest.Mock
-    info: { id: string }
+    takeControl: jest.Mock
+    info: { id: string; sandboxed?: boolean }
   } | null
 } = { current: null }
 
@@ -209,9 +218,12 @@ function makeFakeSession() {
     onData: jest.fn(() => () => undefined),
     onIntegration: jest.fn(() => () => undefined),
     onExit: jest.fn(() => () => undefined),
+    onControlState: jest.fn(() => () => undefined),
+    onReplayGap: jest.fn(() => () => undefined),
     write: jest.fn(async () => undefined),
     resize: jest.fn(async () => undefined),
     kill: jest.fn(async () => undefined),
+    takeControl: jest.fn(async () => undefined),
   }
 }
 
@@ -228,6 +240,7 @@ beforeEach(() => {
   mockTermInstance.loadAddon = jest.fn()
   mockTermInstance.open = jest.fn()
   mockTermInstance.write = jest.fn()
+  mockTermInstance.writeln = jest.fn()
   mockTermInstance.onData = jest.fn(() => ({ dispose: jest.fn() }))
   mockTermInstance.onSelectionChange = jest.fn(() => ({ dispose: jest.fn() }))
   mockTermInstance.onBell = jest.fn(() => ({ dispose: jest.fn() }))
@@ -428,6 +441,40 @@ describe("TerminalInstance", () => {
     await flushAsync()
     ref.current!.clearScreen()
     expect(mockTermInstance.clear).toHaveBeenCalled()
+  })
+
+  it("imperative handle supports touch input and software-keyboard control", async () => {
+    const ref = createRef<import("./terminal-instance").TerminalInstanceHandle | null>()
+    render(<TerminalInstance ref={ref} sessionId="s-1" />)
+    await waitFor(() => expect(ref.current).not.toBeNull())
+
+    await act(async () => ref.current!.sendInput("\u001b[A"))
+    expect(sessionRegistry.current?.write).toHaveBeenCalledWith("\u001b[A")
+    ref.current!.focusKeyboard()
+    ref.current!.hideKeyboard()
+    expect(mockTermInstance.focus).toHaveBeenCalled()
+    expect(mockTermInstance.blur).toHaveBeenCalled()
+  })
+
+  it("surfaces read-only takeover and replay truncation states", async () => {
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const session = sessionRegistry.current!
+    const controlListener = session.onControlState.mock.calls[0]?.[0] as (state: unknown) => void
+    const gapListener = session.onReplayGap.mock.calls[0]?.[0] as (gap: unknown) => void
+    act(() => {
+      controlListener({ role: "viewer", controllerId: "phone-2", reason: "takeover" })
+      gapListener({ requestedAfter: 2, firstAvailable: 8, lastAvailable: 20 })
+    })
+    expect(screen.getByTestId("terminal-read-only-state")).toBeInTheDocument()
+    expect(screen.getByTestId("terminal-replay-gap-state")).toBeInTheDocument()
+    expect(mockTermInstance.writeln).toHaveBeenCalledWith(
+      expect.stringContaining("Earlier terminal output is unavailable")
+    )
+    const confirm = jest.spyOn(window, "confirm").mockReturnValueOnce(true)
+    fireEvent.click(screen.getByText("Take control"))
+    expect(session.takeControl).toHaveBeenCalled()
+    confirm.mockRestore()
   })
 
   it("attaches a custom key event handler for clipboard shortcuts", async () => {

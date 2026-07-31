@@ -44,6 +44,8 @@ pub enum GrantKind {
     Control,
     /// Start and drive external agents — [`super::control_allow_list::agent_control_global`].
     AgentControl,
+    /// Create, attach to, and control interactive terminal sessions.
+    Terminal,
 }
 
 impl GrantKind {
@@ -51,6 +53,7 @@ impl GrantKind {
         match self {
             GrantKind::Control => "control",
             GrantKind::AgentControl => "agent-control",
+            GrantKind::Terminal => "terminal",
         }
     }
 
@@ -58,6 +61,7 @@ impl GrantKind {
         match raw {
             "control" => Some(GrantKind::Control),
             "agent-control" | "agent_control" => Some(GrantKind::AgentControl),
+            "terminal" => Some(GrantKind::Terminal),
             _ => None,
         }
     }
@@ -71,6 +75,8 @@ pub struct PersistedGrants {
     pub control: BTreeSet<String>,
     #[serde(default)]
     pub agent_control: BTreeSet<String>,
+    #[serde(default)]
+    pub terminal: BTreeSet<String>,
 }
 
 impl PersistedGrants {
@@ -78,6 +84,7 @@ impl PersistedGrants {
         match kind {
             GrantKind::Control => &mut self.control,
             GrantKind::AgentControl => &mut self.agent_control,
+            GrantKind::Terminal => &mut self.terminal,
         }
     }
 }
@@ -126,19 +133,20 @@ impl DeviceGrantStore for FileDeviceGrantStore {
 }
 
 /// Project the persisted grants onto the in-memory allow lists the RPC hot path
-/// reads. Returns `(control, agent_control)` counts for the boot log.
+/// reads. Returns `(control, agent_control, terminal)` counts for the boot log.
 ///
 /// Uses `reseed` (replace, not union) so a grant revoked while the server was
 /// down does not survive the restart.
-pub fn seed_allow_lists(store: &dyn DeviceGrantStore) -> Result<(usize, usize), String> {
+pub fn seed_allow_lists(store: &dyn DeviceGrantStore) -> Result<(usize, usize, usize), String> {
     seed_allow_lists_into(
         store,
         super::control_allow_list::global(),
         super::control_allow_list::agent_control_global(),
+        super::control_allow_list::terminal_global(),
     )
 }
 
-/// Seed a specific pair of lists.
+/// Seed a specific set of capability lists.
 ///
 /// Split out so the replace-not-union contract can be tested against lists the
 /// test owns. The two globals are shared by every test in this binary and
@@ -149,13 +157,16 @@ pub fn seed_allow_lists_into(
     store: &dyn DeviceGrantStore,
     control_list: &super::control_allow_list::ControlAllowList,
     agent_control_list: &super::control_allow_list::ControlAllowList,
-) -> Result<(usize, usize), String> {
+    terminal_list: &super::control_allow_list::ControlAllowList,
+) -> Result<(usize, usize, usize), String> {
     let grants = store.load()?;
     let control: Vec<String> = grants.control.iter().cloned().collect();
     let agent: Vec<String> = grants.agent_control.iter().cloned().collect();
-    let counts = (control.len(), agent.len());
+    let terminal: Vec<String> = grants.terminal.iter().cloned().collect();
+    let counts = (control.len(), agent.len(), terminal.len());
     control_list.reseed(control);
     agent_control_list.reseed(agent);
+    terminal_list.reseed(terminal);
     Ok(counts)
 }
 
@@ -216,7 +227,11 @@ mod tests {
 
     #[test]
     fn grant_kind_round_trips_through_its_wire_name() {
-        for kind in [GrantKind::Control, GrantKind::AgentControl] {
+        for kind in [
+            GrantKind::Control,
+            GrantKind::AgentControl,
+            GrantKind::Terminal,
+        ] {
             assert_eq!(GrantKind::parse(kind.as_str()), Some(kind));
         }
         // Underscore spelling accepted so a config written either way works.
@@ -236,6 +251,7 @@ mod tests {
         let grants = store.load().unwrap();
         assert!(grants.control.contains("dev-1"));
         assert!(grants.agent_control.is_empty());
+        assert!(grants.terminal.is_empty());
     }
 
     #[test]
@@ -275,27 +291,31 @@ mod tests {
     fn seeding_replaces_rather_than_unions_so_revocations_survive_a_restart() {
         // Seeded into lists this test owns. Reseeding the process-global pair
         // from here would wipe whatever the RPC gate tests in `rpc.rs` and
-        // `ws_terminal_test.rs` had granted themselves — same binary, threads
+        // terminal WebSocket tests had granted themselves — same binary, threads
         // in parallel — and a permission test passing because the grant
         // vanished is a false green, not a flake.
         let control = super::super::control_allow_list::ControlAllowList::new();
         let agent = super::super::control_allow_list::ControlAllowList::new();
+        let terminal = super::super::control_allow_list::ControlAllowList::new();
         let store = MemStore::default();
         grant(&store, "dev-1", GrantKind::Control).unwrap();
         grant(&store, "dev-2", GrantKind::AgentControl).unwrap();
+        grant(&store, "dev-3", GrantKind::Terminal).unwrap();
         assert_eq!(
-            seed_allow_lists_into(&store, &control, &agent).unwrap(),
-            (1, 1)
+            seed_allow_lists_into(&store, &control, &agent, &terminal).unwrap(),
+            (1, 1, 1)
         );
         assert!(control.is_allowed("dev-1"));
         assert!(agent.is_allowed("dev-2"));
+        assert!(terminal.is_allowed("dev-3"));
         // A device granted control is NOT thereby allowed to run agents.
         assert!(!agent.is_allowed("dev-1"));
+        assert!(!terminal.is_allowed("dev-1"));
 
         revoke(&store, "dev-1", GrantKind::Control).unwrap();
         assert_eq!(
-            seed_allow_lists_into(&store, &control, &agent).unwrap(),
-            (0, 1)
+            seed_allow_lists_into(&store, &control, &agent, &terminal).unwrap(),
+            (0, 1, 1)
         );
         assert!(!control.is_allowed("dev-1"));
     }
@@ -309,13 +329,16 @@ mod tests {
         let store = MemStore::default();
         grant(&store, "seeded-control", GrantKind::Control).unwrap();
         grant(&store, "seeded-agent", GrantKind::AgentControl).unwrap();
-        assert_eq!(seed_allow_lists(&store).unwrap(), (1, 1));
+        grant(&store, "seeded-terminal", GrantKind::Terminal).unwrap();
+        assert_eq!(seed_allow_lists(&store).unwrap(), (1, 1, 1));
         assert!(super::super::control_allow_list::global().is_allowed("seeded-control"));
         assert!(super::super::control_allow_list::agent_control_global().is_allowed("seeded-agent"));
+        assert!(super::super::control_allow_list::terminal_global().is_allowed("seeded-terminal"));
 
         // Leave the process-global lists clean for other tests.
         super::super::control_allow_list::global().clear();
         super::super::control_allow_list::agent_control_global().clear();
+        super::super::control_allow_list::terminal_global().clear();
     }
 
     #[test]
@@ -337,11 +360,13 @@ mod tests {
         let store = FileDeviceGrantStore::new(&dir);
         grant(store.as_ref(), "dev-a", GrantKind::AgentControl).unwrap();
         grant(store.as_ref(), "dev-b", GrantKind::Control).unwrap();
+        grant(store.as_ref(), "dev-c", GrantKind::Terminal).unwrap();
 
         let reopened = FileDeviceGrantStore::new(&dir);
         let grants = reopened.load().unwrap();
         assert!(grants.agent_control.contains("dev-a"));
         assert!(grants.control.contains("dev-b"));
+        assert!(grants.terminal.contains("dev-c"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

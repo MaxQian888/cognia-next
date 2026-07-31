@@ -593,4 +593,56 @@ describe("TerminalCard", () => {
       expect(screen.getByTestId("terminal-card-unattended-policy")).toBeInTheDocument()
     })
   })
+
+  describe("durable host settings", () => {
+    it("enables host-wide remote access while preserving validated defaults", async () => {
+      render(<TerminalCard />)
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("terminal-host-allowRemoteAccess"))
+      })
+      expect(lastSavedTerminal()).toMatchObject({
+        host: {
+          allowRemoteAccess: true,
+          startAtLogin: false,
+          diagnostics: false,
+          maxSessions: 32,
+          maxRemoteSessionsPerDevice: 8,
+          replayBytesPerSession: 8 * 1024 * 1024,
+          totalReplayBytes: 128 * 1024 * 1024,
+        },
+      })
+    })
+
+    it("clamps the host session limit before persistence", async () => {
+      render(<TerminalCard />)
+      const input = screen.getByTestId("terminal-host-max-sessions") as HTMLInputElement
+      await act(async () => {
+        fireEvent.change(input, { target: { value: "999" } })
+        fireEvent.blur(input)
+      })
+      expect(lastSavedTerminal()).toMatchObject({
+        host: expect.objectContaining({ maxSessions: 256 }),
+      })
+    })
+
+    it("keeps the total replay budget at least as large as one session budget", async () => {
+      settingsState = {
+        terminal: {
+          host: {
+            replayBytesPerSession: 16 * 1024 * 1024,
+            totalReplayBytes: 128 * 1024 * 1024,
+          },
+        },
+      }
+      render(<TerminalCard />)
+      const input = screen.getByTestId("terminal-host-replay-total") as HTMLInputElement
+      await act(async () => {
+        fireEvent.change(input, { target: { value: "1" } })
+        fireEvent.blur(input)
+      })
+      expect(lastSavedTerminal()).toMatchObject({
+        host: expect.objectContaining({ totalReplayBytes: 16 * 1024 * 1024 }),
+      })
+    })
+  })
 })

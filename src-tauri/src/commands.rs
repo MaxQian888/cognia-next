@@ -1,6 +1,6 @@
 use serde::Serialize;
 use tauri::window::Color;
-use tauri::WebviewWindow;
+use tauri::Webview;
 
 #[derive(Debug, thiserror::Error, Serialize)]
 pub enum AppError {
@@ -21,7 +21,7 @@ pub fn greet(name: &str) -> Result<String, AppError> {
 /// Parse a `#RRGGBB` or `#RRGGBBAA` (or unprefixed) hex string into a
 /// `tauri::window::Color` tuple. Used by `set_window_background_color`; kept
 /// pub(crate) so the unit tests in this module can drive it directly without
-/// instantiating a WebviewWindow.
+/// instantiating a Webview.
 pub(crate) fn parse_hex_color(hex: &str) -> Result<Color, AppError> {
     let cleaned = hex.trim().trim_start_matches('#');
     if cleaned.len() != 6 && cleaned.len() != 8 {
@@ -43,13 +43,23 @@ pub(crate) fn parse_hex_color(hex: &str) -> Result<Color, AppError> {
 
 /// Drive the desktop window background color from the renderer side so a
 /// theme switch repaints the custom titlebar / chrome area without a full
-/// reload. Tauri 2.9 doesn't expose a runtime `setTitleBarStyle`, so on
+/// reload. Tauri doesn't expose a runtime `setTitleBarStyle`, so on
 /// Windows with `decorations=false` the window background is what the
 /// titlebar surface inherits.
+///
+/// Accept the infallible `Webview` command extractor rather than
+/// `WebviewWindow`. The main window can own embedded browser/code-server child
+/// webviews, at which point Tauri intentionally stops classifying it as a
+/// `WebviewWindow` even though the invoking app webview and parent window are
+/// both valid targets.
 #[tauri::command]
-pub fn set_window_background_color(window: WebviewWindow, hex: String) -> Result<(), String> {
+pub fn set_window_background_color(webview: Webview, hex: String) -> Result<(), String> {
     let color = parse_hex_color(&hex).map_err(|e| e.to_string())?;
-    window
+    webview
+        .window()
+        .set_background_color(Some(color))
+        .map_err(|e| e.to_string())?;
+    webview
         .set_background_color(Some(color))
         .map_err(|e| e.to_string())?;
     Ok(())

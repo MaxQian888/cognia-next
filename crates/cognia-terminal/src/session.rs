@@ -36,7 +36,7 @@ use cognia_automation::sandbox::launcher::LaunchScope;
 
 /// Where the bytes ultimately came from. `Local` = Tauri Channel
 /// consumer in the same process; `Remote` = LAN WebSocket consumer
-/// against the V2 headless server (ADR-0014/0015).
+/// against the durable desktop host (ADR-0014/0015).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SessionOrigin {
@@ -50,7 +50,7 @@ impl Default for SessionOrigin {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SpawnRequest {
     /// Shell binary — absolute path or PATH-resolvable name. The integration
@@ -182,7 +182,7 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TerminalEvent {
     /// Raw bytes from the PTY. Serialised as a JSON array of u8 today —
-    /// acceptable for the v1 throughput target; revisit with a binary
+    /// acceptable for the bounded host throughput target; revisit with a binary
     /// channel if `yes(1)` floods become a problem.
     Data { bytes: Vec<u8> },
     /// Decoded OSC 633 event from `osc633::Osc633Parser`.
@@ -492,6 +492,33 @@ pub fn spawn_session_with_sink(
     sink: EventSink,
     channel_slot: DeskChannel,
 ) -> Result<PtySession, String> {
+    spawn_session_with_identity(
+        req,
+        script_dir,
+        path,
+        Uuid::new_v4().to_string(),
+        Arc::new(ReplayBuffer::new()),
+        sink,
+        channel_slot,
+    )
+}
+
+/// Host-owned variant of [`spawn_session_with_sink`]. The caller supplies the
+/// stable session id and durable replay ring before reader threads start, so
+/// every emitted event can be routed through the process-independent host
+/// registry without an initialization race.
+pub fn spawn_session_with_identity(
+    req: SpawnRequest,
+    script_dir: &Path,
+    path: &PathInjection,
+    session_id: String,
+    replay: Arc<ReplayBuffer>,
+    sink: EventSink,
+    channel_slot: DeskChannel,
+) -> Result<PtySession, String> {
+    if Uuid::parse_str(&session_id).is_err() {
+        return Err("terminal session id must be a UUID".to_string());
+    }
     let mut req = req;
     // Resolve the shell binary up front so a missing `pwsh.exe` (PowerShell 7
     // not installed) transparently falls back to Windows PowerShell rather
@@ -591,8 +618,7 @@ pub fn spawn_session_with_sink(
     // Capture the OS PID before the child is moved into the waiter thread, so
     // the managed-process registry can attribute + join it in the perf panel.
     let pid = child.process_id();
-    let id = Uuid::new_v4().to_string();
-    let replay = Arc::new(ReplayBuffer::new());
+    let id = session_id;
     let write_tx = spawn_writer_thread(&id, writer);
 
     let reader_sink = sink.clone();

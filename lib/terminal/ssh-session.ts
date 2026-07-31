@@ -65,6 +65,20 @@ export class SshTerminalSession extends BaseTerminalSession {
     })
   }
 
+  async detach(): Promise<void> {
+    await invoke<void>("terminal_detach", { id: this.info.id })
+  }
+
+  async takeControl(): Promise<void> {
+    await invoke<void>("terminal_take_control", { id: this.info.id })
+    this.dispatchControlState({ role: "controller", controllerId: "local" })
+  }
+
+  async releaseControl(): Promise<void> {
+    await invoke<void>("terminal_release_control", { id: this.info.id })
+    this.dispatchControlState({ role: "viewer", controllerId: null, reason: "released" })
+  }
+
   async kill(): Promise<void> {
     if (this.isExited) return
     await invoke("ssh_terminal_kill", { id: this.info.id })

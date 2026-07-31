@@ -1,7 +1,7 @@
 //! One-shot command execution for the Companion API (`terminal_exec`).
 //!
 //! Distinct from the streaming PTY in [`super::commands`]: the live terminal
-//! stays on `/ws/v1/terminal`, while this runs a single command to completion
+//! stays on `/ws/terminal`, while this runs a single command to completion
 //! and returns the captured output as one request/response RPC. This is the
 //! shape a remote client needs for "run X and show me the result" without
 //! managing a long-lived session.

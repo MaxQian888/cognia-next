@@ -12,7 +12,7 @@
 //!
 //! Mirrors [`super::deny_list::DenyList`] in spirit (an O(1) HashSet checked on
 //! the request hot path with no Dexie round-trip), but is a **process-global**
-//! singleton — like [`super::ws_terminal::WS_TERMINAL_REGISTRY`] — rather than
+//! singleton rather than
 //! a field on `CompanionState`. That keeps the per-command gate reachable from
 //! both the HTTP `rpc_handler` and the WebRTC `signaling::dispatch` path
 //! without threading a new field through every `CompanionState` constructor.
@@ -57,7 +57,20 @@ pub fn agent_control_global() -> &'static Arc<ControlAllowList> {
     &AGENT_CONTROL_ALLOW_LIST
 }
 
-/// Serializes every test that touches the two allow lists above.
+/// Devices permitted to create, attach to, and control terminal sessions.
+///
+/// Terminal access is intentionally independent from remote control and agent
+/// control. It exposes an interactive shell, so neither adjacent capability
+/// may imply it.
+static TERMINAL_ALLOW_LIST: Lazy<Arc<ControlAllowList>> =
+    Lazy::new(|| Arc::new(ControlAllowList::new()));
+
+/// Accessor for the process-global terminal allow list.
+pub fn terminal_global() -> &'static Arc<ControlAllowList> {
+    &TERMINAL_ALLOW_LIST
+}
+
+/// Serializes every test that touches the three allow lists above.
 ///
 /// Both are process-global and `reseed` REPLACES, so `cargo test` — one binary,
 /// threads in parallel — will happily run a seeding test that wipes the list
@@ -214,5 +227,20 @@ mod tests {
         assert!(global().is_allowed("shared-dev"));
         global().clear();
         assert!(!global().is_allowed("shared-dev"));
+    }
+
+    #[test]
+    fn terminal_access_is_independent_from_other_capabilities() {
+        let _guard = test_guard();
+        global().clear();
+        agent_control_global().clear();
+        terminal_global().clear();
+
+        terminal_global().allow("terminal-device".to_string());
+        assert!(terminal_global().is_allowed("terminal-device"));
+        assert!(!global().is_allowed("terminal-device"));
+        assert!(!agent_control_global().is_allowed("terminal-device"));
+
+        terminal_global().clear();
     }
 }

@@ -431,7 +431,7 @@ fn no_profile_args(shell: &str) -> Vec<String> {
 }
 
 /// Platform default shell for headless runs (mirrors the dock defaults).
-fn default_headless_shell() -> String {
+pub fn default_headless_shell() -> String {
     if cfg!(windows) {
         "pwsh.exe".to_string()
     } else if cfg!(target_os = "macos") {

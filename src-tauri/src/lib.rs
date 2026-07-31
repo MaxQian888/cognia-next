@@ -121,6 +121,8 @@ mod telemetry;
 // generate_handler! + .manage()) resolves unchanged.
 pub use cognia_scheduling::timing;
 pub use cognia_terminal as terminal;
+pub mod terminal_host_bridge;
+pub mod terminal_host_service;
 // ADR-0067 follow-up — extracted to `crates/cognia-tts`; re-aliased so
 // `crate::tts::…` (generate_handler!) resolves unchanged.
 pub use cognia_tts as tts;
@@ -522,7 +524,7 @@ pub fn run() {
         // The store outlives the window; dropping it on app shutdown
         // cascades into per-session Drop kills.
         .manage(terminal::TerminalState::new())
-        .manage(terminal::ssh::SshTerminalState::new())
+        .manage(terminal_host_bridge::TerminalHostBridgeState::new())
         // Headless (unattended) terminal sessions — workflow nodes running
         // shell lines with no visible dock tab. Independent of TerminalState
         // so dock listing / audit views never see them.
@@ -762,6 +764,10 @@ pub fn run() {
             task_workspace::task_workspace_list,
             task_workspace::task_workspace_list_runs,
             task_workspace::task_workspace_list_resources,
+            task_workspace::task_workspace_list_resource_events,
+            task_workspace::task_workspace_get_resource_summary,
+            task_workspace::task_workspace_export_resource_manifest,
+            task_workspace::task_workspace_record_tool_event,
             task_workspace::task_workspace_get_resource,
             task_workspace::task_workspace_get_patch_set,
             task_workspace::task_resource_read_diff,
@@ -811,15 +817,19 @@ pub fn run() {
             settings::write_claude_project_settings,
             settings::write_claude_local_settings,
             shell::shell_exec,
-            terminal::commands::terminal_spawn,
-            terminal::commands::terminal_reattach,
-            terminal::commands::terminal_write,
-            terminal::commands::terminal_resize,
-            terminal::commands::terminal_kill,
-            terminal::ssh::ssh_terminal_spawn,
-            terminal::ssh::ssh_terminal_write,
-            terminal::ssh::ssh_terminal_resize,
-            terminal::ssh::ssh_terminal_kill,
+            terminal_host_bridge::terminal_spawn,
+            terminal_host_bridge::terminal_reattach,
+            terminal_host_bridge::terminal_write,
+            terminal_host_bridge::terminal_resize,
+            terminal_host_bridge::terminal_detach,
+            terminal_host_bridge::terminal_take_control,
+            terminal_host_bridge::terminal_release_control,
+            terminal_host_bridge::terminal_kill,
+            terminal_host_bridge::terminal_host_service,
+            terminal_host_bridge::ssh_terminal_spawn,
+            terminal_host_bridge::ssh_terminal_write,
+            terminal_host_bridge::ssh_terminal_resize,
+            terminal_host_bridge::ssh_terminal_kill,
             terminal::exec::terminal_exec,
             terminal::complete::terminal_complete_paths,
             terminal::path_scan::terminal_list_path_executables,
@@ -829,8 +839,8 @@ pub fn run() {
             terminal::headless::terminal_headless_spawn,
             terminal::headless::terminal_headless_run,
             terminal::headless::terminal_headless_kill,
-            terminal::commands::terminal_list_for_project,
-            terminal::commands::terminal_list_all,
+            terminal_host_bridge::terminal_list_for_project,
+            terminal_host_bridge::terminal_list_all,
             terminal::commands::terminal_kill_port,
             tts::keyring::tts_keyring_get,
             tts::keyring::tts_keyring_set,
@@ -979,6 +989,8 @@ pub fn run() {
             companion_api::commands::companion_seed_remote_control,
             companion_api::commands::companion_set_agent_control,
             companion_api::commands::companion_seed_agent_control,
+            companion_api::commands::companion_set_remote_terminal,
+            companion_api::commands::companion_seed_remote_terminal,
             companion_api::commands::companion_set_locked_computer_use,
             companion_api::commands::companion_seed_locked_computer_use,
             companion_api::commands::companion_sync_pull_response,
@@ -1872,7 +1884,27 @@ pub fn run() {
 }
 
 #[cfg(test)]
-mod command_registration_tests {
+mod tests {
+    #[test]
+    fn resource_tracking_commands_remain_registered() {
+        let source = include_str!("lib.rs");
+        let production_source = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production lib.rs source");
+        for command in [
+            "task_workspace::task_workspace_list_resource_events,",
+            "task_workspace::task_workspace_get_resource_summary,",
+            "task_workspace::task_workspace_export_resource_manifest,",
+            "task_workspace::task_workspace_record_tool_event,",
+        ] {
+            assert!(
+                production_source.contains(command),
+                "missing Tauri command: {command}"
+            );
+        }
+    }
+
     #[test]
     fn git_diff_stat_is_registered_with_the_tauri_invoke_handler() {
         let source = include_str!("lib.rs");

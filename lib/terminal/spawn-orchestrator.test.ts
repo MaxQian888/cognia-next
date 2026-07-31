@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { spawnFromDock, killFromDock, restartFromDock } from "./spawn-orchestrator"
+import { detachFromDock, spawnFromDock, killFromDock, restartFromDock } from "./spawn-orchestrator"
 import { __clearLiveSessionsForTesting, getLiveSession } from "./session-registry"
 import type { SpawnRequest, SessionInfo } from "./types"
 
@@ -58,6 +58,7 @@ async function flushPersist(): Promise<void> {
 interface FakeSession {
   info: SessionInfo
   killed: number
+  detached: number
   writes: Array<string | Uint8Array>
   onIntegrationListeners: Array<
     (e: { kind: string; cwd?: string; exit_code?: number | null }) => void
@@ -65,6 +66,7 @@ interface FakeSession {
   onExitListeners: Array<(code: number | null) => void>
   id: string
   kill: () => Promise<void>
+  detach: () => Promise<void>
   write: (data: string | Uint8Array) => Promise<void>
   onIntegration: (
     l: (e: { kind: string; cwd?: string; exit_code?: number | null }) => void
@@ -86,12 +88,16 @@ function makeFakeSession(id: string, info: Partial<SessionInfo> = {}): FakeSessi
   const session: FakeSession = {
     info: fullInfo,
     killed: 0,
+    detached: 0,
     writes: [],
     onIntegrationListeners,
     onExitListeners,
     id,
     kill: async () => {
       session.killed += 1
+    },
+    detach: async () => {
+      session.detached += 1
     },
     write: async (data) => {
       session.writes.push(data)
@@ -239,6 +245,71 @@ beforeEach(() => {
 })
 
 describe("spawnFromDock", () => {
+  it("falls through the transport chain when the LAN attempt fails", async () => {
+    const store = makeFakeStore()
+    const hooks = makeFakeHooks()
+    const wan = makeFakeSession("wan-session", { origin: "remote" })
+    const attempts: string[] = []
+
+    const out = await spawnFromDock({
+      req: baseReq,
+      store,
+      hooks: hooks as unknown as ReturnType<typeof import("@/lib/plugin").getPluginEventHooks>,
+      transportSpawns: [
+        async () => {
+          attempts.push("lan")
+          throw new Error("LAN unavailable")
+        },
+        async () => {
+          attempts.push("webrtc")
+          return wan as unknown as import("./base-session").BaseTerminalSession
+        },
+      ],
+    })
+
+    expect(out).toEqual({ kind: "spawned", sessionId: "wan-session", shell: "/bin/bash" })
+    expect(attempts).toEqual(["lan", "webrtc"])
+  })
+
+  it("kills a late session created by a timed-out transport attempt", async () => {
+    jest.useFakeTimers()
+    try {
+      const store = makeFakeStore()
+      const hooks = makeFakeHooks()
+      const late = makeFakeSession("late-session", { origin: "remote" })
+      const fallback = makeFakeSession("fallback-session", { origin: "remote" })
+      let resolveLate: ((session: import("./base-session").BaseTerminalSession) => void) | undefined
+
+      const outcome = spawnFromDock({
+        req: baseReq,
+        store,
+        hooks: hooks as unknown as ReturnType<typeof import("@/lib/plugin").getPluginEventHooks>,
+        transportSpawns: [
+          () =>
+            new Promise((resolve) => {
+              resolveLate = resolve
+            }),
+          async () => fallback as unknown as import("./base-session").BaseTerminalSession,
+        ],
+      })
+
+      await jest.advanceTimersByTimeAsync(7_500)
+      await expect(outcome).resolves.toEqual({
+        kind: "spawned",
+        sessionId: "fallback-session",
+        shell: "/bin/bash",
+      })
+
+      resolveLate?.(late as unknown as import("./base-session").BaseTerminalSession)
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(late.killed).toBe(1)
+      expect(getLiveSession("late-session")).toBeUndefined()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("denies the spawn when a plugin returns 'deny'", async () => {
     const hooks = makeFakeHooks()
     hooks.willSpawnDecision = "deny"
@@ -612,6 +683,29 @@ describe("spawnFromDock", () => {
       },
     })
     expect(capturedReq!.shell).toBe("/usr/local/bin/fish")
+  })
+})
+
+describe("detachFromDock", () => {
+  it("detaches the viewer without terminating the host-owned process", async () => {
+    const hooks = makeFakeHooks()
+    const store = makeFakeStore()
+    const fake = makeFakeSession("s-1")
+    await spawnFromDock({
+      req: baseReq,
+      store,
+      hooks: hooks as unknown as ReturnType<typeof import("@/lib/plugin").getPluginEventHooks>,
+      spawn: async () =>
+        fake as unknown as Awaited<ReturnType<typeof import("./session").TerminalSession.spawn>>,
+    })
+
+    await detachFromDock("s-1", store)
+
+    expect(fake.detached).toBe(1)
+    expect(fake.killed).toBe(0)
+    expect(getLiveSession("s-1")).toBeUndefined()
+    expect(store.removed).toEqual(["s-1"])
+    expect(hooks.lifecycle.find((event) => event.kind === "killed")).toBeUndefined()
   })
 })
 

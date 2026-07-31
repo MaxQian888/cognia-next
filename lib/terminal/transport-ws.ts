@@ -1,98 +1,77 @@
 "use client"
 
-/**
- * LAN-only WebSocket transport for the integrated terminal.
- *
- * On Capacitor mobile (no Tauri runtime, no `ipc::Channel` access) the
- * dock talks to the desktop server's `cognia-server` axum router at
- * `wss://<host>/ws/v1/terminal?...`. The companion pair flow has
- * already signed a JWT and stored the base URL; this transport reads
- * those (lazily, via `getCompanionEndpoint`) and frames PTY bytes as
- * binary WS messages plus a small JSON control envelope for spawn /
- * resize / kill.
- *
- * Wire protocol (v1):
- *   * `?token=<jwt>` — auth, JWT injected by middleware
- *   * `?projectId=…` (optional) — propagates to PtySession.project_id
- *   * `?spawn=1&shell=…&rows=…&cols=…` — open the session inline; the
- *     server allocates `sessionId` and replies with a JSON
- *     `{ "kind": "ready", "sessionId": "…" }` text frame.
- *   * `?sessionId=<id>&resumeFrom=<seq>` — Wave 2: reconnect to an
- *     existing session. The server's `ReplayBuffer` re-emits every
- *     buffered event with `seq > resumeFrom` then resumes live.
- *
- * Frame conventions after the first text:
- *   * Binary frames Server→Client = PTY stdout.
- *   * Binary frames Client→Server = PTY stdin.
- *   * Text frames carry control envelopes (integration events,
- *     resize, kill, exit). Each control frame is `{ "kind": "…", "seq": <u64>, … }`
- *     with the same tagged-enum shape as `TerminalEvent` minus the
- *     `data` variant (which uses binary frames). `seq` is monotonic
- *     per session and powers the reconnect replay; if the server is
- *     pre-Wave-2 it may be missing — we treat that as `seq = 0`.
- *
- * Wave 2 — reconnect: when the WebSocket drops (network blip,
- * background tab, mobile-app pause) we schedule a reconnect with
- * exponential backoff up to a 5-minute envelope. During the window:
- *   * outgoing writes are queued and flushed on reattach,
- *   * `transport-state` listeners see `"reconnecting"`,
- *   * the session never appears exited to its consumers.
- * If the envelope expires, we surface `"gone"` then `handleExit(null)`.
- *
- * This file mirrors the public surface of `lib/terminal/session.ts` so
- * `spawn-orchestrator` can swap transports without conditionals. Both
- * classes share `BaseTerminalSession` for listener / exit bookkeeping.
- */
+/** LAN terminal session adapter backed by the durable terminal host. */
 
-import { BaseTerminalSession } from "./base-session"
+import { BaseTerminalSession, TerminalSessionError } from "./base-session"
+import {
+  LanTerminalHostConnection,
+  WanTerminalHostConnection,
+  type TerminalHostConnection,
+} from "./host-connection"
+import {
+  decodeTerminalJson,
+  EMPTY_SESSION_ID,
+  makeTerminalJsonFrame,
+  makeTerminalFrame,
+  splitTerminalStreamFrames,
+  TerminalFrameKind,
+  type TerminalErrorCode,
+  type TerminalFrame,
+} from "./protocol"
 import { isCapacitor } from "@/lib/tauri"
 import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
 
-import type { IntegrationEvent, SessionInfo, SpawnRequest } from "./types"
+import type { IntegrationEvent, SessionInfo, SpawnRequest, TerminalReplayGap } from "./types"
 
-/**
- * Resolver for the desktop server endpoint + JWT. Injected from
- * `companion-boot-provider` in production; tests stub it.
- */
 export interface CompanionEndpoint {
-  /** Base WSS URL (e.g. `wss://192.168.1.10:7654`). */
+  /** HTTPS base URL for ticket issuance. */
   baseUrl: string
-  /** Signed device JWT — the auth middleware reads `?token=`. */
+  /** Device JWT used only in the authenticated request header. */
   token: string
+  /** Stable paired-device id used to identify the controller lease. */
+  deviceId?: string
 }
 
 export type CompanionEndpointResolver = () => Promise<CompanionEndpoint | null>
 
-/**
- * Default resolver — reads from `pickCompanionStorage()`, the same
- * source the companion boot provider uses to load the pair JWT + base
- * URL. Returns `null` when the device hasn't paired yet so the dock's
- * mobile empty state surfaces "Remote terminal not configured".
- *
- * Tests inject their own resolver via
- * `configureCompanionEndpointResolver` to avoid the dynamic import.
- */
-/** Companion `baseUrl` is `https://…`; flip to `wss://…` for the WS upgrade. */
-function toWsBase(baseUrl: string): string {
-  return baseUrl.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://")
-}
-
 const defaultResolver: CompanionEndpointResolver = async () => {
-  // Desktop driving a remote Cognia host (ADR-0082): the active-host store
-  // installs the endpoint descriptor. Prefer it over the local companion cache
-  // so a remote terminal opens against the active host, not the paired server.
   const remote = getActiveRemoteEndpoint()
   if (remote) {
-    return { baseUrl: toWsBase(remote.baseUrl), token: remote.deviceJwt }
+    return { baseUrl: remote.baseUrl, token: remote.deviceJwt, deviceId: remote.deviceId }
   }
   if (!isCapacitor()) return null
   const { pickCompanionStorage } = await import("@/lib/tauri/companion-storage")
   const config = await pickCompanionStorage().load()
-  if (!config) return null
-  return { baseUrl: toWsBase(config.baseUrl), token: config.deviceJwt }
+  return config
+    ? { baseUrl: config.baseUrl, token: config.deviceJwt, deviceId: config.deviceId }
+    : null
 }
 
 let endpointResolver: CompanionEndpointResolver = defaultResolver
+
+interface TerminalDataChannelBinding {
+  channel: RTCDataChannel
+  clientId?: string
+}
+
+type TerminalDataChannelResolver = () => Promise<TerminalDataChannelBinding | null>
+
+const defaultTerminalDataChannelResolver: TerminalDataChannelResolver = async () => {
+  const [{ getActiveRemoteTransport }, transportModule] = await Promise.all([
+    import("@/lib/tauri/transport-routing"),
+    import("@/lib/tauri/transport-instance"),
+  ])
+  const candidate = getActiveRemoteTransport() ?? transportModule.transport
+  const capable = candidate as {
+    getTerminalDataChannel?: () => RTCDataChannel | null
+    getTerminalClientId?: () => string | null
+  }
+  const channel = capable.getTerminalDataChannel?.() ?? null
+  return channel ? { channel, clientId: capable.getTerminalClientId?.() ?? undefined } : null
+}
+
+let terminalDataChannelResolver = defaultTerminalDataChannelResolver
+const wanConnections = new WeakMap<RTCDataChannel, WanTerminalHostConnection>()
 
 export function configureCompanionEndpointResolver(resolver: CompanionEndpointResolver): void {
   endpointResolver = resolver
@@ -102,379 +81,542 @@ export function __resetEndpointResolverForTesting(): void {
   endpointResolver = defaultResolver
 }
 
-export type TransportState = "connected" | "reconnecting" | "gone"
-type TransportStateListener = (state: TransportState) => void
+export function __setTerminalDataChannelResolverForTesting(
+  resolver?: () => RTCDataChannel | null | Promise<RTCDataChannel | null>
+): void {
+  terminalDataChannelResolver = resolver
+    ? async () => {
+        const channel = await resolver()
+        return channel ? { channel } : null
+      }
+    : defaultTerminalDataChannelResolver
+}
 
-type ControlFrame =
-  | { kind: "ready"; sessionId: string; shell: string; seq?: number }
-  | { kind: "integration"; event: IntegrationEvent; seq?: number }
-  | { kind: "exit"; code: number | null; seq?: number }
-  | { kind: "error"; message: string; seq?: number }
+interface SocketTicket {
+  ticket: string
+  expiresAt: number
+}
 
-/**
- * Backoff schedule used during reconnect. Sums to ~5 min so a long
- * mobile sleep (commute through a tunnel, screen lock) still survives.
- * Indices past the end clamp to the last value.
- */
-const BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000, 60_000, 60_000, 60_000]
-const RECONNECT_BUDGET_MS = 5 * 60 * 1000
+type SocketTicketIssuer = (endpoint: CompanionEndpoint) => Promise<SocketTicket>
 
-/** Override hook for the WebSocket factory — tests inject a stub. */
+const defaultTicketIssuer: SocketTicketIssuer = async (endpoint) => {
+  const url = new URL("/api/v1/terminal/socket-ticket", toHttpBase(endpoint.baseUrl))
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${endpoint.token}` },
+  })
+  const payload = (await response.json()) as Partial<SocketTicket> & { message?: string }
+  if (!response.ok || !payload.ticket || typeof payload.expiresAt !== "number") {
+    throw new TerminalSessionError(
+      response.status === 401 ? "unauthorized" : "permission_denied",
+      payload.message ?? "terminal socket ticket request failed"
+    )
+  }
+  return { ticket: payload.ticket, expiresAt: payload.expiresAt }
+}
+
+let ticketIssuer: SocketTicketIssuer = defaultTicketIssuer
 let webSocketFactory: (url: string) => WebSocket = (url) => new WebSocket(url)
+
+export function __setSocketTicketIssuerForTesting(issuer?: SocketTicketIssuer): void {
+  ticketIssuer = issuer ?? defaultTicketIssuer
+}
 
 export function __setWebSocketFactoryForTesting(
   factory: (url: string) => WebSocket | null = (url) => new WebSocket(url)
 ): void {
   webSocketFactory = (url) => {
-    const ws = factory(url)
-    if (!ws) throw new Error("test factory returned null")
-    return ws
+    const socket = factory(url)
+    if (!socket) throw new Error("test factory returned null")
+    return socket
   }
 }
 
-/**
- * Server-side companion that owns the actual `PtySession`. From the
- * renderer's POV this class is API-compatible with `TerminalSession`
- * from `session.ts` — both extend `BaseTerminalSession`.
- */
-export class RemoteTerminalSession extends BaseTerminalSession {
-  readonly info: SessionInfo
+export type TransportState = "connected" | "reconnecting" | "gone"
+type TransportStateListener = (state: TransportState) => void
 
-  private ws: WebSocket
-  private readonly endpoint: CompanionEndpoint
+const BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000]
+const RECONNECT_BUDGET_MS = 5 * 60 * 1_000
+const REQUEST_TIMEOUT_MS = 15_000
+const encoder = new TextEncoder()
+
+type PendingRequest = {
+  resolve: (frame: TerminalFrame) => void
+  reject: (error: Error) => void
+  timeout: ReturnType<typeof setTimeout>
+}
+
+type RemoteConnectionFactory = () => Promise<TerminalHostConnection>
+
+export class RemoteTerminalSession extends BaseTerminalSession {
+  info: SessionInfo
+
+  private connection: TerminalHostConnection
   private readonly req: SpawnRequest
+  private readonly connectionFactory: RemoteConnectionFactory
+  private sequence = BigInt(1)
+  private lastOutputSequence = BigInt(0)
+  private readonly pending = new Map<bigint, PendingRequest>()
   private readonly transportStateListeners = new Set<TransportStateListener>()
-  /** Highest control-frame seq we've observed. Powers `resumeFrom`. */
-  private lastSeq = 0
-  /** Bytes queued during a reconnect window — flushed on reattach. */
   private pendingWrites: Uint8Array[] = []
-  /** Resolves when a `kill()` has been requested explicitly. */
   private intentionalClose = false
-  /** Wall-clock time the current reconnect cycle began. Null when connected. */
   private reconnectStartedAt: number | null = null
-  /** Index into BACKOFF_MS for the next attempt. */
   private backoffIndex = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private ownedControllerId: string | null = null
+  private takingControl = false
+  private connectionUnsubscribers: Array<() => void> = []
 
   private constructor(
-    info: SessionInfo,
-    ws: WebSocket,
-    endpoint: CompanionEndpoint,
-    req: SpawnRequest
+    req: SpawnRequest,
+    connection: TerminalHostConnection,
+    connectionFactory: RemoteConnectionFactory
   ) {
     super()
-    this.info = info
-    this.ws = ws
-    this.endpoint = endpoint
     this.req = req
-    this.wireListeners()
+    this.connection = connection
+    this.connectionFactory = connectionFactory
+    this.info = {
+      id: EMPTY_SESSION_ID,
+      projectId: req.projectId ?? null,
+      extensionId: req.extensionId ?? null,
+      origin: "remote",
+      shell: req.shell,
+    }
+    this.wireConnection(connection)
   }
 
   static async spawn(req: SpawnRequest): Promise<RemoteTerminalSession> {
     const endpoint = await endpointResolver()
     if (!endpoint) {
-      throw new Error("transport-ws: companion endpoint not configured")
+      throw new TerminalSessionError("unpaired", "terminal host is not paired")
     }
-    const url = buildSpawnUrl(endpoint, req)
-    const ws = webSocketFactory(url)
-    ws.binaryType = "arraybuffer"
-    const info = await waitForReady(ws, req)
-    return new RemoteTerminalSession(info, ws, endpoint, req)
+    const connectionFactory = () => openLanConnection(endpoint)
+    return RemoteTerminalSession.spawnWithConnection(req, connectionFactory)
   }
 
-  /** Subscribe to transport-state changes (connected → reconnecting → connected | gone). */
+  static async spawnWan(req: SpawnRequest): Promise<RemoteTerminalSession> {
+    return RemoteTerminalSession.spawnWithConnection(req, openWanConnection)
+  }
+
+  static async listLan(): Promise<SessionInfo[]> {
+    const endpoint = await endpointResolver()
+    if (!endpoint) throw new TerminalSessionError("unpaired", "terminal host is not paired")
+    return RemoteTerminalSession.listWithConnection(() => openLanConnection(endpoint))
+  }
+
+  static async listWan(): Promise<SessionInfo[]> {
+    return RemoteTerminalSession.listWithConnection(openWanConnection)
+  }
+
+  static async reattachLan(sessionId: string, resumeAfter = 0): Promise<RemoteTerminalSession> {
+    const endpoint = await endpointResolver()
+    if (!endpoint) throw new TerminalSessionError("unpaired", "terminal host is not paired")
+    return RemoteTerminalSession.reattachWithConnection(sessionId, resumeAfter, () =>
+      openLanConnection(endpoint)
+    )
+  }
+
+  static async reattachWan(sessionId: string, resumeAfter = 0): Promise<RemoteTerminalSession> {
+    return RemoteTerminalSession.reattachWithConnection(sessionId, resumeAfter, openWanConnection)
+  }
+
+  private static async spawnWithConnection(
+    req: SpawnRequest,
+    connectionFactory: RemoteConnectionFactory
+  ): Promise<RemoteTerminalSession> {
+    const connection = await connectionFactory()
+    const session = new RemoteTerminalSession(req, connection, connectionFactory)
+    try {
+      const response = await session.sendCommand(TerminalFrameKind.Spawn, EMPTY_SESSION_ID, {
+        profileId: req.profileId ?? "default",
+      })
+      session.info = decodeTerminalJson<SessionInfo>(response)
+      session.ownedControllerId = session.info.currentController ?? null
+      session.dispatchControlState({
+        role: "controller",
+        controllerId: session.info.currentController ?? null,
+      })
+      return session
+    } catch (error) {
+      session.intentionalClose = true
+      session.disposeConnectionListeners()
+      await session.closeOwnedConnection()
+      throw error
+    }
+  }
+
+  private static async listWithConnection(
+    connectionFactory: RemoteConnectionFactory
+  ): Promise<SessionInfo[]> {
+    const connection = await connectionFactory()
+    const session = new RemoteTerminalSession(
+      { shell: "", rows: 1, cols: 1 },
+      connection,
+      connectionFactory
+    )
+    try {
+      const response = await session.sendCommand(TerminalFrameKind.List, EMPTY_SESSION_ID)
+      const snapshot = decodeTerminalJson<{ sessions: SessionInfo[] }>(response)
+      return snapshot.sessions
+    } finally {
+      session.intentionalClose = true
+      session.disposeConnectionListeners()
+      await session.closeOwnedConnection()
+    }
+  }
+
+  private static async reattachWithConnection(
+    sessionId: string,
+    resumeAfter: number,
+    connectionFactory: RemoteConnectionFactory
+  ): Promise<RemoteTerminalSession> {
+    const connection = await connectionFactory()
+    const session = new RemoteTerminalSession(
+      { shell: "", rows: 1, cols: 1 },
+      connection,
+      connectionFactory
+    )
+    try {
+      const response = await session.sendCommand(TerminalFrameKind.Attach, sessionId, {
+        resumeAfter: Math.max(0, Math.floor(resumeAfter)),
+      })
+      session.info = decodeTerminalJson<SessionInfo>(response)
+      session.ownedControllerId =
+        session.info.currentController === connection.clientId
+          ? (session.info.currentController ?? null)
+          : null
+      session.dispatchControlState({
+        role: session.ownedControllerId ? "controller" : "viewer",
+        controllerId: session.info.currentController ?? null,
+      })
+      return session
+    } catch (error) {
+      session.intentionalClose = true
+      session.disposeConnectionListeners()
+      await session.closeOwnedConnection()
+      throw error
+    }
+  }
+
   onTransportState(listener: TransportStateListener): () => void {
     this.transportStateListeners.add(listener)
-    return () => {
-      this.transportStateListeners.delete(listener)
-    }
+    return () => this.transportStateListeners.delete(listener)
   }
 
   async write(data: Uint8Array | string): Promise<void> {
-    const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data
-    if (this.ws.readyState === WebSocket.OPEN) {
-      // `WebSocket.send` only accepts ArrayBuffer-backed views (not the
-      // SharedArrayBuffer side of `Uint8Array<ArrayBufferLike>` that TS 6
-      // surfaces). Callers always hand us ArrayBuffer-backed bytes at
-      // runtime (PTY transport + TextEncoder above), so the cast is safe.
-      this.ws.send(bytes as Uint8Array<ArrayBuffer>)
+    const bytes = typeof data === "string" ? encoder.encode(data) : data
+    if (this.connection.state !== "connected") {
+      if (!this.isExited && this.pendingWrites.length < 256) this.pendingWrites.push(bytes)
       return
     }
-    if (this.isExited) return
-    // Reconnecting — queue for replay. Bounded to a sensible cap so a
-    // long disconnect doesn't blow the heap; the user can always retry.
-    if (this.pendingWrites.length < 256) {
-      this.pendingWrites.push(bytes)
+    for (const frame of splitTerminalStreamFrames(
+      TerminalFrameKind.Stdin,
+      this.info.id,
+      this.nextSequence(),
+      bytes
+    )) {
+      await this.connection.send(frame)
     }
   }
 
   async resize(rows: number, cols: number): Promise<void> {
-    if (this.ws.readyState !== WebSocket.OPEN) return
-    this.ws.send(
-      JSON.stringify({
-        kind: "resize",
-        rows: Math.max(1, Math.floor(rows)),
-        cols: Math.max(1, Math.floor(cols)),
-      })
-    )
+    await this.sendCommand(TerminalFrameKind.Resize, this.info.id, {
+      rows: Math.max(1, Math.floor(rows)),
+      cols: Math.max(1, Math.floor(cols)),
+    })
+  }
+
+  async detach(): Promise<void> {
+    if (this.intentionalClose) return
+    this.intentionalClose = true
+    this.cancelReconnect()
+    try {
+      await this.sendCommand(TerminalFrameKind.Detach, this.info.id)
+    } finally {
+      this.disposeConnectionListeners()
+      await this.closeOwnedConnection()
+    }
+  }
+
+  async takeControl(): Promise<void> {
+    this.takingControl = true
+    try {
+      await this.sendCommand(TerminalFrameKind.TakeControl, this.info.id)
+    } finally {
+      this.takingControl = false
+    }
+  }
+
+  async releaseControl(): Promise<void> {
+    await this.sendCommand(TerminalFrameKind.ReleaseControl, this.info.id)
+    this.ownedControllerId = null
+    this.dispatchControlState({ role: "viewer", controllerId: null, reason: "released" })
   }
 
   async kill(): Promise<void> {
     if (this.isExited) return
     this.intentionalClose = true
     this.cancelReconnect()
-    if (this.ws.readyState === WebSocket.OPEN) {
-      try {
-        this.ws.send(JSON.stringify({ kind: "kill" }))
-      } catch {
-        /* noop */
-      }
-    }
     try {
-      this.ws.close()
-    } catch {
-      /* noop */
-    }
-    this.handleExit(null)
-  }
-
-  private wireListeners(): void {
-    this.ws.addEventListener("message", (event) => this.onMessage(event))
-    this.ws.addEventListener("close", (event) => this.onClose(event))
-    this.ws.addEventListener("error", () => this.onError())
-    // Drain any queued writes immediately on attach (initial connect
-    // races: the spawn promise resolved on `ready`, so a fast caller
-    // might have written before this listener was wired).
-    if (this.ws.readyState === WebSocket.OPEN) {
-      this.flushPendingWrites()
-    } else {
-      this.ws.addEventListener("open", () => this.flushPendingWrites(), { once: true })
+      await this.sendCommand(TerminalFrameKind.Kill, this.info.id)
+    } finally {
+      this.disposeConnectionListeners()
+      await this.closeOwnedConnection()
+      this.handleExit(null)
     }
   }
 
-  private onMessage(event: MessageEvent): void {
-    if (typeof event.data === "string") {
-      try {
-        const frame = JSON.parse(event.data) as ControlFrame
-        if (typeof frame.seq === "number" && frame.seq > this.lastSeq) {
-          this.lastSeq = frame.seq
+  private wireConnection(connection: TerminalHostConnection): void {
+    this.connectionUnsubscribers.push(
+      connection.onFrame((frame) => this.onFrame(frame)),
+      connection.onState((state) => {
+        if (state === "closed" && !this.intentionalClose && !this.isExited) {
+          this.rejectPending(new TerminalSessionError("host_offline", "terminal connection closed"))
+          this.scheduleReconnect()
         }
-        this.dispatchControl(frame)
-      } catch {
-        // Ignore non-JSON text frames — protocol drift; the server
-        // should only emit valid JSON.
+      })
+    )
+  }
+
+  private onFrame(frame: TerminalFrame): void {
+    if (frame.sequence > this.lastOutputSequence && isStreamEvent(frame.kind)) {
+      this.lastOutputSequence = frame.sequence
+    }
+    const pending = this.pending.get(frame.sequence)
+    if (pending && isResponse(frame.kind)) {
+      this.pending.delete(frame.sequence)
+      clearTimeout(pending.timeout)
+      if (frame.kind === TerminalFrameKind.Error) {
+        const error = decodeTerminalJson<{ code: TerminalErrorCode; message: string }>(frame)
+        pending.reject(new TerminalSessionError(error.code, error.message))
+      } else {
+        pending.resolve(frame)
       }
       return
     }
-    const buf = new Uint8Array(event.data as ArrayBuffer)
-    this.dispatchData(buf)
-  }
+    if (frame.sessionId !== this.info.id) return
 
-  private onClose(event: CloseEvent): void {
-    if (this.intentionalClose || this.isExited) return
-    // Schedule reconnect rather than treating this as exit.
-    this.scheduleReconnect()
-    void event // event.code is informational only
-  }
-
-  private onError(): void {
-    if (this.intentionalClose || this.isExited) return
-    this.scheduleReconnect()
-  }
-
-  private dispatchControl(frame: ControlFrame): void {
     switch (frame.kind) {
-      case "integration":
-        this.dispatchIntegration(frame.event)
+      case TerminalFrameKind.Stdout:
+        this.dispatchData(frame.payload)
         break
-      case "exit":
-        // Server reports clean exit — surface to the consumer.
+      case TerminalFrameKind.Integration:
+        this.dispatchIntegration(decodeTerminalJson<IntegrationEvent>(frame))
+        break
+      case TerminalFrameKind.Exit: {
+        const { code } = decodeTerminalJson<{ code: number | null }>(frame)
         this.intentionalClose = true
         this.cancelReconnect()
-        this.handleExit(frame.code)
+        this.handleExit(code)
+        this.disposeConnectionListeners()
+        void this.closeOwnedConnection()
         break
-      case "error":
-        console.warn(`remote-terminal(${this.info.id}): server error:`, frame.message)
+      }
+      case TerminalFrameKind.ControllerChanged: {
+        const { controller } = decodeTerminalJson<{ controller: string | null }>(frame)
+        if (controller === this.connection.clientId || (controller && this.takingControl)) {
+          this.ownedControllerId = controller
+        } else if (controller !== this.ownedControllerId) {
+          this.ownedControllerId = null
+        }
+        this.dispatchControlState({
+          role:
+            controller !== null && controller === this.ownedControllerId ? "controller" : "viewer",
+          controllerId: controller,
+          reason: controller === null ? "released" : "takeover",
+        })
         break
+      }
+      case TerminalFrameKind.ReplayGap:
+        this.dispatchReplayGap(decodeTerminalJson<TerminalReplayGap>(frame))
+        break
+      case TerminalFrameKind.SessionSnapshot:
+        if (frame.sequence === BigInt(0)) this.info = decodeTerminalJson<SessionInfo>(frame)
+        break
+      case TerminalFrameKind.Error: {
+        const error = decodeTerminalJson<{ code: TerminalErrorCode; message: string }>(frame)
+        if (error.code === "replay_gap") return
+        console.warn(`remote-terminal(${this.info.id}): ${error.code}: ${error.message}`)
+        break
+      }
       default:
         break
     }
   }
 
+  private async sendCommand(
+    kind: TerminalFrameKind,
+    sessionId: string,
+    value?: unknown
+  ): Promise<TerminalFrame> {
+    if (this.connection.state !== "connected") {
+      throw new TerminalSessionError("host_offline", "terminal connection is not open")
+    }
+    const sequence = this.nextSequence()
+    const frame =
+      value === undefined
+        ? makeTerminalFrame(kind, { sessionId, sequence })
+        : makeTerminalJsonFrame(kind, value, { sessionId, sequence })
+    const response = new Promise<TerminalFrame>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(sequence)
+        reject(new TerminalSessionError("host_offline", "terminal host request timed out"))
+      }, REQUEST_TIMEOUT_MS)
+      this.pending.set(sequence, { resolve, reject, timeout })
+    })
+    try {
+      await this.connection.send(frame)
+    } catch (error) {
+      const request = this.pending.get(sequence)
+      if (request) {
+        clearTimeout(request.timeout)
+        this.pending.delete(sequence)
+        request.reject(error instanceof Error ? error : new Error(String(error)))
+      }
+    }
+    return response
+  }
+
+  private nextSequence(): bigint {
+    if (this.connection.nextSequence) return this.connection.nextSequence()
+    const current = this.sequence
+    this.sequence += BigInt(1)
+    return current
+  }
+
+  private rejectPending(error: Error): void {
+    for (const request of this.pending.values()) {
+      clearTimeout(request.timeout)
+      request.reject(error)
+    }
+    this.pending.clear()
+  }
+
   private scheduleReconnect(): void {
-    if (this.intentionalClose || this.isExited) return
-    if (this.reconnectStartedAt == null) {
+    if (this.intentionalClose || this.isExited || this.reconnectTimer) return
+    if (this.reconnectStartedAt === null) {
       this.reconnectStartedAt = Date.now()
       this.backoffIndex = 0
       this.emitTransportState("reconnecting")
     }
-    const elapsed = Date.now() - this.reconnectStartedAt
-    if (elapsed >= RECONNECT_BUDGET_MS) {
+    if (Date.now() - this.reconnectStartedAt >= RECONNECT_BUDGET_MS) {
       this.emitTransportState("gone")
       this.handleExit(null)
       return
     }
-    const delay = BACKOFF_MS[Math.min(this.backoffIndex, BACKOFF_MS.length - 1)]
+    const delay = BACKOFF_MS[Math.min(this.backoffIndex, BACKOFF_MS.length - 1)]!
     this.backoffIndex += 1
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
-      this.attemptReconnect()
+      void this.attemptReconnect()
     }, delay)
   }
 
-  private attemptReconnect(): void {
-    const url = buildResumeUrl(this.endpoint, this.req, this.info.id, this.lastSeq)
-    let ws: WebSocket
+  private async attemptReconnect(): Promise<void> {
     try {
-      ws = webSocketFactory(url)
-    } catch {
-      this.scheduleReconnect()
-      return
-    }
-    ws.binaryType = "arraybuffer"
-    const onOpen = () => {
-      ws.removeEventListener("open", onOpen)
-      ws.removeEventListener("error", onError)
-      this.ws = ws
+      const connection = await this.connectionFactory()
+      this.disposeConnectionListeners()
+      this.connection = connection
+      this.wireConnection(connection)
+      const response = await this.sendCommand(TerminalFrameKind.Attach, this.info.id, {
+        resumeAfter: Number(this.lastOutputSequence),
+      })
+      this.info = decodeTerminalJson<SessionInfo>(response)
       this.reconnectStartedAt = null
       this.backoffIndex = 0
       this.emitTransportState("connected")
-      this.wireListeners()
-    }
-    const onError = () => {
-      ws.removeEventListener("open", onOpen)
-      ws.removeEventListener("error", onError)
-      try {
-        ws.close()
-      } catch {
-        /* noop */
-      }
+      await this.flushPendingWrites()
+    } catch {
       this.scheduleReconnect()
     }
-    ws.addEventListener("open", onOpen)
-    ws.addEventListener("error", onError)
   }
 
   private cancelReconnect(): void {
-    if (this.reconnectTimer != null) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
-    }
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = null
     this.reconnectStartedAt = null
     this.backoffIndex = 0
   }
 
-  private flushPendingWrites(): void {
-    if (this.pendingWrites.length === 0) return
-    if (this.ws.readyState !== WebSocket.OPEN) return
-    for (const bytes of this.pendingWrites) {
-      try {
-        this.ws.send(bytes as Uint8Array<ArrayBuffer>)
-      } catch {
-        // Drop the rest if the socket flips closed mid-flush.
-        break
-      }
-    }
+  private async flushPendingWrites(): Promise<void> {
+    const writes = this.pendingWrites
     this.pendingWrites = []
+    for (const bytes of writes) await this.write(bytes)
   }
 
   private emitTransportState(state: TransportState): void {
-    for (const listener of this.transportStateListeners) {
-      try {
-        listener(state)
-      } catch (err) {
-        console.warn(`remote-terminal(${this.info.id}): transport-state listener threw:`, err)
-      }
-    }
+    for (const listener of this.transportStateListeners) listener(state)
+  }
+
+  private async closeOwnedConnection(): Promise<void> {
+    // WAN is one multiplexed channel shared by every visible terminal tab.
+    // Detaching one session must not disconnect its sibling attachments.
+    if (this.connection.transport !== "wan") await this.connection.close()
+  }
+
+  private disposeConnectionListeners(): void {
+    const unsubscribers = this.connectionUnsubscribers
+    this.connectionUnsubscribers = []
+    for (const unsubscribe of unsubscribers) unsubscribe()
   }
 }
 
-function buildSpawnUrl(endpoint: CompanionEndpoint, req: SpawnRequest): string {
-  const url = new URL("/ws/v1/terminal", endpoint.baseUrl.replace(/\/$/, ""))
-  url.searchParams.set("token", endpoint.token)
-  url.searchParams.set("spawn", "1")
-  url.searchParams.set("shell", req.shell)
-  url.searchParams.set("rows", String(req.rows))
-  url.searchParams.set("cols", String(req.cols))
-  if (req.cwd) url.searchParams.set("cwd", req.cwd)
-  if (req.projectId) url.searchParams.set("projectId", req.projectId)
-  if (req.extensionId) url.searchParams.set("extensionId", req.extensionId)
-  if (req.enableShellIntegration === false) {
-    url.searchParams.set("shellIntegration", "0")
+async function openLanConnection(endpoint: CompanionEndpoint): Promise<TerminalHostConnection> {
+  const ticket = await ticketIssuer(endpoint)
+  if (ticket.expiresAt <= Date.now()) {
+    throw new TerminalSessionError("unauthorized", "terminal socket ticket expired")
   }
-  return url.toString()
+  const url = new URL("/ws/terminal", toWsBase(endpoint.baseUrl))
+  url.searchParams.set("ticket", ticket.ticket)
+  const connection = new LanTerminalHostConnection(
+    url.toString(),
+    webSocketFactory,
+    endpoint.deviceId ? `companion:${endpoint.deviceId}` : undefined
+  )
+  await connection.open()
+  return connection
 }
 
-function buildResumeUrl(
-  endpoint: CompanionEndpoint,
-  _req: SpawnRequest,
-  sessionId: string,
-  resumeFrom: number
-): string {
-  const url = new URL("/ws/v1/terminal", endpoint.baseUrl.replace(/\/$/, ""))
-  url.searchParams.set("token", endpoint.token)
-  url.searchParams.set("sessionId", sessionId)
-  url.searchParams.set("resumeFrom", String(resumeFrom))
-  return url.toString()
+async function openWanConnection(): Promise<TerminalHostConnection> {
+  const binding = await terminalDataChannelResolver()
+  if (!binding) {
+    throw new TerminalSessionError("host_offline", "terminal WebRTC channel is unavailable")
+  }
+  let connection = wanConnections.get(binding.channel)
+  if (!connection) {
+    connection = new WanTerminalHostConnection(binding.channel, binding.clientId)
+    wanConnections.set(binding.channel, connection)
+  }
+  await connection.open()
+  return connection
 }
 
-function waitForReady(ws: WebSocket, req: SpawnRequest): Promise<SessionInfo> {
-  return new Promise<SessionInfo>((resolve, reject) => {
-    let settled = false
-    const timeout = setTimeout(() => {
-      if (settled) return
-      settled = true
-      ws.close()
-      reject(new Error("transport-ws: ready frame timeout"))
-    }, 10_000)
-
-    const onMessage = (event: MessageEvent) => {
-      if (typeof event.data !== "string") return
-      try {
-        const frame = JSON.parse(event.data) as ControlFrame
-        if (frame.kind === "ready") {
-          settled = true
-          clearTimeout(timeout)
-          ws.removeEventListener("message", onMessage)
-          resolve({
-            id: frame.sessionId,
-            projectId: req.projectId ?? null,
-            extensionId: req.extensionId ?? null,
-            origin: "remote",
-            shell: frame.shell,
-          })
-        } else if (frame.kind === "error") {
-          settled = true
-          clearTimeout(timeout)
-          ws.removeEventListener("message", onMessage)
-          ws.close()
-          reject(new Error(`transport-ws: server error — ${frame.message}`))
-        }
-      } catch {
-        // ignore non-JSON
-      }
-    }
-    ws.addEventListener("message", onMessage)
-    ws.addEventListener("close", () => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      reject(new Error("transport-ws: connection closed before ready"))
-    })
-    ws.addEventListener("error", () => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      reject(new Error("transport-ws: connection error"))
-    })
-  })
+function toHttpBase(baseUrl: string): string {
+  return baseUrl.replace(/^wss:/, "https:").replace(/^ws:/, "http:")
 }
 
-/**
- * Helper for `spawn-orchestrator`: picks the correct transport class
- * based on the runtime shell. The orchestrator calls this once at
- * spawn time and treats both classes as a unified `TerminalSession`.
- */
+function toWsBase(baseUrl: string): string {
+  return baseUrl.replace(/^https:/, "wss:").replace(/^http:/, "ws:")
+}
+
+function isResponse(kind: TerminalFrameKind): boolean {
+  return (
+    kind === TerminalFrameKind.Ack ||
+    kind === TerminalFrameKind.HostSnapshot ||
+    kind === TerminalFrameKind.SessionSnapshot ||
+    kind === TerminalFrameKind.Error
+  )
+}
+
+function isStreamEvent(kind: TerminalFrameKind): boolean {
+  return (
+    kind === TerminalFrameKind.Stdout ||
+    kind === TerminalFrameKind.Integration ||
+    kind === TerminalFrameKind.Exit
+  )
+}
+
 export function pickRemoteSpawn(): typeof RemoteTerminalSession.spawn | null {
   if (!isCapacitor()) return null
   return RemoteTerminalSession.spawn.bind(RemoteTerminalSession)

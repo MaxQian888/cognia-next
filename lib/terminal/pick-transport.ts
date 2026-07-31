@@ -9,7 +9,7 @@
  *   - Tauri desktop      → `"tauri-channel"` (in-process PTY via the
  *                          Rust `terminal_*` commands + `Channel`)
  *   - Capacitor mobile   → `"ws"` (LAN — companion server WebSocket)
- *   - Capacitor over WAN → `"webrtc"` (datachannel via signaling — Wave 2)
+ *   - Capacitor over WAN → `"webrtc"` (ordered terminal data channel)
  *   - Plain web          → `"unsupported"`
  *
  * `selectTerminalTransport` returns the *preferred* transport for the
@@ -30,7 +30,7 @@ export type TerminalTransportKind = "tauri-channel" | "ws" | "webrtc" | "unsuppo
  */
 export function selectTerminalTransport(): TerminalTransportKind {
   // Desktop driving a remote Cognia host (ADR-0082): the terminal targets the
-  // host's `/ws/v1/terminal` over the ws session instead of the local
+  // host's `/ws/terminal` over the ws session instead of the local
   // in-process PTY. Inert until a remote host is activated, so a plain desktop
   // still gets `tauri-channel` (zero regression).
   if (isRemoteHostActive()) return "ws"
@@ -44,17 +44,14 @@ export function selectTerminalTransport(): TerminalTransportKind {
  * next transport when the previous one returned `null` / threw.
  *
  *   - Tauri host: just the in-process channel (no remote ambiguity).
- *   - Capacitor mobile: `ws` (LAN/mDNS) — `webrtc` is the planned
- *     follow-up for WAN-only mobile (see ADR-0031); the chain will
- *     extend to `["ws", "webrtc"]` once both the Rust desktop peer
- *     (`signaling/peer.rs` + `rtc_terminal.rs`) and the TS client
- *     (`transport-webrtc.ts`) are wired through the rendezvous.
+ *   - Capacitor mobile: `ws` (LAN/mDNS), then the already-authenticated
+ *     Companion WebRTC peer when no direct socket is reachable.
  *   - Web: returns `[]` — caller should surface "unsupported".
  */
 export function selectTerminalTransportChain(): TerminalTransportKind[] {
-  if (isRemoteHostActive()) return ["ws"]
+  if (isRemoteHostActive()) return ["ws", "webrtc"]
   if (isTauri()) return ["tauri-channel"]
-  if (isCapacitor()) return ["ws"]
+  if (isCapacitor()) return ["ws", "webrtc"]
   return []
 }
 

@@ -77,6 +77,13 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum CliCommand {
+    /// Run only the durable integrated-terminal host. No brain, AI sidecar,
+    /// gateway, browser, or general companion services are started.
+    DesktopHost {
+        /// Owner-only Unix socket path or Windows named-pipe name.
+        #[arg(long)]
+        endpoint: Option<String>,
+    },
     /// Issue a one-shot pair token + print the cgnp2 payload the mobile
     /// app scans or pastes.
     Pair {
@@ -101,6 +108,10 @@ enum CliCommand {
         /// `COGNIA_PUBLIC_URL`, else `https://127.0.0.1:<bound port>`.
         #[arg(long)]
         advertise_url: Option<String>,
+        /// Persistently enable remote terminal socket tickets for paired
+        /// devices that also hold the terminal control grant.
+        #[arg(long, default_value_t = false)]
+        allow_remote_terminal: bool,
     },
     /// Re-encrypt the secret store under a new master key (ADR-0059 R9).
     /// The old key comes from COGNIA_MASTER_KEY(_FILE); stored values —
@@ -186,6 +197,9 @@ enum DevicesCommand {
         /// but within that the device chooses what runs.
         #[arg(long = "agent-control")]
         agent_control: bool,
+        /// Create, attach to, and control interactive terminal sessions.
+        #[arg(long)]
+        terminal: bool,
     },
     /// Revoke an elevated capability.
     Revoke {
@@ -194,6 +208,8 @@ enum DevicesCommand {
         control: bool,
         #[arg(long = "agent-control")]
         agent_control: bool,
+        #[arg(long)]
+        terminal: bool,
     },
 }
 
@@ -291,6 +307,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logger();
     let cli = Cli::parse();
 
+    if let CliCommand::DesktopHost { endpoint } = &cli.command {
+        let endpoint = endpoint
+            .clone()
+            .unwrap_or_else(app_lib::terminal_host_service::default_terminal_host_endpoint);
+        eprintln!("[cognia-server] terminal host endpoint: {endpoint}");
+        return app_lib::terminal_host_service::run_terminal_host(endpoint)
+            .await
+            .map_err(Into::into);
+    }
+
     let dir = data_dir();
     std::fs::create_dir_all(&dir)?;
 
@@ -329,7 +355,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         CliCommand::Serve {
             port,
             advertise_url,
-        } => run_serve(&store, &tls_material, port, advertise_url).await,
+            allow_remote_terminal,
+        } => {
+            if allow_remote_terminal {
+                let mut settings = app_lib::terminal_host_service::load_terminal_host_settings()?;
+                settings.allow_remote_access = true;
+                app_lib::terminal_host_service::save_terminal_host_settings(&settings)?;
+            }
+            run_serve(&store, &tls_material, port, advertise_url).await
+        }
         CliCommand::IssueServiceToken => {
             let signing_secret = secret::load_or_generate()?;
             let (token, exp) = app_lib::companion_api::jwt::issue_service_jwt(
@@ -344,6 +378,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         CliCommand::Profiles { command } => run_profiles(&dir, command),
         CliCommand::Gateway { command } => run_gateway_admin(command),
         CliCommand::Devices { command } => run_devices_admin(command),
+        CliCommand::DesktopHost { .. } => unreachable!("handled before headless initialization"),
         CliCommand::RotateMasterKey { .. } => unreachable!("handled above"),
     }
 }
@@ -354,7 +389,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Selected capabilities, or an error when the operator named none — silently
 /// doing nothing would read as success and leave them believing a device is
 /// granted.
-fn selected_kinds(control: bool, agent_control: bool) -> Result<Vec<GrantKind>, String> {
+fn selected_kinds(
+    control: bool,
+    agent_control: bool,
+    terminal: bool,
+) -> Result<Vec<GrantKind>, String> {
     let mut kinds = Vec::new();
     if control {
         kinds.push(GrantKind::Control);
@@ -362,8 +401,11 @@ fn selected_kinds(control: bool, agent_control: bool) -> Result<Vec<GrantKind>, 
     if agent_control {
         kinds.push(GrantKind::AgentControl);
     }
+    if terminal {
+        kinds.push(GrantKind::Terminal);
+    }
     if kinds.is_empty() {
-        return Err("pass --control and/or --agent-control".to_string());
+        return Err("pass --control, --agent-control, and/or --terminal".to_string());
     }
     Ok(kinds)
 }
@@ -427,8 +469,9 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
             device_id,
             control,
             agent_control,
+            terminal,
         } => {
-            for kind in selected_kinds(control, agent_control)? {
+            for kind in selected_kinds(control, agent_control, terminal)? {
                 let changed = device_grants::grant(store.as_ref(), &device_id, kind)?;
                 println!(
                     "{} {} for {device_id}",
@@ -447,8 +490,9 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
             device_id,
             control,
             agent_control,
+            terminal,
         } => {
-            for kind in selected_kinds(control, agent_control)? {
+            for kind in selected_kinds(control, agent_control, terminal)? {
                 let changed = device_grants::revoke(store.as_ref(), &device_id, kind)?;
                 println!(
                     "{} {} for {device_id}",
@@ -678,8 +722,10 @@ async fn run_serve(
     // refuses every elevated call, and the operator would have no way to tell
     // that from a genuinely empty grant list.
     match device_grants::seed_allow_lists(FileDeviceGrantStore::new(&data_dir).as_ref()) {
-        Ok((control, agent)) => {
-            println!("[cognia-server] device grants: {control} control, {agent} agent-control");
+        Ok((control, agent, terminal)) => {
+            println!(
+                "[cognia-server] device grants: {control} control, {agent} agent-control, {terminal} terminal"
+            );
         }
         Err(err) => return Err(format!("device grants: {err}").into()),
     }
@@ -903,7 +949,8 @@ async fn run_serve(
 
 #[cfg(test)]
 mod tests {
-    use super::plugin_storage_dir;
+    use super::{plugin_storage_dir, Cli, CliCommand};
+    use clap::Parser;
     use std::path::Path;
 
     #[test]
@@ -928,5 +975,34 @@ mod tests {
             app_lib::provider_profiles::headless_store_path(data),
             from_plugin_parent
         );
+    }
+
+    #[test]
+    fn desktop_host_mode_parses_without_headless_service_flags() {
+        let cli = Cli::try_parse_from([
+            "cognia-server",
+            "desktop-host",
+            "--endpoint",
+            "/tmp/cognia-terminal.sock",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            CliCommand::DesktopHost { endpoint: Some(value) }
+                if value == "/tmp/cognia-terminal.sock"
+        ));
+    }
+
+    #[test]
+    fn serve_can_explicitly_enable_remote_terminal_access() {
+        let cli =
+            Cli::try_parse_from(["cognia-server", "serve", "--allow-remote-terminal"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            CliCommand::Serve {
+                allow_remote_terminal: true,
+                ..
+            }
+        ));
     }
 }

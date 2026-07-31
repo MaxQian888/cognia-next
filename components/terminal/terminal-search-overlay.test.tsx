@@ -24,6 +24,9 @@ function makeHandle(overrides: Partial<TerminalInstanceHandle> = {}): TerminalIn
     pasteFromClipboard: jest.fn(async () => undefined),
     selectAll: jest.fn(),
     resetZoom: jest.fn(),
+    sendInput: jest.fn(async () => undefined),
+    focusKeyboard: jest.fn(),
+    hideKeyboard: jest.fn(),
     ...overrides,
   }
 }

@@ -4,12 +4,17 @@
 
 jest.mock("./session-registry", () => ({ registerLiveSession: jest.fn() }))
 jest.mock("./spawn-orchestrator", () => ({ wireSessionToStore: jest.fn() }))
+let mockTransportChain: Array<"tauri-channel" | "ws" | "webrtc"> = ["tauri-channel"]
+jest.mock("./pick-transport", () => ({
+  selectTerminalTransportChain: () => mockTransportChain,
+}))
 
 import { rehydrateTerminals } from "./rehydrate"
 import { registerLiveSession } from "./session-registry"
 import { wireSessionToStore, type TerminalStoreLike } from "./spawn-orchestrator"
 import type { SessionInfo } from "./types"
 import type { TerminalSession } from "./session"
+import { RemoteTerminalSession } from "./transport-ws"
 
 function info(id: string): SessionInfo {
   return { id, projectId: "p", extensionId: null, origin: "local", shell: "/bin/bash" }
@@ -37,11 +42,34 @@ const fakeReattach = (id: string): Promise<TerminalSession> =>
   Promise.resolve({ info: info(id) } as unknown as TerminalSession)
 
 beforeEach(() => {
+  mockTransportChain = ["tauri-channel"]
   ;(registerLiveSession as jest.Mock).mockClear()
   ;(wireSessionToStore as jest.Mock).mockClear()
 })
 
+afterEach(() => {
+  jest.restoreAllMocks()
+})
+
 describe("rehydrateTerminals", () => {
+  it("falls from LAN to WAN when restoring mobile host sessions", async () => {
+    mockTransportChain = ["ws", "webrtc"]
+    const store = makeStore()
+    const remoteInfo = { ...info("remote-a"), origin: "remote" as const }
+    const remoteSession = { info: remoteInfo } as unknown as TerminalSession
+    jest.spyOn(RemoteTerminalSession, "listLan").mockRejectedValue(new Error("LAN offline"))
+    jest.spyOn(RemoteTerminalSession, "listWan").mockResolvedValue([remoteInfo])
+    jest.spyOn(RemoteTerminalSession, "reattachLan").mockRejectedValue(new Error("LAN offline"))
+    jest
+      .spyOn(RemoteTerminalSession, "reattachWan")
+      .mockResolvedValue(remoteSession as unknown as RemoteTerminalSession)
+
+    await expect(rehydrateTerminals({ store })).resolves.toEqual({ restored: 1, failed: 0 })
+    expect(RemoteTerminalSession.listLan).toHaveBeenCalledTimes(1)
+    expect(RemoteTerminalSession.listWan).toHaveBeenCalledTimes(1)
+    expect(RemoteTerminalSession.reattachWan).toHaveBeenCalledWith("remote-a", 0)
+  })
+
   it("restores each alive session: row + reattach + register + wire", async () => {
     const store = makeStore()
     const list = jest.fn(async () => [info("a"), info("b")])

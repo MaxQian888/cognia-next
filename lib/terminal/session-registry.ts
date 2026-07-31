@@ -11,9 +11,8 @@
  * after spawn and look it up by id from React components.
  *
  * Lifecycle: callers register on spawn, unregister on exit / kill.
- * Window reload tears the module down; sessions die with the Rust
- * process via `PtySession::Drop`. No persistence (replay is out of v1
- * scope per the plan).
+ * Window reload tears the renderer registry down, but the durable host keeps
+ * sessions and replay alive so rehydration can register fresh client handles.
  */
 
 import type { BaseTerminalSession } from "./base-session"

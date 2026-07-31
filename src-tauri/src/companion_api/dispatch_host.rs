@@ -121,54 +121,43 @@ impl DispatchHost {
         }
     }
 
-    /// Snapshot terminal sessions visible to the caller. Desktop sessions
-    /// live in Tauri-managed state; headless remote sessions live in the
-    /// reconnect registry and are scoped to their creating device.
-    pub fn terminal_list_all(&self, device_id: &str) -> Vec<crate::terminal::TerminalSessionInfo> {
-        match self {
-            Self::Tauri(app) => {
-                use tauri::Manager;
-                app.state::<crate::terminal::TerminalState>().list_all()
-            }
-            Self::Headless(_) => {
-                super::ws_terminal::ws_terminal_registry().list_for_device(device_id)
-            }
+    /// Snapshot durable host-owned terminal sessions visible to the caller.
+    pub async fn terminal_list_all(
+        &self,
+        device_id: &str,
+    ) -> Result<Vec<cognia_terminal::host::HostSessionInfo>, String> {
+        #[cfg(test)]
+        if let Self::Headless(services) = self {
+            return Ok(services.terminal_sessions_for_tests.read().await.clone());
         }
+        let app = match self {
+            Self::Tauri(app) => Some(app),
+            Self::Headless(_) => None,
+        };
+        crate::terminal_host_bridge::terminal_host_remote_list(app, device_id).await
     }
 
-    pub fn terminal_list_for_project(
+    pub async fn terminal_list_for_project(
         &self,
         device_id: &str,
         project_id: &str,
-    ) -> Vec<crate::terminal::TerminalSessionInfo> {
-        match self {
-            Self::Tauri(app) => {
-                use tauri::Manager;
-                app.state::<crate::terminal::TerminalState>()
-                    .list_for_project(project_id)
-            }
-            Self::Headless(_) => super::ws_terminal::ws_terminal_registry()
-                .list_for_device_project(device_id, project_id),
-        }
+    ) -> Result<Vec<cognia_terminal::host::HostSessionInfo>, String> {
+        Ok(self
+            .terminal_list_all(device_id)
+            .await?
+            .into_iter()
+            .filter(|session| session.project_id.as_deref() == Some(project_id))
+            .collect())
     }
 
-    /// Idempotently kill a terminal session on its owning process. Headless
-    /// ownership is checked against the authenticated device id.
-    pub fn terminal_kill(&self, device_id: &str, session_id: &str) {
-        match self {
-            Self::Tauri(app) => {
-                use tauri::Manager;
-                if let Some(session) = app
-                    .state::<crate::terminal::TerminalState>()
-                    .remove(session_id)
-                {
-                    let _ = session.kill();
-                }
-            }
-            Self::Headless(_) => {
-                super::ws_terminal::ws_terminal_registry().kill_for_device(session_id, device_id)
-            }
-        }
+    /// Terminate a durable host-owned terminal after taking its controller
+    /// lease on behalf of the authenticated device.
+    pub async fn terminal_kill(&self, device_id: &str, session_id: &str) -> Result<(), String> {
+        let app = match self {
+            Self::Tauri(app) => Some(app),
+            Self::Headless(_) => None,
+        };
+        crate::terminal_host_bridge::terminal_host_remote_kill(app, device_id, session_id).await
     }
 
     /// The sidecar host seam for this host — what `sidecar::spawn` needs.

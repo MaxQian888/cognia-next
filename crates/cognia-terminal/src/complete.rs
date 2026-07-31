@@ -50,21 +50,31 @@ fn resolve_dir(cwd: &str, dir_part: &str) -> PathBuf {
     if dir_part.is_empty() {
         return PathBuf::from(cwd);
     }
+    // Fragments arrive from terminals running shells from every supported
+    // platform. Normalize separators before asking the host filesystem to
+    // resolve the directory so a Windows-style `src\\li` fragment remains
+    // usable when tests or remote clients run against a Unix host (and vice
+    // versa).
+    let native_dir_part = if std::path::MAIN_SEPARATOR == '/' {
+        dir_part.replace('\\', "/")
+    } else {
+        dir_part.replace('/', "\\")
+    };
     let expanded: PathBuf =
         if dir_part == "~" || dir_part.starts_with("~/") || dir_part.starts_with("~\\") {
             match dirs::home_dir() {
                 Some(home) => {
-                    let rest = dir_part[1..].trim_start_matches(['/', '\\']);
+                    let rest = native_dir_part[1..].trim_start_matches(['/', '\\']);
                     if rest.is_empty() {
                         home
                     } else {
                         home.join(rest)
                     }
                 }
-                None => PathBuf::from(dir_part),
+                None => PathBuf::from(&native_dir_part),
             }
         } else {
-            PathBuf::from(dir_part)
+            PathBuf::from(&native_dir_part)
         };
     if expanded.is_absolute() {
         expanded

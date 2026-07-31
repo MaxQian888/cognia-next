@@ -31,6 +31,8 @@ function row(overrides: Partial<TerminalSessionRow> = {}): TerminalSessionRow {
     lastCommands: [],
     historyOpen: false,
     ...overrides,
+    hostId: overrides.hostId ?? null,
+    controllerId: overrides.controllerId ?? null,
   }
 }
 

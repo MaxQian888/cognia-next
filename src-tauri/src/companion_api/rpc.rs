@@ -223,6 +223,34 @@ impl RpcError {
     }
 }
 
+fn terminal_rpc_authorization(
+    device_id: &str,
+    host_remote_access_enabled: bool,
+) -> Result<(), (StatusCode, Json<RpcError>)> {
+    if !host_remote_access_enabled {
+        return Err(RpcError::forbidden(
+            "remote terminal access is disabled on this host",
+        ));
+    }
+    if device_id.trim().is_empty()
+        || !super::control_allow_list::terminal_global().is_allowed(device_id)
+    {
+        return Err(RpcError::forbidden(
+            "remote terminal permission is required for this device",
+        ));
+    }
+    Ok(())
+}
+
+async fn ensure_terminal_rpc_authorized(
+    device_id: &str,
+) -> Result<(), (StatusCode, Json<RpcError>)> {
+    terminal_rpc_authorization(
+        device_id,
+        crate::terminal_host_service::terminal_remote_access_enabled().await,
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Read-only command list
 // ---------------------------------------------------------------------------
@@ -524,6 +552,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     "task_workspace_list",
     "task_workspace_list_runs",
     "task_workspace_list_resources",
+    "task_workspace_list_resource_events",
+    "task_workspace_get_resource_summary",
+    "task_workspace_export_resource_manifest",
+    "task_workspace_record_tool_event",
     "task_workspace_get_resource",
     "task_workspace_get_patch_set",
     "task_resource_read_diff",
@@ -549,7 +581,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "fs_rename_workspace_entry",
     "fs_copy_workspace_entry",
     // ── Terminal ────────────────────────────────────────────────────────────
-    // Live PTY stays on `/ws/v1/terminal`; these are request/response only.
+    // Live PTY stays on `/ws/terminal`; these are request/response only.
     // `terminal_exec` is a one-shot command runner (capture stdout/stderr/exit).
     "terminal_list_all",
     "terminal_list_for_project",
@@ -893,6 +925,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "task_workspace_list",
     "task_workspace_list_runs",
     "task_workspace_list_resources",
+    "task_workspace_list_resource_events",
+    "task_workspace_get_resource_summary",
+    "task_workspace_export_resource_manifest",
     "task_workspace_get_resource",
     "task_workspace_get_patch_set",
     "task_resource_read_diff",
@@ -1076,6 +1111,7 @@ const CONTROL_COMMANDS: &[&str] = &[
     "task_workspace_resolve_conflict",
     "task_workspace_pin",
     "task_workspace_prune",
+    "task_workspace_record_tool_event",
     // File-tree browser writes — mutate the workspace, so remote-control gated.
     "fs_create_workspace_dir",
     "fs_delete_workspace_entry",
@@ -1273,6 +1309,22 @@ fn inject_caller_device_id(name: &str, mut args: Value, device_id: &str) -> Valu
                 "callerDeviceId".to_string(),
                 Value::String(device_id.to_string()),
             );
+        }
+    }
+    args
+}
+
+/// Project the authenticated caller's current grants into the host manifest
+/// request. The client cannot self-assert these values: any supplied field is
+/// overwritten from the server-side allow list before the TS bridge sees it.
+fn inject_caller_device_grants(name: &str, mut args: Value, device_id: &str) -> Value {
+    if name == "host_feature_manifest" {
+        if let Value::Object(map) = &mut args {
+            let mut grants = vec![Value::String("host.observe".to_string())];
+            if super::control_allow_list::agent_control_global().is_allowed(device_id) {
+                grants.push(Value::String("agent.run".to_string()));
+            }
+            map.insert("callerDeviceGrants".to_string(), Value::Array(grants));
         }
     }
     args
@@ -3370,6 +3422,7 @@ pub(super) async fn dispatch(
             // caller device. Injected server-side (overwriting any
             // client-sent value) so a device can never spoof another's id.
             let args = inject_caller_device_id(name, args, device_id);
+            let args = inject_caller_device_grants(name, args, device_id);
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
             // Connected brain first, desktop WebView second (ADR-0059 R4/R5).
             let transport = super::ws_bridge::resolve_bridge_transport(state)
@@ -4825,6 +4878,13 @@ pub(super) async fn dispatch(
                         agent_id: input.agent_id,
                         agent_kind: input.agent_kind,
                         workspace_key: input.workspace_key,
+                        execution_run_id: input.execution_run_id,
+                        trace_id: input.trace_id,
+                        turn_id: input.turn_id,
+                        attempt_id: input.attempt_id,
+                        provider_attempt_id: input.provider_attempt_id,
+                        surface: input.surface,
+                        tracking_policy: input.tracking_policy,
                     },
                     sink,
                 )
@@ -4855,9 +4915,6 @@ pub(super) async fn dispatch(
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
             .map_err(RpcError::internal)?;
-            if let Ok(service) = crate::task_workspace::service() {
-                let _ = service.stop_watching_run(&run_id);
-            }
             to_json(resources)
         }
         "task_workspace_get" => {
@@ -4885,6 +4942,51 @@ pub(super) async fn dispatch(
             let task_id: String = required(&args, "taskId")?;
             crate::task_workspace::service()
                 .and_then(|service| service.list_resources(&task_id))
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_list_resource_events" => {
+            let run_id: String = required(&args, "runId")?;
+            let cursor: Option<u64> = optional(&args, "cursor")?;
+            let limit: Option<u32> = optional(&args, "limit")?;
+            crate::task_workspace::service()
+                .and_then(|service| {
+                    service.list_resource_events(&run_id, cursor, limit.unwrap_or(200))
+                })
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_get_resource_summary" => {
+            let run_id: String = required(&args, "runId")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.get_resource_summary(&run_id))
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_record_tool_event" => {
+            let run_id: String = required(&args, "runId")?;
+            let path: String = required(&args, "path")?;
+            let old_path: Option<String> = optional(&args, "oldPath")?;
+            let kind: cognia_task_workspace::ResourceEventKind = required(&args, "kind")?;
+            let tool_call_id: Option<String> = optional(&args, "toolCallId")?;
+            crate::task_workspace::service()
+                .and_then(|service| {
+                    service.record_tool_event(
+                        &run_id,
+                        &path,
+                        old_path.as_deref(),
+                        kind,
+                        tool_call_id.as_deref(),
+                    )
+                })
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_export_resource_manifest" => {
+            let task_id: String = required(&args, "taskId")?;
+            let run_id: Option<String> = optional(&args, "runId")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.export_resource_manifest(&task_id, run_id.as_deref()))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
@@ -5174,18 +5276,31 @@ pub(super) async fn dispatch(
         }
 
         // ── Terminal ───────────────────────────────────────────────────────
-        // Live PTY streaming stays on `/ws/v1/terminal`. These are
+        // Live PTY streaming stays on `/ws/terminal`. These are
         // request/response only; `terminal_exec` is a one-shot command runner.
         "terminal_list_all" => {
-            to_json(host.terminal_list_all(device_id))
+            ensure_terminal_rpc_authorized(device_id).await?;
+            to_json(
+                host.terminal_list_all(device_id)
+                    .await
+                    .map_err(RpcError::internal)?,
+            )
         }
         "terminal_list_for_project" => {
+            ensure_terminal_rpc_authorized(device_id).await?;
             let project_id: String = required(&args, "projectId")?;
-            to_json(host.terminal_list_for_project(device_id, &project_id))
+            to_json(
+                host.terminal_list_for_project(device_id, &project_id)
+                    .await
+                    .map_err(RpcError::internal)?,
+            )
         }
         "terminal_kill" => {
+            ensure_terminal_rpc_authorized(device_id).await?;
             let id: String = required(&args, "id")?;
-            host.terminal_kill(device_id, &id);
+            host.terminal_kill(device_id, &id)
+                .await
+                .map_err(RpcError::internal)?;
             Ok(Value::Null)
         }
         "terminal_exec" => {
@@ -7027,19 +7142,25 @@ mod tests {
     /// successful read instead of claiming the command needs Tauri.
     #[tokio::test]
     async fn headless_dispatch_lists_live_terminal_sessions() {
-        let state = test_state();
-        let sessions = dispatch(
-            "terminal_list_all",
-            json!({}),
-            &state,
-            &headless_host(),
-            "terminal-list-headless-device",
-            Some(ACCOUNT_ID),
-            Some("service"),
-        )
-        .await
-        .expect("terminal_list_all must work on a headless host");
-        assert_eq!(sessions, json!([]));
+        let sessions = headless_host()
+            .terminal_list_all("terminal-list-headless-device")
+            .await
+            .expect("headless durable terminal inventory must be host-generic");
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn terminal_rpc_requires_host_enablement_and_an_independent_device_grant() {
+        let acl = super::super::control_allow_list::terminal_global();
+        acl.clear();
+        let device = "terminal-rpc-device";
+
+        assert!(terminal_rpc_authorization(device, true).is_err());
+        acl.allow(device.to_string());
+        assert!(terminal_rpc_authorization(device, false).is_err());
+        assert!(terminal_rpc_authorization(device, true).is_ok());
+
+        acl.clear();
     }
 
     /// The claude arms are host-generic after R7: `claude_sidecar_status` on
@@ -9120,6 +9241,46 @@ rl.on("line", (line) => {
     fn inject_caller_device_id_ignores_non_object_payloads() {
         let out = inject_caller_device_id("workflow_trigger_manual", json!("nope"), "dev-real");
         assert_eq!(out, json!("nope"));
+    }
+
+    #[test]
+    fn host_feature_manifest_grants_are_least_privilege_by_default() {
+        let _guard = super::super::control_allow_list::test_guard();
+        let agent_control = super::super::control_allow_list::agent_control_global();
+        agent_control.disallow("dev-observer");
+
+        let out = inject_caller_device_grants(
+            "host_feature_manifest",
+            json!({ "callerDeviceGrants": ["agent.run"] }),
+            "dev-observer",
+        );
+
+        assert_eq!(out["callerDeviceGrants"], json!(["host.observe"]));
+    }
+
+    #[test]
+    fn host_feature_manifest_includes_agent_run_only_for_granted_device() {
+        let _guard = super::super::control_allow_list::test_guard();
+        let agent_control = super::super::control_allow_list::agent_control_global();
+        agent_control.allow("dev-agent".to_string());
+
+        let out = inject_caller_device_grants("host_feature_manifest", json!({}), "dev-agent");
+
+        assert_eq!(
+            out["callerDeviceGrants"],
+            json!(["host.observe", "agent.run"])
+        );
+        agent_control.disallow("dev-agent");
+    }
+
+    #[test]
+    fn caller_device_grants_only_touch_the_manifest_command() {
+        let out = inject_caller_device_grants(
+            "character_upsert",
+            json!({ "callerDeviceGrants": ["spoofed"] }),
+            "dev-real",
+        );
+        assert_eq!(out["callerDeviceGrants"], json!(["spoofed"]));
     }
 
     #[test]

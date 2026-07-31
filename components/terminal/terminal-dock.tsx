@@ -41,7 +41,13 @@ import {
 import { findProfile, profileToSpawnFields, type TerminalProfile } from "@/lib/terminal/profiles"
 import { resolveDefaultShell } from "@/lib/terminal/shell-detect"
 import { selectTerminalTransport } from "@/lib/terminal/pick-transport"
-import { killFromDock, restartFromDock, spawnFromDock } from "@/lib/terminal/spawn-orchestrator"
+import {
+  detachFromDock,
+  killFromDock,
+  restartFromDock,
+  spawnFromDock,
+} from "@/lib/terminal/spawn-orchestrator"
+import { getLiveSession } from "@/lib/terminal/session-registry"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
@@ -50,6 +56,7 @@ import { useTerminalStore, type TerminalSessionRow } from "@/stores/terminal/ter
 import { FileViewerDialog } from "./file-viewer-dialog"
 import { TerminalEmptyState } from "./terminal-empty-state"
 import { TerminalHistoryPanel } from "./terminal-history-panel"
+import { TerminalHostStateBanner } from "./terminal-host-state-banner"
 import { type TerminalInstanceHandle } from "./terminal-instance"
 import { TerminalPaneGroup } from "./terminal-pane-group"
 import { TerminalSearchOverlay } from "./terminal-search-overlay"
@@ -201,6 +208,7 @@ export function TerminalDock() {
       await spawnWithFeedback({
         req: {
           ...fields,
+          profileId,
           rows: 24,
           cols: 80,
           projectId: activeProjectId ?? undefined,
@@ -231,11 +239,18 @@ export function TerminalDock() {
     }
   }, [settingsDefaultProfileId, settingsProfiles, handleNewFromProfile, handleNewWithShell])
 
-  // Close a single split pane — kills just that session; the group's
-  // other panes (and the tab) survive via the store's anchor-promotion.
-  const handleClosePane = useCallback((id: string) => {
-    void killFromDock(id, useTerminalStore.getState())
-  }, [])
+  // Close a single split pane by detaching this renderer. The host-owned
+  // process remains available to other viewers and for later reattachment.
+  const handleClosePane = useCallback(
+    (id: string) => {
+      void detachFromDock(id, useTerminalStore.getState()).catch((error) => {
+        toast.error(
+          t("detachError", { message: error instanceof Error ? error.message : String(error) })
+        )
+      })
+    },
+    [t]
+  )
 
   // Close a whole tab — kills every pane in the group.
   const doCloseTab = useCallback((anchorId: string) => {
@@ -245,24 +260,43 @@ export function TerminalDock() {
     }
   }, [])
 
-  // True when any pane in the group is mid-command (OSC 633 `C` seen, no `D`).
-  const groupHasRunning = useCallback((anchorId: string) => {
+  const doDetachTab = useCallback(
+    (anchorId: string) => {
+      const state = useTerminalStore.getState()
+      for (const paneId of state.panesForGroup(anchorId)) {
+        void detachFromDock(paneId, state).catch((error) => {
+          toast.error(
+            t("detachError", { message: error instanceof Error ? error.message : String(error) })
+          )
+        })
+      }
+    },
+    [t]
+  )
+
+  // A host-owned process is live even when its shell is currently idle. Closing
+  // its tab must detach by default instead of destroying it for every client.
+  const groupHasLiveProcess = useCallback((anchorId: string) => {
     const state = useTerminalStore.getState()
-    return state.panesForGroup(anchorId).some((id) => state.sessions[id]?.status === "running")
+    return state
+      .panesForGroup(anchorId)
+      .some((id) => getLiveSession(id)?.info.alive !== false && !!getLiveSession(id))
   }, [])
 
   // Close entry point for the × button and the context menu. Routes through a
-  // confirm dialog when `confirmOnClose` is on and the tab is running a
-  // command; idle / exited tabs close immediately.
+  // choice dialog while the process is live. The primary action detaches this
+  // device; termination is an explicitly destructive secondary action.
   const requestCloseTab = useCallback(
     (anchorId: string) => {
-      if (confirmOnClose && groupHasRunning(anchorId)) {
+      if (confirmOnClose && groupHasLiveProcess(anchorId)) {
         setCloseConfirmTarget(anchorId)
+      } else if (groupHasLiveProcess(anchorId)) {
+        doDetachTab(anchorId)
       } else {
         doCloseTab(anchorId)
       }
     },
-    [confirmOnClose, groupHasRunning, doCloseTab]
+    [confirmOnClose, groupHasLiveProcess, doCloseTab, doDetachTab]
   )
 
   const handleSelect = useCallback(
@@ -494,6 +528,15 @@ export function TerminalDock() {
           </>
         }
       />
+      <TerminalHostStateBanner
+        onRetry={() => {
+          useTerminalStore.getState().setHostState("reconnecting")
+          void import("@/lib/terminal/rehydrate").then(({ rehydrateTerminals }) =>
+            rehydrateTerminals()
+          )
+        }}
+        onOpenSettings={() => router.push("/settings?section=terminal")}
+      />
       <div className="relative flex-1 overflow-hidden">
         {activeRow ? (
           <>
@@ -571,7 +614,7 @@ export function TerminalDock() {
       </div>
       {/* Read-only viewer for clicked terminal file links (1D). */}
       <FileViewerDialog />
-      {/* Confirm before killing a tab that's still running a command. */}
+      {/* Live sessions default to detach; termination is always explicit. */}
       <AlertDialog
         open={closeConfirmTarget !== null}
         onOpenChange={(open) => {
@@ -587,14 +630,24 @@ export function TerminalDock() {
             <AlertDialogCancel data-testid="terminal-dock-close-confirm-cancel">
               {t("closeConfirm.cancel")}
             </AlertDialogCancel>
-            <AlertDialogAction
-              data-testid="terminal-dock-close-confirm-accept"
+            <Button
+              variant="destructive"
+              data-testid="terminal-dock-close-terminate"
               onClick={() => {
                 if (closeConfirmTarget) doCloseTab(closeConfirmTarget)
                 setCloseConfirmTarget(null)
               }}
             >
-              {t("closeConfirm.confirm")}
+              {t("closeConfirm.terminate")}
+            </Button>
+            <AlertDialogAction
+              data-testid="terminal-dock-close-confirm-accept"
+              onClick={() => {
+                if (closeConfirmTarget) doDetachTab(closeConfirmTarget)
+                setCloseConfirmTarget(null)
+              }}
+            >
+              {t("closeConfirm.detach")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

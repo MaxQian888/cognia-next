@@ -64,8 +64,11 @@ export async function installFakeIndexedDb(
   // so every `getDb()` open finds the API; without this, the first real DB
   // read/write rejects with a `MissingAPIError` that surfaces as an unhandled
   // rejection and crashes the process.
-  if (!Dexie.dependencies.indexedDB) {
-    Dexie.dependencies.indexedDB = g.indexedDB as IDBFactory
-    Dexie.dependencies.IDBKeyRange = g.IDBKeyRange as typeof IDBKeyRange
-  }
+  // A long-lived Node/Jest process can replace the global IndexedDB factory
+  // between isolated environments while Dexie still holds the previous,
+  // non-empty dependency snapshot. Rebind unconditionally to the current
+  // environment: checking only for an undefined dependency leaves newly
+  // constructed databases attached to the stale factory.
+  Dexie.dependencies.indexedDB = g.indexedDB as IDBFactory
+  Dexie.dependencies.IDBKeyRange = g.IDBKeyRange as typeof IDBKeyRange
 }

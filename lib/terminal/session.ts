@@ -62,6 +62,7 @@ export class TerminalSession extends BaseTerminalSession {
     // a handler is set. (See `tauri::ipc::Channel` docs.)
     const result = await invoke<SpawnResult>("terminal_spawn", {
       req,
+      profileId: req.profileId,
       onEvent,
     })
     return new TerminalSession(result.session, onEvent)
@@ -101,6 +102,20 @@ export class TerminalSession extends BaseTerminalSession {
     })
   }
 
+  async detach(): Promise<void> {
+    await invoke<void>("terminal_detach", { id: this.info.id })
+  }
+
+  async takeControl(): Promise<void> {
+    await invoke<void>("terminal_take_control", { id: this.info.id })
+    this.dispatchControlState({ role: "controller", controllerId: "local" })
+  }
+
+  async releaseControl(): Promise<void> {
+    await invoke<void>("terminal_release_control", { id: this.info.id })
+    this.dispatchControlState({ role: "viewer", controllerId: null, reason: "released" })
+  }
+
   async kill(): Promise<void> {
     if (this.isExited) return
     await invoke<void>("terminal_kill", { id: this.info.id })
@@ -118,6 +133,22 @@ export class TerminalSession extends BaseTerminalSession {
       }
       case "exit": {
         this.handleExit(event.code ?? null)
+        break
+      }
+      case "replay_gap": {
+        this.dispatchReplayGap({
+          requestedAfter: event.requested_after,
+          firstAvailable: event.first_available,
+          lastAvailable: event.last_available,
+        })
+        break
+      }
+      case "controller_changed": {
+        this.dispatchControlState({
+          role: event.controller === "desktop" ? "controller" : "viewer",
+          controllerId: event.controller,
+          reason: event.controller === "desktop" ? undefined : "takeover",
+        })
         break
       }
     }

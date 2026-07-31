@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { KeyRoundIcon, PlusIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
@@ -16,11 +16,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { connectSshFromDock } from "@/lib/terminal/ssh-connect"
+import { syncTerminalHostProfiles } from "@/lib/terminal/host-profiles"
 import { clearSshCredential, saveSshCredential } from "@/lib/terminal/ssh-credentials"
 import { nextSshHostId, type SshAuthMethod, type SshHostProfile } from "@/lib/terminal/ssh-profiles"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
+import { isTauri } from "@/lib/tauri"
 
 type TerminalSettings = NonNullable<
   NonNullable<ReturnType<typeof useSettingsStore.getState>["settings"]>["terminal"]
@@ -36,9 +38,33 @@ export function SshHosts() {
   const hosts = (terminal.sshHosts ?? []) as SshHostProfile[]
   const [secrets, setSecrets] = useState<Record<string, string>>({})
   const [busyId, setBusyId] = useState<string | null>(null)
+  const hostSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (hostSyncTimer.current) clearTimeout(hostSyncTimer.current)
+    },
+    []
+  )
 
   async function persistHosts(next: SshHostProfile[]): Promise<void> {
-    await save({ terminal: { ...terminal, sshHosts: next } })
+    const nextTerminal = { ...terminal, sshHosts: next }
+    await save({ terminal: nextTerminal })
+    if (!isTauri()) return
+    if (hostSyncTimer.current) clearTimeout(hostSyncTimer.current)
+    hostSyncTimer.current = setTimeout(() => {
+      hostSyncTimer.current = null
+      void syncTerminalHostProfiles(nextTerminal.profiles, {
+        enableShellIntegration: nextTerminal.enableShellIntegration,
+        forceUtf8: nextTerminal.forceUtf8,
+        sandboxed: nextTerminal.sandboxed,
+        sshProfiles: next,
+      }).catch((error) =>
+        toast.error(t("toasts.syncFailed"), {
+          description: error instanceof Error ? error.message : String(error),
+        })
+      )
+    }, 200)
   }
 
   function updateHost(id: string, patch: Partial<SshHostProfile>): void {

@@ -387,6 +387,36 @@ pub async fn companion_seed_agent_control(device_ids: Vec<String>) -> Result<(),
     Ok(())
 }
 
+/// Grant or revoke interactive terminal access for a paired device.
+///
+/// This is deliberately separate from remote-control and agent-control. The
+/// settings UI performs system confirmation before invoking this command.
+#[tauri::command]
+pub async fn companion_set_remote_terminal(device_id: String, allowed: bool) -> Result<(), String> {
+    if device_id.trim().is_empty() {
+        return Err("device_id is required".into());
+    }
+    let acl = super::control_allow_list::terminal_global();
+    if allowed {
+        acl.allow(device_id);
+    } else {
+        acl.disallow(&device_id);
+    }
+    Ok(())
+}
+
+/// Re-seed terminal grants from persisted paired-device rows at desktop boot.
+#[tauri::command]
+pub async fn companion_seed_remote_terminal(device_ids: Vec<String>) -> Result<(), String> {
+    super::control_allow_list::terminal_global().reseed(
+        device_ids
+            .into_iter()
+            .filter(|device_id| !device_id.trim().is_empty())
+            .collect(),
+    );
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn companion_set_locked_computer_use(
     device_id: String,
@@ -1156,6 +1186,33 @@ mod tests {
     // Compile-only smoke: ensure the module builds without errors.
 
     use super::*;
+
+    #[tokio::test]
+    async fn remote_terminal_grants_reject_empty_ids_and_support_revoke_and_reseed() {
+        let acl = super::super::control_allow_list::terminal_global();
+        acl.clear();
+
+        assert!(companion_set_remote_terminal("   ".into(), true)
+            .await
+            .is_err());
+        companion_set_remote_terminal("terminal-device".into(), true)
+            .await
+            .unwrap();
+        assert!(acl.is_allowed("terminal-device"));
+        companion_set_remote_terminal("terminal-device".into(), false)
+            .await
+            .unwrap();
+        assert!(!acl.is_allowed("terminal-device"));
+
+        companion_seed_remote_terminal(vec!["seeded-terminal".into(), "".into(), "   ".into()])
+            .await
+            .unwrap();
+        assert!(acl.is_allowed("seeded-terminal"));
+        assert!(!acl.is_allowed(""));
+        assert!(!acl.is_allowed("   "));
+
+        acl.clear();
+    }
 
     #[test]
     fn commands_module_compiles() {}

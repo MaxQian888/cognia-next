@@ -16,7 +16,7 @@
  *     watermark accounting; high-watermark triggers `term.refresh` to
  *     ensure repaint, low-watermark resumes new pushes (the Rust side
  *     doesn't currently observe pause/resume — placeholder for a
- *     future XON/XOFF sentinel; v1 relies on Channel queue depth).
+ *     host attachment queue and replay bounds protect the PTY reader).
  *
  * User input flow:
  *   * `term.onData(text)` → `session.write(text)` over Tauri IPC.
@@ -66,6 +66,7 @@ import type { IDecoration, ILink, ILinkProvider, IMarker } from "@xterm/xterm"
 // workflow canvas uses for `@xyflow/react/dist/style.css`.
 import "@xterm/xterm/css/xterm.css"
 
+import { Button } from "@/components/ui/button"
 import { TerminalBackpressure } from "@/lib/terminal/backpressure"
 import { findColorScheme, resolveTerminalTheme } from "@/lib/terminal/color-schemes"
 import type { TerminalTheme } from "@/lib/terminal/color-schemes"
@@ -76,7 +77,11 @@ import type { QuickFixAction } from "@/lib/terminal/quick-fix/matchers"
 import { shouldShowSticky, stickyCommandFor } from "@/lib/terminal/sticky-scroll"
 import { getLiveSession } from "@/lib/terminal/session-registry"
 import { matchFileLinks, resolveLinkPath } from "@/lib/terminal/terminal-links"
-import type { IntegrationEvent } from "@/lib/terminal/types"
+import type {
+  IntegrationEvent,
+  TerminalControlState,
+  TerminalReplayGap,
+} from "@/lib/terminal/types"
 import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
 import { openInProjectEditor } from "@/lib/files/project-editor-bridge"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
@@ -129,6 +134,12 @@ export interface TerminalInstanceHandle {
   jumpToPrevCommand: () => void
   /** Scroll to the next OSC 633 command boundary (no-op when none below). */
   jumpToNextCommand: () => void
+  /** Send a key sequence from touch/mobile accessory controls. */
+  sendInput: (text: string) => Promise<void>
+  /** Explicitly summon the software keyboard. */
+  focusKeyboard: () => void
+  /** Explicitly dismiss the software keyboard. */
+  hideKeyboard: () => void
 }
 
 interface CommandMarkerEntry {
@@ -529,6 +540,11 @@ function TerminalInstanceImpl(
   const [quickFix, setQuickFix] = useState<QuickFixState | null>(null)
   const [quickFixOpen, setQuickFixOpen] = useState(false)
   const [sticky, setSticky] = useState<StickyState | null>(null)
+  const [controlState, setControlState] = useState<TerminalControlState>({
+    role: "controller",
+    controllerId: null,
+  })
+  const [replayGap, setReplayGap] = useState<TerminalReplayGap | null>(null)
 
   const quickFixesRef = useRef(quickFixesEnabled)
   const commandActionsRef = useRef(commandActionsEnabled)
@@ -661,8 +677,14 @@ function TerminalInstanceImpl(
       },
       jumpToPrevCommand: () => jumpToCommand(termRef.current, markersRef.current, "prev"),
       jumpToNextCommand: () => jumpToCommand(termRef.current, markersRef.current, "next"),
+      sendInput: async (text) => {
+        const session = getLiveSession(sessionId)
+        if (session) await session.write(text)
+      },
+      focusKeyboard: () => termRef.current?.focus?.(),
+      hideKeyboard: () => termRef.current?.blur?.(),
     }),
-    []
+    [sessionId]
   )
 
   useEffect(() => {
@@ -1029,6 +1051,11 @@ function TerminalInstanceImpl(
         term: { write: (data, cb) => term.write(data, cb) },
       })
       const offData = session.onData((bytes) => bp.push(bytes))
+      const offControl = session.onControlState(setControlState)
+      const offReplayGap = session.onReplayGap((gap) => {
+        setReplayGap(gap)
+        term.writeln(`\r\n${t("sessionState.replayGapMarker")}\r\n`)
+      })
       const offInput = term.onData((text: string) => {
         void session.write(text)
         // Mirror the keystroke into the autocomplete line model (no-op when
@@ -1314,6 +1341,8 @@ function TerminalInstanceImpl(
           container.style.boxShadow = ""
         }
         offData()
+        offControl()
+        offReplayGap()
         offIntegration()
         try {
           offScroll?.dispose()
@@ -1530,6 +1559,54 @@ function TerminalInstanceImpl(
         data-session-id={sessionId}
         className="h-full w-full overflow-hidden bg-background"
       />
+      <div className="pointer-events-none absolute left-2 right-2 top-2 z-30 flex flex-wrap gap-1">
+        {controlState.role === "viewer" ? (
+          <div
+            className="pointer-events-auto flex items-center gap-2 rounded-md border border-amber-500/40 bg-background/95 px-2 py-1 text-xs shadow-sm backdrop-blur"
+            data-testid="terminal-read-only-state"
+          >
+            <span>{t("sessionState.readOnly")}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-[11px]"
+              onClick={() => {
+                if (!window.confirm(t("sessionState.takeoverConfirm"))) return
+                void getLiveSession(sessionId)?.takeControl()
+              }}
+            >
+              {t("sessionState.takeControl")}
+            </Button>
+          </div>
+        ) : null}
+        {replayGap ? (
+          <div
+            className="rounded-md border border-orange-500/40 bg-background/95 px-2 py-1 text-xs shadow-sm backdrop-blur"
+            role="status"
+            data-testid="terminal-replay-gap-state"
+          >
+            {t("sessionState.replayGap", {
+              first: replayGap.firstAvailable,
+              last: replayGap.lastAvailable,
+            })}
+          </div>
+        ) : null}
+        {getLiveSession(sessionId)?.info.sandboxed ? (
+          <div className="rounded-md border bg-background/95 px-2 py-1 text-xs shadow-sm backdrop-blur">
+            {t("sessionState.sandboxed")}
+          </div>
+        ) : (
+          <div className="rounded-md border border-red-500/30 bg-background/95 px-2 py-1 text-xs shadow-sm backdrop-blur">
+            {t("sessionState.fullHost")}
+          </div>
+        )}
+        {getLiveSession(sessionId)?.info.integrationCapabilities?.degradedReason ? (
+          <div className="rounded-md border border-amber-500/40 bg-background/95 px-2 py-1 text-xs shadow-sm backdrop-blur">
+            {t("sessionState.integrationDegraded")}
+          </div>
+        ) : null}
+      </div>
       {autocomplete.enabled && autocomplete.ghost ? (
         <TerminalGhostText
           ghost={autocomplete.ghost}

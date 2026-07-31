@@ -33,6 +33,9 @@
  *
  * - `companion-boot` — the CLIENT side of the companion protocol (pairing,
  *   sync-down into a phone); a brain is the server side.
+ * - `companion-outbound-runner` — drains phone-originated writes from the
+ *   browser-local IndexedDB queue into the paired desktop; a brain is the
+ *   receiving authority and never owns that client-side queue.
  * - `storage-persistence` — `navigator.storage.persist()` is a browser API.
  * - `window-title`, `context-keys`, `appearance` — WebView chrome/UI state.
  * - `window-liveness-initializers` — reveals and heartbeats the Tauri main

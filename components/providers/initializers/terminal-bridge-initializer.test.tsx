@@ -20,6 +20,25 @@ jest.mock("@/lib/plugin/vscode-shim/terminal-bridge", () => ({
 // Cheap module to satisfy the warm-import — the real handler depends on
 // stores not stood up in this test.
 jest.mock("@/lib/terminal/dock-tool-handler", () => ({ runTerminalDockAction: jest.fn() }))
+const mockSyncTerminalHostProfiles = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/terminal/host-profiles", () => ({
+  syncTerminalHostProfiles: (...args: unknown[]) => mockSyncTerminalHostProfiles(...args),
+}))
+const mockSettingsState = {
+  loaded: true,
+  settings: {
+    terminal: {
+      profiles: [{ id: "zsh", name: "Zsh", shell: "/bin/zsh" }],
+      sandboxed: true,
+    },
+  },
+}
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: {
+    getState: () => mockSettingsState,
+    subscribe: jest.fn(() => () => undefined),
+  },
+}))
 const restorePersistedLayout = jest.fn()
 jest.mock("@/stores/terminal/terminal-store", () => ({
   useTerminalStore: {
@@ -71,6 +90,10 @@ describe("TerminalBridgeInitializer", () => {
     expect(typeof arg.outputSink.markClosed).toBe("function")
     arg.outputSink.appendLine("term-1", "stdout", "anything")
     arg.outputSink.markClosed("term-1", 0)
+    expect(mockSyncTerminalHostProfiles).toHaveBeenCalledWith(
+      mockSettingsState.settings.terminal.profiles,
+      expect.objectContaining({ sandboxed: true })
+    )
   })
 
   it("resets the bridge on unmount (fast-refresh safety)", () => {

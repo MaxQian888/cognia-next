@@ -10,7 +10,7 @@
  * and tells the caller to pause the PTY (via `onPause`). When ack count
  * drops below the low-watermark, calls `onResume`.
  *
- * This is the v1 implementation of VS Code's PtyHost pause/resume flow
+ * This is the renderer side of the durable host's bounded-output flow
  * control. See https://xtermjs.org/docs/guides/flowcontrol/ for the
  * upstream guidance the watermarks come from.
  *

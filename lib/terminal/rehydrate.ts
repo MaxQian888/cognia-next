@@ -1,19 +1,16 @@
 "use client"
 
 /**
- * Reattach to PTY sessions that survived a webview reload (1C).
+ * Reattach to host-owned sessions that survived a renderer or app restart.
  *
- * The Tauri Rust process — and thus every live `PtySession` — outlives a
- * webview reload (F5 / HMR). Only the JS Channel + the in-memory
- * session-registry are torn down. On boot we ask Rust for its sessions
- * (`terminal_list_all`), skip the ones whose shell has already exited,
- * rebuild the dock rows for the rest, reattach a fresh Channel to each
+ * The lightweight terminal host outlives the Tauri UI process. Only the JS
+ * channel and in-memory session registry are torn down. On boot we ask the host
+ * for its sessions
+ * through the active local/LAN/WAN transport, skip exited shells, rebuild
+ * the dock rows for the rest, and reattach a fresh logical stream to each
  * (replaying the retained buffer so recent scrollback comes back), and
  * re-wire events to the store via the same `wireSessionToStore` the spawn
  * path uses.
- *
- * Sessions are NOT restored across a full app restart — the Rust process
- * and its PTYs are gone then, so `terminal_list_all` returns nothing.
  *
  * Reload-safe UI metadata is restored only after every surviving PTY has
  * registered. That ordering lets the store validate split groups, focus,
@@ -22,9 +19,14 @@
  */
 
 import { listAllTerminals, TerminalSession } from "./session"
+import { RemoteTerminalSession } from "./transport-ws"
+import { selectTerminalTransportChain, type TerminalTransportKind } from "./pick-transport"
 import { registerLiveSession } from "./session-registry"
 import { wireSessionToStore, type TerminalStoreLike } from "./spawn-orchestrator"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
+import { classifyTerminalHostError } from "./host-state"
+import type { BaseTerminalSession } from "./base-session"
+import type { SessionInfo } from "./types"
 
 export interface RehydrateResult {
   restored: number
@@ -35,23 +37,73 @@ type RehydrateStore = TerminalStoreLike & {
   restorePersistedLayout?: () => void
 }
 
+async function tryTransportChain<T>(
+  operation: (transport: TerminalTransportKind) => Promise<T>
+): Promise<T> {
+  let lastError: unknown = new Error("terminal transport unavailable")
+  for (const transport of selectTerminalTransportChain()) {
+    try {
+      return await operation(transport)
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError
+}
+
+function listFromActiveHost(): Promise<SessionInfo[]> {
+  return tryTransportChain((transport) => {
+    switch (transport) {
+      case "tauri-channel":
+        return listAllTerminals()
+      case "ws":
+        return RemoteTerminalSession.listLan()
+      case "webrtc":
+        return RemoteTerminalSession.listWan()
+      default:
+        return Promise.reject(new Error("terminal transport unavailable"))
+    }
+  })
+}
+
+function reattachToActiveHost(
+  sessionId: string,
+  resumeAfter: number
+): Promise<BaseTerminalSession> {
+  return tryTransportChain((transport) => {
+    switch (transport) {
+      case "tauri-channel":
+        return TerminalSession.reattach(sessionId, resumeAfter)
+      case "ws":
+        return RemoteTerminalSession.reattachLan(sessionId, resumeAfter)
+      case "webrtc":
+        return RemoteTerminalSession.reattachWan(sessionId, resumeAfter)
+      default:
+        return Promise.reject(new Error("terminal transport unavailable"))
+    }
+  })
+}
+
 export async function rehydrateTerminals(
   opts: {
     store?: RehydrateStore
-    list?: typeof listAllTerminals
-    reattach?: typeof TerminalSession.reattach
+    list?: () => Promise<SessionInfo[]>
+    reattach?: (sessionId: string, resumeAfter: number) => Promise<BaseTerminalSession>
   } = {}
 ): Promise<RehydrateResult> {
   const store = opts.store ?? useTerminalStore.getState()
-  const list = opts.list ?? listAllTerminals
-  const reattach = opts.reattach ?? TerminalSession.reattach.bind(TerminalSession)
+  const list = opts.list ?? listFromActiveHost
+  const reattach = opts.reattach ?? reattachToActiveHost
 
   let infos: Awaited<ReturnType<typeof listAllTerminals>>
   try {
     infos = await list()
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    store.setHostState?.(classifyTerminalHostError(error), message)
     return { restored: 0, failed: 0 }
   }
+  store.setHostState?.("online")
 
   let restored = 0
   let failed = 0
@@ -85,7 +137,7 @@ export async function rehydrateTerminals(
     }
   }
   // Apply the saved layout as one transaction after all rows exist. Calling
-  // this for an empty successful list clears stale ids from a full app restart;
+  // this for an empty successful list clears stale ids from a host with no sessions;
   // a failed list keeps the snapshot so a transient IPC failure cannot erase it.
   store.restorePersistedLayout?.()
   return { restored, failed }

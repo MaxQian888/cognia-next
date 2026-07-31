@@ -11,6 +11,8 @@
 export type SessionOrigin = "local" | "remote"
 
 export interface SpawnRequest {
+  /** Stable host-synchronized profile id; defaults to `default`. */
+  profileId?: string
   /** Shell binary — absolute path or PATH-resolvable name. */
   shell: string
   /** Argv after the shell. Integration argv (e.g. `--rcfile`) is appended on top. */
@@ -65,6 +67,40 @@ export interface SessionInfo {
    * field, and `undefined` is treated as alive.
    */
   alive?: boolean
+  /** Stable identity of the durable terminal host that owns the process. */
+  hostId?: string
+  /** Host-owned process kind. */
+  kind?: "localPty" | "ssh"
+  profileId?: string
+  createdAt?: number
+  lastActivityAt?: number
+  currentController?: string | null
+  attachedClients?: number
+  sandboxed?: boolean
+  integrationCapabilities?: {
+    osc633: boolean
+    commandStatus: boolean
+    cwdTracking: boolean
+    degradedReason: string | null
+  }
+  replay?: {
+    firstSequence: number
+    lastSequence: number
+    retainedBytes: number
+    truncated: boolean
+  }
+}
+
+export interface TerminalControlState {
+  role: "controller" | "viewer"
+  controllerId: string | null
+  reason?: "takeover" | "disconnected" | "released" | "revoked"
+}
+
+export interface TerminalReplayGap {
+  requestedAfter: number
+  firstAvailable: number
+  lastAvailable: number
 }
 
 export type IntegrationEvent =
@@ -83,3 +119,10 @@ export type TerminalEvent =
   | { kind: "data"; bytes: number[] }
   | { kind: "integration"; event: IntegrationEvent }
   | { kind: "exit"; code: number | null }
+  | {
+      kind: "replay_gap"
+      requested_after: number
+      first_available: number
+      last_available: number
+    }
+  | { kind: "controller_changed"; controller: string | null }

@@ -2,7 +2,7 @@
  * Typed client for the request/response terminal RPCs.
  *
  * The live, interactive PTY stream stays on its own channels
- * (`Channel` over Tauri IPC locally, `/ws/v1/terminal` remotely — see
+ * (`Channel` over Tauri IPC locally, `/ws/terminal` remotely — see
  * `transport-ws.ts`); everything here is one-shot request/response and rides
  * the process-wide `Transport` (`@/lib/tauri`), so the SAME calls work from
  * the desktop renderer (Tauri `invoke`), the Capacitor mobile shell

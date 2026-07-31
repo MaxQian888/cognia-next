@@ -1,0 +1,1100 @@
+//! Tauri facade for the durable terminal host.
+//!
+//! The public command names intentionally remain the existing `terminal_*`
+//! surface. This module replaces their in-process PTY ownership with one
+//! authenticated native connection to `cognia-server desktop-host`.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
+use cognia_terminal::host::ClientIdentity;
+use cognia_terminal::host::HostSessionInfo;
+use cognia_terminal::host_wire::{read_frame, write_frame};
+use cognia_terminal::osc633::IntegrationEvent;
+use cognia_terminal::protocol::{FrameKind, TerminalErrorCode, TerminalFrame, MAX_FRAME_PAYLOAD};
+use cognia_terminal::session::SpawnRequest;
+use cognia_terminal::ssh::SshSpawnRequest;
+use parking_lot::Mutex;
+use serde::{Deserialize, Serialize};
+use tauri::ipc::Channel;
+use tauri::{AppHandle, Manager, Runtime, State};
+use tokio::sync::{mpsc, oneshot};
+use uuid::Uuid;
+
+use crate::terminal_host_service::{
+    connect_terminal_host, connect_terminal_host_as, default_terminal_host_endpoint,
+    load_terminal_host_settings, provision_terminal_host_descriptor, save_terminal_host_settings,
+    set_terminal_host_login_service, BoxedTerminalHostIo, TerminalHostDescriptor,
+    TerminalHostSettings,
+};
+
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+const START_RETRY_COUNT: usize = 40;
+const START_RETRY_DELAY: Duration = Duration::from_millis(100);
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HostChannelEvent {
+    Data {
+        bytes: Vec<u8>,
+    },
+    Integration {
+        event: IntegrationEvent,
+    },
+    Exit {
+        code: Option<u32>,
+    },
+    ReplayGap {
+        requested_after: u64,
+        first_available: u64,
+        last_available: u64,
+    },
+    ControllerChanged {
+        controller: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostSeqEvent {
+    pub seq: u64,
+    pub event: HostChannelEvent,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpawnResult {
+    pub session: HostSessionInfo,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshSpawnResult {
+    pub session: HostSessionInfo,
+    pub host_key_status: String,
+    pub host_key_fingerprint: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ErrorPayload {
+    code: TerminalErrorCode,
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExitPayload {
+    code: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ControllerPayload {
+    controller: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplayGapPayload {
+    requested_after: u64,
+    first_available: u64,
+    last_available: u64,
+}
+
+type PendingResponse = oneshot::Sender<Result<TerminalFrame, String>>;
+
+struct BridgeClient {
+    writer: mpsc::Sender<TerminalFrame>,
+    pending: Mutex<HashMap<u64, PendingResponse>>,
+    channels: Mutex<HashMap<String, Channel<HostSeqEvent>>>,
+    next_sequence: AtomicU64,
+    closed: AtomicBool,
+}
+
+impl BridgeClient {
+    async fn connect(endpoint: &str) -> Result<Arc<Self>, String> {
+        let stream = connect_terminal_host(endpoint).await?;
+        let (mut reader, mut writer) = tokio::io::split(stream);
+        let (writer_tx, mut writer_rx) = mpsc::channel::<TerminalFrame>(256);
+        let client = Arc::new(Self {
+            writer: writer_tx,
+            pending: Mutex::new(HashMap::new()),
+            channels: Mutex::new(HashMap::new()),
+            next_sequence: AtomicU64::new(1),
+            closed: AtomicBool::new(false),
+        });
+
+        let writer_client = Arc::clone(&client);
+        tauri::async_runtime::spawn(async move {
+            while let Some(frame) = writer_rx.recv().await {
+                if let Err(error) = write_frame(&mut writer, &frame).await {
+                    writer_client.fail(error);
+                    break;
+                }
+            }
+        });
+
+        let reader_client = Arc::clone(&client);
+        tauri::async_runtime::spawn(async move {
+            loop {
+                match read_frame(&mut reader).await {
+                    Ok(Some(frame)) => reader_client.dispatch(frame),
+                    Ok(None) => {
+                        reader_client.fail("terminal host connection closed".into());
+                        break;
+                    }
+                    Err(error) => {
+                        reader_client.fail(error);
+                        break;
+                    }
+                }
+            }
+        });
+        Ok(client)
+    }
+
+    fn is_open(&self) -> bool {
+        !self.closed.load(Ordering::SeqCst)
+    }
+
+    async fn request(
+        &self,
+        kind: FrameKind,
+        session_id: Uuid,
+        payload: Vec<u8>,
+    ) -> Result<TerminalFrame, String> {
+        if !self.is_open() {
+            return Err("terminal host connection is closed".into());
+        }
+        if payload.len() > MAX_FRAME_PAYLOAD {
+            return Err(format!(
+                "terminal request payload exceeds {MAX_FRAME_PAYLOAD} bytes"
+            ));
+        }
+        let sequence = self.next_sequence.fetch_add(1, Ordering::Relaxed);
+        let (sender, receiver) = oneshot::channel();
+        self.pending.lock().insert(sequence, sender);
+        if self
+            .writer
+            .send(TerminalFrame::command(kind, session_id, sequence, payload))
+            .await
+            .is_err()
+        {
+            self.pending.lock().remove(&sequence);
+            return Err("terminal host writer is closed".into());
+        }
+        let frame = self
+            .await_response(sequence, receiver, REQUEST_TIMEOUT)
+            .await?;
+        if frame.kind == FrameKind::Error {
+            let error: ErrorPayload = serde_json::from_slice(&frame.payload)
+                .map_err(|decode| format!("terminal host returned an invalid error: {decode}"))?;
+            return Err(format!(
+                "{}: {}",
+                error_code_name(error.code),
+                error.message
+            ));
+        }
+        Ok(frame)
+    }
+
+    async fn await_response(
+        &self,
+        sequence: u64,
+        receiver: oneshot::Receiver<Result<TerminalFrame, String>>,
+        timeout: Duration,
+    ) -> Result<TerminalFrame, String> {
+        match tokio::time::timeout(timeout, receiver).await {
+            Ok(Ok(response)) => response,
+            Ok(Err(_)) => {
+                self.pending.lock().remove(&sequence);
+                Err("terminal host response channel closed".into())
+            }
+            Err(_) => {
+                self.pending.lock().remove(&sequence);
+                Err("terminal host request timed out".into())
+            }
+        }
+    }
+
+    async fn request_json<T: Serialize>(
+        &self,
+        kind: FrameKind,
+        session_id: Uuid,
+        payload: &T,
+    ) -> Result<TerminalFrame, String> {
+        let payload = serde_json::to_vec(payload)
+            .map_err(|error| format!("terminal request serialization failed: {error}"))?;
+        self.request(kind, session_id, payload).await
+    }
+
+    fn register_channel(&self, session_id: &str, channel: Channel<HostSeqEvent>) {
+        self.channels.lock().insert(session_id.to_string(), channel);
+    }
+
+    fn remove_channel(&self, session_id: &str) {
+        self.channels.lock().remove(session_id);
+    }
+
+    fn dispatch(&self, frame: TerminalFrame) {
+        if is_response_kind(frame.kind) && frame.sequence != 0 {
+            if let Some(sender) = self.pending.lock().remove(&frame.sequence) {
+                let _ = sender.send(Ok(frame));
+                return;
+            }
+        }
+        let session_id = frame.session_id.to_string();
+        let event = match frame.kind {
+            FrameKind::Stdout => Some(HostChannelEvent::Data {
+                bytes: frame.payload,
+            }),
+            FrameKind::Integration => serde_json::from_slice(&frame.payload)
+                .ok()
+                .map(|event| HostChannelEvent::Integration { event }),
+            FrameKind::Exit => serde_json::from_slice::<ExitPayload>(&frame.payload)
+                .ok()
+                .map(|payload| HostChannelEvent::Exit { code: payload.code }),
+            FrameKind::ControllerChanged => {
+                serde_json::from_slice::<ControllerPayload>(&frame.payload)
+                    .ok()
+                    .map(|payload| HostChannelEvent::ControllerChanged {
+                        controller: payload.controller,
+                    })
+            }
+            FrameKind::ReplayGap => serde_json::from_slice::<ReplayGapPayload>(&frame.payload)
+                .ok()
+                .map(|payload| HostChannelEvent::ReplayGap {
+                    requested_after: payload.requested_after,
+                    first_available: payload.first_available,
+                    last_available: payload.last_available,
+                }),
+            _ => None,
+        };
+        if let Some(event) = event {
+            if let Some(channel) = self.channels.lock().get(&session_id).cloned() {
+                let _ = channel.send(HostSeqEvent {
+                    seq: frame.sequence,
+                    event,
+                });
+            }
+        }
+    }
+
+    fn fail(&self, error: String) {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let pending = std::mem::take(&mut *self.pending.lock());
+        for (_, sender) in pending {
+            let _ = sender.send(Err(error.clone()));
+        }
+    }
+}
+
+fn is_response_kind(kind: FrameKind) -> bool {
+    matches!(
+        kind,
+        FrameKind::Ack | FrameKind::HostSnapshot | FrameKind::SessionSnapshot | FrameKind::Error
+    )
+}
+
+fn error_code_name(code: TerminalErrorCode) -> &'static str {
+    match code {
+        TerminalErrorCode::NotController => "not_controller",
+        TerminalErrorCode::PermissionDenied => "permission_denied",
+        TerminalErrorCode::ReplayGap => "replay_gap",
+        TerminalErrorCode::ResourceLimit => "resource_limit",
+        TerminalErrorCode::HostOffline => "host_offline",
+        TerminalErrorCode::Unpaired => "unpaired",
+        TerminalErrorCode::Unauthorized => "unauthorized",
+        TerminalErrorCode::SessionNotFound => "session_not_found",
+        TerminalErrorCode::InvalidRequest => "invalid_request",
+        TerminalErrorCode::QueueOverflow => "queue_overflow",
+    }
+}
+
+#[derive(Default)]
+pub struct TerminalHostBridgeState {
+    client: tokio::sync::Mutex<Option<Arc<BridgeClient>>>,
+}
+
+impl TerminalHostBridgeState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    async fn client<R: Runtime>(&self, app: &AppHandle<R>) -> Result<Arc<BridgeClient>, String> {
+        let mut slot = self.client.lock().await;
+        if let Some(client) = slot.as_ref().filter(|client| client.is_open()) {
+            return Ok(Arc::clone(client));
+        }
+        let endpoint = default_terminal_host_endpoint();
+        if let Ok(client) = BridgeClient::connect(&endpoint).await {
+            *slot = Some(Arc::clone(&client));
+            return Ok(client);
+        }
+        let resource_dir = app
+            .path()
+            .resource_dir()
+            .ok()
+            .map(|path| path.join("terminal"));
+        spawn_terminal_host_async(endpoint.clone(), resource_dir).await?;
+        let mut last_error = "terminal host did not start".to_string();
+        for _ in 0..START_RETRY_COUNT {
+            tokio::time::sleep(START_RETRY_DELAY).await;
+            match BridgeClient::connect(&endpoint).await {
+                Ok(client) => {
+                    *slot = Some(Arc::clone(&client));
+                    return Ok(client);
+                }
+                Err(error) => last_error = error,
+            }
+        }
+        Err(last_error)
+    }
+}
+
+fn spawn_terminal_host(
+    endpoint: &str,
+    terminal_resource_dir: Option<PathBuf>,
+) -> Result<(), String> {
+    let binary = resolve_server_binary()?;
+    let mut command = Command::new(&binary);
+    command
+        .arg("desktop-host")
+        .arg("--endpoint")
+        .arg(endpoint)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(resource_dir) = terminal_resource_dir {
+        command.env("COGNIA_TERMINAL_RESOURCES", resource_dir);
+    }
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("failed to start {}: {error}", binary.display()))
+}
+
+async fn spawn_terminal_host_async(
+    endpoint: String,
+    terminal_resource_dir: Option<PathBuf>,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || spawn_terminal_host(&endpoint, terminal_resource_dir))
+        .await
+        .map_err(|error| format!("terminal host spawn task failed: {error}"))?
+}
+
+/// Open an authenticated, identity-scoped connection for a non-renderer
+/// adapter such as the Companion WebSocket route.
+pub async fn connect_terminal_host_client(
+    app: Option<&tauri::AppHandle>,
+    identity: ClientIdentity,
+) -> Result<BoxedTerminalHostIo, String> {
+    let endpoint = default_terminal_host_endpoint();
+    if let Ok(stream) = connect_terminal_host_as(&endpoint, identity.clone()).await {
+        return Ok(stream);
+    }
+    let terminal_resource_dir = app
+        .and_then(|app| app.path().resource_dir().ok())
+        .map(|path| path.join("terminal"));
+    spawn_terminal_host_async(endpoint.clone(), terminal_resource_dir).await?;
+    let mut last_error = "terminal host did not start".to_string();
+    for _ in 0..START_RETRY_COUNT {
+        tokio::time::sleep(START_RETRY_DELAY).await;
+        match connect_terminal_host_as(&endpoint, identity.clone()).await {
+            Ok(stream) => return Ok(stream),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
+}
+
+async fn request_over_host_stream(
+    stream: &mut BoxedTerminalHostIo,
+    frame: TerminalFrame,
+) -> Result<TerminalFrame, String> {
+    request_over_host_stream_with_timeout(stream, frame, REQUEST_TIMEOUT).await
+}
+
+async fn request_over_host_stream_with_timeout(
+    stream: &mut BoxedTerminalHostIo,
+    frame: TerminalFrame,
+    timeout: Duration,
+) -> Result<TerminalFrame, String> {
+    tokio::time::timeout(timeout, async {
+        let sequence = frame.sequence;
+        write_frame(stream, &frame).await?;
+        loop {
+            let response = read_frame(stream)
+                .await?
+                .ok_or_else(|| "terminal host connection closed before responding".to_string())?;
+            if response.sequence != sequence || !is_response_kind(response.kind) {
+                continue;
+            }
+            if response.kind == FrameKind::Error {
+                let error: ErrorPayload =
+                    serde_json::from_slice(&response.payload).map_err(|decode| {
+                        format!("terminal host returned an invalid error: {decode}")
+                    })?;
+                return Err(format!(
+                    "{}: {}",
+                    error_code_name(error.code),
+                    error.message
+                ));
+            }
+            return Ok(response);
+        }
+    })
+    .await
+    .map_err(|_| "terminal host request timed out".to_string())?
+}
+
+pub async fn terminal_host_remote_list(
+    app: Option<&tauri::AppHandle>,
+    device_id: &str,
+) -> Result<Vec<HostSessionInfo>, String> {
+    let identity = ClientIdentity::remote(
+        format!("companion-rpc:{device_id}"),
+        device_id.to_string(),
+        true,
+    );
+    let mut stream = connect_terminal_host_client(app, identity).await?;
+    let response = request_over_host_stream(
+        &mut stream,
+        TerminalFrame::command(FrameKind::List, Uuid::nil(), 1, Vec::new()),
+    )
+    .await?;
+    let value: serde_json::Value = serde_json::from_slice(&response.payload)
+        .map_err(|error| format!("terminal host snapshot is invalid: {error}"))?;
+    serde_json::from_value(value.get("sessions").cloned().unwrap_or_default())
+        .map_err(|error| format!("terminal session list is invalid: {error}"))
+}
+
+pub async fn terminal_host_remote_kill(
+    app: Option<&tauri::AppHandle>,
+    device_id: &str,
+    session_id: &str,
+) -> Result<(), String> {
+    let identity = ClientIdentity::remote(
+        format!("companion-rpc:{device_id}"),
+        device_id.to_string(),
+        true,
+    );
+    let mut stream = connect_terminal_host_client(app, identity).await?;
+    let session_id = parse_session_id(session_id)?;
+    request_over_host_stream(
+        &mut stream,
+        TerminalFrame::command(
+            FrameKind::Attach,
+            session_id,
+            1,
+            serde_json::to_vec(&serde_json::json!({ "resumeAfter": u64::MAX }))
+                .map_err(|error| error.to_string())?,
+        ),
+    )
+    .await?;
+    request_over_host_stream(
+        &mut stream,
+        TerminalFrame::command(FrameKind::TakeControl, session_id, 2, Vec::new()),
+    )
+    .await?;
+    request_over_host_stream(
+        &mut stream,
+        TerminalFrame::command(FrameKind::Kill, session_id, 3, Vec::new()),
+    )
+    .await?;
+    Ok(())
+}
+
+fn resolve_server_binary() -> Result<PathBuf, String> {
+    let executable_name = if cfg!(windows) {
+        "cognia-server.exe"
+    } else {
+        "cognia-server"
+    };
+    let mut candidates = Vec::new();
+    if let Ok(current) = std::env::current_exe() {
+        if let Some(parent) = current.parent() {
+            candidates.push(parent.join(executable_name));
+        }
+    }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(PathBuf::from);
+    if let Some(root) = root {
+        candidates.push(root.join("target").join("debug").join(executable_name));
+        candidates.push(root.join("target").join("release").join(executable_name));
+    }
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| {
+            "cognia-server is not bundled; build the desktop host before opening a terminal"
+                .to_string()
+        })
+}
+
+fn parse_session_id(id: &str) -> Result<Uuid, String> {
+    Uuid::parse_str(id).map_err(|_| format!("invalid terminal session id: {id}"))
+}
+
+fn parse_session(frame: TerminalFrame) -> Result<HostSessionInfo, String> {
+    serde_json::from_slice(&frame.payload)
+        .map_err(|error| format!("terminal session response is invalid: {error}"))
+}
+
+#[tauri::command]
+pub async fn terminal_spawn<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    req: SpawnRequest,
+    profile_id: Option<String>,
+    on_event: Channel<HostSeqEvent>,
+) -> Result<SpawnResult, String> {
+    let client = state.client(&app).await?;
+    let profile_id = profile_id
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "default".into());
+    let response = client
+        .request_json(
+            FrameKind::Spawn,
+            Uuid::nil(),
+            &serde_json::json!({ "profileId": profile_id, "request": req }),
+        )
+        .await?;
+    let session = parse_session(response)?;
+    client.register_channel(&session.id, on_event);
+    client
+        .request_json(
+            FrameKind::Attach,
+            parse_session_id(&session.id)?,
+            &serde_json::json!({ "resumeAfter": 0 }),
+        )
+        .await?;
+    Ok(SpawnResult { session })
+}
+
+#[tauri::command]
+pub async fn ssh_terminal_spawn<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    req: SshSpawnRequest,
+    on_event: Channel<HostSeqEvent>,
+) -> Result<SshSpawnResult, String> {
+    let client = state.client(&app).await?;
+    let response = client
+        .request_json(
+            FrameKind::Spawn,
+            Uuid::nil(),
+            &serde_json::json!({
+                "profileId": req.profile_id,
+                "sshRequest": req,
+            }),
+        )
+        .await?;
+    let session = parse_session(response)?;
+    let host_key_status = session
+        .ssh_host_key_status
+        .clone()
+        .ok_or_else(|| "terminal host omitted the SSH host-key status".to_string())?;
+    let host_key_fingerprint = session
+        .ssh_host_key_fingerprint
+        .clone()
+        .ok_or_else(|| "terminal host omitted the SSH host-key fingerprint".to_string())?;
+    client.register_channel(&session.id, on_event);
+    client
+        .request_json(
+            FrameKind::Attach,
+            parse_session_id(&session.id)?,
+            &serde_json::json!({ "resumeAfter": 0 }),
+        )
+        .await?;
+    Ok(SshSpawnResult {
+        session,
+        host_key_status,
+        host_key_fingerprint,
+    })
+}
+
+#[tauri::command]
+pub async fn terminal_reattach<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    id: String,
+    on_event: Channel<HostSeqEvent>,
+    resume_from: u64,
+) -> Result<HostSessionInfo, String> {
+    let client = state.client(&app).await?;
+    client.register_channel(&id, on_event);
+    let response = client
+        .request_json(
+            FrameKind::Attach,
+            parse_session_id(&id)?,
+            &serde_json::json!({ "resumeAfter": resume_from }),
+        )
+        .await?;
+    parse_session(response)
+}
+
+#[tauri::command]
+pub async fn terminal_write<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    id: String,
+    data: Vec<u8>,
+) -> Result<(), String> {
+    let client = state.client(&app).await?;
+    let session_id = parse_session_id(&id)?;
+    for chunk in data.chunks(MAX_FRAME_PAYLOAD) {
+        client
+            .request(FrameKind::Stdin, session_id, chunk.to_vec())
+            .await?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_terminal_write<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    id: String,
+    data: Vec<u8>,
+) -> Result<(), String> {
+    terminal_write(app, state, id, data).await
+}
+
+#[tauri::command]
+pub async fn terminal_resize<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    id: String,
+    rows: u16,
+    cols: u16,
+) -> Result<(), String> {
+    let client = state.client(&app).await?;
+    client
+        .request_json(
+            FrameKind::Resize,
+            parse_session_id(&id)?,
+            &serde_json::json!({ "rows": rows.max(1), "cols": cols.max(1) }),
+        )
+        .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_terminal_resize<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    id: String,
+    rows: u16,
+    cols: u16,
+) -> Result<(), String> {
+    terminal_resize(app, state, id, rows, cols).await
+}
+
+#[tauri::command]
+pub async fn terminal_detach<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    id: String,
+) -> Result<(), String> {
+    let client = state.client(&app).await?;
+    client
+        .request(FrameKind::Detach, parse_session_id(&id)?, Vec::new())
+        .await?;
+    client.remove_channel(&id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn terminal_take_control<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    id: String,
+) -> Result<(), String> {
+    state
+        .client(&app)
+        .await?
+        .request(FrameKind::TakeControl, parse_session_id(&id)?, Vec::new())
+        .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn terminal_release_control<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    id: String,
+) -> Result<(), String> {
+    state
+        .client(&app)
+        .await?
+        .request(
+            FrameKind::ReleaseControl,
+            parse_session_id(&id)?,
+            Vec::new(),
+        )
+        .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn terminal_kill<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    id: String,
+) -> Result<(), String> {
+    let client = state.client(&app).await?;
+    client
+        .request(FrameKind::Kill, parse_session_id(&id)?, Vec::new())
+        .await?;
+    client.remove_channel(&id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_terminal_kill<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    id: String,
+) -> Result<(), String> {
+    terminal_kill(app, state, id).await
+}
+
+async fn list_sessions<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &TerminalHostBridgeState,
+) -> Result<Vec<HostSessionInfo>, String> {
+    let response = state
+        .client(app)
+        .await?
+        .request(FrameKind::List, Uuid::nil(), Vec::new())
+        .await?;
+    let value: serde_json::Value = serde_json::from_slice(&response.payload)
+        .map_err(|error| format!("terminal host snapshot is invalid: {error}"))?;
+    serde_json::from_value(value.get("sessions").cloned().unwrap_or_default())
+        .map_err(|error| format!("terminal session list is invalid: {error}"))
+}
+
+#[tauri::command]
+pub async fn terminal_list_all<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+) -> Result<Vec<HostSessionInfo>, String> {
+    list_sessions(&app, &state).await
+}
+
+#[tauri::command]
+pub async fn terminal_list_for_project<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    project_id: String,
+) -> Result<Vec<HostSessionInfo>, String> {
+    Ok(list_sessions(&app, &state)
+        .await?
+        .into_iter()
+        .filter(|session| session.project_id.as_deref() == Some(&project_id))
+        .collect())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalHostStatus {
+    running: bool,
+    endpoint: String,
+    settings: TerminalHostSettings,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    descriptor: Option<TerminalHostDescriptor>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum TerminalHostServiceAction {
+    Status,
+    Provision {
+        #[serde(rename = "deviceId")]
+        device_id: String,
+        #[serde(rename = "devicePublicKey")]
+        device_public_key: String,
+        #[serde(rename = "lanUrl")]
+        lan_url: Option<String>,
+        #[serde(rename = "signalingRoomId")]
+        signaling_room_id: Option<String>,
+    },
+    Configure {
+        settings: TerminalHostSettings,
+    },
+    SyncProfiles {
+        profiles: Vec<TerminalHostProfile>,
+        #[serde(default)]
+        ssh_profiles: Vec<TerminalHostSshProfile>,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalHostProfile {
+    profile_id: String,
+    request: SpawnRequest,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalHostSshProfile {
+    profile_id: String,
+    request: SshSpawnRequest,
+}
+
+async fn terminal_host_blocking<T, F>(operation: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|error| format!("terminal host blocking task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn terminal_host_service<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    companion: State<'_, crate::companion_api::CompanionServerState>,
+    action: TerminalHostServiceAction,
+) -> Result<TerminalHostStatus, String> {
+    let endpoint = terminal_host_blocking(|| Ok(default_terminal_host_endpoint())).await?;
+    let client = state.client(&app).await?;
+    let mut settings = terminal_host_blocking(load_terminal_host_settings).await?;
+    let descriptor = match action {
+        TerminalHostServiceAction::Status => None,
+        TerminalHostServiceAction::Provision {
+            device_id,
+            device_public_key,
+            lan_url,
+            signaling_room_id,
+        } => {
+            let lan_url = lan_url.or_else(|| terminal_lan_url(&companion));
+            Some(
+                terminal_host_blocking(move || {
+                    provision_terminal_host_descriptor(
+                        &device_id,
+                        &device_public_key,
+                        lan_url,
+                        signaling_room_id,
+                    )
+                })
+                .await?,
+            )
+        }
+        TerminalHostServiceAction::Configure { settings: updated } => {
+            let config = updated.host_config()?;
+            client
+                .request_json(
+                    FrameKind::Hello,
+                    Uuid::nil(),
+                    &serde_json::json!({ "config": config }),
+                )
+                .await?;
+            let setup_endpoint = endpoint.clone();
+            let start_at_login = updated.start_at_login;
+            let binary_result = terminal_host_blocking(move || {
+                let binary = resolve_server_binary()?;
+                set_terminal_host_login_service(start_at_login, &binary, &setup_endpoint)?;
+                Ok(binary)
+            })
+            .await;
+            let binary = match binary_result {
+                Ok(binary) => binary,
+                Err(error) => {
+                    if let Ok(previous) = settings.host_config() {
+                        let _ = client
+                            .request_json(
+                                FrameKind::Hello,
+                                Uuid::nil(),
+                                &serde_json::json!({ "config": previous }),
+                            )
+                            .await;
+                    }
+                    return Err(error);
+                }
+            };
+            let persisted = updated.clone();
+            if let Err(error) =
+                terminal_host_blocking(move || save_terminal_host_settings(&persisted)).await
+            {
+                if let Ok(previous) = settings.host_config() {
+                    let _ = client
+                        .request_json(
+                            FrameKind::Hello,
+                            Uuid::nil(),
+                            &serde_json::json!({ "config": previous }),
+                        )
+                        .await;
+                }
+                let rollback_start_at_login = settings.start_at_login;
+                let rollback_endpoint = endpoint.clone();
+                let _ = terminal_host_blocking(move || {
+                    set_terminal_host_login_service(
+                        rollback_start_at_login,
+                        &binary,
+                        &rollback_endpoint,
+                    )
+                })
+                .await;
+                return Err(error);
+            }
+            settings = updated;
+            None
+        }
+        TerminalHostServiceAction::SyncProfiles {
+            profiles,
+            ssh_profiles,
+        } => {
+            client
+                .request_json(
+                    FrameKind::Hello,
+                    Uuid::nil(),
+                    &serde_json::json!({
+                        "profiles": profiles,
+                        "sshProfiles": ssh_profiles,
+                    }),
+                )
+                .await?;
+            None
+        }
+    };
+    Ok(TerminalHostStatus {
+        running: true,
+        endpoint,
+        settings,
+        descriptor,
+    })
+}
+
+fn terminal_lan_url(state: &crate::companion_api::CompanionServerState) -> Option<String> {
+    if state.bind_mode() != Some(crate::companion_api::BindMode::Lan) {
+        return None;
+    }
+    let port = state.bound_port()?;
+    let host = crate::companion_api::commands::detect_lan_ip()?;
+    let host = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host
+    };
+    Some(format!("wss://{host}:{port}/ws/terminal"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn timed_out_requests_are_removed_from_the_pending_map() {
+        let (writer, _reader) = mpsc::channel(1);
+        let client = BridgeClient {
+            writer,
+            pending: Mutex::new(HashMap::new()),
+            channels: Mutex::new(HashMap::new()),
+            next_sequence: AtomicU64::new(1),
+            closed: AtomicBool::new(false),
+        };
+        let (sender, receiver) = oneshot::channel();
+        client.pending.lock().insert(7, sender);
+
+        let error = client
+            .await_response(7, receiver, Duration::ZERO)
+            .await
+            .unwrap_err();
+
+        assert_eq!(error, "terminal host request timed out");
+        assert!(!client.pending.lock().contains_key(&7));
+    }
+
+    #[tokio::test]
+    async fn remote_stream_requests_time_out_when_the_host_never_responds() {
+        let (client, _server) = tokio::io::duplex(4096);
+        let mut stream: BoxedTerminalHostIo = Box::pin(client);
+
+        let error = request_over_host_stream_with_timeout(
+            &mut stream,
+            TerminalFrame::command(FrameKind::List, Uuid::nil(), 7, Vec::new()),
+            Duration::from_millis(10),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error, "terminal host request timed out");
+    }
+
+    #[test]
+    fn response_kinds_do_not_consume_stream_events_with_same_sequence() {
+        assert!(is_response_kind(FrameKind::Ack));
+        assert!(is_response_kind(FrameKind::SessionSnapshot));
+        assert!(!is_response_kind(FrameKind::Stdout));
+        assert!(!is_response_kind(FrameKind::Integration));
+    }
+
+    #[test]
+    fn invalid_session_ids_are_rejected_before_native_io() {
+        assert!(parse_session_id("not-a-uuid").is_err());
+        assert!(parse_session_id(&Uuid::new_v4().to_string()).is_ok());
+    }
+
+    #[test]
+    fn terminal_errors_keep_machine_readable_codes() {
+        assert_eq!(
+            error_code_name(TerminalErrorCode::NotController),
+            "not_controller"
+        );
+        assert_eq!(
+            error_code_name(TerminalErrorCode::ResourceLimit),
+            "resource_limit"
+        );
+    }
+
+    #[test]
+    fn service_actions_decode_without_a_protocol_version() {
+        let action: TerminalHostServiceAction =
+            serde_json::from_value(serde_json::json!({ "kind": "status" })).unwrap();
+        assert!(matches!(action, TerminalHostServiceAction::Status));
+        let provision: TerminalHostServiceAction = serde_json::from_value(serde_json::json!({
+            "kind": "provision",
+            "deviceId": "device-a",
+            "devicePublicKey": "public-a"
+        }))
+        .unwrap();
+        assert!(matches!(
+            provision,
+            TerminalHostServiceAction::Provision { .. }
+        ));
+        let configure: TerminalHostServiceAction = serde_json::from_value(serde_json::json!({
+            "kind": "configure",
+            "settings": {
+                "allowRemoteAccess": true,
+                "startAtLogin": true,
+                "diagnostics": false,
+                "maxSessions": 32,
+                "maxRemoteSessionsPerDevice": 8,
+                "replayBytesPerSession": 8388608,
+                "totalReplayBytes": 134217728
+            }
+        }))
+        .unwrap();
+        assert!(matches!(
+            configure,
+            TerminalHostServiceAction::Configure { .. }
+        ));
+    }
+
+    #[test]
+    fn terminal_lan_url_is_absent_while_companion_is_stopped() {
+        let state = crate::companion_api::CompanionServerState::new();
+        assert_eq!(terminal_lan_url(&state), None);
+    }
+}

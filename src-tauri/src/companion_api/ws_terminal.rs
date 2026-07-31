@@ -1,437 +1,290 @@
-//! Companion WebSocket bridge for the integrated terminal —
-//! `GET /ws/v1/terminal`.
+//! Authenticated LAN adapter for the durable terminal host.
 //!
-//! # Wire protocol (v2)
-//!
-//! 1. Client opens
-//!    `wss://<host>/ws/v1/terminal?token=<jwt>&spawn=1&shell=…&rows=…&cols=…`.
-//!    The `require_device_jwt` middleware verifies the JWT and injects
-//!    [`super::middleware::DeviceContext`] before the handler runs.
-//! 2. Server allocates a `PtySession` via
-//!    [`crate::terminal::session::spawn_session_with_sink`], marks
-//!    `origin = Remote`, registers it in the process-wide
-//!    [`WsTerminalRegistry`] under the device id, and replies with a
-//!    single text frame:
-//!    `{"kind":"ready","sessionId":"<uuid>","shell":"<resolved>"}`.
-//! 3. Steady state:
-//!    * **Binary** frames Server→Client = PTY stdout (raw bytes).
-//!    * **Binary** frames Client→Server = PTY stdin.
-//!    * **Text** frames carry control envelopes (each gains a `seq` for
-//!      Wave 2 reconnect):
-//!      - `{"kind":"integration","event":…,"seq":<u64>}` from OSC 633.
-//!      - `{"kind":"exit","code":…,"seq":<u64>}` once on exit.
-//!      - `{"kind":"resize","rows":…,"cols":…}` (client→server).
-//!      - `{"kind":"kill"}` (client→server).
-//!
-//! ## Wave 2 reconnect
-//!
-//! Clients that drop their socket can resume by re-opening
-//! `wss://…/ws/v1/terminal?token=<jwt>&sessionId=<id>&resumeFrom=<seq>`.
-//! The server looks the session up in [`WsTerminalRegistry`], confirms
-//! the requesting device matches the device that spawned it, replays
-//! every event with `seq > resumeFrom` from the in-Rust
-//! [`crate::terminal::ReplayBuffer`], then resumes live emission.
-//!
-//! Sessions are NOT dropped when the WS closes — instead the registry
-//! marks them detached. A background reaper drops sessions still
-//! detached after 5 minutes, matching the renderer-side reconnect
-//! budget in `lib/terminal/transport-ws.ts`.
+//! A paired client first obtains a short-lived, single-use, device-bound
+//! socket ticket through the authenticated Companion channel, then opens
+//! `GET /ws/terminal?ticket=…`. The WebSocket carries only canonical binary
+//! terminal frames; PTY/session ownership remains in `cognia-server
+//! desktop-host` and therefore survives this process or UI disconnecting.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Query, State,
+        Extension, Query, State,
     },
     http::StatusCode,
     response::{IntoResponse, Response},
+    Json,
 };
-use serde::Deserialize;
-use serde_json::json;
+use base64::Engine;
+use cognia_terminal::host::{ClientIdentity, HostSessionInfo};
+use cognia_terminal::host_wire::{read_frame, write_frame};
+use cognia_terminal::protocol::{
+    FrameKind, TerminalErrorCode, TerminalFrame, HEADER_LEN, MAX_FRAME_PAYLOAD,
+};
+use rand::{rngs::OsRng, RngCore};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use tokio::sync::mpsc;
+use uuid::Uuid;
+use webrtc::data_channel::data_channel_message::DataChannelMessage;
+use webrtc::data_channel::RTCDataChannel;
 
 use super::{middleware::DeviceContext, SharedState};
-use crate::terminal::session::{
-    self, EventSink, PtySession, SessionOrigin, SpawnRequest, TerminalEvent,
-};
 
-// ── Process-wide registry for resumable WS-spawned sessions ──────────
+const TICKET_TTL: Duration = Duration::from_secs(60);
+const MAX_TICKETS: usize = 256;
+const MAX_WS_FRAME_BYTES: usize = HEADER_LEN + MAX_FRAME_PAYLOAD;
+const TERMINAL_DATACHANNEL_QUEUE_CAPACITY: usize = 128;
 
-/// Window during which a detached session is kept alive waiting for a
-/// reconnect. Matches the renderer-side `RECONNECT_BUDGET_MS` in
-/// `lib/terminal/transport-ws.ts`.
-const RESUME_TTL: Duration = Duration::from_secs(5 * 60);
-
-/// Idle WS read timeout. Generous so mobile screen-off doesn't tear
-/// the consumer down. Smaller than `RESUME_TTL` on purpose — the
-/// registry GC catches the abandoned session after the consumer drops.
-const IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
-
-/// Depth of the per-consumer fan-out channel. Bounded (was unbounded) so a fast
-/// producer (`cat bigfile`) feeding a slow WAN consumer can't grow the queue
-/// without limit and OOM the desktop. When full, the PTY reader OS thread blocks
-/// on `blocking_send` — natural backpressure that stalls the child instead of
-/// buffering unboundedly. Data is already durable in the 512 KiB ReplayBuffer
-/// (pushed before the sink runs), so nothing is lost. Each queued Data event is
-/// up to 64 KiB, so this bounds the channel to ~16 MiB worst case.
-const CONSUMER_CHANNEL_CAPACITY: usize = 256;
-
-pub struct WsTerminalRegistry {
-    inner: Mutex<HashMap<String, WsSessionEntry>>,
-}
-
-struct WsSessionEntry {
-    session: Arc<PtySession>,
+#[derive(Clone)]
+struct TicketBinding {
     device_id: String,
-    /// `true` while a WS consumer is currently attached. The registry
-    /// reaper only kills sessions whose consumer has been gone past
-    /// `RESUME_TTL`.
-    attached: Arc<AtomicBool>,
-    detached_at: Mutex<Option<Instant>>,
-    /// Sender into the in-process MPSC the WS handler drains. We keep
-    /// a clone on the entry so reconnects can swap the consumer end.
-    /// `None` means "no live consumer" — events still land in the
-    /// session's ReplayBuffer because the EventSink writes there first.
-    consumer: Mutex<Option<tokio::sync::mpsc::Sender<(u64, TerminalEvent)>>>,
+    expires_at: Instant,
 }
 
-impl WsTerminalRegistry {
-    fn new() -> Self {
-        Self {
-            inner: Mutex::new(HashMap::new()),
-        }
-    }
+#[derive(Default)]
+struct TerminalTicketStore {
+    inner: Mutex<HashMap<[u8; 32], TicketBinding>>,
+}
 
-    fn insert(&self, entry: WsSessionEntry) {
-        let id = entry.session.id.clone();
-        let mut guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        guard.insert(id, entry);
-    }
-
-    fn lookup_for_device(&self, session_id: &str, device_id: &str) -> Option<Arc<PtySession>> {
-        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        let entry = guard.get(session_id)?;
-        if entry.device_id != device_id {
-            return None;
-        }
-        Some(Arc::clone(&entry.session))
-    }
-
-    fn swap_consumer(
-        &self,
-        session_id: &str,
-        device_id: &str,
-        consumer: tokio::sync::mpsc::Sender<(u64, TerminalEvent)>,
-    ) -> bool {
-        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(entry) = guard.get(session_id) else {
-            return false;
-        };
-        if entry.device_id != device_id {
-            return false;
-        }
-        entry.attached.store(true, Ordering::SeqCst);
-        *entry.detached_at.lock().unwrap_or_else(|p| p.into_inner()) = None;
-        *entry.consumer.lock().unwrap_or_else(|p| p.into_inner()) = Some(consumer);
-        true
-    }
-
-    fn detach_consumer(&self, session_id: &str) {
-        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(entry) = guard.get(session_id) {
-            entry.attached.store(false, Ordering::SeqCst);
-            *entry.detached_at.lock().unwrap_or_else(|p| p.into_inner()) = Some(Instant::now());
-            *entry.consumer.lock().unwrap_or_else(|p| p.into_inner()) = None;
-        }
-    }
-
-    fn remove(&self, session_id: &str) -> Option<WsSessionEntry> {
-        let mut guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        guard.remove(session_id)
-    }
-
-    /// Snapshot the live/resumable sessions owned by one authenticated
-    /// device. Device scoping mirrors reconnect lookup and prevents a paired
-    /// client from enumerating another client's shell metadata.
-    pub(crate) fn list_for_device(
+impl TerminalTicketStore {
+    fn issue(
         &self,
         device_id: &str,
-    ) -> Vec<crate::terminal::TerminalSessionInfo> {
-        self.inner
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .values()
-            .filter(|entry| entry.device_id == device_id)
-            .map(|entry| entry.session.info())
-            .collect()
-    }
-
-    /// Device-scoped project projection over the same reconnect registry.
-    pub(crate) fn list_for_device_project(
-        &self,
-        device_id: &str,
-        project_id: &str,
-    ) -> Vec<crate::terminal::TerminalSessionInfo> {
-        self.inner
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .values()
-            .filter(|entry| {
-                entry.device_id == device_id
-                    && entry.session.project_id.as_deref() == Some(project_id)
-            })
-            .map(|entry| entry.session.info())
-            .collect()
-    }
-
-    /// Kill and forget a session only when it belongs to the caller. Missing
-    /// and foreign ids are both an idempotent no-op so ownership is not leaked.
-    pub(crate) fn kill_for_device(&self, session_id: &str, device_id: &str) {
-        let entry = {
-            let mut guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-            if guard
-                .get(session_id)
-                .is_some_and(|entry| entry.device_id == device_id)
-            {
-                guard.remove(session_id)
-            } else {
-                None
-            }
-        };
-        if let Some(entry) = entry {
-            let _ = entry.session.kill();
+        remote_access_enabled: bool,
+    ) -> Result<TerminalSocketTicket, String> {
+        if !remote_access_enabled {
+            return Err("remote terminal access is disabled on this host".into());
         }
+        if !device_allowed_for_terminal(device_id) {
+            return Err("remote terminal permission is required".into());
+        }
+        let now = Instant::now();
+        let mut inner = self.inner.lock().unwrap_or_else(|error| error.into_inner());
+        inner.retain(|_, binding| binding.expires_at > now);
+        if inner.len() >= MAX_TICKETS {
+            return Err("too many pending terminal socket tickets".into());
+        }
+        let mut bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut bytes);
+        let ticket = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+        inner.insert(
+            ticket_digest(&ticket),
+            TicketBinding {
+                device_id: device_id.to_string(),
+                expires_at: now + TICKET_TTL,
+            },
+        );
+        Ok(TerminalSocketTicket {
+            ticket,
+            expires_at: chrono::Utc::now()
+                .timestamp_millis()
+                .saturating_add(TICKET_TTL.as_millis() as i64),
+        })
     }
 
-    /// Reaper sweep: drop sessions whose consumer has been gone for
-    /// longer than `RESUME_TTL`. Called by the background tokio task.
-    fn reap(&self, now: Instant) {
-        let mut guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        guard.retain(|_, entry| {
-            if entry.attached.load(Ordering::SeqCst) {
-                return true;
-            }
-            let detached = entry
-                .detached_at
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .clone();
-            match detached {
-                Some(t) if now.duration_since(t) > RESUME_TTL => {
-                    let _ = entry.session.kill();
-                    false
-                }
-                _ => true,
-            }
-        });
-    }
-
-    #[cfg(test)]
-    pub fn len(&self) -> usize {
-        self.inner.lock().unwrap_or_else(|p| p.into_inner()).len()
+    fn consume(&self, ticket: &str, remote_access_enabled: bool) -> Result<TicketBinding, String> {
+        if !remote_access_enabled {
+            return Err("remote terminal access is disabled on this host".into());
+        }
+        if ticket.len() > 256 {
+            return Err("terminal socket ticket is invalid".into());
+        }
+        let now = Instant::now();
+        let mut inner = self.inner.lock().unwrap_or_else(|error| error.into_inner());
+        let binding = inner
+            .remove(&ticket_digest(ticket))
+            .ok_or_else(|| "terminal socket ticket is invalid or already used".to_string())?;
+        if binding.expires_at <= now {
+            return Err("terminal socket ticket expired".into());
+        }
+        if !device_allowed_for_terminal(&binding.device_id) {
+            return Err("remote terminal permission was revoked".into());
+        }
+        Ok(binding)
     }
 }
 
-pub static WS_TERMINAL_REGISTRY: once_cell::sync::Lazy<Arc<WsTerminalRegistry>> =
-    once_cell::sync::Lazy::new(|| {
-        let registry = Arc::new(WsTerminalRegistry::new());
-        // Spawn a single background reaper that ticks every 30 s.
-        // tokio::spawn requires a runtime — fine inside the companion
-        // server, which runs under tokio. For test contexts without a
-        // runtime the spawn fails silently, which is acceptable: tests
-        // exercise the registry directly without time-based reaping.
-        if tokio::runtime::Handle::try_current().is_ok() {
-            let reg = Arc::clone(&registry);
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(Duration::from_secs(30));
-                loop {
-                    interval.tick().await;
-                    reg.reap(Instant::now());
-                }
-            });
-        }
-        registry
-    });
+static TERMINAL_TICKETS: once_cell::sync::Lazy<TerminalTicketStore> =
+    once_cell::sync::Lazy::new(TerminalTicketStore::default);
 
-pub fn ws_terminal_registry() -> Arc<WsTerminalRegistry> {
-    Arc::clone(&WS_TERMINAL_REGISTRY)
+fn ticket_digest(ticket: &str) -> [u8; 32] {
+    Sha256::digest(ticket.as_bytes()).into()
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalSocketTicket {
+    ticket: String,
+    expires_at: i64,
+}
+
+/// Authenticated endpoint used before the unauthenticated WebSocket upgrade.
+pub async fn issue_ticket_handler(
+    Extension(context): Extension<DeviceContext>,
+) -> impl IntoResponse {
+    let remote_access_enabled =
+        crate::terminal_host_service::terminal_remote_access_enabled().await;
+    match TERMINAL_TICKETS.issue(&context.device_id, remote_access_enabled) {
+        Ok(ticket) => (StatusCode::OK, Json(serde_json::json!(ticket))),
+        Err(message) => (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "code": "permission_denied",
+                "message": message,
+            })),
+        ),
+    }
 }
 
 #[derive(Debug, Deserialize)]
-pub struct WsTerminalParams {
-    /// Set to `"1"` for a fresh spawn. When omitted, `session_id` +
-    /// `resume_from` must identify an existing resumable session.
-    #[serde(default)]
-    pub spawn: Option<String>,
-    pub shell: Option<String>,
-    pub rows: Option<u16>,
-    pub cols: Option<u16>,
-    pub cwd: Option<String>,
-    #[serde(rename = "projectId")]
-    pub project_id: Option<String>,
-    #[serde(rename = "extensionId")]
-    pub extension_id: Option<String>,
-    #[serde(rename = "shellIntegration")]
-    pub shell_integration: Option<String>,
-    /// Wave 2 — reconnect target. When set, server looks up the
-    /// session by id in `WsTerminalRegistry` and resumes; the requesting
-    /// device JWT must match the device that spawned the session.
-    #[serde(rename = "sessionId")]
-    pub session_id: Option<String>,
-    /// Wave 2 — sequence number the client last observed. The server
-    /// replays every event with `seq > resume_from` before resuming
-    /// live emission.
-    #[serde(rename = "resumeFrom")]
-    pub resume_from: Option<u64>,
+pub struct TerminalSocketQuery {
+    ticket: String,
 }
 
-/// Axum handler for `GET /ws/v1/terminal`. The route is gated by
-/// `require_device_jwt`; we read the device id off request extensions
-/// before the upgrade consumes them.
-///
-/// # Capability gate
-///
-/// A valid device JWT only proves the device is *paired* (the chat-only
-/// baseline tier). Opening a remote PTY is strictly more powerful than the
-/// request/response `terminal_exec` RPC — it grants a persistent, interactive,
-/// stdin-streaming shell — so it requires the same elevated **remote-control**
-/// capability that `terminal_exec` is gated behind (see
-/// [`super::control_allow_list`] and `CONTROL_COMMANDS` in `rpc.rs`). Without
-/// this check, any device paired merely for chat could spawn an unsandboxed
-/// shell. The gate runs *before* the WS upgrade so an unauthorized device never
-/// reaches `handle_terminal_socket` (which covers both fresh spawns and the
-/// resume path in one place).
 pub async fn ws_terminal_handler(
     ws: WebSocketUpgrade,
-    Query(params): Query<WsTerminalParams>,
+    Query(query): Query<TerminalSocketQuery>,
     State(state): State<SharedState>,
-    request: axum::extract::Request,
 ) -> Response {
-    let device_id = request
-        .extensions()
-        .get::<DeviceContext>()
-        .map(|ctx| ctx.device_id.clone())
-        .unwrap_or_default();
-    if !device_allowed_for_terminal(&device_id) {
+    let remote_access_enabled =
+        crate::terminal_host_service::terminal_remote_access_enabled().await;
+    let binding = match TERMINAL_TICKETS.consume(&query.ticket, remote_access_enabled) {
+        Ok(binding) => binding,
+        Err(message) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "code": "unauthorized",
+                    "message": message,
+                })),
+            )
+                .into_response();
+        }
+    };
+    ws.max_message_size(MAX_WS_FRAME_BYTES)
+        .max_frame_size(MAX_WS_FRAME_BYTES)
+        .on_upgrade(move |socket| proxy_terminal_socket(socket, binding.device_id, state))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyTerminalQuery {
+    #[serde(default)]
+    spawn: Option<String>,
+    session_id: Option<String>,
+    #[serde(default)]
+    resume_from: Option<u64>,
+}
+
+/// Compatibility adapter for the released `/ws/v1/terminal` protocol.
+/// Authentication remains the route's device-JWT middleware; after upgrade,
+/// frames are translated to the durable host protocol so the legacy client no
+/// longer owns an in-process PTY or a separate replay registry.
+pub async fn legacy_ws_terminal_handler(
+    ws: WebSocketUpgrade,
+    Query(query): Query<LegacyTerminalQuery>,
+    State(state): State<SharedState>,
+    Extension(context): Extension<DeviceContext>,
+) -> Response {
+    if !crate::terminal_host_service::terminal_remote_access_enabled().await
+        || !device_allowed_for_terminal(&context.device_id)
+    {
         return (
             StatusCode::FORBIDDEN,
-            "remote terminal requires the remote-control capability; enable it from the desktop paired-devices settings",
+            Json(serde_json::json!({
+                "code": "permission_denied",
+                "message": "remote terminal access is disabled or not granted",
+            })),
         )
             .into_response();
     }
-    // Bound inbound frame allocation (DoS guard). Terminal stdin frames are
-    // normally keystroke-sized; 4 MiB is generous enough for large pastes while
-    // capping a hostile peer that streams unbounded binary frames into the PTY.
-    // This route is intentionally outside `RequestBodyLimitLayer`, so the limit
-    // is set on the upgrade here.
-    const MAX_WS_FRAME_BYTES: usize = 4 * 1024 * 1024;
     ws.max_message_size(MAX_WS_FRAME_BYTES)
         .max_frame_size(MAX_WS_FRAME_BYTES)
-        .on_upgrade(move |socket| handle_terminal_socket(socket, params, device_id, state))
+        .on_upgrade(move |socket| {
+            proxy_legacy_terminal_socket(socket, query, context.device_id, state)
+        })
 }
 
-/// Whether `device_id` may open a remote terminal. Mirrors the `terminal_exec`
-/// gate in `rpc::dispatch`: the device must hold the remote-control capability.
-/// An empty/absent device id (defensive — middleware should always populate it)
-/// is never allowed.
-fn device_allowed_for_terminal(device_id: &str) -> bool {
-    !device_id.is_empty() && super::control_allow_list::global().is_allowed(device_id)
-}
-
-async fn handle_terminal_socket(
+async fn proxy_legacy_terminal_socket(
     mut socket: WebSocket,
-    params: WsTerminalParams,
+    query: LegacyTerminalQuery,
     device_id: String,
-    _state: SharedState,
+    state: SharedState,
 ) {
-    let registry = ws_terminal_registry();
-    let is_spawn = params.spawn.as_deref() == Some("1");
-    let resume_target = params.session_id.clone();
-
-    let (session, session_id, resolved_shell): (Arc<PtySession>, String, String);
-    let (consumer_tx, mut rx) =
-        tokio::sync::mpsc::channel::<(u64, TerminalEvent)>(CONSUMER_CHANNEL_CAPACITY);
-
-    if is_spawn {
-        let req = match build_spawn_request(&params) {
-            Ok(req) => req,
-            Err(reason) => {
-                send_error_and_close(&mut socket, &reason).await;
-                return;
-            }
-        };
-        let resolved = req.shell.clone();
-        let script_dir = resolve_script_dir();
-
-        let consumer_for_sink = consumer_tx.clone();
-        let sink: EventSink = Arc::new(move |seq, event| {
-            // Runs on the PTY reader/waiter OS threads (no tokio runtime), so a
-            // blocking send is safe and gives backpressure when the consumer is
-            // slow. An `Err` means the receiver was dropped (consumer gone) —
-            // ignore it; the event is already durable in the ReplayBuffer.
-            let _ = consumer_for_sink.blocking_send((seq, event));
-        });
-
-        // Remote sessions fan out through the mpsc sink above; the desktop
-        // Tauri Channel slot stays detached (the WS handler owns reconnect
-        // via its own registry consumer-swap).
-        let path = build_remote_cli_path_injection();
-        let new_session = match session::spawn_session_with_sink(
-            req,
-            &script_dir,
-            &path,
-            sink,
-            session::detached_desk_channel(),
-        ) {
-            Ok(s) => s,
-            Err(reason) => {
-                send_error_and_close(&mut socket, &reason).await;
-                return;
-            }
-        };
-        let id = new_session.id.clone();
-        let arc_session = Arc::new(new_session);
-
-        let entry = WsSessionEntry {
-            session: Arc::clone(&arc_session),
-            device_id: device_id.clone(),
-            attached: Arc::new(AtomicBool::new(true)),
-            detached_at: Mutex::new(None),
-            consumer: Mutex::new(Some(consumer_tx)),
-        };
-        registry.insert(entry);
-
-        session = arc_session;
-        session_id = id;
-        resolved_shell = resolved;
-    } else if let Some(id) = resume_target.clone() {
-        let Some(existing) = registry.lookup_for_device(&id, &device_id) else {
-            send_error_and_close(&mut socket, "session not found or not owned by this device")
-                .await;
-            return;
-        };
-        if !registry.swap_consumer(&id, &device_id, consumer_tx.clone()) {
-            send_error_and_close(&mut socket, "session is no longer resumable").await;
+    let identity = ClientIdentity::remote(
+        format!("legacy-companion:{device_id}"),
+        device_id.clone(),
+        true,
+    );
+    let mut host_stream = match crate::terminal_host_bridge::connect_terminal_host_client(
+        state.app_handle.as_ref(),
+        identity,
+    )
+    .await
+    {
+        Ok(stream) => stream,
+        Err(message) => {
+            let _ = send_legacy_error(&mut socket, &message).await;
             return;
         }
-        session = existing;
-        session_id = id;
-        resolved_shell = session.shell.clone();
+    };
+    let mut sequence = 1u64;
+    let initial = if query.spawn.as_deref() == Some("1") {
+        TerminalFrame::command(
+            FrameKind::Spawn,
+            Uuid::nil(),
+            sequence,
+            serde_json::to_vec(&serde_json::json!({ "profileId": "default" })).unwrap_or_default(),
+        )
+    } else if let Some(session_id) = query.session_id.as_deref() {
+        let Ok(session_id) = Uuid::parse_str(session_id) else {
+            let _ = send_legacy_error(&mut socket, "invalid terminal session id").await;
+            return;
+        };
+        TerminalFrame::command(
+            FrameKind::Attach,
+            session_id,
+            sequence,
+            serde_json::to_vec(&serde_json::json!({
+                "resumeAfter": query.resume_from.unwrap_or(0),
+            }))
+            .unwrap_or_default(),
+        )
     } else {
-        send_error_and_close(&mut socket, "missing spawn=1 or sessionId").await;
+        let _ = send_legacy_error(&mut socket, "missing spawn=1 or sessionId").await;
         return;
-    }
-
-    // Ready handshake. Clients block on this frame in
-    // `lib/terminal/transport-ws.ts::waitForReady`.
-    let ready = json!({
+    };
+    let snapshot = match legacy_host_request(&mut host_stream, initial).await {
+        Ok(frame) => frame,
+        Err(message) => {
+            let _ = send_legacy_error(&mut socket, &message).await;
+            return;
+        }
+    };
+    let session: HostSessionInfo = match serde_json::from_slice(&snapshot.payload) {
+        Ok(session) => session,
+        Err(error) => {
+            let _ =
+                send_legacy_error(&mut socket, &format!("invalid host snapshot: {error}")).await;
+            return;
+        }
+    };
+    let session_id = match Uuid::parse_str(&session.id) {
+        Ok(id) => id,
+        Err(_) => {
+            let _ = send_legacy_error(&mut socket, "invalid host session id").await;
+            return;
+        }
+    };
+    let ready = serde_json::json!({
         "kind": "ready",
-        "sessionId": session_id,
-        "shell": resolved_shell,
+        "sessionId": session.id,
+        "shell": session.shell,
         "deviceId": device_id,
     });
     if socket
@@ -439,259 +292,441 @@ async fn handle_terminal_socket(
         .await
         .is_err()
     {
-        registry.detach_consumer(&session_id);
         return;
     }
 
-    // Replay every event the client missed (resume only — fresh
-    // spawns have an empty replay buffer at this point).
-    if !is_spawn {
-        let resume_from = params.resume_from.unwrap_or(0);
-        let replay = session.replay();
-        let last = replay.last_seq();
-        if resume_from > last {
-            log::warn!(
-                "ws_terminal resume_from={} > last_seq={} for session={}; client ahead of server",
-                resume_from,
-                last,
-                session_id
-            );
-        } else {
-            for (seq, event) in replay.since(resume_from) {
-                if emit_event(&mut socket, seq, &event).await.is_err() {
-                    registry.detach_consumer(&session_id);
-                    return;
+    let (mut host_reader, mut host_writer) = tokio::io::split(host_stream);
+    let mut authorization_check = tokio::time::interval(Duration::from_secs(1));
+    authorization_check.tick().await;
+    loop {
+        tokio::select! {
+            _ = authorization_check.tick() => {
+                if !terminal_remote_client_authorized(&device_id).await {
+                    let _ = send_legacy_error(&mut socket, "remote terminal permission was revoked").await;
+                    break;
+                }
+            }
+            frame = read_frame(&mut host_reader) => {
+                match frame {
+                    Ok(Some(frame)) => {
+                        if forward_legacy_host_frame(&mut socket, frame).await.is_err() {
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        let _ = send_legacy_error(&mut socket, &error).await;
+                        break;
+                    }
+                }
+            }
+            incoming = socket.recv() => {
+                let Some(Ok(message)) = incoming else { break; };
+                let command = match message {
+                    Message::Binary(bytes) => Some((FrameKind::Stdin, bytes.to_vec())),
+                    Message::Text(text) => legacy_control_command(text.as_str()),
+                    Message::Ping(bytes) => {
+                        if socket.send(Message::Pong(bytes)).await.is_err() { break; }
+                        None
+                    }
+                    Message::Pong(_) => None,
+                    Message::Close(_) => break,
+                };
+                if let Some((kind, payload)) = command {
+                    sequence = sequence.saturating_add(1);
+                    if write_frame(
+                        &mut host_writer,
+                        &TerminalFrame::command(kind, session_id, sequence, payload),
+                    )
+                    .await
+                    .is_err()
+                    {
+                        break;
+                    }
                 }
             }
         }
-        // Diagnostic: log replay buffer state after resuming.
-        if !replay.is_empty() {
-            log::debug!(
-                "ws_terminal replay buffer for session={}: {} events, {} bytes, last_seq={}",
-                session_id,
-                replay.len(),
-                replay.retained_bytes(),
-                last
-            );
+    }
+}
+
+async fn legacy_host_request(
+    stream: &mut crate::terminal_host_service::BoxedTerminalHostIo,
+    request: TerminalFrame,
+) -> Result<TerminalFrame, String> {
+    let sequence = request.sequence;
+    write_frame(stream, &request).await?;
+    loop {
+        let frame = read_frame(stream)
+            .await?
+            .ok_or_else(|| "terminal host closed before responding".to_string())?;
+        if frame.sequence != sequence {
+            continue;
+        }
+        if frame.kind == FrameKind::Error {
+            let value: serde_json::Value = serde_json::from_slice(&frame.payload)
+                .map_err(|error| format!("invalid terminal host error: {error}"))?;
+            return Err(value
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("terminal host rejected the request")
+                .to_string());
+        }
+        if matches!(frame.kind, FrameKind::SessionSnapshot) {
+            return Ok(frame);
         }
     }
+}
 
-    // Steady-state proxy: tokio::select! over PTY events vs WS frames.
-    let mut idle_deadline = tokio::time::Instant::now() + IDLE_TIMEOUT;
-    let mut exited = false;
+fn legacy_control_command(text: &str) -> Option<(FrameKind, Vec<u8>)> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    match value.get("kind")?.as_str()? {
+        "resize" => Some((
+            FrameKind::Resize,
+            serde_json::to_vec(&serde_json::json!({
+                "rows": value.get("rows").and_then(serde_json::Value::as_u64).unwrap_or(24).clamp(1, u16::MAX as u64),
+                "cols": value.get("cols").and_then(serde_json::Value::as_u64).unwrap_or(80).clamp(1, u16::MAX as u64),
+            }))
+            .ok()?,
+        )),
+        "kill" => Some((FrameKind::Kill, Vec::new())),
+        _ => None,
+    }
+}
+
+async fn forward_legacy_host_frame(socket: &mut WebSocket, frame: TerminalFrame) -> Result<(), ()> {
+    let message = match frame.kind {
+        FrameKind::Stdout => Some(Message::Binary(frame.payload.into())),
+        FrameKind::Integration => {
+            let event: serde_json::Value =
+                serde_json::from_slice(&frame.payload).map_err(|_| ())?;
+            Some(Message::Text(
+                serde_json::json!({ "kind": "integration", "event": event, "seq": frame.sequence })
+                    .to_string()
+                    .into(),
+            ))
+        }
+        FrameKind::Exit => {
+            let payload: serde_json::Value =
+                serde_json::from_slice(&frame.payload).map_err(|_| ())?;
+            Some(Message::Text(
+                serde_json::json!({
+                    "kind": "exit",
+                    "code": payload.get("code").cloned().unwrap_or(serde_json::Value::Null),
+                    "seq": frame.sequence,
+                })
+                .to_string()
+                .into(),
+            ))
+        }
+        FrameKind::Error => {
+            let payload: serde_json::Value =
+                serde_json::from_slice(&frame.payload).map_err(|_| ())?;
+            Some(Message::Text(
+                serde_json::json!({
+                    "kind": "error",
+                    "message": payload.get("message").and_then(serde_json::Value::as_str).unwrap_or("terminal host error"),
+                })
+                .to_string()
+                .into(),
+            ))
+        }
+        _ => None,
+    };
+    if let Some(message) = message {
+        socket.send(message).await.map_err(|_| ())?;
+    }
+    Ok(())
+}
+
+async fn send_legacy_error(socket: &mut WebSocket, message: &str) -> Result<(), ()> {
+    socket
+        .send(Message::Text(
+            serde_json::json!({ "kind": "error", "message": message })
+                .to_string()
+                .into(),
+        ))
+        .await
+        .map_err(|_| ())
+}
+
+fn device_allowed_for_terminal(device_id: &str) -> bool {
+    !device_id.is_empty() && super::control_allow_list::terminal_global().is_allowed(device_id)
+}
+
+async fn proxy_terminal_socket(mut socket: WebSocket, device_id: String, state: SharedState) {
+    let identity =
+        ClientIdentity::remote(format!("companion:{device_id}"), device_id.clone(), true);
+    let app = state.app_handle.as_ref();
+    let host_stream =
+        match crate::terminal_host_bridge::connect_terminal_host_client(app, identity).await {
+            Ok(stream) => stream,
+            Err(message) => {
+                let _ = send_protocol_error(&mut socket, TerminalErrorCode::HostOffline, &message)
+                    .await;
+                return;
+            }
+        };
+    let (mut host_reader, mut host_writer) = tokio::io::split(host_stream);
+    let mut authorization_check = tokio::time::interval(Duration::from_secs(1));
+    authorization_check.tick().await;
 
     loop {
         tokio::select! {
-            event = rx.recv() => {
-                match event {
-                    Some((seq, TerminalEvent::Data { bytes })) => {
-                        // Binary frames don't carry seq today — the
-                        // resume buffer covers gap detection. Wave 2.x
-                        // could add a tiny preamble if exact byte-level
-                        // reconcilation becomes important.
-                        let _ = seq; // seq used by replay only
+            _ = authorization_check.tick() => {
+                if !terminal_remote_client_authorized(&device_id).await {
+                    let _ = send_protocol_error(
+                        &mut socket,
+                        TerminalErrorCode::PermissionDenied,
+                        "remote terminal permission was revoked",
+                    ).await;
+                    break;
+                }
+            }
+            host_frame = read_frame(&mut host_reader) => {
+                match host_frame {
+                    Ok(Some(frame)) => {
+                        let bytes = match frame.encode() {
+                            Ok(bytes) => bytes,
+                            Err(error) => {
+                                let _ = send_protocol_error(
+                                    &mut socket,
+                                    TerminalErrorCode::InvalidRequest,
+                                    &error.to_string(),
+                                ).await;
+                                break;
+                            }
+                        };
                         if socket.send(Message::Binary(bytes.into())).await.is_err() {
                             break;
                         }
                     }
-                    Some((seq, TerminalEvent::Integration { event })) => {
-                        let payload = json!({ "kind": "integration", "event": event, "seq": seq });
-                        if socket.send(Message::Text(payload.to_string().into())).await.is_err() {
-                            break;
-                        }
-                    }
-                    Some((seq, TerminalEvent::Exit { code })) => {
-                        let payload = json!({ "kind": "exit", "code": code, "seq": seq });
-                        let _ = socket.send(Message::Text(payload.to_string().into())).await;
-                        exited = true;
-                        break;
-                    }
-                    None => {
-                        // Sink dropped without an exit — sometimes
-                        // happens when the child segfaults before the
-                        // waiter ran. Treat as null-code exit.
-                        let payload = json!({ "kind": "exit", "code": null });
-                        let _ = socket.send(Message::Text(payload.to_string().into())).await;
-                        exited = true;
+                    Ok(None) => break,
+                    Err(error) => {
+                        let _ = send_protocol_error(
+                            &mut socket,
+                            TerminalErrorCode::HostOffline,
+                            &error,
+                        ).await;
                         break;
                     }
                 }
             }
-            msg = socket.recv() => {
-                idle_deadline = tokio::time::Instant::now() + IDLE_TIMEOUT;
-                match msg {
+            incoming = socket.recv() => {
+                match incoming {
                     Some(Ok(Message::Binary(bytes))) => {
-                        if session.write(&bytes).is_err() {
-                            break;
-                        }
-                    }
-                    Some(Ok(Message::Text(text))) => {
-                        match handle_control_frame(text.as_str(), &session) {
-                            Ok(ControlAction::Continue) => {}
-                            Ok(ControlAction::Killed) => {
-                                // We leave the select loop immediately, so the
-                                // waiter-thread Exit event may never be drained
-                                // from `rx`. Acknowledge the explicit kill on
-                                // the wire before closing; clients use this as
-                                // the terminal lifecycle completion signal.
-                                let payload = json!({ "kind": "exit", "code": null });
-                                let _ = socket.send(Message::Text(payload.to_string().into())).await;
-                                exited = true;
+                        let frame = match TerminalFrame::decode(&bytes) {
+                            Ok(frame) => frame,
+                            Err(error) => {
+                                let _ = send_protocol_error(
+                                    &mut socket,
+                                    TerminalErrorCode::InvalidRequest,
+                                    &error.to_string(),
+                                ).await;
                                 break;
                             }
-                            Err(reason) => log::warn!("ws_terminal: bad control frame: {reason}"),
+                        };
+                        if write_frame(&mut host_writer, &frame).await.is_err() {
+                            break;
                         }
                     }
-                    Some(Ok(Message::Close(_))) | None => break,
-                    Some(Ok(Message::Ping(data))) => {
-                        let _ = socket.send(Message::Pong(data)).await;
+                    Some(Ok(Message::Ping(bytes))) => {
+                        if socket.send(Message::Pong(bytes)).await.is_err() {
+                            break;
+                        }
                     }
                     Some(Ok(Message::Pong(_))) => {}
-                    Some(Err(_)) => break,
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                    Some(Ok(Message::Text(_))) => {
+                        let _ = send_protocol_error(
+                            &mut socket,
+                            TerminalErrorCode::InvalidRequest,
+                            "terminal WebSocket accepts binary protocol frames only",
+                        ).await;
+                        break;
+                    }
                 }
             }
-            _ = tokio::time::sleep_until(idle_deadline) => {
-                break;
+        }
+    }
+}
+
+async fn terminal_remote_client_authorized(device_id: &str) -> bool {
+    crate::terminal_host_service::terminal_remote_access_enabled().await
+        && device_allowed_for_terminal(device_id)
+}
+
+enum TerminalDataChannelEvent {
+    Binary(Vec<u8>),
+    Text,
+    Closed,
+}
+
+/// Authenticated WAN adapter for the durable terminal host. Signaling binds
+/// the peer to `device_id`; the independent terminal grant remains mandatory
+/// and is rechecked while the attachment is live for immediate revocation.
+pub(crate) async fn proxy_terminal_datachannel(
+    channel: std::sync::Arc<RTCDataChannel>,
+    device_id: String,
+    state: SharedState,
+) {
+    if !terminal_remote_client_authorized(&device_id).await {
+        let _ = send_datachannel_protocol_error(
+            &channel,
+            TerminalErrorCode::PermissionDenied,
+            "remote terminal permission is required",
+        )
+        .await;
+        let _ = channel.close().await;
+        return;
+    }
+
+    let identity =
+        ClientIdentity::remote(format!("companion:{device_id}"), device_id.clone(), true);
+    let app = state.app_handle.as_ref();
+    let host_stream = match crate::terminal_host_bridge::connect_terminal_host_client(app, identity)
+        .await
+    {
+        Ok(stream) => stream,
+        Err(message) => {
+            let _ =
+                send_datachannel_protocol_error(&channel, TerminalErrorCode::HostOffline, &message)
+                    .await;
+            let _ = channel.close().await;
+            return;
+        }
+    };
+    let (mut host_reader, mut host_writer) = tokio::io::split(host_stream);
+    let (event_tx, mut event_rx) = mpsc::channel(TERMINAL_DATACHANNEL_QUEUE_CAPACITY);
+
+    let message_tx = event_tx.clone();
+    let overflow_channel = std::sync::Arc::clone(&channel);
+    channel.on_message(Box::new(move |message: DataChannelMessage| {
+        let message_tx = message_tx.clone();
+        let overflow_channel = std::sync::Arc::clone(&overflow_channel);
+        Box::pin(async move {
+            let event = if message.is_string {
+                TerminalDataChannelEvent::Text
+            } else {
+                TerminalDataChannelEvent::Binary(message.data.to_vec())
+            };
+            if message_tx.try_send(event).is_err() {
+                log::warn!("terminal data channel input queue overflow; closing attachment");
+                let _ = overflow_channel.close().await;
+            }
+        })
+    }));
+    channel.on_close(Box::new(move || {
+        let event_tx = event_tx.clone();
+        Box::pin(async move {
+            let _ = event_tx.try_send(TerminalDataChannelEvent::Closed);
+        })
+    }));
+
+    let mut authorization_check = tokio::time::interval(Duration::from_secs(1));
+    authorization_check.tick().await;
+    loop {
+        tokio::select! {
+            _ = authorization_check.tick() => {
+                if !terminal_remote_client_authorized(&device_id).await {
+                    let _ = send_datachannel_protocol_error(
+                        &channel,
+                        TerminalErrorCode::PermissionDenied,
+                        "remote terminal permission was revoked",
+                    ).await;
+                    break;
+                }
+            }
+            host_frame = read_frame(&mut host_reader) => {
+                match host_frame {
+                    Ok(Some(frame)) => match frame.encode() {
+                        Ok(bytes) => {
+                            if channel.send(&bytes::Bytes::from(bytes)).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(error) => {
+                            let _ = send_datachannel_protocol_error(
+                                &channel,
+                                TerminalErrorCode::InvalidRequest,
+                                &error.to_string(),
+                            ).await;
+                            break;
+                        }
+                    },
+                    Ok(None) => break,
+                    Err(error) => {
+                        let _ = send_datachannel_protocol_error(
+                            &channel,
+                            TerminalErrorCode::HostOffline,
+                            &error,
+                        ).await;
+                        break;
+                    }
+                }
+            }
+            incoming = event_rx.recv() => {
+                match incoming {
+                    Some(TerminalDataChannelEvent::Binary(bytes)) => {
+                        let frame = match TerminalFrame::decode(&bytes) {
+                            Ok(frame) => frame,
+                            Err(error) => {
+                                let _ = send_datachannel_protocol_error(
+                                    &channel,
+                                    TerminalErrorCode::InvalidRequest,
+                                    &error.to_string(),
+                                ).await;
+                                break;
+                            }
+                        };
+                        if write_frame(&mut host_writer, &frame).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(TerminalDataChannelEvent::Text) => {
+                        let _ = send_datachannel_protocol_error(
+                            &channel,
+                            TerminalErrorCode::InvalidRequest,
+                            "terminal data channel accepts binary protocol frames only",
+                        ).await;
+                        break;
+                    }
+                    Some(TerminalDataChannelEvent::Closed) | None => break,
+                }
             }
         }
     }
-
-    if exited {
-        // Session ran its course — remove from the registry.
-        registry.remove(&session_id);
-    } else {
-        // Consumer dropped; let the reaper decide whether to kill the
-        // session based on RESUME_TTL.
-        registry.detach_consumer(&session_id);
-    }
+    let _ = channel.close().await;
 }
 
-async fn emit_event(socket: &mut WebSocket, seq: u64, event: &TerminalEvent) -> Result<(), ()> {
-    match event {
-        TerminalEvent::Data { bytes } => {
-            let _ = seq;
-            socket
-                .send(Message::Binary(bytes.clone().into()))
-                .await
-                .map_err(|_| ())
-        }
-        TerminalEvent::Integration { event } => {
-            let payload = json!({ "kind": "integration", "event": event, "seq": seq });
-            socket
-                .send(Message::Text(payload.to_string().into()))
-                .await
-                .map_err(|_| ())
-        }
-        TerminalEvent::Exit { code } => {
-            let payload = json!({ "kind": "exit", "code": code, "seq": seq });
-            socket
-                .send(Message::Text(payload.to_string().into()))
-                .await
-                .map_err(|_| ())
-        }
-    }
+async fn send_datachannel_protocol_error(
+    channel: &RTCDataChannel,
+    code: TerminalErrorCode,
+    message: &str,
+) -> Result<(), String> {
+    let payload = serde_json::to_vec(&serde_json::json!({ "code": code, "message": message }))
+        .map_err(|error| error.to_string())?;
+    let frame = TerminalFrame::command(FrameKind::Error, Uuid::nil(), 0, payload);
+    let bytes = frame.encode().map_err(|error| error.to_string())?;
+    channel
+        .send(&bytes::Bytes::from(bytes))
+        .await
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
-fn build_spawn_request(params: &WsTerminalParams) -> Result<SpawnRequest, String> {
-    let shell = params
-        .shell
-        .clone()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| "shell parameter is required".to_string())?;
-    let rows = params.rows.unwrap_or(24);
-    let cols = params.cols.unwrap_or(80);
-    let cwd = params.cwd.clone().filter(|s| !s.is_empty());
-    // Disable OSC 633 on remote sessions — see module docs. We accept
-    // `shellIntegration` in the params so the wire format matches the
-    // local path, but ignore the value for v1: the integration scripts
-    // are local file paths that the remote shell can't resolve.
-    let enable_shell_integration = false;
-    Ok(SpawnRequest {
-        shell,
-        args: vec![],
-        cwd,
-        env: Default::default(),
-        rows,
-        cols,
-        project_id: params.project_id.clone(),
-        extension_id: params.extension_id.clone(),
-        enable_shell_integration,
-        // Pin UTF-8 even on remote sessions: the WS path streams raw PTY
-        // bytes that the client's xterm.js decodes as UTF-8, so a non-UTF-8
-        // server codepage would still corrupt output.
-        force_utf8: true,
-        origin: SessionOrigin::Remote,
-        skip_user_profile: false,
-        // Remote WS sessions are not wrapped in the local OS sandbox.
-        sandboxed: false,
-        sandbox_network: None,
-    })
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum ControlFrame {
-    Resize { rows: u16, cols: u16 },
-    Kill,
-}
-
-enum ControlAction {
-    Continue,
-    Killed,
-}
-
-fn handle_control_frame(text: &str, session: &PtySession) -> Result<ControlAction, String> {
-    let frame: ControlFrame = serde_json::from_str(text).map_err(|e| format!("parse: {e}"))?;
-    match frame {
-        ControlFrame::Resize { rows, cols } => {
-            session
-                .resize(rows, cols)
-                .map_err(|e| format!("resize: {e}"))?;
-            Ok(ControlAction::Continue)
-        }
-        ControlFrame::Kill => {
-            session.kill().map_err(|e| format!("kill: {e}"))?;
-            Ok(ControlAction::Killed)
-        }
-    }
-}
-
-/// Locate the bundled shell-integration script directory. Remote
-/// sessions don't use it today (integration is force-disabled) but
-/// `spawn_session_with_sink` still expects a path, so we provide the
-/// same fallback as `terminal::commands::resolve_script_dir`.
-fn resolve_script_dir() -> PathBuf {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest.join("resources").join("terminal")
-}
-
-/// PATH directories woven into a remote (WS) terminal child so `cognia` is
-/// runnable server-side. Mirrors `terminal::commands::build_cli_path_injection`
-/// but without an `AppHandle` (this handler runs inside the axum server):
-/// app-managed (downloaded) dirs + a dev/bundled workspace `target` dir,
-/// then `~/.cargo/bin` resolved from `HOME` / `USERPROFILE`.
-fn build_remote_cli_path_injection() -> session::PathInjection {
-    let mut prepend = crate::cli_bridge::detect::managed_dirs_snapshot();
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    if let Some(root) = manifest.parent() {
-        for profile in ["release", "debug"] {
-            let dir = root.join("target").join(profile);
-            if dir.join(session::cognia_bin_filename()).exists() {
-                prepend.push(dir);
-                break;
-            }
-        }
-    }
-    let mut append = Vec::new();
-    if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
-        append.push(PathBuf::from(home).join(".cargo").join("bin"));
-    }
-    session::PathInjection { prepend, append }
-}
-
-async fn send_error_and_close(socket: &mut WebSocket, message: &str) {
-    let frame = json!({ "kind": "error", "message": message });
-    let _ = socket.send(Message::Text(frame.to_string().into())).await;
+async fn send_protocol_error(
+    socket: &mut WebSocket,
+    code: TerminalErrorCode,
+    message: &str,
+) -> Result<(), String> {
+    let payload = serde_json::to_vec(&serde_json::json!({ "code": code, "message": message }))
+        .map_err(|error| error.to_string())?;
+    let frame = TerminalFrame::command(FrameKind::Error, Uuid::nil(), 0, payload);
+    let bytes = frame.encode().map_err(|error| error.to_string())?;
+    socket
+        .send(Message::Binary(bytes.into()))
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -699,210 +734,67 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ws_params_deserializes_query_string_with_camelcase_aliases() {
-        let json = serde_json::json!({
-            "spawn": "1",
-            "shell": "/bin/bash",
-            "rows": 24,
-            "cols": 80,
-            "projectId": "p1",
-            "extensionId": "ext.a",
-            "shellIntegration": "0",
-            "sessionId": "s-1",
-            "resumeFrom": 42,
-        });
-        let params: WsTerminalParams = serde_json::from_value(json).unwrap();
-        assert_eq!(params.spawn.as_deref(), Some("1"));
-        assert_eq!(params.shell.as_deref(), Some("/bin/bash"));
-        assert_eq!(params.rows, Some(24));
-        assert_eq!(params.cols, Some(80));
-        assert_eq!(params.project_id.as_deref(), Some("p1"));
-        assert_eq!(params.extension_id.as_deref(), Some("ext.a"));
-        assert_eq!(params.shell_integration.as_deref(), Some("0"));
-        assert_eq!(params.session_id.as_deref(), Some("s-1"));
-        assert_eq!(params.resume_from, Some(42));
+    fn terminal_tickets_are_single_use_and_device_bound() {
+        let _guard = super::super::control_allow_list::test_guard();
+        let device = format!("ticket-device-{}", Uuid::new_v4());
+        super::super::control_allow_list::terminal_global().allow(device.clone());
+        let store = TerminalTicketStore::default();
+        let ticket = store.issue(&device, true).unwrap();
+        let binding = store.consume(&ticket.ticket, true).unwrap();
+        assert_eq!(binding.device_id, device);
+        assert!(store.consume(&ticket.ticket, true).is_err());
+        super::super::control_allow_list::terminal_global().disallow(&device);
     }
 
     #[test]
-    fn ws_params_optional_fields_default_to_none() {
-        let params: WsTerminalParams = serde_json::from_value(serde_json::json!({})).unwrap();
-        assert!(params.spawn.is_none());
-        assert!(params.shell.is_none());
-        assert!(params.rows.is_none());
-        assert!(params.resume_from.is_none());
+    fn terminal_ticket_requires_the_independent_grant() {
+        let store = TerminalTicketStore::default();
+        assert!(store.issue("never-granted-terminal-device", true).is_err());
     }
 
     #[test]
-    fn build_spawn_request_rejects_missing_shell() {
-        let params = WsTerminalParams {
-            spawn: Some("1".into()),
-            shell: None,
-            rows: Some(24),
-            cols: Some(80),
-            cwd: None,
-            project_id: None,
-            extension_id: None,
-            shell_integration: None,
-            session_id: None,
-            resume_from: None,
-        };
-        let err = build_spawn_request(&params).unwrap_err();
-        assert!(err.contains("shell"));
+    fn terminal_ticket_revocation_is_checked_again_at_consumption() {
+        let _guard = super::super::control_allow_list::test_guard();
+        let device = format!("revoked-ticket-device-{}", Uuid::new_v4());
+        super::super::control_allow_list::terminal_global().allow(device.clone());
+        let store = TerminalTicketStore::default();
+        let ticket = store.issue(&device, true).unwrap();
+        super::super::control_allow_list::terminal_global().disallow(&device);
+        assert!(store.consume(&ticket.ticket, true).is_err());
     }
 
     #[test]
-    fn build_spawn_request_defaults_rows_cols_and_forces_remote_origin() {
-        let params = WsTerminalParams {
-            spawn: Some("1".into()),
-            shell: Some("/bin/bash".into()),
-            rows: None,
-            cols: None,
-            cwd: None,
-            project_id: None,
-            extension_id: None,
-            shell_integration: None,
-            session_id: None,
-            resume_from: None,
-        };
-        let req = build_spawn_request(&params).unwrap();
-        assert_eq!(req.rows, 24);
-        assert_eq!(req.cols, 80);
-        assert_eq!(req.origin, SessionOrigin::Remote);
-        assert_eq!(req.sandbox_network, None);
-        // Integration is always disabled on remote sessions for v1.
-        assert!(!req.enable_shell_integration);
+    fn ticket_store_never_keeps_the_bearer_value() {
+        let ticket = "sensitive-ticket";
+        let digest = ticket_digest(ticket);
+        assert_ne!(digest.as_slice(), ticket.as_bytes());
+        assert_eq!(digest.len(), 32);
     }
 
     #[test]
-    fn build_spawn_request_carries_project_and_extension_ids() {
-        let params = WsTerminalParams {
-            spawn: Some("1".into()),
-            shell: Some("/bin/zsh".into()),
-            rows: Some(48),
-            cols: Some(120),
-            cwd: Some("/tmp/x".into()),
-            project_id: Some("proj-a".into()),
-            extension_id: Some("ext.cline".into()),
-            shell_integration: Some("1".into()),
-            session_id: None,
-            resume_from: None,
-        };
-        let req = build_spawn_request(&params).unwrap();
-        assert_eq!(req.cwd.as_deref(), Some("/tmp/x"));
-        assert_eq!(req.project_id.as_deref(), Some("proj-a"));
-        assert_eq!(req.extension_id.as_deref(), Some("ext.cline"));
-        assert_eq!(req.rows, 48);
-        assert_eq!(req.cols, 120);
+    fn host_wide_remote_disable_blocks_issue_and_consumption() {
+        let _guard = super::super::control_allow_list::test_guard();
+        let device = format!("disabled-host-device-{}", Uuid::new_v4());
+        super::super::control_allow_list::terminal_global().allow(device.clone());
+        let store = TerminalTicketStore::default();
+        assert!(store.issue(&device, false).is_err());
+        let ticket = store.issue(&device, true).unwrap();
+        assert!(store.consume(&ticket.ticket, false).is_err());
+        super::super::control_allow_list::terminal_global().disallow(&device);
     }
 
     #[test]
-    fn control_frame_parses_resize_and_kill() {
-        let resize: ControlFrame =
-            serde_json::from_str(r#"{"kind":"resize","rows":32,"cols":100}"#).unwrap();
-        assert!(matches!(
-            resize,
-            ControlFrame::Resize {
-                rows: 32,
-                cols: 100
-            }
-        ));
-        let kill: ControlFrame = serde_json::from_str(r#"{"kind":"kill"}"#).unwrap();
-        assert!(matches!(kill, ControlFrame::Kill));
-    }
+    fn legacy_control_frames_translate_to_canonical_host_commands() {
+        let resize = legacy_control_command(r#"{"kind":"resize","rows":0,"cols":120}"#)
+            .expect("resize command");
+        assert_eq!(resize.0, FrameKind::Resize);
+        let payload: serde_json::Value = serde_json::from_slice(&resize.1).unwrap();
+        assert_eq!(payload["rows"], 1);
+        assert_eq!(payload["cols"], 120);
 
-    #[test]
-    fn control_frame_rejects_unknown_kind() {
-        let res = serde_json::from_str::<ControlFrame>(r#"{"kind":"unknown"}"#);
-        assert!(res.is_err());
-    }
-
-    /// Helper: `EventSink` smoke — the closure is `Send + Sync` and can
-    /// be cloned across the std-thread / tokio-task boundary that the
-    /// real handler relies on. Updated for the Wave 2 `(seq, event)`
-    /// signature.
-    #[test]
-    fn event_sink_closure_is_send_sync_clonable() {
-        let (tx, _rx) =
-            tokio::sync::mpsc::channel::<(u64, TerminalEvent)>(CONSUMER_CHANNEL_CAPACITY);
-        let sink: EventSink = Arc::new(move |seq, event| {
-            // Mirrors the production sink: a dropped receiver makes blocking_send
-            // return Err immediately (no hang), which we swallow.
-            let _ = tx.blocking_send((seq, event));
-        });
-        let cloned = sink.clone();
-        cloned(1, TerminalEvent::Exit { code: Some(0) });
-    }
-
-    #[test]
-    fn consumer_channel_is_bounded_not_unbounded() {
-        // The fan-out channel must be capacity-limited so a slow consumer can't
-        // grow it without bound (the OOM vector this replaced). Fill it to
-        // capacity without draining and assert the next non-blocking send is
-        // rejected as Full — proof the channel is bounded.
-        let (tx, _rx) =
-            tokio::sync::mpsc::channel::<(u64, TerminalEvent)>(CONSUMER_CHANNEL_CAPACITY);
-        for seq in 0..CONSUMER_CHANNEL_CAPACITY as u64 {
-            tx.try_send((seq, TerminalEvent::Data { bytes: vec![b'x'] }))
-                .expect("send within capacity");
-        }
-        let overflow = tx.try_send((
-            CONSUMER_CHANNEL_CAPACITY as u64,
-            TerminalEvent::Data { bytes: vec![b'x'] },
-        ));
-        assert!(
-            matches!(
-                overflow,
-                Err(tokio::sync::mpsc::error::TrySendError::Full(_))
-            ),
-            "channel should be full at capacity (bounded)"
-        );
-    }
-
-    // ── Wave 2 registry behaviour ──────────────────────────────────
-
-    #[test]
-    fn registry_can_be_constructed_and_starts_empty() {
-        let reg = WsTerminalRegistry::new();
-        assert_eq!(reg.len(), 0);
-    }
-
-    #[test]
-    fn registry_lookup_enforces_device_ownership() {
-        let reg = WsTerminalRegistry::new();
-        // We can't easily insert a real PtySession from a test (it
-        // needs a live PTY pair), so this test confirms only the
-        // negative path. The integration test in `ws_terminal_test.rs`
-        // covers the positive case.
-        assert!(reg.lookup_for_device("missing", "device-a").is_none());
-    }
-
-    // ── Remote-control capability gate (P0-1) ───────────────────────
-    // The allow list is a process-global singleton shared across the crate's
-    // tests, so we never call `clear()` (which would nuke grants other tests
-    // rely on). Instead each test uses a unique device id and tidies up with
-    // `disallow`, matching the pattern in `rpc.rs`'s control-gate tests.
-
-    #[test]
-    fn terminal_gate_denies_paired_but_uncontrolled_device() {
-        // A device that is merely paired (never granted) must be rejected —
-        // this is the chat-only baseline tier.
-        assert!(!device_allowed_for_terminal("p0-gate-never-granted-device"));
-    }
-
-    #[test]
-    fn terminal_gate_allows_remote_control_device() {
-        let acl = super::super::control_allow_list::global();
-        let id = "p0-gate-trusted-device";
-        acl.allow(id.to_string());
-        assert!(device_allowed_for_terminal(id));
-        acl.disallow(id);
-    }
-
-    #[test]
-    fn terminal_gate_denies_empty_device_id() {
-        // Defensive: an empty id (middleware failed to populate it) is
-        // short-circuited before the allow-list lookup, so it is never
-        // allowed regardless of the list's contents.
-        assert!(!device_allowed_for_terminal(""));
+        let kill = legacy_control_command(r#"{"kind":"kill"}"#).expect("kill command");
+        assert_eq!(kill.0, FrameKind::Kill);
+        assert!(kill.1.is_empty());
+        assert!(legacy_control_command(r#"{"kind":"unknown"}"#).is_none());
     }
 }

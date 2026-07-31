@@ -9,11 +9,16 @@
 # `~/.bashrc` as the interactive rc. The first block below re-sources the
 # user's rc files so their customisations still apply.
 
-if [ -f /etc/bash.bashrc ]; then
-  . /etc/bash.bashrc
-fi
-if [ -f "$HOME/.bashrc" ]; then
-  . "$HOME/.bashrc"
+# Headless sessions must be deterministic: user prompt frameworks and DEBUG
+# traps can emit their own output or replace the integration hooks. Visible
+# terminal sessions still retain the user's normal interactive setup.
+if [ -z "$COGNIA_TERM_HEADLESS" ]; then
+  if [ -f /etc/bash.bashrc ]; then
+    . /etc/bash.bashrc
+  fi
+  if [ -f "$HOME/.bashrc" ]; then
+    . "$HOME/.bashrc"
+  fi
 fi
 
 # No nonce → nothing to gate sequences on; bail silently. The user still
@@ -50,7 +55,12 @@ __cognia_term_precmd() {
   __cognia_term_in_prompt=0
 }
 
-trap '__cognia_term_preexec' DEBUG
+# The headless capture path anchors output when it writes the command and only
+# needs the command-end marker. Avoiding DEBUG there also prevents commands
+# executed inside the hook from looking like nested user commands.
+if [ -z "$COGNIA_TERM_HEADLESS" ]; then
+  trap '__cognia_term_preexec' DEBUG
+fi
 
 if [ -n "$PROMPT_COMMAND" ]; then
   PROMPT_COMMAND="__cognia_term_precmd; $PROMPT_COMMAND"

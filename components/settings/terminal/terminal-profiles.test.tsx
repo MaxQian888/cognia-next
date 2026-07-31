@@ -8,6 +8,13 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+const mockIsTauri = jest.fn(() => false)
+const mockSyncTerminalHostProfiles = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri() }))
+jest.mock("@/lib/terminal/host-profiles", () => ({
+  syncTerminalHostProfiles: (...args: unknown[]) => mockSyncTerminalHostProfiles(...args),
+}))
+
 const settingsSave = jest.fn(async (..._args: unknown[]) => undefined)
 let settingsState: { terminal?: Record<string, unknown> } = {}
 
@@ -30,6 +37,8 @@ import { TerminalProfiles } from "./terminal-profiles"
 beforeEach(() => {
   cleanup()
   settingsSave.mockClear()
+  mockIsTauri.mockReturnValue(false)
+  mockSyncTerminalHostProfiles.mockClear()
   settingsState = {}
 })
 
@@ -64,6 +73,27 @@ describe("TerminalProfiles", () => {
         profiles: [expect.objectContaining({ id: "profile-1", shell: "pwsh.exe" })],
       }),
     })
+  })
+
+  it("synchronizes complete profile identifiers and policies to the desktop host", async () => {
+    jest.useFakeTimers()
+    mockIsTauri.mockReturnValue(true)
+    settingsState = {
+      terminal: {
+        profiles: [{ id: "profile-1", name: "PS", shell: "pwsh.exe" }],
+        sandboxed: true,
+      },
+    }
+    render(<TerminalProfiles />)
+    fireEvent.change(screen.getByTestId("terminal-profile-shell-profile-1"), {
+      target: { value: "pwsh" },
+    })
+    await act(async () => jest.advanceTimersByTime(200))
+    expect(mockSyncTerminalHostProfiles).toHaveBeenCalledWith(
+      [expect.objectContaining({ id: "profile-1", shell: "pwsh" })],
+      expect.objectContaining({ sandboxed: true })
+    )
+    jest.useRealTimers()
   })
 
   it("sets and toggles the default profile", async () => {

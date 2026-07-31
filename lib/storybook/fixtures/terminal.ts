@@ -27,6 +27,8 @@ export function makeTerminalSession(over: Partial<TerminalSessionRow> = {}): Ter
     lastCommands: [],
     historyOpen: false,
     ...over,
+    hostId: over.hostId ?? null,
+    controllerId: over.controllerId ?? null,
   }
 }
 

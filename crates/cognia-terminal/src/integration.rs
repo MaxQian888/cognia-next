@@ -48,10 +48,15 @@ pub enum ShellKind {
 
 impl ShellKind {
     pub fn from_shell_path(path: &str) -> Self {
-        let stem = Path::new(path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
+        // `std::path::Path` only recognises separators from the host OS, but
+        // terminal profiles can be synchronized between platforms. Parse the
+        // final component in a platform-neutral way, then strip the optional
+        // executable suffix.
+        let file_name = path.rsplit(['/', '\\']).next().unwrap_or("");
+        let stem = file_name
+            .strip_suffix(".exe")
+            .or_else(|| file_name.strip_suffix(".EXE"))
+            .unwrap_or(file_name)
             .to_ascii_lowercase();
         match stem.as_str() {
             "bash" => ShellKind::Bash,

@@ -879,6 +879,20 @@ async fn handle_relay(
                 let callbacks = PeerCallbacks {
                     outbound_ice: ice_tx,
                     inbound_data: data_tx,
+                    terminal_channel: Arc::new({
+                        let state = Arc::clone(state);
+                        let device_id = config.device_id.clone();
+                        move |channel| {
+                            let state = Arc::clone(&state);
+                            let device_id = device_id.clone();
+                            tokio::spawn(async move {
+                                crate::companion_api::ws_terminal::proxy_terminal_datachannel(
+                                    channel, device_id, state,
+                                )
+                                .await;
+                            });
+                        }
+                    }),
                     state_change: state_tx,
                 };
                 let new_peer = PeerSession::new(config.ice_servers.clone(), callbacks)

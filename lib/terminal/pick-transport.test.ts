@@ -76,9 +76,9 @@ describe("selectTerminalTransportChain", () => {
     expect(selectTerminalTransportChain()).toEqual(["tauri-channel"])
   })
 
-  it("returns ws on Capacitor (webrtc follow-up will join once wired)", () => {
+  it("tries LAN first and WebRTC second on Capacitor", () => {
     mockIsCapacitor = true
-    expect(selectTerminalTransportChain()).toEqual(["ws"])
+    expect(selectTerminalTransportChain()).toEqual(["ws", "webrtc"])
   })
 
   it("returns an empty chain in plain browser", () => {
@@ -93,10 +93,10 @@ describe("remote host active (ADR-0082)", () => {
     expect(selectTerminalTransport()).toBe("ws")
   })
 
-  it("chain is [ws] when a remote host is active", () => {
+  it("tries the active remote host over LAN then WebRTC", () => {
     mockIsTauri = true
     setActiveRemoteTransport(activeRemoteFake)
-    expect(selectTerminalTransportChain()).toEqual(["ws"])
+    expect(selectTerminalTransportChain()).toEqual(["ws", "webrtc"])
   })
 
   it("reverts to tauri-channel once the remote host is cleared", () => {

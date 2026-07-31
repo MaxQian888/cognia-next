@@ -82,7 +82,6 @@ pub mod v2;
 pub mod ws;
 pub mod ws_bridge;
 pub mod ws_terminal;
-pub mod ws_terminal_test;
 
 pub mod commands;
 

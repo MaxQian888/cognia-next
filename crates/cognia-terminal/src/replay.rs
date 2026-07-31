@@ -53,13 +53,29 @@ pub const DEFAULT_TTL: Duration = Duration::from_secs(5 * 60);
 pub struct ReplayBuffer {
     next_seq: AtomicU64,
     capacity_bytes: usize,
-    ttl: Duration,
+    ttl: Option<Duration>,
     inner: Mutex<Ring>,
 }
 
 struct Ring {
     events: VecDeque<TimedEvent>,
     total_bytes: usize,
+    truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReplayBounds {
+    pub first_seq: u64,
+    pub last_seq: u64,
+    pub retained_bytes: usize,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReplayGap {
+    pub requested_after: u64,
+    pub first_available: u64,
+    pub last_available: u64,
 }
 
 impl ReplayBuffer {
@@ -69,13 +85,24 @@ impl ReplayBuffer {
     }
 
     pub fn with_limits(capacity_bytes: usize, ttl: Duration) -> Self {
+        Self::with_policy(capacity_bytes, Some(ttl))
+    }
+
+    /// Build a host-owned replay ring. Live host sessions intentionally have
+    /// no TTL: only the byte budget may evict output.
+    pub fn durable(capacity_bytes: usize) -> Self {
+        Self::with_policy(capacity_bytes, None)
+    }
+
+    fn with_policy(capacity_bytes: usize, ttl: Option<Duration>) -> Self {
         Self {
             next_seq: AtomicU64::new(1),
-            capacity_bytes,
+            capacity_bytes: capacity_bytes.max(1),
             ttl,
             inner: Mutex::new(Ring {
                 events: VecDeque::new(),
                 total_bytes: 0,
+                truncated: false,
             }),
         }
     }
@@ -83,22 +110,31 @@ impl ReplayBuffer {
     /// Assign the next sequence number, run GC, then push the event.
     /// Returns the assigned seq so the caller can include it in the wire
     /// envelope.
-    pub fn push(&self, event: TerminalEvent) -> u64 {
+    pub fn push(&self, mut event: TerminalEvent) -> u64 {
         let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
-        let size = event_size(&event);
+        if let TerminalEvent::Data { bytes } = &mut event {
+            if bytes.len() > self.capacity_bytes {
+                let keep_from = bytes.len() - self.capacity_bytes;
+                bytes.drain(..keep_from);
+            }
+        }
+        let size = event_size(&event).min(self.capacity_bytes);
         let now = Instant::now();
         let mut ring = match self.inner.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
         // TTL GC — drop events whose `at + ttl < now`.
-        while let Some(front) = ring.events.front() {
-            if now.duration_since(front.at) > self.ttl {
-                let dropped_size = event_size(&front.event);
-                ring.events.pop_front();
-                ring.total_bytes = ring.total_bytes.saturating_sub(dropped_size);
-            } else {
-                break;
+        if let Some(ttl) = self.ttl {
+            while let Some(front) = ring.events.front() {
+                if now.duration_since(front.at) > ttl {
+                    let dropped_size = event_size(&front.event);
+                    ring.events.pop_front();
+                    ring.total_bytes = ring.total_bytes.saturating_sub(dropped_size);
+                    ring.truncated = true;
+                } else {
+                    break;
+                }
             }
         }
         // Capacity GC — keep popping the oldest until we'd fit.
@@ -106,6 +142,7 @@ impl ReplayBuffer {
             if let Some(dropped) = ring.events.pop_front() {
                 let dropped_size = event_size(&dropped.event);
                 ring.total_bytes = ring.total_bytes.saturating_sub(dropped_size);
+                ring.truncated = true;
             }
         }
         ring.events.push_back(TimedEvent {
@@ -152,6 +189,20 @@ impl ReplayBuffer {
             .collect()
     }
 
+    /// Replay after `after_seq`, returning an explicit gap when capacity
+    /// eviction removed bytes the caller expected to resume from.
+    pub fn since_checked(&self, after_seq: u64) -> Result<Vec<(u64, TerminalEvent)>, ReplayGap> {
+        let bounds = self.bounds();
+        if bounds.truncated && after_seq.saturating_add(1) < bounds.first_seq {
+            return Err(ReplayGap {
+                requested_after: after_seq,
+                first_available: bounds.first_seq,
+                last_available: bounds.last_seq,
+            });
+        }
+        Ok(self.since(after_seq))
+    }
+
     /// Most-recently-assigned seq. `0` when no events have been pushed
     /// yet. Used by WS resume to validate `resume_from` bounds.
     pub fn last_seq(&self) -> u64 {
@@ -178,6 +229,38 @@ impl ReplayBuffer {
             Ok(g) => g.total_bytes,
             Err(p) => p.into_inner().total_bytes,
         }
+    }
+
+    pub fn bounds(&self) -> ReplayBounds {
+        let ring = match self.inner.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        let last_seq = self.last_seq();
+        ReplayBounds {
+            first_seq: ring
+                .events
+                .front()
+                .map(|event| event.seq)
+                .unwrap_or(last_seq),
+            last_seq,
+            retained_bytes: ring.total_bytes,
+            truncated: ring.truncated,
+        }
+    }
+
+    /// Remove one retained event and return its approximate byte cost. The
+    /// host uses this to enforce its cross-session replay budget.
+    pub fn evict_oldest(&self) -> Option<usize> {
+        let mut ring = match self.inner.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        let event = ring.events.pop_front()?;
+        let bytes = event_size(&event.event);
+        ring.total_bytes = ring.total_bytes.saturating_sub(bytes);
+        ring.truncated = true;
+        Some(bytes)
     }
 }
 
@@ -275,6 +358,35 @@ mod tests {
         assert_eq!(all.len(), 5);
         assert_eq!(all.first().map(|(s, _)| *s), Some(1));
         assert_eq!(all.last().map(|(s, _)| *s), Some(5));
+    }
+
+    #[test]
+    fn durable_buffer_has_no_ttl_and_reports_replay_gap() {
+        let buf = ReplayBuffer::durable(128);
+        buf.push(data(80));
+        buf.push(data(80));
+        let bounds = buf.bounds();
+        assert_eq!(bounds.first_seq, 2);
+        assert_eq!(bounds.last_seq, 2);
+        assert!(bounds.truncated);
+        assert_eq!(
+            buf.since_checked(0).unwrap_err(),
+            ReplayGap {
+                requested_after: 0,
+                first_available: 2,
+                last_available: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn host_can_evict_oldest_event_for_global_budget() {
+        let buf = ReplayBuffer::durable(1024);
+        buf.push(data(100));
+        buf.push(data(200));
+        assert_eq!(buf.evict_oldest(), Some(100));
+        assert_eq!(buf.retained_bytes(), 200);
+        assert_eq!(buf.bounds().first_seq, 2);
     }
 
     #[test]

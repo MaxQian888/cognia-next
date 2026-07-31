@@ -271,12 +271,22 @@ fn build_router_for_mode(state: SharedState, mode: super::deployment::Deployment
             "/api/v1/browser/stream-ticket",
             post(super::browser_gateway::issue_ticket_handler),
         )
+        .route(
+            "/api/v1/terminal/socket-ticket",
+            post(ws_terminal::issue_ticket_handler),
+        )
+        // Legacy JSON/raw-byte terminal protocol. Keep this behind device-JWT
+        // middleware for released clients while `/ws/terminal` uses tickets
+        // and canonical binary frames.
+        .route(
+            "/ws/v1/terminal",
+            any(ws_terminal::legacy_ws_terminal_handler),
+        )
         .route("/ws/v1/events", any(ws::ws_handler))
         // Headless-brain data plane (ADR-0059 W3). The JWT middleware already
         // enforces loopback for service-scope tokens; the handler additionally
         // rejects non-service scopes before the upgrade.
         .route("/ws/v1/bridge", any(ws_bridge::ws_bridge_handler))
-        .route("/ws/v1/terminal", any(ws_terminal::ws_terminal_handler))
         // Remote Pro IDE relay. The companion owns code-server and revalidates
         // the paired device on every HTTP request and WebSocket upgrade.
         .route(
@@ -359,6 +369,9 @@ fn build_router_for_mode(state: SharedState, mode: super::deployment::Deployment
             "/ws/v1/browser/{session_id}",
             any(super::browser_gateway::browser_ws_handler),
         )
+        // Terminal upgrades use the same single-use-ticket pattern as the
+        // browser stream, so a long-lived device JWT never enters the URL.
+        .route("/ws/terminal", any(ws_terminal::ws_terminal_handler))
         .merge(protected_routes)
         .with_state(state.clone());
 
@@ -601,6 +614,23 @@ mod tests {
 
         let response = router.oneshot(request).await.unwrap();
         assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn legacy_terminal_websocket_route_remains_mounted() {
+        use tower::ServiceExt as _;
+
+        let response = build_router(test_state())
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/ws/v1/terminal")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_ne!(response.status(), axum::http::StatusCode::NOT_FOUND);
     }
 
     /// ADR-0059 F4/R12: the public `/connectors` ingress mounts only on

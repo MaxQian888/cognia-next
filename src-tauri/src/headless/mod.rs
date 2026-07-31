@@ -171,6 +171,11 @@ pub struct HeadlessServices {
     /// started by `cognia-server` when enabled. Snapshots come from the
     /// profile-store projection (authority: profile-store), not a renderer.
     pub gateway: Arc<crate::gateway::GatewayState>,
+    /// Hermetic terminal inventory used by headless dispatch tests. Production
+    /// builds omit this seam and always reach the durable terminal host.
+    #[cfg(test)]
+    pub terminal_sessions_for_tests:
+        tokio::sync::RwLock<Vec<cognia_terminal::host::HostSessionInfo>>,
 }
 
 impl HeadlessServices {
@@ -316,6 +321,8 @@ impl HeadlessServices {
             connectors: ConnectorsState::new(),
             workflow,
             profiles,
+            #[cfg(test)]
+            terminal_sessions_for_tests: tokio::sync::RwLock::new(Vec::new()),
         }))
     }
 

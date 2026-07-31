@@ -12,9 +12,10 @@
  * pure profile helpers live in `lib/terminal/profiles.ts`.
  */
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { PlusIcon, Trash2Icon } from "lucide-react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -29,6 +30,8 @@ import {
   type TerminalProfile,
 } from "@/lib/terminal/profiles"
 import { useSettingsStore } from "@/stores/settings"
+import { isTauri } from "@/lib/tauri"
+import { syncTerminalHostProfiles } from "@/lib/terminal/host-profiles"
 
 /** In-flight textarea text per profile row, keyed `<profileId>:<field>`. */
 type DraftMap = Record<string, string | undefined>
@@ -50,9 +53,30 @@ export function TerminalProfiles() {
   // the raw draft until blur — otherwise a half-typed line ("KEY=" parses to
   // nothing) would be reformatted out from under the user mid-keystroke.
   const [drafts, setDrafts] = useState<DraftMap>({})
+  const profileSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (profileSyncTimer.current) clearTimeout(profileSyncTimer.current)
+    },
+    []
+  )
 
   function persist(patch: Partial<TerminalSettings>): void {
-    void save({ terminal: { ...terminal, ...patch } })
+    const nextTerminal = { ...terminal, ...patch }
+    void save({ terminal: nextTerminal })
+    if (patch.profiles && isTauri()) {
+      if (profileSyncTimer.current) clearTimeout(profileSyncTimer.current)
+      profileSyncTimer.current = setTimeout(() => {
+        profileSyncTimer.current = null
+        void syncTerminalHostProfiles(patch.profiles, {
+          enableShellIntegration: nextTerminal.enableShellIntegration,
+          forceUtf8: nextTerminal.forceUtf8,
+          sandboxed: nextTerminal.sandboxed,
+          sshProfiles: nextTerminal.sshHosts,
+        }).catch(() => toast.error(t("settings.terminal.profiles.syncError")))
+      }, 200)
+    }
   }
 
   function updateProfile(id: string, patch: Partial<TerminalProfile>): void {

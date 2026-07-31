@@ -167,9 +167,9 @@ mod tests {
 
     #[test]
     fn shared_manifest_is_complete_and_validated() {
-        assert_eq!(commands().len(), 969);
+        assert_eq!(commands().len(), 992);
         assert_eq!(command_names().len(), commands().len());
-        assert_eq!(legacy_rpc_command_names().len(), 379);
+        assert_eq!(legacy_rpc_command_names().len(), 402);
     }
 
     #[test]

@@ -30,6 +30,7 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 
 import type { SessionInfo } from "@/lib/terminal/types"
+import type { TerminalHostState } from "@/lib/terminal/host-state"
 
 /**
  * Status the tab badge surfaces. Driven by OSC 633 events (`command_*`)
@@ -59,6 +60,10 @@ export interface TerminalPromptBoundary {
 
 export interface TerminalSessionRow {
   id: string
+  /** Stable durable-host identity used to reject cross-host layout collisions. */
+  hostId: string | null
+  /** Last host snapshot controller; live control events remain authoritative. */
+  controllerId: string | null
   projectId: string | null
   extensionId: string | null
   /** Auto-derived title from shell + extension. Use `displayTitle()` to apply `customTitle` override. */
@@ -103,6 +108,8 @@ export interface TerminalReloadLayout {
   splitDirection: Record<string, "row" | "col">
   activeSessionIdByProject: Record<string, string | null>
   customTitles: Record<string, string>
+  stableHostSessionIds: string[]
+  controllerBySession: Record<string, string>
 }
 
 interface TerminalPersistedState {
@@ -117,7 +124,7 @@ export const TERMINAL_LAYOUT_DEFAULTS = {
 
 export const TERMINAL_LAYOUT_BOUNDS = {
   panelMinPct: 15,
-  panelMaxPct: 75,
+  panelMaxPct: 85,
 } as const
 
 export const TERMINAL_LAYOUT_PERSIST_DEBOUNCE_MS = 150
@@ -140,6 +147,11 @@ export interface TerminalStoreState {
   // Persisted UI shell
   panelOpen: boolean
   panelHeightPct: number
+
+  // Transient durable-host health. The authoritative value comes from the
+  // live connection and must not survive an app restart.
+  hostState: TerminalHostState
+  hostStateMessage: string | null
 
   // Maximize toggle (in-memory only). When `maximized` the dock snaps to
   // `panelMaxPct`; toggling off restores `preMaxHeightPct` (the height the
@@ -173,6 +185,7 @@ export interface TerminalStoreState {
   setPanelOpen: (open: boolean) => void
   togglePanel: () => void
   setPanelHeight: (pct: number) => void
+  setHostState: (state: TerminalHostState, message?: string | null) => void
   /** Snap to full height (or restore the pre-maximize height). No-op semantics live in the impl. */
   toggleMaximized: () => void
 
@@ -268,8 +281,10 @@ function captureReloadLayout(
   >
 ): TerminalReloadLayout {
   const customTitles: Record<string, string> = {}
+  const controllerBySession: Record<string, string> = {}
   for (const row of Object.values(state.sessions)) {
     if (row.customTitle) customTitles[row.id] = row.customTitle
+    if (row.controllerId) controllerBySession[row.id] = row.controllerId
   }
   return {
     splitPanes: Object.fromEntries(
@@ -279,6 +294,10 @@ function captureReloadLayout(
     splitDirection: { ...state.splitDirection },
     activeSessionIdByProject: { ...state.activeSessionIdByProject },
     customTitles,
+    stableHostSessionIds: Object.values(state.sessions)
+      .filter((row) => !!row.hostId)
+      .map((row) => row.id),
+    controllerBySession,
   }
 }
 
@@ -329,6 +348,10 @@ function normalizeReloadLayout(value: unknown): TerminalReloadLayout | null {
     splitDirection,
     activeSessionIdByProject,
     customTitles: normalizeStringMap(raw.customTitles),
+    stableHostSessionIds: Array.isArray(raw.stableHostSessionIds)
+      ? raw.stableHostSessionIds.filter((id): id is string => typeof id === "string")
+      : [],
+    controllerBySession: normalizeStringMap(raw.controllerBySession),
   }
 }
 
@@ -336,6 +359,8 @@ export const useTerminalStore = create<TerminalStoreState>()(
   persist<TerminalStoreState, [], [], TerminalPersistedState>(
     (set, get) => ({
       ...TERMINAL_LAYOUT_DEFAULTS,
+      hostState: "online",
+      hostStateMessage: null,
       maximized: false,
       preMaxHeightPct: TERMINAL_LAYOUT_DEFAULTS.panelHeightPct,
       sessions: {},
@@ -348,6 +373,8 @@ export const useTerminalStore = create<TerminalStoreState>()(
       setPanelOpen: (open) => set({ panelOpen: open }),
 
       togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
+
+      setHostState: (hostState, hostStateMessage = null) => set({ hostState, hostStateMessage }),
 
       setPanelHeight: (pct) => {
         const { panelMinPct, panelMaxPct } = TERMINAL_LAYOUT_BOUNDS
@@ -377,6 +404,8 @@ export const useTerminalStore = create<TerminalStoreState>()(
       registerSession: (info, opts = {}) => {
         const row: TerminalSessionRow = {
           id: info.id,
+          hostId: info.hostId ?? null,
+          controllerId: info.currentController ?? null,
           projectId: info.projectId,
           extensionId: info.extensionId,
           title: opts.title ?? makeTitle(info),
@@ -696,7 +725,16 @@ export const useTerminalStore = create<TerminalStoreState>()(
           const sessions = { ...s.sessions }
           for (const [id, row] of Object.entries(sessions)) {
             const title = saved.customTitles[id]?.trim()
-            sessions[id] = { ...row, customTitle: title ? title : null }
+            const savedController = saved.controllerBySession[id]
+            sessions[id] = {
+              ...row,
+              customTitle: title ? title : null,
+              controllerId:
+                row.controllerId ??
+                (row.hostId && saved.stableHostSessionIds.includes(id)
+                  ? (savedController ?? null)
+                  : null),
+            }
           }
 
           const activeSessionIdByProject: Record<string, string | null> = {}
@@ -746,6 +784,8 @@ export const useTerminalStore = create<TerminalStoreState>()(
         pendingFlush = null
         set({
           ...TERMINAL_LAYOUT_DEFAULTS,
+          hostState: "online",
+          hostStateMessage: null,
           maximized: false,
           preMaxHeightPct: TERMINAL_LAYOUT_DEFAULTS.panelHeightPct,
           sessions: {},
@@ -759,8 +799,9 @@ export const useTerminalStore = create<TerminalStoreState>()(
     }),
     {
       name: "cognia-terminal-layout",
-      // v3 adds a reload-only layout snapshot while keeping live session rows ephemeral.
-      version: 3,
+      // v4 records stable host-session/controller layout metadata. Live host
+      // snapshots remain authoritative; this only bridges the reload window.
+      version: 4,
       migrate: (oldState: unknown, oldVersion: number) => {
         const prev = oldState as
           { panelHeightPct?: unknown; pendingReloadLayout?: unknown } | null | undefined

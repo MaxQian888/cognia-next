@@ -5,27 +5,26 @@
 //! dedicated OpenSSH `known_hosts` file with TOFU semantics: first use is
 //! learned, later connections must match, and changed keys fail closed.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use cognia_secrets::keyring_secrets;
-use parking_lot::Mutex;
 use russh::client;
 use russh::keys::key::PrivateKeyWithHashAlg;
 use russh::keys::known_hosts::learn_known_hosts_path;
 use russh::keys::{check_known_hosts_path, load_secret_key, ssh_key};
 use russh::{ChannelMsg, Disconnect};
 use serde::{Deserialize, Serialize};
-use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager, Runtime, State};
 use tokio::sync::mpsc;
-use uuid::Uuid;
 
+use crate::host::HostedTerminalProcess;
+use crate::integration::ShellKind;
+use crate::osc633::Osc633Parser;
 use crate::replay::ReplayBuffer;
-use crate::session::{SeqEvent, SessionOrigin, TerminalEvent, TerminalSessionInfo};
+use crate::session::{EventSink, TerminalEvent};
 
 const SSH_CREDENTIAL_NAMESPACE: &str = "cognia-ssh";
 const COMMAND_QUEUE_CAPACITY: usize = 256;
@@ -52,14 +51,14 @@ impl HostKeyStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum SshAuthMethod {
     Password,
     PrivateKey,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshSpawnRequest {
     pub host: String,
@@ -205,11 +204,49 @@ struct RemoteConnection {
     writer: russh::ChannelWriteHalf<client::Msg>,
 }
 
+#[derive(Debug, Clone)]
+struct SshIntegrationNegotiation {
+    enabled: bool,
+    degraded_reason: Option<String>,
+}
+
+async fn probe_remote_shell(
+    handle: &client::Handle<ClientHandler>,
+) -> Result<Option<ShellKind>, String> {
+    let mut channel = handle
+        .channel_open_session()
+        .await
+        .map_err(|error| format!("SSH shell probe channel failed: {error}"))?;
+    channel
+        .exec(true, "printf 'COGNIA_SHELL=%s\\n' \"$SHELL\"")
+        .await
+        .map_err(|error| format!("SSH shell probe was rejected: {error}"))?;
+    let output = tokio::time::timeout(Duration::from_secs(3), async {
+        let mut bytes = Vec::new();
+        while let Some(message) = channel.wait().await {
+            match message {
+                ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } => {
+                    if bytes.len() + data.len() <= 4096 {
+                        bytes.extend_from_slice(&data);
+                    }
+                }
+                ChannelMsg::ExitStatus { .. } | ChannelMsg::Close => break,
+                _ => {}
+            }
+        }
+        bytes
+    })
+    .await
+    .map_err(|_| "SSH shell probe timed out".to_string())?;
+    Ok(classify_remote_shell(&output))
+}
+
 async fn connect_remote(
     request: &SshSpawnRequest,
     credential: &StoredCredential,
     known_hosts_path: &Path,
-) -> Result<(RemoteConnection, HostObservation), String> {
+    integration_nonce: &str,
+) -> Result<(RemoteConnection, HostObservation, SshIntegrationNegotiation), String> {
     let observation = Arc::new(StdMutex::new(HostObservation::default()));
     let handler = ClientHandler {
         host: request.host.clone(),
@@ -265,6 +302,8 @@ async fn connect_remote(
         return Err("SSH authentication was rejected by the server".into());
     }
 
+    let probed_shell = probe_remote_shell(&handle).await;
+
     let channel = handle
         .channel_open_session()
         .await
@@ -286,6 +325,34 @@ async fn connect_remote(
         .await
         .map_err(|error| format!("SSH shell request failed: {error}"))?;
     let (reader, writer) = channel.split();
+    let integration = match probed_shell {
+        Ok(Some(shell)) => match ssh_integration_command(shell, integration_nonce) {
+            Some(command) => match writer.data_bytes(command.into_bytes()).await {
+                Ok(()) => SshIntegrationNegotiation {
+                    enabled: true,
+                    degraded_reason: None,
+                },
+                Err(error) => SshIntegrationNegotiation {
+                    enabled: false,
+                    degraded_reason: Some(format!(
+                        "ssh_shell_integration_injection_failed:{error}"
+                    )),
+                },
+            },
+            None => SshIntegrationNegotiation {
+                enabled: false,
+                degraded_reason: Some("ssh_shell_integration_unsupported".into()),
+            },
+        },
+        Ok(None) => SshIntegrationNegotiation {
+            enabled: false,
+            degraded_reason: Some("ssh_shell_integration_unsupported".into()),
+        },
+        Err(error) => SshIntegrationNegotiation {
+            enabled: false,
+            degraded_reason: Some(format!("ssh_shell_integration_probe_failed:{error}")),
+        },
+    };
     let observed = {
         let mut guard = observation
             .lock()
@@ -299,6 +366,7 @@ async fn connect_remote(
             writer,
         },
         observed,
+        integration,
     ))
 }
 
@@ -314,6 +382,66 @@ fn expand_home(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+fn classify_remote_shell(output: &[u8]) -> Option<ShellKind> {
+    let text = String::from_utf8_lossy(output);
+    let value = text
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().strip_prefix("COGNIA_SHELL="))?
+        .trim()
+        .trim_start_matches('-');
+    let kind = ShellKind::from_shell_path(value);
+    matches!(kind, ShellKind::Bash | ShellKind::Zsh | ShellKind::Fish).then_some(kind)
+}
+
+fn ssh_integration_command(kind: ShellKind, nonce: &str) -> Option<String> {
+    if !(16..=64).contains(&nonce.len()) || !nonce.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let script = match kind {
+        ShellKind::Bash => format!(
+            r#"__cognia_term_emit() {{ printf '\033]633;%s;{nonce}\a' "$1"; }}
+__cognia_term_emit_with() {{ printf '\033]633;%s;{nonce};%s\a' "$1" "$2"; }}
+__cognia_term_in_prompt=0
+__cognia_term_preexec() {{ [ "$__cognia_term_in_prompt" = 1 ] || __cognia_term_emit C; }}
+__cognia_term_precmd() {{ local e=$?; __cognia_term_in_prompt=1; __cognia_term_emit_with D "$e"; __cognia_term_emit_with P "Cwd=$PWD"; __cognia_term_in_prompt=0; }}
+trap '__cognia_term_preexec' DEBUG
+if [ -n "$PROMPT_COMMAND" ]; then PROMPT_COMMAND="__cognia_term_precmd; $PROMPT_COMMAND"; else PROMPT_COMMAND=__cognia_term_precmd; fi
+PS1="\[\e]633;A;{nonce}\a\]${{PS1}}\[\e]633;B;{nonce}\a\]""#
+        ),
+        ShellKind::Zsh => format!(
+            r#"__cognia_term_emit() {{ printf '\033]633;%s;{nonce}\a' "$1"; }}
+__cognia_term_emit_with() {{ printf '\033]633;%s;{nonce};%s\a' "$1" "$2"; }}
+__cognia_term_preexec() {{ __cognia_term_emit C; }}
+__cognia_term_precmd() {{ local e=$?; __cognia_term_emit_with D "$e"; __cognia_term_emit_with P "Cwd=$PWD"; }}
+autoload -Uz add-zsh-hook
+add-zsh-hook precmd __cognia_term_precmd
+add-zsh-hook preexec __cognia_term_preexec
+PROMPT=$'%{{\033]633;A;{nonce}\a%}}'${{PROMPT}}$'%{{\033]633;B;{nonce}\a%}}'"#
+        ),
+        ShellKind::Fish => format!(
+            r#"function __cognia_term_emit
+  printf '\033]633;%s;{nonce}\a' $argv[1]
+end
+function __cognia_term_emit_with
+  printf '\033]633;%s;{nonce};%s\a' $argv[1] $argv[2]
+end
+function __cognia_term_preexec --on-event fish_preexec
+  __cognia_term_emit C
+end
+function __cognia_term_render_prompt --on-event fish_prompt
+  set -l e $status
+  __cognia_term_emit_with D $e
+  __cognia_term_emit_with P "Cwd=$PWD"
+  __cognia_term_emit A
+end"#
+        ),
+        _ => return None,
+    };
+    let quoted = script.replace('\'', "'\"'\"'");
+    Some(format!("eval '{quoted}'\r"))
+}
+
 #[derive(Debug)]
 enum SessionCommand {
     Write(Vec<u8>),
@@ -322,38 +450,25 @@ enum SessionCommand {
 }
 
 pub struct SshTerminalSession {
-    id: String,
-    request: SshSpawnRequest,
     command_tx: mpsc::Sender<SessionCommand>,
     alive: Arc<AtomicBool>,
+    replay: Arc<ReplayBuffer>,
 }
 
 impl SshTerminalSession {
-    fn info(&self) -> TerminalSessionInfo {
-        TerminalSessionInfo {
-            id: self.id.clone(),
-            project_id: self.request.project_id.clone(),
-            extension_id: None,
-            origin: SessionOrigin::Remote,
-            shell: format!("ssh {}@{}", self.request.username, self.request.host),
-            pid: None,
-            alive: self.alive.load(Ordering::Acquire),
-        }
-    }
-
-    fn write(&self, data: Vec<u8>) -> Result<(), String> {
+    fn write_owned(&self, data: Vec<u8>) -> Result<(), String> {
         self.command_tx
             .try_send(SessionCommand::Write(data))
             .map_err(|error| format!("SSH write queue unavailable: {error}"))
     }
 
-    fn resize(&self, rows: u16, cols: u16) -> Result<(), String> {
+    fn resize_terminal(&self, rows: u16, cols: u16) -> Result<(), String> {
         self.command_tx
             .try_send(SessionCommand::Resize { rows, cols })
             .map_err(|error| format!("SSH resize queue unavailable: {error}"))
     }
 
-    fn kill(&self) -> Result<(), String> {
+    fn kill_terminal(&self) -> Result<(), String> {
         if !self.alive.load(Ordering::Acquire) {
             return Ok(());
         }
@@ -363,38 +478,37 @@ impl SshTerminalSession {
     }
 }
 
-#[derive(Default)]
-pub struct SshTerminalState {
-    sessions: Mutex<HashMap<String, Arc<SshTerminalSession>>>,
+impl HostedTerminalProcess for SshTerminalSession {
+    fn write(&self, bytes: &[u8]) -> Result<(), String> {
+        self.write_owned(bytes.to_vec())
+    }
+
+    fn resize(&self, rows: u16, cols: u16) -> Result<(), String> {
+        self.resize_terminal(rows.max(1), cols.max(1))
+    }
+
+    fn kill(&self) -> Result<(), String> {
+        self.kill_terminal()
+    }
+
+    fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::Acquire)
+    }
+
+    fn replay(&self) -> Arc<ReplayBuffer> {
+        Arc::clone(&self.replay)
+    }
 }
 
-impl SshTerminalState {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    fn insert(&self, session: Arc<SshTerminalSession>) {
-        self.sessions.lock().insert(session.id.clone(), session);
-    }
-
-    fn get(&self, id: &str) -> Option<Arc<SshTerminalSession>> {
-        self.sessions.lock().get(id).cloned()
-    }
-
-    fn remove(&self, id: &str) -> Option<Arc<SshTerminalSession>> {
-        self.sessions.lock().remove(id)
-    }
-}
-
-fn emit_event(replay: &ReplayBuffer, channel: &Channel<SeqEvent>, event: TerminalEvent) {
+fn emit_event(replay: &ReplayBuffer, sink: &EventSink, event: TerminalEvent) {
     let seq = replay.push(event.clone());
-    let _ = channel.send(SeqEvent { seq, event });
+    sink(seq, event);
 }
 
-fn emit_notice(replay: &ReplayBuffer, channel: &Channel<SeqEvent>, notice: &str) {
+fn emit_notice(replay: &ReplayBuffer, sink: &EventSink, notice: &str) {
     emit_event(
         replay,
-        channel,
+        sink,
         TerminalEvent::Data {
             bytes: format!("\r\n{notice}\r\n").into_bytes(),
         },
@@ -413,7 +527,8 @@ async fn drive_connection(
     commands: &mut mpsc::Receiver<SessionCommand>,
     pending: &mut VecDeque<SessionCommand>,
     replay: &ReplayBuffer,
-    channel: &Channel<SeqEvent>,
+    sink: &EventSink,
+    parser: &mut Option<Osc633Parser>,
 ) -> ConnectionEnd {
     let mut exit_code = None;
     loop {
@@ -428,7 +543,12 @@ async fn drive_connection(
                 match message {
                     Some(ChannelMsg::Data { data })
                     | Some(ChannelMsg::ExtendedData { data, .. }) => {
-                        emit_event(replay, channel, TerminalEvent::Data { bytes: data.to_vec() });
+                        if let Some(parser) = parser.as_mut() {
+                            for event in parser.feed(&data) {
+                                emit_event(replay, sink, TerminalEvent::Integration { event });
+                            }
+                        }
+                        emit_event(replay, sink, TerminalEvent::Data { bytes: data.to_vec() });
                     }
                     Some(ChannelMsg::ExitStatus { exit_status }) => {
                         exit_code = Some(exit_status);
@@ -512,8 +632,11 @@ async fn run_ssh_session(
     known_hosts_path: PathBuf,
     mut commands: mpsc::Receiver<SessionCommand>,
     output: SshSessionOutput,
+    integration_nonce: String,
+    integration_enabled: bool,
 ) {
     let mut pending = VecDeque::new();
+    let mut parser = integration_enabled.then(|| Osc633Parser::new(integration_nonce.clone()));
     let exit_code = loop {
         match drive_connection(
             &mut connection,
@@ -521,7 +644,8 @@ async fn run_ssh_session(
             &mut commands,
             &mut pending,
             &output.replay,
-            &output.channel,
+            &output.sink,
+            &mut parser,
         )
         .await
         {
@@ -530,7 +654,7 @@ async fn run_ssh_session(
             ConnectionEnd::Lost => {
                 emit_notice(
                     &output.replay,
-                    &output.channel,
+                    &output.sink,
                     "[SSH connection lost; reconnecting]",
                 );
                 let mut reconnected = None;
@@ -539,28 +663,38 @@ async fn run_ssh_session(
                         output.alive.store(false, Ordering::Release);
                         emit_event(
                             &output.replay,
-                            &output.channel,
+                            &output.sink,
                             TerminalEvent::Exit { code: None },
                         );
                         return;
                     }
-                    match connect_remote(&request, &credential, &known_hosts_path).await {
-                        Ok((next, _)) => {
+                    match connect_remote(
+                        &request,
+                        &credential,
+                        &known_hosts_path,
+                        &integration_nonce,
+                    )
+                    .await
+                    {
+                        Ok((next, _, integration)) => {
+                            parser = integration
+                                .enabled
+                                .then(|| Osc633Parser::new(integration_nonce.clone()));
                             reconnected = Some(next);
-                            emit_notice(&output.replay, &output.channel, "[SSH reconnected]");
+                            emit_notice(&output.replay, &output.sink, "[SSH reconnected]");
                             break;
                         }
                         Err(error) if attempt + 1 < RECONNECT_DELAYS.len() => {
                             emit_notice(
                                 &output.replay,
-                                &output.channel,
+                                &output.sink,
                                 &format!("[SSH reconnect attempt failed: {error}]"),
                             );
                         }
                         Err(error) => {
                             emit_notice(
                                 &output.replay,
-                                &output.channel,
+                                &output.sink,
                                 &format!("[SSH reconnect failed: {error}]"),
                             );
                         }
@@ -576,63 +710,56 @@ async fn run_ssh_session(
     output.alive.store(false, Ordering::Release);
     emit_event(
         &output.replay,
-        &output.channel,
+        &output.sink,
         TerminalEvent::Exit { code: exit_code },
     );
 }
 
 struct SshSessionOutput {
-    channel: Channel<SeqEvent>,
+    sink: EventSink,
     replay: Arc<ReplayBuffer>,
     alive: Arc<AtomicBool>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SshSpawnResult {
-    session: TerminalSessionInfo,
-    host_key_status: String,
-    host_key_fingerprint: String,
+pub struct HostedSshSpawn {
+    pub process: SshTerminalSession,
+    pub host_key_status: String,
+    pub host_key_fingerprint: String,
+    pub integration_enabled: bool,
+    pub integration_degraded_reason: Option<String>,
 }
 
-#[tauri::command]
-pub async fn ssh_terminal_spawn<R: Runtime>(
-    app: AppHandle<R>,
-    state: State<'_, SshTerminalState>,
+/// Connect an SSH PTY whose lifetime and replay are owned by the durable
+/// terminal host. The caller supplies the canonical event sink so SSH and
+/// local PTYs share the same attachment, controller, and backpressure path.
+pub async fn spawn_hosted_ssh(
     req: SshSpawnRequest,
-    on_event: Channel<SeqEvent>,
-) -> Result<SshSpawnResult, String> {
+    known_hosts_path: PathBuf,
+    replay: Arc<ReplayBuffer>,
+    sink: EventSink,
+) -> Result<HostedSshSpawn, String> {
     req.validate()?;
     let credential_request = req.clone();
     let credential =
         tokio::task::spawn_blocking(move || load_stored_credential(&credential_request))
             .await
             .map_err(|error| format!("SSH credential task failed: {error}"))??;
-    let known_hosts_path = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("SSH app data directory unavailable: {error}"))?
-        .join("ssh")
-        .join("known_hosts");
-    let (connection, observation) = connect_remote(&req, &credential, &known_hosts_path).await?;
+    let integration_nonce = uuid::Uuid::new_v4().simple().to_string();
+    let (connection, observation, integration) =
+        connect_remote(&req, &credential, &known_hosts_path, &integration_nonce).await?;
     let status = observation
         .status
         .ok_or_else(|| "SSH server did not present a host key".to_string())?;
     let fingerprint = observation
         .fingerprint
         .ok_or_else(|| "SSH host-key fingerprint is unavailable".to_string())?;
-    let id = Uuid::now_v7().to_string();
     let (command_tx, command_rx) = mpsc::channel(COMMAND_QUEUE_CAPACITY);
     let alive = Arc::new(AtomicBool::new(true));
-    let replay = Arc::new(ReplayBuffer::new());
-    let session = Arc::new(SshTerminalSession {
-        id,
-        request: req.clone(),
+    let process = SshTerminalSession {
         command_tx,
         alive: alive.clone(),
-    });
-    let info = session.info();
-    state.insert(session);
+        replay: Arc::clone(&replay),
+    };
     tokio::spawn(run_ssh_session(
         connection,
         req,
@@ -640,49 +767,20 @@ pub async fn ssh_terminal_spawn<R: Runtime>(
         known_hosts_path,
         command_rx,
         SshSessionOutput {
-            channel: on_event,
+            sink,
             replay,
             alive,
         },
+        integration_nonce,
+        integration.enabled,
     ));
-    Ok(SshSpawnResult {
-        session: info,
+    Ok(HostedSshSpawn {
+        process,
         host_key_status: status.as_str().into(),
         host_key_fingerprint: fingerprint,
+        integration_enabled: integration.enabled,
+        integration_degraded_reason: integration.degraded_reason,
     })
-}
-
-#[tauri::command]
-pub fn ssh_terminal_write(
-    state: State<'_, SshTerminalState>,
-    id: String,
-    data: Vec<u8>,
-) -> Result<(), String> {
-    state
-        .get(&id)
-        .ok_or_else(|| format!("unknown SSH session id: {id}"))?
-        .write(data)
-}
-
-#[tauri::command]
-pub fn ssh_terminal_resize(
-    state: State<'_, SshTerminalState>,
-    id: String,
-    rows: u16,
-    cols: u16,
-) -> Result<(), String> {
-    state
-        .get(&id)
-        .ok_or_else(|| format!("unknown SSH session id: {id}"))?
-        .resize(rows.max(1), cols.max(1))
-}
-
-#[tauri::command]
-pub fn ssh_terminal_kill(state: State<'_, SshTerminalState>, id: String) -> Result<(), String> {
-    if let Some(session) = state.remove(&id) {
-        session.kill()?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -692,8 +790,8 @@ mod tests {
     use russh::keys::{parse_public_key_base64, ssh_key};
 
     use super::{
-        parse_stored_credential, verify_or_learn_host_key, HostKeyStatus, SshAuthMethod,
-        SshSpawnRequest,
+        classify_remote_shell, parse_stored_credential, ssh_integration_command,
+        verify_or_learn_host_key, HostKeyStatus, ShellKind, SshAuthMethod, SshSpawnRequest,
     };
 
     const KEY_A: &str = "AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ";
@@ -774,5 +872,36 @@ mod tests {
         assert_eq!(passphrase.passphrase.as_deref(), Some("key-secret"));
         assert!(parse_stored_credential("{}").is_err());
         assert!(parse_stored_credential(r#"{"password":42}"#).is_err());
+    }
+
+    #[test]
+    fn remote_shell_probe_accepts_only_supported_interactive_shells() {
+        assert_eq!(
+            classify_remote_shell(b"noise\nCOGNIA_SHELL=/bin/bash\n"),
+            Some(ShellKind::Bash)
+        );
+        assert_eq!(
+            classify_remote_shell(b"COGNIA_SHELL=-zsh\n"),
+            Some(ShellKind::Zsh)
+        );
+        assert_eq!(
+            classify_remote_shell(b"COGNIA_SHELL=/usr/bin/fish\n"),
+            Some(ShellKind::Fish)
+        );
+        assert_eq!(classify_remote_shell(b"COGNIA_SHELL=/bin/tcsh\n"), None);
+    }
+
+    #[test]
+    fn ssh_integration_is_nonce_bound_and_never_interpolates_unknown_shells() {
+        let nonce = "0123456789abcdef";
+        for shell in [ShellKind::Bash, ShellKind::Zsh, ShellKind::Fish] {
+            let command = ssh_integration_command(shell, nonce).expect("supported shell");
+            assert!(command.contains(nonce));
+            assert!(command.contains("633"));
+            assert!(command.ends_with('\r'));
+        }
+        assert!(ssh_integration_command(ShellKind::Pwsh, nonce).is_none());
+        assert!(ssh_integration_command(ShellKind::Unknown, nonce).is_none());
+        assert!(ssh_integration_command(ShellKind::Bash, "unsafe';command").is_none());
     }
 }

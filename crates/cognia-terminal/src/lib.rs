@@ -23,9 +23,12 @@ pub mod commands;
 pub mod complete;
 pub mod exec;
 pub mod headless;
+pub mod host;
+pub mod host_wire;
 pub mod integration;
 pub mod osc633;
 pub mod path_scan;
+pub mod protocol;
 pub mod replay;
 pub mod session;
 pub mod ssh;
@@ -36,7 +39,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 
 // Re-export the public session API so downstream Rust consumers (e.g.
-// the LAN-only WS handler in `lib/api/v1/`) can `use …::terminal::*`
+// the LAN terminal WebSocket handler can `use …::terminal::*`
 // without reaching into a sub-module. The unused-import lint fires for
 // the types this crate itself doesn't reference today — they're still
 // part of the module's stable surface.

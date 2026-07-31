@@ -128,4 +128,37 @@ describe("SshTerminalSession", () => {
     channels[0]?.onmessage?.({ seq: 2, event: { kind: "exit" } })
     expect(exit).toBeNull()
   })
+
+  it("detaches and transitions local control ownership", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      session: {
+        id: "remote-3",
+        projectId: null,
+        extensionId: null,
+        origin: "remote",
+        shell: "ssh deploy@host.example",
+      },
+      hostKeyStatus: "verified",
+      hostKeyFingerprint: "SHA256:ghi",
+    })
+    const session = await SshTerminalSession.connect(request)
+    const controls: unknown[] = []
+    session.onControlState((state) => controls.push(state))
+    mockInvoke.mockResolvedValue(undefined)
+
+    await session.detach()
+    await session.takeControl()
+    await session.releaseControl()
+
+    expect(mockInvoke.mock.calls.slice(-3)).toEqual([
+      ["terminal_detach", { id: "remote-3" }],
+      ["terminal_take_control", { id: "remote-3" }],
+      ["terminal_release_control", { id: "remote-3" }],
+    ])
+    expect(controls).toEqual([
+      { role: "controller", controllerId: null },
+      { role: "controller", controllerId: "local" },
+      { role: "viewer", controllerId: null, reason: "released" },
+    ])
+  })
 })

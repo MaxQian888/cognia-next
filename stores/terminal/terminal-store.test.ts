@@ -42,6 +42,16 @@ describe("dock layout state", () => {
     expect(useTerminalStore.getState().panelOpen).toBe(start)
   })
 
+  it("tracks actionable terminal-host state without persisting it", () => {
+    useTerminalStore.getState().setHostState("unauthorized", "grant revoked")
+    expect(useTerminalStore.getState()).toMatchObject({
+      hostState: "unauthorized",
+      hostStateMessage: "grant revoked",
+    })
+    const { partialize } = useTerminalStore.persist.getOptions()
+    expect(partialize?.(useTerminalStore.getState())).not.toHaveProperty("hostState")
+  })
+
   it("clamps panelHeight within bounds", () => {
     useTerminalStore.getState().setPanelHeight(99)
     expect(useTerminalStore.getState().panelHeightPct).toBe(TERMINAL_LAYOUT_BOUNDS.panelMaxPct)
@@ -67,7 +77,20 @@ describe("dock layout state", () => {
         splitDirection: { a: "col" },
         activeSessionIdByProject: { "proj-a": "a" },
         customTitles: { b: "Tests" },
+        stableHostSessionIds: [],
+        controllerBySession: {},
       },
+    })
+  })
+
+  it("persists stable host-session identity and last controller for reload handoff", () => {
+    useTerminalStore
+      .getState()
+      .registerSession(baseInfo({ id: "durable", hostId: "host-a", currentController: "desktop" }))
+    const { partialize } = useTerminalStore.persist.getOptions()
+    expect(partialize?.(useTerminalStore.getState()).pendingReloadLayout).toMatchObject({
+      stableHostSessionIds: ["durable"],
+      controllerBySession: { durable: "desktop" },
     })
   })
 
@@ -102,6 +125,12 @@ describe("maximize toggle", () => {
     expect(s.maximized).toBe(true)
     expect(s.panelHeightPct).toBe(TERMINAL_LAYOUT_BOUNDS.panelMaxPct)
     expect(s.preMaxHeightPct).toBe(40)
+  })
+
+  it("supports continuous dock resizing through the complete 15–85 percent range", () => {
+    useTerminalStore.getState().setPanelHeight(84.5)
+    expect(useTerminalStore.getState().panelHeightPct).toBe(84.5)
+    expect(TERMINAL_LAYOUT_BOUNDS).toEqual({ panelMinPct: 15, panelMaxPct: 85 })
   })
 
   it("toggling again restores the pre-maximize height", () => {
@@ -526,6 +555,8 @@ describe("split panes (1A)", () => {
         splitDirection: { a: "col" },
         activeSessionIdByProject: { "proj-a": "a" },
         customTitles: { a: "Server", b: "Tests" },
+        stableHostSessionIds: [],
+        controllerBySession: {},
       },
     })
     twoSessions()
@@ -550,6 +581,8 @@ describe("split panes (1A)", () => {
         splitDirection: { a: "row" },
         activeSessionIdByProject: { "proj-a": "missing", "proj-b": "other" },
         customTitles: { missing: "Gone", b: "Restored", other: "Other" },
+        stableHostSessionIds: [],
+        controllerBySession: {},
       },
     })
     twoSessions()
@@ -574,6 +607,8 @@ describe("split panes (1A)", () => {
         splitDirection: { gone: "col" },
         activeSessionIdByProject: { "proj-a": "gone" },
         customTitles: { gone: "Old" },
+        stableHostSessionIds: [],
+        controllerBySession: {},
       },
     })
 

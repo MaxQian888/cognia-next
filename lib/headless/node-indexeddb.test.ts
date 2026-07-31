@@ -31,6 +31,26 @@ describe("installFakeIndexedDb", () => {
     expect(g2.window).toBe(g2)
   })
 
+  it("rebinds a stale non-empty Dexie dependency snapshot", async () => {
+    const savedIdb = Dexie.dependencies.indexedDB
+    const savedRange = Dexie.dependencies.IDBKeyRange
+    const staleIdb = {} as IDBFactory
+    const staleRange = {} as typeof IDBKeyRange
+    const currentIdb = {} as IDBFactory
+    const currentRange = {} as typeof IDBKeyRange
+
+    try {
+      Dexie.dependencies.indexedDB = staleIdb
+      Dexie.dependencies.IDBKeyRange = staleRange
+      await installFakeIndexedDb({ indexedDB: currentIdb, IDBKeyRange: currentRange })
+      expect(Dexie.dependencies.indexedDB).toBe(currentIdb)
+      expect(Dexie.dependencies.IDBKeyRange).toBe(currentRange)
+    } finally {
+      Dexie.dependencies.indexedDB = savedIdb
+      Dexie.dependencies.IDBKeyRange = savedRange
+    }
+  })
+
   it("opens a real Dexie database against the shim", async () => {
     const g: Record<string, unknown> = {}
     await installFakeIndexedDb(g)
