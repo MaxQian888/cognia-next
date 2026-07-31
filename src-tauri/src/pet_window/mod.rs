@@ -34,7 +34,6 @@ pub(crate) use surfaces::enumerate_scaled_candidates;
 // reclassing the pet windows pioneered (non-activating, all-Spaces,
 // floating level). Alias rather than move — pet call sites stay untouched.
 pub(crate) use macos_panel::{
-    apply_pet_panel_behavior as apply_overlay_panel_behavior,
     begin_panel_open as begin_overlay_panel_open,
     cancel_panel_reveal as cancel_overlay_panel_reveal,
     // The AWAITED conversion. `apply_overlay_panel_behavior` only enqueues, and
@@ -43,8 +42,11 @@ pub(crate) use macos_panel::{
     // ordinary — activating — NSWindow.
     configure_pet_panel as configure_overlay_panel,
     current_panel_generation as current_overlay_panel_generation,
+    detach_pet_panel as detach_overlay_panel,
+    panel_generation_is_current as overlay_panel_generation_is_current,
     reveal_pet_panel as reveal_overlay_panel,
     set_panel_key as set_overlay_panel_key,
+    try_begin_panel_build as try_begin_overlay_panel_build,
     PetPanelRole as OverlayPanelRole,
 };
 

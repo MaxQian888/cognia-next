@@ -6,8 +6,8 @@
 // deduction. Consumption itself is just an event emission: the controller owns
 // all progression (needs restore via meta.itemId, XP, coins, achievements).
 
-import { getDb } from "@/lib/db/schema"
-import { addPetInventory, decrementPetInventory, patchPetProfile } from "@/lib/db/pet"
+import { getDb, withDbReopenRetry } from "@/lib/db/schema"
+import { decrementPetInventory, patchPetProfile } from "@/lib/db/pet"
 import { normalizeCoins, type PetShopItem } from "@/types/pet"
 import { emitPetEvent } from "@/lib/pet/events/pet-event-bus"
 import { enqueuePetWork } from "@/lib/pet/runtime/pet-controller"
@@ -30,21 +30,35 @@ export function canAfford(coins: number, item: PetShopItem, qty = 1): boolean {
 export async function purchaseItem(itemId: string, qty = 1): Promise<PurchaseResult> {
   const item = getPetItem(itemId)
   if (!item) return { ok: false, error: "unknown-item" }
-  return enqueuePetWork(async () => {
-    const db = getDb()
-    return db.transaction("rw", db.petProfile, db.petInventory, async () => {
-      const profile = await db.petProfile.get("global")
-      if (!profile) return { ok: false, error: "no-profile" as const }
-      const balance = normalizeCoins(profile.coins)
-      if (!canAfford(balance, item, qty)) {
-        return { ok: false, error: "insufficient-coins" as const }
-      }
-      const coins = balance - item.price * qty
-      await patchPetProfile({ coins })
-      await addPetInventory(itemId, qty)
-      return { ok: true, coins }
+  return enqueuePetWork(() =>
+    withDbReopenRetry(() => {
+      const db = getDb()
+      return db.transaction("rw", db.petProfile, db.petInventory, () =>
+        db.petProfile.get("global").then((profile) => {
+          if (!profile) return { ok: false, error: "no-profile" as const }
+          const balance = normalizeCoins(profile.coins)
+          if (!canAfford(balance, item, qty)) {
+            return { ok: false, error: "insufficient-coins" as const }
+          }
+          const coins = balance - item.price * qty
+          const now = Date.now()
+          return db.petInventory.get(itemId).then((inventory) => {
+            const nextInventory = inventory
+              ? { ...inventory, qty: inventory.qty + qty, updatedAt: now }
+              : { id: itemId, qty, acquiredAt: now, updatedAt: now }
+            return Promise.all([
+              db.petProfile.put({
+                ...profile,
+                coins,
+                updatedAt: new Date(now).toISOString(),
+              }),
+              db.petInventory.put(nextInventory),
+            ]).then(() => ({ ok: true as const, coins }))
+          })
+        })
+      )
     })
-  })
+  )
 }
 
 export type ConsumeError = "unknown-item" | "not-owned"

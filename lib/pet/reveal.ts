@@ -45,6 +45,7 @@ export function schedulePetWindowReveal(options: PetWindowRevealOptions = {}): (
   const reveal = () => {
     void (async () => {
       try {
+        if (cancelled) return
         if (isMacPlatform()) {
           const role = getPetWindowRole()
           if (role === "island") {
@@ -76,6 +77,16 @@ export function schedulePetWindowReveal(options: PetWindowRevealOptions = {}): (
         // re-toggling it reopens via the already-painted re-show path.
       }
     })()
+  }
+  // A hidden macOS NSPanel may not receive animation frames until it is made
+  // visible, creating a deadlock with the renderer-driven reveal. The native
+  // panel path has no Windows transparent-surface resize requirement, so a
+  // post-effect microtask is sufficient and remains cancellable on unmount.
+  if (isMacPlatform()) {
+    queueMicrotask(reveal)
+    return () => {
+      cancelled = true
+    }
   }
   raf1 = requestAnimationFrame(() => {
     raf2 = requestAnimationFrame(reveal)

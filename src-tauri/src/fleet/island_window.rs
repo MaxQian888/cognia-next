@@ -584,20 +584,39 @@ fn reposition_island_with<R: Runtime>(
     Ok(())
 }
 
-/// Open (or re-show) the island. Shared by the Tauri command and the tray
-/// action — idempotent like `open_pet_window_inner`.
-pub(crate) fn open_island_window_inner<R: Runtime>(
+/// Start a fresh native-panel reveal lifecycle for every island open.
+///
+/// `reveal_overlay_panel` deliberately rejects a generation unless its role
+/// has an active open intent. Without this call the renderer's first-paint
+/// reveal is a successful no-op and the late plain-`show()` fallback only
+/// appears reliably while Cognia owns the foreground Space.
+fn begin_island_panel_open() -> u64 {
+    crate::pet_window::begin_overlay_panel_open(crate::pet_window::OverlayPanelRole::Island)
+}
+
+/// Open (or re-show) the island after atomically claiming its build lifecycle.
+fn open_island_window_claimed<R: Runtime>(
     app: &AppHandle<R>,
     opts: IslandWindowOpts,
+    generation: u64,
 ) -> Result<(), String> {
-    set_island_open_flag(true);
+    let role = crate::pet_window::OverlayPanelRole::Island;
+    if !crate::pet_window::overlay_panel_generation_is_current(role, generation) {
+        return Ok(());
+    }
     if let Some(window) = app.get_webview_window(ISLAND_LABEL) {
         // Recompute the top-center placement before re-showing: the monitor
         // layout / preferred monitor may have changed since the window was
-        // created, and `show()` alone would bring the strip back at its stale
-        // position.
+        // created. Reveal through the native panel owner: ordinary
+        // `WebviewWindow::show()` can remain behind another application's
+        // maximized/full-screen Space.
         let _ = reposition_island(app, &window);
-        window.show().map_err(|e| e.to_string())?;
+        if let Err(error) =
+            crate::pet_window::reveal_overlay_panel(&window, role, false, generation)
+        {
+            crate::pet_window::cancel_overlay_panel_reveal(role);
+            return Err(error);
+        }
         spawn_hover_monitor(app);
         return Ok(());
     }
@@ -625,14 +644,19 @@ pub(crate) fn open_island_window_inner<R: Runtime>(
     // return) while the card's body covers the strip itself.
     .inner_size(opts.width, opts.height + anchor.top_inset_logical())
     .build()
-    .map_err(|e| e.to_string())?;
+    .map_err(|error| {
+        crate::pet_window::cancel_overlay_panel_reveal(role);
+        error.to_string()
+    })?;
 
     // Strip the app menu bar on Windows/Linux (same fix as the pet overlay).
     let _ = window.remove_menu();
 
-    window
-        .set_position(PhysicalPosition::new(x, y))
-        .map_err(|e| e.to_string())?;
+    if let Err(error) = window.set_position(PhysicalPosition::new(x, y)) {
+        crate::pet_window::cancel_overlay_panel_reveal(role);
+        let _ = window.close();
+        return Err(error.to_string());
+    }
 
     // Non-activating NSPanel: float over all Spaces + full-screen apps, never
     // steal focus. `Island` role — key-capable like the popup (the inline
@@ -640,25 +664,20 @@ pub(crate) fn open_island_window_inner<R: Runtime>(
     // plain clicks non-key) but at a window level ABOVE the menu bar, since
     // the strip hugs the true top edge of the screen.
     //
-    // MUST run on the main thread: `to_panel` reclasses the NSWindow with raw
-    // AppKit calls (`-[NSPanel setFloatingPanel:]`), and AppKit traps
-    // (EXC_BREAKPOINT) when they run off-main. This command is `async`, so it
-    // executes on a tokio worker — calling the reclass inline here crashed the
-    // whole app the moment the island was opened from the renderer (the tray
-    // path never crashed because tray handlers already run on main).
-    // Fire-and-forget is safe: the window is created hidden and only revealed
-    // by the renderer after first paint, well after this closure has run.
-    {
-        let win = window.clone();
-        app.run_on_main_thread(move || {
-            if let Err(e) = crate::pet_window::apply_overlay_panel_behavior(
-                &win,
-                crate::pet_window::OverlayPanelRole::Island,
-            ) {
-                log::warn!("island: applying overlay panel behavior failed: {e}");
-            }
-        })
-        .map_err(|e| e.to_string())?;
+    // `configure_overlay_panel` schedules the raw AppKit conversion on the
+    // main thread and waits for it. The open command therefore cannot report
+    // success while this is still an ordinary NSWindow, nor can first-paint
+    // reveal race ahead of the all-Spaces/full-screen collection behavior.
+    if let Err(error) = crate::pet_window::configure_overlay_panel(&window, role) {
+        crate::pet_window::cancel_overlay_panel_reveal(role);
+        let _ = crate::pet_window::detach_overlay_panel(&window);
+        let _ = window.close();
+        return Err(error);
+    }
+    if !crate::pet_window::overlay_panel_generation_is_current(role, generation) {
+        let _ = crate::pet_window::detach_overlay_panel(&window);
+        let _ = window.close();
+        return Ok(());
     }
 
     spawn_hover_monitor(app);
@@ -670,18 +689,19 @@ pub(crate) fn open_island_window_inner<R: Runtime>(
         let handle = app.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+            if !crate::pet_window::overlay_panel_generation_is_current(role, generation) {
+                return;
+            }
             if let Some(window) = handle.get_webview_window(ISLAND_LABEL) {
                 if !window.is_visible().unwrap_or(true) {
                     log::warn!(
                         "island window still hidden 8s after open; force-showing (renderer never signaled first paint)"
                     );
-                    // Reveal WITHOUT stealing focus: the island is a passive
-                    // status overlay and must never pull the user's foreground
-                    // app (especially one on another display). Plain `show()`
-                    // on the non-activating NSPanel reveals it in place;
-                    // `bring_window_to_front` would also `set_focus()`, which
-                    // activates the window and yanks focus away.
-                    let _ = window.show();
+                    // `show()` on the native panel owner maps to
+                    // `orderFrontRegardless`, which crosses another app's
+                    // Space without activating Cognia or stealing focus.
+                    let _ =
+                        crate::pet_window::reveal_overlay_panel(&window, role, false, generation);
                 }
             }
         });
@@ -690,8 +710,46 @@ pub(crate) fn open_island_window_inner<R: Runtime>(
     Ok(())
 }
 
+/// Open (or re-show) the island. Shared by the Tauri command and the tray
+/// action — idempotent like `open_pet_window_inner`.
+///
+/// Initial panel conversion is synchronous from this caller's perspective.
+/// Serialize it with re-show requests so a newer open cannot adopt the hidden
+/// window while an older generation is still configuring it, then have the
+/// older generation detach and close the newer owner's live panel.
+pub(crate) fn open_island_window_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    opts: IslandWindowOpts,
+) -> Result<(), String> {
+    set_island_open_flag(true);
+    let role = crate::pet_window::OverlayPanelRole::Island;
+    let generation = begin_island_panel_open();
+    if let Some(_build_guard) = crate::pet_window::try_begin_overlay_panel_build(role) {
+        return open_island_window_claimed(app, opts, generation);
+    }
+
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        for _ in 0..200 {
+            if !crate::pet_window::overlay_panel_generation_is_current(role, generation) {
+                return;
+            }
+            if let Some(_build_guard) = crate::pet_window::try_begin_overlay_panel_build(role) {
+                if let Err(error) = open_island_window_claimed(&handle, opts, generation) {
+                    log::error!("island: queued open failed: {error}");
+                }
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        log::error!("island: timed out waiting for the window lifecycle to become idle");
+    });
+    Ok(())
+}
+
 pub(crate) fn close_island_window_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     set_island_open_flag(false);
+    crate::pet_window::cancel_overlay_panel_reveal(crate::pet_window::OverlayPanelRole::Island);
     if let Some(window) = app.get_webview_window(ISLAND_LABEL) {
         window.hide().map_err(|e| e.to_string())?;
     }
@@ -1162,6 +1220,47 @@ mod tests {
 
         let opted_in: IslandConfig = serde_json::from_str(r#"{"hideOnFullscreen":true}"#).unwrap();
         assert!(opted_in.hide_on_fullscreen);
+    }
+
+    #[test]
+    fn opening_the_island_arms_its_native_panel_reveal() {
+        let generation = begin_island_panel_open();
+        let role = crate::pet_window::OverlayPanelRole::Island;
+
+        assert!(crate::pet_window::overlay_panel_generation_is_current(
+            role, generation
+        ));
+
+        crate::pet_window::cancel_overlay_panel_reveal(role);
+    }
+
+    #[test]
+    fn island_panel_builds_are_serialized() {
+        let role = crate::pet_window::OverlayPanelRole::Island;
+        let first = crate::pet_window::try_begin_overlay_panel_build(role)
+            .expect("first island build should claim the lifecycle");
+
+        assert!(crate::pet_window::try_begin_overlay_panel_build(role).is_none());
+
+        drop(first);
+        assert!(crate::pet_window::try_begin_overlay_panel_build(role).is_some());
+    }
+
+    #[test]
+    fn closing_cancels_an_island_open_waiting_for_the_build_guard() {
+        let role = crate::pet_window::OverlayPanelRole::Island;
+        let first = crate::pet_window::try_begin_overlay_panel_build(role)
+            .expect("first island build should claim the lifecycle");
+        let queued_generation = begin_island_panel_open();
+
+        crate::pet_window::cancel_overlay_panel_reveal(role);
+        drop(first);
+
+        assert!(!crate::pet_window::overlay_panel_generation_is_current(
+            role,
+            queued_generation
+        ));
+        assert!(crate::pet_window::try_begin_overlay_panel_build(role).is_some());
     }
 
     #[test]

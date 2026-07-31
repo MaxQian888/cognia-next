@@ -127,6 +127,7 @@ function PetSvgContent({
         rx={22}
         ry={5}
         fill="#00000022"
+        opacity={1}
         animate={
           still
             ? { scaleX: 1, opacity: 1 }

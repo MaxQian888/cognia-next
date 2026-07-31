@@ -60,6 +60,12 @@ describe("svgSkin", () => {
     expect(container.querySelector('[data-pet-state="thinking"]')).not.toBeNull()
   })
 
+  it("gives the animated ground shadow a valid initial opacity", () => {
+    const { container } = render(<>{svgSkin.render(props())}</>)
+    const shadow = container.querySelector('[data-pet-part="shadow"]')
+    expect(shadow).toHaveAttribute("opacity", "1")
+  })
+
   it("renders an egg (no body) for the egg stage", () => {
     const { container } = render(<>{svgSkin.render(props({ stage: "egg" }))}</>)
     expect(container.querySelector('[data-pet-part="egg"]')).not.toBeNull()
@@ -108,6 +114,19 @@ describe("svgSkin", () => {
     // turn), not an instant style flip on the root.
     expect(container.querySelector("[data-pet-facing-group]")).not.toBeNull()
     expect(root.style.transform).toBe("")
+  })
+
+  it.each(["falling", "climbing"] as const)("renders the %s locomotion overlay", (mode) => {
+    const { container } = render(
+      <>{svgSkin.render(props({ locomotion: { mode, facing: "right" } }))}</>
+    )
+    const root = container.querySelector('[data-pet-skin-root="svg"]')
+    expect(root).toHaveAttribute("data-pet-locomotion", mode)
+  })
+
+  it("animates the mouth while speaking outside a one-shot", () => {
+    const { container } = render(<>{svgSkin.render(props({ speaking: true }))}</>)
+    expect(container.querySelector('[data-pet-part="lip-flap"]')).not.toBeNull()
   })
 
   it("renders a still frame when paused (motion suppressed like reduced motion)", () => {

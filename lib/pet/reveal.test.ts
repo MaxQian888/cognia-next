@@ -142,6 +142,18 @@ describe("schedulePetWindowReveal", () => {
     expect(setSizeMock).not.toHaveBeenCalled()
   })
 
+  it("does not wait for requestAnimationFrame before revealing a hidden macOS panel", async () => {
+    mockIsTauri = true
+    mockIsMac = true
+    mockWindowRole = "island"
+
+    schedulePetWindowReveal()
+    await flushAsync()
+
+    expect(rafSpy).not.toHaveBeenCalled()
+    expect(revealIslandWindowMock).toHaveBeenCalledWith(false)
+  })
+
   it("asks the native macOS panel to become key only for the popup", async () => {
     mockIsTauri = true
     mockIsMac = true
