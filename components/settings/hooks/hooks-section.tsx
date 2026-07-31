@@ -335,34 +335,38 @@ export function HooksSection({ cwd }: Props) {
         </div>
       </div>
 
-      {/* Scrolling body: aux cards + scope tabs + master-detail editor. */}
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5 @container/hooks-pane">
-        <RelatedSectionsStrip current="hooks" targets={CLAUDE_CODE_RELATED} />
+      {/* Fixed settings region: only the event list below owns vertical scrolling. */}
+      <div
+        className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden pr-0.5 @container/hooks-pane"
+        data-testid="hooks-settings-region"
+      >
+        <div className="shrink-0 space-y-3">
+          <RelatedSectionsStrip current="hooks" targets={CLAUDE_CODE_RELATED} />
 
-        <BuiltinHooksCard />
+          <BuiltinHooksCard />
 
-        <Tabs value={scope} onValueChange={(v) => requestScope(v as Scope)}>
-          <TabsList>
-            <TabsTrigger value="user" data-testid="scope-user">
-              {t("scope.user")}
-            </TabsTrigger>
-            <TabsTrigger value="project" data-testid="scope-project" disabled={!cwd}>
-              {t("scope.project")}
-            </TabsTrigger>
-            <TabsTrigger value="local" data-testid="scope-local" disabled={!cwd}>
-              {t("scope.local")}
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+          <Tabs value={scope} onValueChange={(v) => requestScope(v as Scope)}>
+            <TabsList>
+              <TabsTrigger value="user" data-testid="scope-user">
+                {t("scope.user")}
+              </TabsTrigger>
+              <TabsTrigger value="project" data-testid="scope-project" disabled={!cwd}>
+                {t("scope.project")}
+              </TabsTrigger>
+              <TabsTrigger value="local" data-testid="scope-local" disabled={!cwd}>
+                {t("scope.local")}
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
 
-        <div className="flex flex-col gap-3 @3xl/hooks-pane:flex-row @3xl/hooks-pane:items-start @3xl/hooks-pane:gap-4">
-          {/* Left: category-grouped event list. Sticky on wide panes. */}
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden @3xl/hooks-pane:flex-row @3xl/hooks-pane:gap-4">
+          {/* Left: category-grouped event list. */}
           <div
             aria-label={t("eventListLabel")}
             className={cn(
-              "space-y-3 rounded-lg border bg-muted/20 p-2",
-              "@3xl/hooks-pane:sticky @3xl/hooks-pane:top-0 @3xl/hooks-pane:w-60 @3xl/hooks-pane:shrink-0",
-              "@3xl/hooks-pane:max-h-[80vh] @3xl/hooks-pane:overflow-y-auto @3xl/hooks-pane:self-start"
+              "max-h-64 min-h-0 space-y-3 overflow-y-auto rounded-lg border bg-muted/20 p-2",
+              "@3xl/hooks-pane:h-full @3xl/hooks-pane:max-h-none @3xl/hooks-pane:w-60 @3xl/hooks-pane:shrink-0"
             )}
           >
             {HOOK_EVENT_CATEGORIES.map((cat) => {
@@ -419,7 +423,7 @@ export function HooksSection({ cwd }: Props) {
           </div>
 
           {/* Right: editor for the active event. */}
-          <div className="min-w-0 flex-1 space-y-2">
+          <div className="min-h-0 min-w-0 flex-1 space-y-2 overflow-hidden">
             {isDormantEvent(activeEvent) ? (
               <p
                 className="rounded border border-dashed bg-muted/20 p-2 text-xs text-muted-foreground"

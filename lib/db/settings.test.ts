@@ -72,6 +72,36 @@ describe("getSettings", () => {
     expect(s.importedVscodeThemes).toEqual([])
   })
 
+  it("normalizes legacy auto and difficulty routing into the existing settings block", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      autoRouting: {
+        enabled: true,
+        thresholds: { balanced: 0.2, powerful: 0.8 },
+        candidateAliases: ["quick", "normal", "deep"],
+      },
+      difficultyRouting: {
+        enabled: true,
+        threshold: 0.6,
+      },
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+
+    const first = await getSettings()
+    const second = await getSettings()
+
+    expect(first.autoRouting).toMatchObject({
+      enabled: true,
+      strategy: "difficulty",
+      defaultSelection: "auto",
+      candidateAliases: ["quick", "normal", "deep"],
+      thresholds: { balanced: 0.2, powerful: 0.8 },
+    })
+    expect(first.routingConfig?.strategy).toBe("difficulty")
+    expect(second.autoRouting).toEqual(first.autoRouting)
+  })
+
   it("merges background defaults under a partial saved row", async () => {
     await getDb().settings.put({
       id: "singleton",

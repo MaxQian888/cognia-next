@@ -383,18 +383,23 @@ export function SettingsPageHeader({
   return (
     <div
       className={cn(
-        "flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between mb-4",
+        "relative mb-5 flex min-h-14 flex-col gap-2 overflow-hidden rounded-xl border border-border/70 bg-background/88 px-4 py-3 shadow-xs backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between",
+        "before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/35 before:to-transparent",
         className
       )}
     >
-      <div className="flex items-center gap-2">
-        {icon && <span className="text-muted-foreground">{icon}</span>}
-        <div>
-          <h2 className="text-lg font-semibold">{title}</h2>
-          {description && <p className="text-sm text-muted-foreground">{description}</p>}
+      <div className="flex min-w-0 items-center gap-3">
+        {icon && (
+          <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-primary/15 bg-gradient-to-br from-primary/14 via-primary/8 to-background text-primary shadow-xs [&_svg]:size-4">
+            {icon}
+          </span>
+        )}
+        <div className="min-w-0">
+          <h2 className="truncate text-base font-semibold tracking-tight">{title}</h2>
+          {description && <p className="truncate text-xs text-muted-foreground">{description}</p>}
         </div>
       </div>
-      {actions && <div className="flex items-center gap-2 mt-2 sm:mt-0">{actions}</div>}
+      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </div>
   )
 }

@@ -11,6 +11,7 @@ import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { ArrowDownIcon, ArrowUpIcon, SearchIcon, Trash2Icon } from "lucide-react"
+import { toast } from "sonner"
 
 import { listAllGoals } from "@/lib/db/goals"
 import { getGoalRuntime } from "@/lib/goal/runtime"
@@ -96,7 +97,16 @@ export function GoalsHistoryTable() {
 
   async function confirmDelete() {
     if (!pendingDelete) return
-    await getGoalRuntime().deleteGoal(pendingDelete.id)
+    try {
+      await getGoalRuntime().deleteGoal(pendingDelete.id)
+    } catch (error) {
+      toast.error(
+        t("history.deleteFailed", {
+          message: error instanceof Error ? error.message : String(error),
+        })
+      )
+      return
+    }
     setPendingDelete(null)
     setHistoryRevision((revision) => revision + 1)
   }
@@ -240,7 +250,10 @@ export function GoalsHistoryTable() {
           <AlertDialogFooter>
             <AlertDialogCancel>{t("history.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => void confirmDelete()}
+              onClick={(event) => {
+                event.preventDefault()
+                void confirmDelete()
+              }}
               data-testid="goals-history-delete-confirm"
             >
               {t("history.deleteConfirm")}

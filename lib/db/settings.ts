@@ -17,6 +17,9 @@ import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/types/ocr"
 import { DEFAULT_GIT_SETTINGS } from "@/types/git"
 import { DEFAULT_SIDEBAR_LAYOUT, DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
 import { DEFAULT_EVAL_SETTINGS } from "@/types/eval/settings"
+import { DEFAULT_AUTO_ROUTING, type AutoRoutingSettings } from "@cognia/provider-types/auto-router"
+import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
+import type { DifficultyRoutingSettings } from "@/types/routing/tool-route"
 import { getDb, withDbReopenRetry } from "./schema"
 
 const SINGLETON_ID = "singleton" as const
@@ -38,6 +41,7 @@ export const DEFAULTS: AppSettings = {
   canvasCodeSandboxEnabled: true,
   builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
   routingFallbackEnabled: true,
+  autoRouting: { ...DEFAULT_AUTO_ROUTING },
   // Cache-friendly prompt assembly is on by default: volatile per-turn sections
   // (twin RAG, style few-shot, memory recall) are routed to the appended tail so
   // the stable system prefix stays byte-identical across turns and provider
@@ -180,9 +184,9 @@ export const DEFAULTS: AppSettings = {
   // are off until the user opts in via Settings → 应用安全.
   biometricRequiredFor: { ...DEFAULT_BIOMETRIC_GUARD },
 
-  // Auto-lock disabled by default — the local account stays unlocked until a
-  // manual lock or app exit. Opt-in from Settings → Security.
-  accountAutoLockMinutes: 0,
+  // Browser/desktop Vault locks after 30 minutes of inactivity by default.
+  // Active local turns pause the timer; users may override or disable it.
+  accountAutoLockMinutes: 30,
 
   // OCR subsystem preferences. Driven by the settings page at
   // `components/settings/ocr/*`. Mirrors `lib/ocr/types.ts:DEFAULT_OCR_SETTINGS`.
@@ -224,6 +228,12 @@ export async function getSettings(): Promise<AppSettings> {
   // Forward-compat: merge defaults under the persisted row so older installs
   // pick up new fields (e.g., searchProviders) without a schema migration.
   if (!row) return DEFAULTS
+  const autoRouting = mergeAutoRouting(row.autoRouting, row.difficultyRouting)
+  const routingConfig = {
+    ...DEFAULT_ROUTING_CONFIG,
+    ...(row.routingConfig ?? {}),
+    strategy: row.routingConfig?.strategy ?? autoRouting.strategy,
+  }
   return {
     ...DEFAULTS,
     ...row,
@@ -311,7 +321,43 @@ export async function getSettings(): Promise<AppSettings> {
       ...DEFAULTS.conversationSidebar,
       ...(row.conversationSidebar ?? {}),
     },
+    routingConfig,
+    autoRouting: { ...autoRouting, strategy: routingConfig.strategy },
     id: SINGLETON_ID,
+  }
+}
+
+function mergeAutoRouting(
+  stored: Partial<AutoRoutingSettings> | undefined,
+  legacyDifficulty: DifficultyRoutingSettings | undefined
+): AutoRoutingSettings {
+  const strategy =
+    stored?.strategy ??
+    (legacyDifficulty?.enabled ? ("difficulty" as const) : DEFAULT_AUTO_ROUTING.strategy)
+  return {
+    ...DEFAULT_AUTO_ROUTING,
+    ...(stored ?? {}),
+    strategy,
+    enabled: stored?.enabled ?? legacyDifficulty?.enabled ?? DEFAULT_AUTO_ROUTING.enabled,
+    defaultSelection:
+      stored?.defaultSelection ??
+      (stored?.enabled === true || legacyDifficulty?.enabled === true
+        ? "auto"
+        : DEFAULT_AUTO_ROUTING.defaultSelection),
+    preferredProviders: stored?.preferredProviders ?? [],
+    excludedProviders: stored?.excludedProviders ?? [],
+    dataPolicy: {
+      ...DEFAULT_AUTO_ROUTING.dataPolicy,
+      ...(stored?.dataPolicy ?? {}),
+    },
+    thresholds: {
+      ...DEFAULT_AUTO_ROUTING.thresholds,
+      ...(legacyDifficulty?.enabled ? { powerful: legacyDifficulty.threshold } : {}),
+      ...(stored?.thresholds ?? {}),
+    },
+    candidateAliases: stored?.candidateAliases?.length
+      ? [...stored.candidateAliases]
+      : [...DEFAULT_AUTO_ROUTING.candidateAliases],
   }
 }
 

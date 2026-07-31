@@ -131,6 +131,18 @@ beforeEach(() => {
   toastError.mockReset()
 })
 
+describe("HooksSection — scroll ownership", () => {
+  it("keeps the settings region fixed and gives vertical scrolling only to the event list", async () => {
+    mockReadUser.mockResolvedValue({ hooks: {} })
+    render(<HooksSection />)
+    await waitFor(() => expect(mockReadUser).toHaveBeenCalled())
+
+    expect(screen.getByTestId("hooks-settings-region")).toHaveClass("overflow-hidden")
+    expect(screen.getByTestId("hooks-settings-region")).not.toHaveClass("overflow-y-auto")
+    expect(screen.getByLabelText("eventListLabel")).toHaveClass("overflow-y-auto")
+  })
+})
+
 describe("HooksSection — load + scope switching", () => {
   it("loads user-scope hooks on initial mount", async () => {
     mockReadUser.mockResolvedValue({

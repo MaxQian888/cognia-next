@@ -1,8 +1,8 @@
 /**
  * @jest-environment jsdom
  *
- * Focused on the shell's own logic: the per-section reset row appears only for
- * sections that own AppSettings keys. Heavy children (sidebar, the ~50 dynamic
+ * Focused on the shell's own logic: the per-section reset button appears in the
+ * header only for sections that own AppSettings keys. Heavy children (sidebar, the ~50 dynamic
  * section components) are stubbed so the test isolates shell routing/branching.
  */
 
@@ -24,7 +24,12 @@ jest.mock("next-intl", () => ({
 // `next/dynamic` would code-split the section components; in the test we just
 // render a marker so the shell's wrapper logic is what's exercised.
 jest.mock("next/dynamic", () => () => {
-  const Stub = () => <div data-testid="section-body" />
+  const Stub = ({ headerActionsTarget }: { headerActionsTarget?: HTMLElement | null }) => (
+    <div
+      data-testid="section-body"
+      data-has-header-actions-target={String(Boolean(headerActionsTarget))}
+    />
+  )
   Stub.displayName = "DynamicStub"
   return Stub
 })
@@ -79,22 +84,24 @@ function setDesktop(on: boolean) {
 
 afterEach(() => setDesktop(false))
 
-describe("SettingsShell reset row", () => {
+describe("SettingsShell reset button", () => {
   beforeEach(() => {
     replace.mockClear()
   })
 
-  it("renders the reset row for a section that owns settings keys", () => {
+  it("renders the reset button in the header for a section that owns settings keys", () => {
     mockSection = "appearance"
-    render(<SettingsShell />)
-    expect(screen.getByTestId("section-reset-row")).toBeInTheDocument()
+    const { container } = render(<SettingsShell />)
+    const header = container.querySelector("header")
+    expect(header).toContainElement(screen.getByTestId("section-reset-button"))
+    expect(screen.queryByTestId("section-reset-row")).not.toBeInTheDocument()
     expect(screen.getByTestId("section-reset-button")).toHaveTextContent("appearance")
   })
 
-  it("omits the reset row for a Dexie-backed section with no settings keys", () => {
+  it("omits the reset button for a Dexie-backed section with no settings keys", () => {
     mockSection = "plugins"
     render(<SettingsShell />)
-    expect(screen.queryByTestId("section-reset-row")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("section-reset-button")).not.toBeInTheDocument()
   })
 
   it("opens the finder from the header trigger", async () => {
@@ -103,6 +110,18 @@ describe("SettingsShell reset row", () => {
     render(<SettingsShell />)
     await user.click(screen.getByTestId("settings-finder-trigger"))
     expect(screen.getByTestId("settings-finder")).toHaveAttribute("data-open", "true")
+  })
+
+  it("provides AI Connections with an action target inside the header", () => {
+    mockSection = "ai-connections"
+    const { container } = render(<SettingsShell />)
+    const target = screen.getByTestId("settings-section-header-actions")
+
+    expect(container.querySelector("header")).toContainElement(target)
+    expect(screen.getByTestId("section-body")).toHaveAttribute(
+      "data-has-header-actions-target",
+      "true"
+    )
   })
 
   it("redirects the deprecated ?section=general deep link to agent-runtime", () => {

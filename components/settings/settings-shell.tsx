@@ -9,6 +9,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { SettingsSidebar } from "./settings-sidebar"
 import { SectionResetButton } from "./common/section-reset-button"
 import { SettingsEmptyState } from "./common/settings-section"
@@ -327,6 +328,8 @@ function SettingsShellInner({ actions }: Props) {
   const searchParams = useSearchParams()
   const [searchQuery, setSearchQuery] = useState("")
   const [finderOpen, setFinderOpen] = useState(false)
+  const [sectionHeaderActionsTarget, setSectionHeaderActionsTarget] =
+    useState<HTMLDivElement | null>(null)
 
   useSettingFocus()
 
@@ -383,40 +386,60 @@ function SettingsShellInner({ actions }: Props) {
       />
 
       <SidebarInset data-bg-target="chat" className="flex flex-col min-w-0 h-full overflow-hidden">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 z-10 sm:h-12">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 shrink-0 sm:h-8 sm:w-8"
-            onClick={goHome}
-            aria-label={t("backToChat")}
-          >
-            <ArrowLeftIcon className="h-4 w-4" />
-          </Button>
-          <SidebarTrigger />
-          <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            <h1 className="text-base font-semibold">{t("title")}</h1>
-            {activeItem && (
-              <>
-                <ChevronRightIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <span className="text-base text-muted-foreground truncate">
-                  {t(`tabs.${activeItem.labelKey}` as never)}
-                </span>
-              </>
-            )}
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8"
-            onClick={() => setFinderOpen(true)}
-            aria-label={t("finder.triggerAria")}
-            data-testid="settings-finder-trigger"
-          >
-            <SearchIcon className="h-4 w-4" />
-          </Button>
-          {actions}
-        </header>
+        <FeaturePageHeader
+          variant="compact"
+          icon={<MonitorIcon />}
+          title={
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span>{t("title")}</span>
+              {activeItem && (
+                <>
+                  <ChevronRightIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <span className="truncate font-normal text-muted-foreground">
+                    {t(`tabs.${activeItem.labelKey}` as never)}
+                  </span>
+                </>
+              )}
+            </span>
+          }
+          breadcrumb={
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8 shrink-0"
+                onClick={goHome}
+                aria-label={t("backToChat")}
+              >
+                <ArrowLeftIcon className="size-4" />
+              </Button>
+              <SidebarTrigger />
+            </div>
+          }
+          actions={
+            <>
+              {activeSection === "ai-connections" && (
+                <div
+                  ref={setSectionHeaderActionsTarget}
+                  className="contents"
+                  data-testid="settings-section-header-actions"
+                />
+              )}
+              {hasSectionReset && <SectionResetButton sectionId={activeSection} />}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                onClick={() => setFinderOpen(true)}
+                aria-label={t("finder.triggerAria")}
+                data-testid="settings-finder-trigger"
+              >
+                <SearchIcon className="size-4" />
+              </Button>
+              {actions}
+            </>
+          }
+        />
 
         <SettingsFinder open={finderOpen} onOpenChange={setFinderOpen} />
 
@@ -426,24 +449,22 @@ function SettingsShellInner({ actions }: Props) {
             data-settings-panel
           >
             <div className="mx-auto flex w-full min-h-0 flex-1 flex-col animate-in fade-in slide-in-from-bottom-2 duration-200">
-              {hasSectionReset && (
-                <div className="mb-3 flex shrink-0 justify-end" data-testid="section-reset-row">
-                  <SectionResetButton sectionId={activeSection} />
-                </div>
-              )}
-              <SectionContent section={activeSection} onClose={goHome} />
+              <SectionContent
+                section={activeSection}
+                onClose={goHome}
+                headerActionsTarget={sectionHeaderActionsTarget}
+              />
             </div>
           </div>
         ) : (
           <ScrollArea className="flex-1 min-h-0">
             <div className="p-3 sm:p-4 md:p-5 lg:p-6 safe-area-pb" data-settings-panel>
               <div className="mx-auto w-full max-w-5xl animate-in fade-in slide-in-from-bottom-2 duration-200">
-                {hasSectionReset && (
-                  <div className="mb-3 flex justify-end" data-testid="section-reset-row">
-                    <SectionResetButton sectionId={activeSection} />
-                  </div>
-                )}
-                <SectionContent section={activeSection} onClose={goHome} />
+                <SectionContent
+                  section={activeSection}
+                  onClose={goHome}
+                  headerActionsTarget={sectionHeaderActionsTarget}
+                />
               </div>
             </div>
           </ScrollArea>
@@ -453,7 +474,15 @@ function SettingsShellInner({ actions }: Props) {
   )
 }
 
-function SectionContent({ section, onClose }: { section: SettingsSectionId; onClose: () => void }) {
+function SectionContent({
+  section,
+  onClose,
+  headerActionsTarget,
+}: {
+  section: SettingsSectionId
+  onClose: () => void
+  headerActionsTarget: HTMLDivElement | null
+}) {
   const t = useTranslations("settings")
   const desktopAvailable = useDesktopAvailable()
 
@@ -477,7 +506,7 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
     case "account":
       return <AccountOverviewSection />
     case "ai-connections":
-      return <ProvidersSection />
+      return <ProvidersSection headerActionsTarget={headerActionsTarget} />
     case "model-catalog":
       return <ModelCatalogSection />
     case "subscription":
@@ -591,7 +620,7 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
     case "about":
       return <AboutSection />
     default:
-      return <ProvidersSection />
+      return <ProvidersSection headerActionsTarget={headerActionsTarget} />
   }
 }
 
