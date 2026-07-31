@@ -158,6 +158,19 @@ import type { EvalRunRow } from "./eval-runs"
 import type { TraceAnnotationRow } from "./trace-annotations"
 import type { EvalDatasetVersion } from "@/types/eval/version"
 import type { EvalRunCaseRow } from "./eval-run-cases"
+import type {
+  EvalAdjudicationRow,
+  EvalAssetRow,
+  EvalConfigurationApplyRow,
+  EvalExperimentRow,
+  EvalProjectRow,
+  EvalRecommendationRow,
+  EvalReviewBatchRow,
+  EvalReviewVoteRow,
+  EvalSampleRow,
+  EvalScoreRow,
+  EvalTaskRow,
+} from "./eval-lab"
 import type { CalibrationItemRow } from "./calibration-items"
 import type { CalibrationRunRow } from "./calibration-runs"
 import type { BackgroundTaskJournalRow } from "./background-tasks"
@@ -195,6 +208,7 @@ import type {
   PetInventoryRow,
 } from "@/types/pet"
 import { accountDatabaseName } from "@/lib/accounts/account-db"
+import { LEGACY_MIXED_TARGET_ID, runtimeTargetDatabaseName } from "@/lib/runtime/target-registry"
 import { rootsFromLegacy } from "@/lib/workspace/roots"
 import { isTauri } from "@/lib/platform/detect"
 import { backfillProjectScopeV86 } from "./project-scope-backfill"
@@ -222,6 +236,14 @@ export function backfillMemoryGovernanceV118(memory: Memory): Memory {
 }
 
 export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
+
+function accountIdFromDatabaseName(databaseName: string): string | null {
+  const prefix = "cognia-account-"
+  if (!databaseName.startsWith(prefix)) return null
+  const scopedName = databaseName.slice(prefix.length)
+  const targetSeparatorIndex = scopedName.indexOf("-target-")
+  return targetSeparatorIndex === -1 ? scopedName : scopedName.slice(0, targetSeparatorIndex)
+}
 
 /**
  * Test-only collapsed schema declaration.
@@ -557,8 +579,8 @@ export class CogniaDB extends Dexie {
    * dashboard's trend source); `traceAnnotations` records error-analysis
    * labels on real `agentTraces` (open/axial coding + "save as eval case").
    * Per-row types + CRUD live in `./eval-datasets.ts`, `./eval-runs.ts`,
-   * `./trace-annotations.ts`. See the design doc
-   * `docs/superpowers/specs/2026-06-01-cognia-agent-eval-design.md`.
+   * `./trace-annotations.ts`. The current architecture is recorded in
+   * `docs/content/docs/{en,zh}/adr/0101-model-evaluation-lab.md`.
    */
   evalDatasets!: Table<EvalDataset, string>
   evalCases!: Table<EvalCase, string>
@@ -568,6 +590,20 @@ export class CogniaDB extends Dexie {
   // `./eval-dataset-versions.ts` and `./eval-run-cases.ts`.
   evalDatasetVersions!: Table<EvalDatasetVersion, string>
   evalRunCaseResults!: Table<EvalRunCaseRow, string>
+  // v137 — Complete Model Evaluation Lab. Project definitions and immutable
+  // experiment manifests are separate from durable tasks and encrypted
+  // artifacts so execution can recover without mutating historical evidence.
+  evalProjects!: Table<EvalProjectRow, string>
+  evalExperiments!: Table<EvalExperimentRow, string>
+  evalTasks!: Table<EvalTaskRow, string>
+  evalSamples!: Table<EvalSampleRow, string>
+  evalScores!: Table<EvalScoreRow, string>
+  evalReviewBatches!: Table<EvalReviewBatchRow, string>
+  evalReviewVotes!: Table<EvalReviewVoteRow, string>
+  evalAdjudications!: Table<EvalAdjudicationRow, string>
+  evalRecommendations!: Table<EvalRecommendationRow, string>
+  evalConfigurationApplies!: Table<EvalConfigurationApplyRow, string>
+  evalAssets!: Table<EvalAssetRow, string>
   // v82 — Judge calibration loop (eval spec §10). `calibrationItems` holds
   // human-gold-labeled (input, answer) pairs grouped into sets; `calibrationRuns`
   // holds one full agreement report (confusion matrix + Cohen's κ + per-item
@@ -3012,6 +3048,71 @@ export class CogniaDB extends Dexie {
         }
       })
 
+    // v136 — Queue rows created before runtime-target scoping cannot be safely
+    // replayed because their intended destination was never persisted. Preserve
+    // them for diagnostics, but quarantine them under the legacy mixed target
+    // instead of silently attributing them to whichever target is active now.
+    this.version(136).upgrade(async (tx) => {
+      const accountId = accountIdFromDatabaseName(this.name) ?? "legacy-unscoped"
+      await tx
+        .table<MobileOutboundJobRow, string>("mobileOutboundQueue")
+        .toCollection()
+        .modify((row) => {
+          if (row.accountId && row.targetId) return
+          Object.assign(row, {
+            accountId,
+            targetId: LEGACY_MIXED_TARGET_ID,
+            status: "deadlettered",
+            lastError: "Legacy outbound action could not be safely attributed to a runtime target.",
+          } satisfies Partial<MobileOutboundJobRow>)
+        })
+    })
+
+    // v137 — Additive durable evaluation-project storage. Existing dataset,
+    // version, run, case-result, and calibration ids remain untouched. Legacy
+    // reports receive an explicit reproducibility marker and stay readable,
+    // while formal recommendation queries use only evalExperiments.
+    this.version(137)
+      .stores({
+        evalRuns: "&runId, datasetId, [datasetId+createdAt], createdAt, reproducibility",
+        evalProjects: "&id, mode, updatedAt, createdAt",
+        evalExperiments: "&id, projectId, state, [projectId+createdAt], updatedAt",
+        evalTasks:
+          "&id, experimentId, [experimentId+state], [state+nextAttemptAt], variantId, caseId, providerId",
+        evalSamples:
+          "&id, experimentId, taskId, [experimentId+caseId], variantId, createdAt, expiresAt",
+        evalScores: "&id, experimentId, sampleId, scorerId, [experimentId+scorerId], createdAt",
+        evalReviewBatches: "&id, experimentId, status, createdAt",
+        evalReviewVotes: "&id, batchId, experimentId, pairId, reviewerId, [batchId+pairId]",
+        evalAdjudications: "&id, batchId, pairId, adjudicatorId, [batchId+pairId]",
+        evalRecommendations: "&id, &experimentId, createdAt",
+        evalConfigurationApplies:
+          "&id, experimentId, targetType, targetId, appliedAt, rolledBackAt",
+        evalAssets: "&digest, mediaType, createdAt, expiresAt, referenceCount",
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table("evalRuns")
+          .toCollection()
+          .modify((run) => {
+            if (!("reproducibility" in run)) run.reproducibility = "legacy-non-reproducible"
+          })
+      })
+
+    // v138 — Remote terminal access is an independent, explicit grant. Seed
+    // every existing paired device to false so no historical control/agent
+    // permission can implicitly authorize a durable shell.
+    this.version(138).upgrade(async (tx) => {
+      await tx
+        .table<PairedDeviceRow, string>("pairedDevices")
+        .toCollection()
+        .modify((row) => {
+          if (typeof row.allowRemoteTerminal !== "boolean") {
+            row.allowRemoteTerminal = false
+          }
+        })
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -3131,6 +3232,19 @@ export type { AutomationAuditLogRow } from "@/lib/automation/audit"
 export type { WorkflowViewportBookmarkRow } from "@/lib/workflow/editor/viewport-bookmarks-db"
 export type { PluginDexieMeta } from "./plugin-types"
 export type { EvalRunRow } from "./eval-runs"
+export type {
+  EvalAdjudicationRow,
+  EvalAssetRow,
+  EvalConfigurationApplyRow,
+  EvalExperimentRow,
+  EvalProjectRow,
+  EvalRecommendationRow,
+  EvalReviewBatchRow,
+  EvalReviewVoteRow,
+  EvalSampleRow,
+  EvalScoreRow,
+  EvalTaskRow,
+} from "./eval-lab"
 export type { OpticalArchiveRow, OpticalArchiveFrame } from "./optical-archives"
 export type { TeamPrObservationRow } from "./team-pr-observations"
 export type { TraceAnnotationRow } from "./trace-annotations"
@@ -3330,7 +3444,19 @@ export function startBlockedYieldRetry(
  */
 function isDatabaseClosedError(err: unknown): boolean {
   const name = err instanceof Error ? err.name : ""
-  return name === "DatabaseClosedError" || name === "DatabaseClosed"
+  if (name === "DatabaseClosedError" || name === "DatabaseClosed") return true
+  return err instanceof Error && "cause" in err ? isDatabaseClosedError(err.cause) : false
+}
+
+function isTransactionInactiveError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  if (err.name === "TransactionInactiveError") return true
+  return "cause" in err ? isTransactionInactiveError(err.cause) : false
+}
+
+function isDbReopenError(err: unknown): boolean {
+  const isPrematureCommit = err instanceof Error && err.name === "PrematureCommitError"
+  return isDatabaseClosedError(err) || isTransactionInactiveError(err) || isPrematureCommit
 }
 
 /**
@@ -3372,14 +3498,16 @@ export async function withDbReopenRetry<T>(
     try {
       return await op()
     } catch (err) {
-      if (attempt >= delaysMs.length || !isDatabaseClosedError(err)) throw err
+      if (attempt >= delaysMs.length || !isDbReopenError(err)) throw err
       await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]))
     }
   }
 }
 
-export function activateAccountDatabase(accountId: string): void {
-  const nextName = accountDatabaseName(accountId)
+export function activateAccountDatabase(accountId: string, targetId?: string): void {
+  const nextName = targetId
+    ? runtimeTargetDatabaseName(accountId, targetId)
+    : accountDatabaseName(accountId)
   if (_activeDatabaseName === nextName && _db?.name === nextName) return
   _activeDatabaseName = nextName
   closeCachedDb()
@@ -3461,8 +3589,10 @@ export function getDb(): CogniaDB {
     // file. The promise is memoized so concurrent callers share the same run.
     _seedPromise = import("./seed")
       .then(({ seedBuiltIns }) => {
-        if (_db !== seedTarget) return
-        return seedBuiltIns()
+        return withDbReopenRetry(() => {
+          if (_db !== seedTarget) return Promise.resolve()
+          return seedBuiltIns()
+        })
       })
       .catch((err) => {
         // DatabaseClosedError fires when the db is deleted out from under us

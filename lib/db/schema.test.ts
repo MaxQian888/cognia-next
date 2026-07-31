@@ -112,6 +112,12 @@ describe("getDb", () => {
     expect(first.isOpen()).toBe(false)
   })
 
+  it("opens a physically isolated database for an account runtime target", () => {
+    activateAccountDatabase("acct_one", "web-standalone")
+
+    expect(getDb().name).toBe("cognia-account-acct_one-target-web-standalone")
+  })
+
   it("leaves the cached handle untouched when account selection does not change", () => {
     activateAccountDatabase("acct_one")
     const first = getDb()
@@ -356,6 +362,39 @@ describe("getDb", () => {
     })
     expect((await upgraded.profileStoreMeta.get("singleton"))?.schemaVersion).toBe(2)
     expect((await upgraded.profileStoreMeta.get("singleton"))?.profileVersion).toBe(4)
+
+    upgraded.close()
+    await Dexie.delete(name)
+  })
+
+  it("v136 quarantines unscoped outbound rows instead of replaying them to an arbitrary target", async () => {
+    const name = `cognia-account-acct_queue_${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(135).stores({
+      mobileOutboundQueue: "&id, status, [status+nextAttemptAt], createdAt, command",
+    })
+    await legacy.open()
+    await legacy.table("mobileOutboundQueue").put({
+      id: "legacy-pending",
+      command: "workflow_trigger_manual",
+      payload: { workflowId: "wf-1" },
+      status: "pending",
+      attempts: 0,
+      createdAt: 100,
+      nextAttemptAt: 100,
+      idempotencyKey: "legacy-key",
+    })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    await expect(upgraded.mobileOutboundQueue.get("legacy-pending")).resolves.toMatchObject({
+      accountId: expect.stringMatching(/^acct_queue_/),
+      targetId: "legacy-mixed",
+      status: "deadlettered",
+      lastError: expect.stringMatching(/could not be safely attributed/i),
+    })
 
     upgraded.close()
     await Dexie.delete(name)
@@ -2979,6 +3018,30 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
       errSpy.mockRestore()
       fresh.__resetDbForTesting()
     })
+    jest.dontMock("./seed")
+  })
+
+  it("reopens and retries once when a schema mutation invalidates the seed transaction", async () => {
+    await jest.isolateModulesAsync(async () => {
+      const transactionInactive = Object.assign(new Error("transaction ended"), {
+        name: "TransactionInactiveError",
+      })
+      const seedBuiltIns = jest
+        .fn<Promise<void>, []>()
+        .mockRejectedValueOnce(transactionInactive)
+        .mockResolvedValueOnce(undefined)
+      jest.doMock("./seed", () => ({
+        seedBuiltIns,
+      }))
+      const fresh = await import("./schema")
+      fresh.__resetDbForTesting()
+
+      await fresh.whenSeeded()
+
+      expect(seedBuiltIns).toHaveBeenCalledTimes(2)
+      fresh.__resetDbForTesting()
+    })
+    jest.dontMock("./seed")
   })
 
   it("v16 upgrade hook migrates customThemes[].colors to tokens.{light,dark}", async () => {
@@ -3721,6 +3784,24 @@ describe("withDbReopenRetry", () => {
     expect(op).toHaveBeenCalledTimes(2)
   })
 
+  it("retries the direct TransactionInactiveError emitted by an interrupted transaction", async () => {
+    const op = jest
+      .fn<Promise<string>, []>()
+      .mockRejectedValueOnce(closedError("TransactionInactiveError"))
+      .mockResolvedValueOnce("row")
+    await expect(withDbReopenRetry(op, [0])).resolves.toBe("row")
+    expect(op).toHaveBeenCalledTimes(2)
+  })
+
+  it("retries Dexie's PrematureCommitError after a schema-close race", async () => {
+    const op = jest
+      .fn<Promise<string>, []>()
+      .mockRejectedValueOnce(closedError("PrematureCommitError"))
+      .mockResolvedValueOnce("row")
+    await expect(withDbReopenRetry(op, [0])).resolves.toBe("row")
+    expect(op).toHaveBeenCalledTimes(2)
+  })
+
   it("never retries an error that isn't a closed connection", async () => {
     const boom = new Error("constraint violated")
     boom.name = "ConstraintError"
@@ -3746,6 +3827,53 @@ describe("withDbReopenRetry", () => {
     // Default first backoff is 50ms — the retry must not be a hot loop, or it
     // burns every attempt inside the close→open window it is waiting out.
     expect(Date.now() - started).toBeGreaterThanOrEqual(40)
+  })
+})
+
+describe("schema v138 remote-terminal grant migration", () => {
+  const databaseName = "cognia-schema-v138-terminal-grant"
+
+  afterEach(async () => {
+    await Dexie.delete(databaseName)
+  })
+
+  it("seeds historical paired devices to false and preserves explicit grants", async () => {
+    const legacy = new Dexie(databaseName)
+    legacy.version(137).stores({
+      pairedDevices: "&deviceId, lastSeenAt, revokedAt, platform",
+    })
+    await legacy.open()
+    await legacy.table("pairedDevices").bulkPut([
+      {
+        deviceId: "historical-device",
+        label: "Old phone",
+        platform: "ios",
+        pubkey: "pk-old",
+        appVersion: "0.1.0",
+        pairedAt: 1,
+        lastSeenAt: 1,
+        allowRemoteControl: true,
+      },
+      {
+        deviceId: "explicit-terminal-device",
+        label: "Current phone",
+        platform: "android",
+        pubkey: "pk-current",
+        appVersion: "0.1.0",
+        pairedAt: 2,
+        lastSeenAt: 2,
+        allowRemoteTerminal: true,
+      },
+    ])
+    legacy.close()
+
+    const current = new CogniaDB(databaseName)
+    await current.open()
+    expect((await current.pairedDevices.get("historical-device"))?.allowRemoteTerminal).toBe(false)
+    expect((await current.pairedDevices.get("explicit-terminal-device"))?.allowRemoteTerminal).toBe(
+      true
+    )
+    current.close()
   })
 })
 
