@@ -27,7 +27,7 @@ import { quoteCardPayload } from "@/lib/share/payload"
 import { buildQuoteCardHtml, renderQuoteCardFragment } from "@/lib/export/html/quote-card"
 import { THEMES, type ThemeId } from "@/lib/export/html/syntax-themes"
 import { themeHasWallpaper, resolveThemeWallpaper } from "@/lib/export/html/theme-wallpaper"
-import { downloadBlob } from "@/lib/files/download"
+import { saveExport } from "@/lib/files/save-export"
 import { createLogger } from "@cognia/logging"
 
 const log = createLogger("quote-card-share")
@@ -96,7 +96,14 @@ export function QuoteCardDialog({
       const blob = await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/png")
       })
-      downloadBlob(blob, `cognia-message-card-${new Date().toISOString().slice(0, 10)}.png`)
+      const outcome = await saveExport({
+        filename: `cognia-message-card-${new Date().toISOString().slice(0, 10)}.png`,
+        data: blob,
+        mimeType: "image/png",
+      })
+      if (outcome.kind === "error") {
+        throw new Error(outcome.message)
+      }
     } catch (e) {
       log.error("quote-card-png-failed", { error: e instanceof Error ? e.message : String(e) })
       setError(t("pngError"))

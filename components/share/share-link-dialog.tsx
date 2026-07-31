@@ -53,6 +53,8 @@ type LimitMode = "unlimited" | "count" | "burn"
 
 interface Props {
   buildPayload: () => SharePayload | Promise<SharePayload>
+  /** Optional product-owned summary shown before publishing (for example, selected chats). */
+  artifactSummary?: React.ReactNode
   trigger?: React.ReactNode
   open?: boolean
   onOpenChange?: (open: boolean) => void
@@ -60,7 +62,14 @@ interface Props {
   onConfigure?: () => void
 }
 
-export function ShareLinkDialog({ buildPayload, trigger, open, onOpenChange, onConfigure }: Props) {
+export function ShareLinkDialog({
+  buildPayload,
+  artifactSummary,
+  trigger,
+  open,
+  onOpenChange,
+  onConfigure,
+}: Props) {
   const t = useTranslations("share")
   const [ttl, setTtl] = useState<TtlOption>("7d")
   const [limitMode, setLimitMode] = useState<LimitMode>("unlimited")
@@ -221,6 +230,7 @@ export function ShareLinkDialog({ buildPayload, trigger, open, onOpenChange, onC
           </div>
         ) : (
           <div className="space-y-4 py-2">
+            {artifactSummary}
             <div className="space-y-1">
               <Label className="text-xs">{t("ttlLabel")}</Label>
               <Select value={ttl} onValueChange={(v) => setTtl(v as TtlOption)}>

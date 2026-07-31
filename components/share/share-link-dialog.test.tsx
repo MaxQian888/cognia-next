@@ -61,6 +61,12 @@ describe("ShareLinkDialog", () => {
     expect(screen.getByText("View limit")).toBeInTheDocument()
   })
 
+  it("renders an artifact summary inside the pre-publish form", () => {
+    open({ artifactSummary: <div>Alpha and Bravo</div> })
+
+    expect(screen.getByText("Alpha and Bravo")).toBeInTheDocument()
+  })
+
   it("creates a link with the default lifecycle and shows the url + qr", async () => {
     mockCreate.mockResolvedValue({
       code: "AbC",

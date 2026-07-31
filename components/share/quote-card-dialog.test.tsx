@@ -8,9 +8,9 @@ jest.mock("html2canvas-pro", () => ({
   default: (...a: unknown[]) => mockHtml2canvas(...a),
 }))
 
-const mockDownloadBlob = jest.fn()
-jest.mock("@/lib/files/download", () => ({
-  downloadBlob: (...a: unknown[]) => mockDownloadBlob(...a),
+const mockSaveExport = jest.fn()
+jest.mock("@/lib/files/save-export", () => ({
+  saveExport: (...a: unknown[]) => mockSaveExport(...a),
 }))
 
 let capturedBuildPayload: (() => SharePayload | Promise<SharePayload>) | null = null
@@ -42,6 +42,12 @@ function fakeCanvas(blob: Blob | null = new Blob(["png"], { type: "image/png" })
 beforeEach(() => {
   jest.clearAllMocks()
   capturedBuildPayload = null
+  mockSaveExport.mockResolvedValue({
+    kind: "saved",
+    platform: "web",
+    location: "downloads",
+    filename: "cognia-message-card-2026-01-10.png",
+  })
 })
 
 function open(props = {}) {
@@ -76,13 +82,18 @@ describe("QuoteCardDialog", () => {
     expect(screen.getByTestId("theme-gallery")).toBeInTheDocument()
   })
 
-  it("downloads a PNG and cleans up the capture host", async () => {
-    mockHtml2canvas.mockResolvedValue(fakeCanvas())
+  it("saves the PNG through the cross-platform export boundary and cleans up the host", async () => {
+    const blob = new Blob(["png"], { type: "image/png" })
+    mockHtml2canvas.mockResolvedValue(fakeCanvas(blob))
     open()
     fireEvent.click(screen.getByTestId("quote-card-download"))
-    await waitFor(() => expect(mockDownloadBlob).toHaveBeenCalledTimes(1))
-    const [, filename] = mockDownloadBlob.mock.calls[0]
-    expect(String(filename)).toMatch(/^cognia-message-card-\d{4}-\d{2}-\d{2}\.png$/)
+    await waitFor(() =>
+      expect(mockSaveExport).toHaveBeenCalledWith({
+        filename: expect.stringMatching(/^cognia-message-card-\d{4}-\d{2}-\d{2}\.png$/),
+        data: blob,
+        mimeType: "image/png",
+      })
+    )
     expect(document.querySelector(".qcard")).toBeNull()
   })
 
@@ -102,7 +113,7 @@ describe("QuoteCardDialog", () => {
     await waitFor(() =>
       expect(screen.getByText("Failed to render the image. Try again.")).toBeInTheDocument()
     )
-    expect(mockDownloadBlob).not.toHaveBeenCalled()
+    expect(mockSaveExport).not.toHaveBeenCalled()
   })
 
   it("injects the wallpaper into the preview when enabled", async () => {
