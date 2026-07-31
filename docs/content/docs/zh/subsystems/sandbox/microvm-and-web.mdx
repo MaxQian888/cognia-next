@@ -11,8 +11,9 @@ description: "T4 级 e2b Firecracker microVM 层、microvm-bridge 中的会话�
   `lib/sandbox/microvm-bridge.ts` 是 OS 沙箱与 e2b microVM 层（T4）之间由两部分组成的胶水层：一个会话级
   **active tier** 映射，以及一个持有 **microVM exec 实现** 的注册表。`cognia-e2b-sandbox` 插件在
   activate 时注册真实的 exec（`buildMicrovmExec`）；同一个插件还为 GitHub-delivery 的 Issue→PR 闭环提供
-  `E2BWorkspaceBackend`。`lib/sandbox/web/index.ts` 是一个刻意保留的 **stub** —— Web 代码执行运行时尚未发布。
-  `types/system/sandbox.ts` 承载跨边界的结果与消耗元数据形状。
+  `E2BWorkspaceBackend`。AgentENV 这类 E2B-compatible 自托管 endpoint 可在该插件设置里通过 API URL 配置。
+  `lib/sandbox/web/index.ts` 是一个刻意保留的 **stub** —— Web 代码执行运行时尚未发布。`types/system/sandbox.ts`
+  承载跨边界的结果与消耗元数据形状。
 </TLDR>
 
 ## 层路由器 —— `microvm-bridge.ts`
@@ -63,7 +64,7 @@ export type MicrovmExec = (payload: MicrovmExecPayload) => Promise<MicrovmResult
 ```ts title="plugins/e2b-sandbox/src/microvm-exec.ts:44-76 (excerpt)"
 return async function microvmExec(payload: MicrovmExecPayload): Promise<MicrovmResult> {
   const started = now()
-  const sandbox = await factory({ apiKey: opts.apiKey ?? process.env.E2B_API_KEY })
+  const sandbox = await factory(resolveSandboxConnection(opts))
   try {
     const cmd = buildBashCommand(payload)
     const result = await sandbox.exec({
@@ -82,6 +83,12 @@ return async function microvmExec(payload: MicrovmExecPayload): Promise<MicrovmR
   }
 }
 ```
+
+<Callout type="info">
+  AgentENV 兼容配置在 Settings → Plugins → E2B Sandbox 中完成。将 “AgentENV / E2B API URL”
+  设为 AgentENV API endpoint；本地默认通常是 `http://127.0.0.1:8000`。SDK bridge 也接受进程环境变量
+  fallback：优先 `E2B_DOMAIN`，其次是 AgentENV 文档里的 `E2B_API_URL`。留空则使用 E2B Cloud。
+</Callout>
 
 `buildBashCommand`（`microvm-exec.ts:84-92`）以内联方式导出环境变量，并通过 `<<<` 管道传入 stdin，环境变量
 名与值均经过 shell 转义。默认 factory 会动态导入 `@e2b/sdk` 并调用 `Sandbox.create`，当 SDK 缺失时给出
@@ -118,11 +125,9 @@ await execChecked(sandbox, {
 })
 ```
 
-<Callout type="warn">
-  工作区后端的 **默认** `sandboxFactory` 并未接入 SDK —— 它会抛出
-  "Default E2B sandboxFactory hasn't been wired to the SDK yet — pass `sandboxFactory` explicitly"
-  （`workspace-backend.ts:187-191`）。调用方必须通过插件设置注入一个 factory。`microvm-exec.ts` 的
-  factory（用于 T4 层）**确实**已接入 `Sandbox.create`；这是两个完成度不同的独立 factory。
+<Callout type="info">
+  工作区后端与 T4 exec 使用同一套连接解析：插件配置优先，其次是进程环境变量 `E2B_API_KEY`、
+  `E2B_DOMAIN` / `E2B_API_URL`。默认 factory 会动态导入 `@e2b/sdk` 并调用 `Sandbox.create`。
 </Callout>
 
 ## Web 代码执行 stub —— `lib/sandbox/web`

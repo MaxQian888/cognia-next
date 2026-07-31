@@ -1,14 +1,11 @@
 /**
- * E2B-backed workspace backend for repository automation.
+ * E2B-backed workspace backend for the GitHub Delivery Issue → PR loop.
  *
- * A repository Integration plugin may wire a real implementation through
- * `setE2BBackend(impl)` from `lib/github/workspace`. When this plugin
- * (`cognia-e2b-sandbox`) is enabled we register one, so any workflow that sets
- * `worktreeMode: "e2b"` runs its AI loop inside a fresh Firecracker microVM
- * instead of writing to the host filesystem. (The built-in GitHub Delivery
- * stack that first drove this seam was removed in 2026-07 — see ADR-0018 — but
- * the seam itself is the plugin-facing `provider.workspace-backend` contract
- * and is unaffected.)
+ * The github-delivery plugin exposes `setE2BBackend(impl)` from
+ * `lib/github/workspace`. When this plugin (`cognia-e2b-sandbox`) is enabled
+ * we register a real implementation so any workflow that sets
+ * `worktreeMode: "e2b"` runs the AI loop inside a fresh Firecracker microVM
+ * instead of writing to the host filesystem.
  *
  * Why a separate file in this plugin:
  *   • Keeps `@e2b/sdk` as a peer / optional dep — not every user wants the
@@ -36,12 +33,25 @@ export interface E2BSandboxFacade {
   close(): Promise<void>
 }
 
+/** Connection options forwarded to the E2B-compatible SDK factory. */
+export interface E2BSandboxConnection {
+  apiKey?: string
+  /** SDK option name. AgentENV's `E2B_API_URL` is normalized into this. */
+  domain?: string
+}
+
 /** Factory the backend uses to obtain a fresh sandbox. */
-export type E2BSandboxFactory = (opts: { apiKey?: string }) => Promise<E2BSandboxFacade>
+export type E2BSandboxFactory = (opts: E2BSandboxConnection) => Promise<E2BSandboxFacade>
 
 export interface E2BWorkspaceBackendOptions {
   /** API key forwarded to the SDK factory. Defaults to process.env.E2B_API_KEY. */
   apiKey?: string
+  /** E2B-compatible API URL. AgentENV documents this as E2B_API_URL. */
+  apiUrl?: string
+  /** Native @e2b/sdk domain override. Takes precedence over apiUrl. */
+  domain?: string
+  /** Dynamic config resolver used by the plugin settings lifecycle. */
+  connection?: () => E2BSandboxConnection
   /** Override the sandbox factory — tests inject a mock here. */
   sandboxFactory?: E2BSandboxFactory
   /** Override `Date.now` for deterministic test output. */
@@ -69,7 +79,7 @@ export class E2BWorkspaceBackend implements E2BBackend {
     token: string
   }): Promise<WorkspaceHandle> {
     const factory = this.opts.sandboxFactory ?? defaultSandboxFactory
-    const sandbox = await factory({ apiKey: this.opts.apiKey ?? process.env.E2B_API_KEY })
+    const sandbox = await factory(resolveSandboxConnection(this.opts))
     try {
       // The sandbox starts with a writable working directory; we clone into
       // /tmp/cognia/<repo>/<stamp> so multiple clones in one sandbox lifetime
@@ -164,7 +174,33 @@ function shellEscape(s: string): string {
   return `'${s.replace(/'/g, `'"'"'`)}'`
 }
 
-async function defaultSandboxFactory(opts: { apiKey?: string }): Promise<E2BSandboxFacade> {
+export function resolveSandboxConnection(
+  opts: Pick<E2BWorkspaceBackendOptions, "apiKey" | "apiUrl" | "domain" | "connection">
+): E2BSandboxConnection {
+  const dynamic = opts.connection?.() ?? {}
+  const apiKey = firstNonEmpty(dynamic.apiKey, opts.apiKey, process.env.E2B_API_KEY)
+  const domain = firstNonEmpty(
+    dynamic.domain,
+    opts.domain,
+    opts.apiUrl,
+    process.env.E2B_DOMAIN,
+    process.env.E2B_API_URL
+  )
+  return {
+    ...(apiKey ? { apiKey } : {}),
+    ...(domain ? { domain } : {}),
+  }
+}
+
+function firstNonEmpty(...values: Array<string | undefined>): string | undefined {
+  for (const value of values) {
+    const trimmed = value?.trim()
+    if (trimmed) return trimmed
+  }
+  return undefined
+}
+
+async function defaultSandboxFactory(opts: E2BSandboxConnection): Promise<E2BSandboxFacade> {
   // Dynamic import keeps `@e2b/sdk` an optional dep. When it's missing we
   // surface a single-line hint pointing users at the install path; the rest
   // of the platform stays usable. Mirrors `microvm-exec.ts`'s default factory:
@@ -188,5 +224,5 @@ async function defaultSandboxFactory(opts: { apiKey?: string }): Promise<E2BSand
   if (!SandboxCtor || typeof SandboxCtor.create !== "function") {
     throw new Error("@e2b/sdk does not export `Sandbox.create` — incompatible SDK version")
   }
-  return SandboxCtor.create({ apiKey: opts.apiKey })
+  return SandboxCtor.create(opts)
 }

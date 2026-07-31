@@ -189,4 +189,37 @@ describe("buildMicrovmExec", () => {
     })
     expect(closed.count).toBe(1)
   })
+
+  it("passes AgentENV apiUrl to the sandbox factory as SDK domain", async () => {
+    const { sandbox } = makeSandbox()
+    const sandboxFactory = jest.fn(async () => sandbox)
+    const exec = buildMicrovmExec({
+      apiKey: "key-1",
+      apiUrl: "http://127.0.0.1:8000",
+      sandboxFactory,
+    })
+    await exec({
+      tool: "sandbox_bash",
+      command: {
+        argv: ["true"],
+        cwd: "/",
+        env: {},
+        stdin: null,
+        timeout: 0,
+      },
+      request: {
+        writable: [],
+        readable: [],
+        targetFiles: [],
+        maxCpuSeconds: 0,
+        maxMemoryMb: 0,
+        network: "off",
+        networkHosts: [],
+      },
+    })
+    expect(sandboxFactory).toHaveBeenCalledWith({
+      apiKey: "key-1",
+      domain: "http://127.0.0.1:8000",
+    })
+  })
 })

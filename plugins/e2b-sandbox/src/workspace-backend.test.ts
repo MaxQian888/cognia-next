@@ -1,4 +1,4 @@
-import { E2BWorkspaceBackend } from "./workspace-backend"
+import { E2BWorkspaceBackend, resolveSandboxConnection } from "./workspace-backend"
 
 function makeSandbox(id: string) {
   const exec = jest.fn(async ({ cmd }: { cmd: string }) => {
@@ -31,6 +31,53 @@ describe("E2BWorkspaceBackend", () => {
     expect(calls.some((c) => c.startsWith("mkdir -p"))).toBe(true)
     expect(calls.some((c) => c.includes("git clone"))).toBe(true)
     expect(calls.some((c) => c.includes("ghs_test"))).toBe(true)
+  })
+
+  it("passes AgentENV apiUrl to the SDK factory as domain", async () => {
+    const sandbox = makeSandbox("sb-agentenv")
+    const sandboxFactory = jest.fn(async () => sandbox)
+    const backend = new E2BWorkspaceBackend({
+      apiKey: "key-1",
+      apiUrl: "http://127.0.0.1:8000",
+      sandboxFactory,
+    })
+    await backend.clone({
+      repoFullName: "octo/hello-world",
+      branch: "main",
+      token: "ghs_test",
+    })
+    expect(sandboxFactory).toHaveBeenCalledWith({
+      apiKey: "key-1",
+      domain: "http://127.0.0.1:8000",
+    })
+  })
+
+  it("resolves E2B_DOMAIN and AgentENV's E2B_API_URL environment aliases", () => {
+    const prevKey = process.env.E2B_API_KEY
+    const prevDomain = process.env.E2B_DOMAIN
+    const prevApiUrl = process.env.E2B_API_URL
+    try {
+      process.env.E2B_API_KEY = "env-key"
+      delete process.env.E2B_DOMAIN
+      process.env.E2B_API_URL = "http://agentenv.local:8000"
+      expect(resolveSandboxConnection({})).toEqual({
+        apiKey: "env-key",
+        domain: "http://agentenv.local:8000",
+      })
+
+      process.env.E2B_DOMAIN = "https://e2b.example"
+      expect(resolveSandboxConnection({})).toEqual({
+        apiKey: "env-key",
+        domain: "https://e2b.example",
+      })
+    } finally {
+      if (prevKey === undefined) delete process.env.E2B_API_KEY
+      else process.env.E2B_API_KEY = prevKey
+      if (prevDomain === undefined) delete process.env.E2B_DOMAIN
+      else process.env.E2B_DOMAIN = prevDomain
+      if (prevApiUrl === undefined) delete process.env.E2B_API_URL
+      else process.env.E2B_API_URL = prevApiUrl
+    }
   })
 
   it("cleans up the sandbox when clone exec fails", async () => {

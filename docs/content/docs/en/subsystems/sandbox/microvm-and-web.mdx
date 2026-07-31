@@ -12,9 +12,10 @@ description: "The T4 e2b Firecracker microVM tier, the per-session tier router i
   tier (T4): a per-session **active tier** map and a registry holding the **microVM exec
   implementation**. The `cognia-e2b-sandbox` plugin registers a real exec on activate
   (`buildMicrovmExec`); the same plugin also provides an `E2BWorkspaceBackend` for the
-  GitHub-delivery Issue→PR loop. `lib/sandbox/web/index.ts` is a deliberate **stub** — the web
-  code-execution runtime is not shipped. `types/system/sandbox.ts` carries the cross-boundary result
-  and consumption-metadata shapes.
+  GitHub-delivery Issue→PR loop. E2B-compatible self-hosted endpoints such as AgentENV can be
+  configured in that plugin's settings via the API URL field. `lib/sandbox/web/index.ts` is a
+  deliberate **stub** — the web code-execution runtime is not shipped. `types/system/sandbox.ts`
+  carries the cross-boundary result and consumption-metadata shapes.
 </TLDR>
 
 ## The tier router — `microvm-bridge.ts`
@@ -65,7 +66,7 @@ runs the argv joined through `bash -c` (so quoting matches the OS backend), then
 ```ts title="plugins/e2b-sandbox/src/microvm-exec.ts:44-76 (excerpt)"
 return async function microvmExec(payload: MicrovmExecPayload): Promise<MicrovmResult> {
   const started = now()
-  const sandbox = await factory({ apiKey: opts.apiKey ?? process.env.E2B_API_KEY })
+  const sandbox = await factory(resolveSandboxConnection(opts))
   try {
     const cmd = buildBashCommand(payload)
     const result = await sandbox.exec({
@@ -103,6 +104,13 @@ try {
 }
 ```
 
+<Callout type="info">
+  AgentENV compatibility is configured through Settings → Plugins → E2B Sandbox. Set "AgentENV /
+  E2B API URL" to the AgentENV API endpoint, typically `http://127.0.0.1:8000` for a local server.
+  The SDK bridge also accepts process env fallbacks: `E2B_DOMAIN` first, then AgentENV's documented
+  `E2B_API_URL`. Leave the URL empty to use E2B Cloud.
+</Callout>
+
 ## The e2b workspace backend — `workspace-backend.ts`
 
 The same plugin also implements `E2BWorkspaceBackend` for the GitHub-delivery Issue→PR loop. When a
@@ -121,12 +129,10 @@ await execChecked(sandbox, {
 })
 ```
 
-<Callout type="warn">
-  The workspace backend's **default** `sandboxFactory` is not wired to the SDK — it throws
-  "Default E2B sandboxFactory hasn't been wired to the SDK yet — pass `sandboxFactory` explicitly"
-  (`workspace-backend.ts:187-191`). Callers must inject a factory via plugin settings. The
-  `microvm-exec.ts` factory (used for the T4 tier) **is** wired to `Sandbox.create`; these are two
-  separate factories with different completeness.
+<Callout type="info">
+  The workspace backend and T4 exec share the same connection resolution: plugin config first,
+  then process env `E2B_API_KEY`, `E2B_DOMAIN` / `E2B_API_URL`. The default factory dynamically
+  imports `@e2b/sdk` and calls `Sandbox.create`.
 </Callout>
 
 ## The web code-execution stub — `lib/sandbox/web`
