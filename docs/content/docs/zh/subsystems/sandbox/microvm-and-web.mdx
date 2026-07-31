@@ -1,6 +1,6 @@
 ---
 title: "microVM 与 Web"
-description: "T4 级 e2b Firecracker microVM 层、microvm-bridge 中的会话级层路由器、为 GitHub-delivery 闭环服务的 e2b 工作区后端、Web 代码执行 stub，以及 SandboxExecutionResult / 消耗元数据类型。"
+description: "T4 级 e2b Firecracker microVM 层、microvm-bridge 中的会话级层路由器、为 Marketplace integration 服务的 e2b 工作区后端、Web 代码执行 stub，以及 SandboxExecutionResult / 消耗元数据类型。"
 ---
 
 # microVM 与 Web
@@ -10,7 +10,7 @@ description: "T4 级 e2b Firecracker microVM 层、microvm-bridge 中的会话�
 <TLDR>
   `lib/sandbox/microvm-bridge.ts` 是 OS 沙箱与 e2b microVM 层（T4）之间由两部分组成的胶水层：一个会话级
   **active tier** 映射，以及一个持有 **microVM exec 实现** 的注册表。`cognia-e2b-sandbox` 插件在
-  activate 时注册真实的 exec（`buildMicrovmExec`）；同一个插件还为 GitHub-delivery 的 Issue→PR 闭环提供
+  activate 时注册真实的 exec（`buildMicrovmExec`）；同一个插件还为 Marketplace integration 提供
   `E2BWorkspaceBackend`。AgentENV 这类 E2B-compatible 自托管 endpoint 可在该插件设置里通过 API URL 配置。
   `lib/sandbox/web/index.ts` 是一个刻意保留的 **stub** —— Web 代码执行运行时尚未发布。`types/system/sandbox.ts`
   承载跨边界的结果与消耗元数据形状。
@@ -84,11 +84,18 @@ return async function microvmExec(payload: MicrovmExecPayload): Promise<MicrovmR
 }
 ```
 
-<Callout type="info">
-  AgentENV 兼容配置在 Settings → Plugins → E2B Sandbox 中完成。将 “AgentENV / E2B API URL”
-  设为 AgentENV API endpoint；本地默认通常是 `http://127.0.0.1:8000`。SDK bridge 也接受进程环境变量
-  fallback：优先 `E2B_DOMAIN`，其次是 AgentENV 文档里的 `E2B_API_URL`。留空则使用 E2B Cloud。
+<Callout type="warn">
+  AgentENV 需要 Linux 6.8+ 与 `/dev/kvm`；只有当 Cognia 与 AgentENV 运行在同一台主机、同一网络命名空间时，
+  `127.0.0.1:8000` 才有效。AgentENV 位于远程主机时，请使用该主机可访问的 IP 地址或域名。请按照
+  [AgentENV 单节点快速开始](https://github.com/kvcache-ai/AgentENV#-quick-start-single-node)
+  安装并启动服务。AgentENV 当前没有内置鉴权，因此只能部署在可信网络中，或置于带身份验证的代理之后。
 </Callout>
+
+使用前端 workspace/T4 bridge 时，请打开 Settings → Plugins → E2B Sandbox，将 “AgentENV / E2B API
+URL” 设置为可访问的 endpoint；留空则使用 E2B Cloud。使用 MCP server 时，需要另外打开 Settings → MCP
+Servers，配置 E2B preset 并将其附加到当前 character。该 preset 会把自己配置的 `E2B_API_KEY` 与
+`E2B_API_URL` 传给子进程。workspace/T4 bridge 读取插件设置，并把 URL 映射为 SDK 的 `domain` 参数；
+它不会读取宿主进程环境变量，也不会复用 MCP preset 的配置值。
 
 `buildBashCommand`（`microvm-exec.ts:84-92`）以内联方式导出环境变量，并通过 `<<<` 管道传入 stdin，环境变量
 名与值均经过 shell 转义。默认 factory 会动态导入 `@e2b/sdk` 并调用 `Sandbox.create`，当 SDK 缺失时给出
@@ -101,15 +108,15 @@ try {
   )) as { Sandbox?: unknown }
 } catch {
   throw new Error(
-    "@e2b/sdk is not installed. Install it with `pnpm add @e2b/sdk -w` and set " +
-      "E2B_API_KEY to use the microVM sandbox tier."
+    "@e2b/sdk is not installed. Install it with `pnpm add @e2b/sdk -w`, then configure " +
+      "E2B Sandbox in Settings → Plugins."
   )
 }
 ```
 
 ## e2b 工作区后端 —— `workspace-backend.ts`
 
-同一个插件还为 GitHub-delivery 的 Issue→PR 闭环实现了 `E2BWorkspaceBackend`。当某个工作流设置
+同一个插件还为 Marketplace integration 实现了 `E2BWorkspaceBackend`。当某个 integration 选择
 `worktreeMode: "e2b"` 时，AI 闭环会在一个全新的 Firecracker microVM 内运行，而不是在宿主文件系统上运行。
 每次 `clone()` 都会预置一个沙箱，并克隆到 `/tmp/cognia/<repo>/<stamp>`；`commitAndPush()` 则在沙箱内运行
 `git add/commit/push`。
@@ -126,8 +133,8 @@ await execChecked(sandbox, {
 ```
 
 <Callout type="info">
-  工作区后端与 T4 exec 使用同一套连接解析：插件配置优先，其次是进程环境变量 `E2B_API_KEY`、
-  `E2B_DOMAIN` / `E2B_API_URL`。默认 factory 会动态导入 `@e2b/sdk` 并调用 `Sandbox.create`。
+  工作区后端与 T4 exec 使用同一个实时插件配置解析器。默认 factory 会动态导入 `@e2b/sdk`
+  并调用 `Sandbox.create`。
 </Callout>
 
 ## Web 代码执行 stub —— `lib/sandbox/web`

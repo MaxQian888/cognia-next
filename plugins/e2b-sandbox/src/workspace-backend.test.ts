@@ -52,32 +52,32 @@ describe("E2BWorkspaceBackend", () => {
     })
   })
 
-  it("resolves E2B_DOMAIN and AgentENV's E2B_API_URL environment aliases", () => {
-    const prevKey = process.env.E2B_API_KEY
-    const prevDomain = process.env.E2B_DOMAIN
-    const prevApiUrl = process.env.E2B_API_URL
-    try {
-      process.env.E2B_API_KEY = "env-key"
-      delete process.env.E2B_DOMAIN
-      process.env.E2B_API_URL = "http://agentenv.local:8000"
-      expect(resolveSandboxConnection({})).toEqual({
-        apiKey: "env-key",
-        domain: "http://agentenv.local:8000",
+  it("prefers trimmed live plugin configuration over construction defaults", () => {
+    expect(
+      resolveSandboxConnection({
+        apiKey: "fallback-key",
+        apiUrl: "https://fallback.example",
+        connection: () => ({
+          apiKey: " live-key ",
+          domain: " http://agentenv.local:8000 ",
+        }),
       })
+    ).toEqual({
+      apiKey: "live-key",
+      domain: "http://agentenv.local:8000",
+    })
+  })
 
-      process.env.E2B_DOMAIN = "https://e2b.example"
-      expect(resolveSandboxConnection({})).toEqual({
-        apiKey: "env-key",
-        domain: "https://e2b.example",
+  it("falls back to explicit options and omits blank values", () => {
+    expect(
+      resolveSandboxConnection({
+        apiKey: " ",
+        domain: "",
+        apiUrl: " http://127.0.0.1:8000 ",
       })
-    } finally {
-      if (prevKey === undefined) delete process.env.E2B_API_KEY
-      else process.env.E2B_API_KEY = prevKey
-      if (prevDomain === undefined) delete process.env.E2B_DOMAIN
-      else process.env.E2B_DOMAIN = prevDomain
-      if (prevApiUrl === undefined) delete process.env.E2B_API_URL
-      else process.env.E2B_API_URL = prevApiUrl
-    }
+    ).toEqual({
+      domain: "http://127.0.0.1:8000",
+    })
   })
 
   it("cleans up the sandbox when clone exec fails", async () => {

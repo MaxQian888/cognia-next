@@ -33,7 +33,7 @@
     "apiKey": "",
     "apiUrl": ""
   },
-  "activationEvents": ["startup"],
+  "activationEvents": ["startup", "onCommand:sandbox"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "blocked",
@@ -47,5 +47,13 @@
       "availability": "blocked",
       "reason": "Spawns @e2b/mcp-server via npx — unavailable on mobile."
     }
-  }
+  },
+  "commands": [
+    {
+      "id": "sandbox",
+      "name": "/sandbox",
+      "description": "Attach the E2B sandbox MCP to the current character.",
+      "icon": "Box"
+    }
+  ]
 }

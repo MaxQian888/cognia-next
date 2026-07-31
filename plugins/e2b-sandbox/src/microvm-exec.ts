@@ -124,8 +124,8 @@ async function defaultMicrovmSandboxFactory(opts: E2BSandboxConnection): Promise
     )) as { Sandbox?: unknown }
   } catch {
     throw new Error(
-      "@e2b/sdk is not installed. Install it with `pnpm add @e2b/sdk -w` and set " +
-        "E2B_API_KEY to use the microVM sandbox tier."
+      "@e2b/sdk is not installed. Install it with `pnpm add @e2b/sdk -w`, then configure " +
+        "E2B Sandbox in Settings → Plugins."
     )
   }
   const SandboxCtor = mod?.Sandbox as

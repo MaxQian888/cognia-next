@@ -15,9 +15,10 @@
  * Part of M3 of the plugin-first Computer Use plan.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { defineMcpServerPreset } from "@cognia/plugin-sdk"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
+import type { PluginContext } from "@/types/plugin"
+import { defineMcpServerPreset, definePlugin } from "@cognia/plugin-sdk"
+import type { PluginManifest } from "@cognia/plugin-sdk/manifest"
+import manifestJson from "../plugin.json"
 // `setE2BBackend` kept as a fallback for hosts that don't expose
 // `ctx.workspace` yet (older bootstrap paths / unit-test contexts). When
 // the new API is present, we register through it for ADR-0026 §2 §D
@@ -88,33 +89,57 @@ function updateSandboxConnection(config: Record<string, unknown> | undefined): v
   sandboxConnection = connectionFromConfig(config)
 }
 
-const definition: PluginDefinition = {
-  manifest: {
-    id: "cognia-e2b-sandbox",
-    name: "E2B Sandbox",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: ["mcp-server-preset", "commands", "configuration"],
-    main: "src/index.ts",
-    configSchema: {
-      type: "object",
-      properties: {
-        apiKey: {
-          type: "string",
-          secret: true,
-          title: "E2B / AgentENV API key",
-          description: "Required for E2B Cloud; optional for local AgentENV if auth is disabled.",
-        },
-        apiUrl: {
-          type: "string",
-          title: "AgentENV / E2B API URL",
-          description: "Set this to your AgentENV server URL, for example http://127.0.0.1:8000.",
-        },
+const manifest = {
+  ...manifestJson,
+  type: "frontend",
+  author: { name: manifestJson.author },
+  capabilities: ["mcp-server-preset", "commands", "configuration"],
+  configSchema: {
+    ...manifestJson.configSchema,
+    type: "object",
+    properties: {
+      apiKey: {
+        ...manifestJson.configSchema.properties.apiKey,
+        type: "string",
+      },
+      apiUrl: {
+        ...manifestJson.configSchema.properties.apiUrl,
+        type: "string",
       },
     },
-    defaultConfig: { apiKey: "", apiUrl: "" },
-    mcpServerPresets: [E2B_PRESET],
-  } as never,
+  },
+  activationEvents: ["startup", "onCommand:sandbox"],
+  runtimeCompatibility: {
+    browser: {
+      availability: "blocked",
+      reason: manifestJson.runtimeCompatibility.browser.reason,
+    },
+    tauri: {
+      availability: "supported",
+      entrypoint: manifestJson.runtimeCompatibility.tauri.entrypoint,
+    },
+    mobile: {
+      availability: "blocked",
+      reason: manifestJson.runtimeCompatibility.mobile.reason,
+    },
+  },
+  commands: [
+    {
+      id: "sandbox",
+      name: "/sandbox",
+      description: manifestJson.commands[0].description,
+      icon: "Box",
+    },
+  ],
+  mcpServerPresets: [E2B_PRESET],
+} satisfies PluginManifest
+
+const definition = definePlugin({
+  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
+  // hand-written subset here would win and silently drop manifest fields.
+  // Literal discriminants above preserve compile-time contribution checking
+  // despite TypeScript widening values imported from JSON.
+  manifest,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("e2b-sandbox plugin activated")
     configChangeDispose?.()
@@ -125,11 +150,10 @@ const definition: PluginDefinition = {
 
     ctx.agent?.registerMcpServerPreset?.(E2B_PRESET)
 
-    // Register the cloud-sandbox workspace backend so GitHub Delivery's
-    // Issue → PR loop can opt in via `worktreeMode: "e2b"`. The backend
-    // lazy-loads `@e2b/sdk`; if the SDK isn't installed it surfaces a
-    // helpful install hint at the first clone attempt instead of failing
-    // here at activation time.
+    // Register the cloud-sandbox workspace backend for Marketplace
+    // integrations that select `worktreeMode: "e2b"`. The backend lazy-loads
+    // `@e2b/sdk`; if the SDK isn't installed it surfaces a helpful install
+    // hint at the first clone attempt instead of failing at activation time.
     //
     // Prefer ADR-0026 §2 §D `ctx.workspace.registerBackend(...)` when
     // available so the registration carries the plugin id + auto-cleanup
@@ -153,26 +177,27 @@ const definition: PluginDefinition = {
       workspaceRegistrationDispose = () => setE2BBackend(null)
     }
 
-    registerSlashCommand({
-      id: "e2b.attach",
-      name: "/sandbox",
-      description: "Attach the E2B sandbox MCP to the current character.",
-      handler: () => ({
-        message:
-          "Open Settings → MCP Servers, click E2B Sandbox in the gallery, paste your E2B API key, then attach it to the current character.",
-      }),
-      source: "plugin",
-      pluginId: ctx.pluginId,
-    })
-
     // ADR-0028 / T4 — register the microvm exec adapter so any session
     // with `sandboxTier: "microvm"` routes `sandbox_*` tool calls through
     // an ephemeral Firecracker microVM instead of the OS sandbox. When
     // `@e2b/sdk` isn't installed the factory throws a clean install hint
     // at first call — strict-mode compliant (no silent fallback).
     setMicrovmExec(buildMicrovmExec({ connection: () => sandboxConnection }))
+
+    // The slash command is declared in plugin.json so the manager owns
+    // namespacing, command-palette registration, idle refresh, and teardown.
+    return {
+      onCommand: async (command: string) => {
+        if (command !== "sandbox") return false
+        ctx.ui?.showToast?.(
+          "Configure workspace/T4 credentials in Settings → Plugins → E2B Sandbox. Separately configure and attach the E2B preset in Settings → MCP Servers.",
+          "info"
+        )
+        return true
+      },
+    }
   },
-  deactivate: async (ctx?: PluginContext) => {
+  deactivate: async () => {
     if (configChangeDispose) {
       configChangeDispose()
       configChangeDispose = undefined
@@ -182,10 +207,7 @@ const definition: PluginDefinition = {
       workspaceRegistrationDispose = undefined
     }
     setMicrovmExec(null)
-    if (ctx?.pluginId) {
-      unregisterCommandsByPlugin(ctx.pluginId)
-    }
   },
-}
+})
 
 export default definition

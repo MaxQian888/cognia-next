@@ -1,6 +1,6 @@
 ---
 title: "microVM & Web"
-description: "The T4 e2b Firecracker microVM tier, the per-session tier router in microvm-bridge, the e2b workspace backend for the GitHub-delivery loop, the web code-execution stub, and the SandboxExecutionResult / consumption-metadata types."
+description: "The T4 e2b Firecracker microVM tier, the per-session tier router in microvm-bridge, the e2b workspace backend for Marketplace integrations, the web code-execution stub, and the SandboxExecutionResult / consumption-metadata types."
 ---
 
 # microVM & Web
@@ -11,8 +11,8 @@ description: "The T4 e2b Firecracker microVM tier, the per-session tier router i
   `lib/sandbox/microvm-bridge.ts` is the two-piece glue between the OS sandbox and the e2b microVM
   tier (T4): a per-session **active tier** map and a registry holding the **microVM exec
   implementation**. The `cognia-e2b-sandbox` plugin registers a real exec on activate
-  (`buildMicrovmExec`); the same plugin also provides an `E2BWorkspaceBackend` for the
-  GitHub-delivery Issue→PR loop. E2B-compatible self-hosted endpoints such as AgentENV can be
+  (`buildMicrovmExec`); the same plugin also provides an `E2BWorkspaceBackend` for Marketplace
+  integrations. E2B-compatible self-hosted endpoints such as AgentENV can be
   configured in that plugin's settings via the API URL field. `lib/sandbox/web/index.ts` is a
   deliberate **stub** — the web code-execution runtime is not shipped. `types/system/sandbox.ts`
   carries the cross-boundary result and consumption-metadata shapes.
@@ -98,25 +98,34 @@ try {
   )) as { Sandbox?: unknown }
 } catch {
   throw new Error(
-    "@e2b/sdk is not installed. Install it with `pnpm add @e2b/sdk -w` and set " +
-      "E2B_API_KEY to use the microVM sandbox tier."
+    "@e2b/sdk is not installed. Install it with `pnpm add @e2b/sdk -w`, then configure " +
+      "E2B Sandbox in Settings → Plugins."
   )
 }
 ```
 
-<Callout type="info">
-  AgentENV compatibility is configured through Settings → Plugins → E2B Sandbox. Set "AgentENV /
-  E2B API URL" to the AgentENV API endpoint, typically `http://127.0.0.1:8000` for a local server.
-  The SDK bridge also accepts process env fallbacks: `E2B_DOMAIN` first, then AgentENV's documented
-  `E2B_API_URL`. Leave the URL empty to use E2B Cloud.
+<Callout type="warn">
+  AgentENV requires a Linux 6.8+ host with `/dev/kvm`; `127.0.0.1:8000` works only when Cognia
+  runs on that same host and network namespace. For a remote AgentENV host, use its reachable IP
+  address or domain. Follow the [AgentENV single-node quick
+  start](https://github.com/kvcache-ai/AgentENV#-quick-start-single-node) to install and start the
+  server. AgentENV currently has no built-in authorization, so keep it on a trusted network or put
+  it behind an authenticated proxy.
 </Callout>
+
+For the frontend workspace/T4 bridge, open Settings → Plugins → E2B Sandbox and set "AgentENV /
+E2B API URL" to the reachable endpoint; leave it empty to use E2B Cloud. To use the MCP server,
+separately open Settings → MCP Servers, configure the E2B preset, and attach it to the current
+character. The preset passes its own `E2B_API_KEY` and `E2B_API_URL` values to the spawned process.
+The workspace/T4 bridge reads the plugin settings and maps the URL to the SDK's `domain` option; it
+does not read host process environment variables or reuse the MCP preset values.
 
 ## The e2b workspace backend — `workspace-backend.ts`
 
-The same plugin also implements `E2BWorkspaceBackend` for the GitHub-delivery Issue→PR loop. When a
-workflow sets `worktreeMode: "e2b"`, the AI loop runs inside a fresh Firecracker microVM instead of
-the host filesystem. Each `clone()` provisions a sandbox and clones into `/tmp/cognia/<repo>/<stamp>`;
-`commitAndPush()` runs `git add/commit/push` inside the sandbox.
+The same plugin also implements `E2BWorkspaceBackend` for Marketplace integrations. When an
+integration selects `worktreeMode: "e2b"`, its AI loop runs inside a fresh Firecracker microVM
+instead of the host filesystem. Each `clone()` provisions a sandbox and clones into
+`/tmp/cognia/<repo>/<stamp>`; `commitAndPush()` runs `git add/commit/push` inside the sandbox.
 
 ```ts title="plugins/e2b-sandbox/src/workspace-backend.ts:74-90 (clone)"
 const stamp = this.opts.now().toString(36)
@@ -130,9 +139,8 @@ await execChecked(sandbox, {
 ```
 
 <Callout type="info">
-  The workspace backend and T4 exec share the same connection resolution: plugin config first,
-  then process env `E2B_API_KEY`, `E2B_DOMAIN` / `E2B_API_URL`. The default factory dynamically
-  imports `@e2b/sdk` and calls `Sandbox.create`.
+  The workspace backend and T4 exec share the same live plugin-configuration resolver. The default
+  factory dynamically imports `@e2b/sdk` and calls `Sandbox.create`.
 </Callout>
 
 ## The web code-execution stub — `lib/sandbox/web`
