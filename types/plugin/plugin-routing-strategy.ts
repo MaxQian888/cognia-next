@@ -44,6 +44,11 @@ export interface PluginRoutingStrategySelectorLike {
     telemetry: RoutingTelemetrySnapshot,
     ctx?: RoutingDecisionContext
   ) => ModelMappingEntry | null
+  selectAsync?: (
+    entries: readonly ModelMappingEntry[],
+    telemetry: RoutingTelemetrySnapshot,
+    ctx?: RoutingDecisionContext
+  ) => Promise<ModelMappingEntry | null>
 }
 
 /** Factory context handed to the plugin's exported factory. */

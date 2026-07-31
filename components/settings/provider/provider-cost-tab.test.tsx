@@ -85,6 +85,13 @@ jest.mock("@/stores", () => ({
 // ── Catalog mock ──────────────────────────────────────────────────────────────
 
 jest.mock("@cognia/provider-types/built-in-provider-catalog", () => ({
+  getBuiltInProviderCatalog: () => [
+    {
+      id: "openai",
+      name: "OpenAI",
+      models: [],
+    },
+  ],
   getBuiltInProviderCatalogEntry: (providerId: string) => {
     if (providerId === "openai") {
       return {

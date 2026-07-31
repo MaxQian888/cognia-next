@@ -91,7 +91,8 @@ async function registerOne(
   importer: NonNullable<RoutingStrategiesBridgeOptions["importer"]>
 ): Promise<void> {
   const strategyId = `${pluginId}:${def.id}`
-  const selectorLike = isPythonBackedContribution(def, pluginType)
+  const pythonBacked = isPythonBackedContribution(def, pluginType)
+  const selectorLike = pythonBacked
     ? createPythonBackedProxy<Awaited<ReturnType<PluginRoutingStrategyFactory>>>({
         pluginId,
         contributionId: def.id,
@@ -104,7 +105,22 @@ async function registerOne(
     {
       id: strategyId,
       label: def.label,
-      select: (entries, telemetry, ctx) => selectorLike.select(entries, telemetry, ctx),
+      // The synchronous API remains a compatibility path. Python selectors
+      // execute only through planRoute/selectAsync and safely keep chain order
+      // for legacy synchronous callers.
+      select: (entries, telemetry, ctx) =>
+        pythonBacked ? (entries[0] ?? null) : selectorLike.select(entries, telemetry, ctx),
+      ...(pythonBacked
+        ? {
+            selectAsync: (entries, telemetry, ctx) =>
+              Promise.resolve(selectorLike.select(entries, telemetry, ctx)),
+          }
+        : selectorLike.selectAsync
+          ? {
+              selectAsync: (entries, telemetry, ctx) =>
+                selectorLike.selectAsync!(entries, telemetry, ctx),
+            }
+          : {}),
     },
     { pluginId }
   )

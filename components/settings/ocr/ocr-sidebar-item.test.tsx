@@ -104,7 +104,7 @@ describe("OcrSidebarItem", () => {
     expect(btn.className).not.toMatch(/opacity-60/)
   })
 
-  it("renders an icon from the OCR_ICON_MAP", () => {
+  it("renders a brand icon for a supported OCR provider", () => {
     render(
       <OcrSidebarItem
         providerId="mistral-ocr"
@@ -116,8 +116,23 @@ describe("OcrSidebarItem", () => {
         statusLabel="Connected"
       />
     )
-    // The icon letter is the first letter of the provider per OCR_ICON_MAP.
-    expect(screen.getByRole("button").textContent).toContain("M")
+    expect(document.querySelector('img[src="/icons/lobe/mistral-color.svg"]')).not.toBeNull()
+  })
+
+  it("keeps the initial fallback for an OCR provider without a brand asset", () => {
+    render(
+      <OcrSidebarItem
+        providerId="paddle-ocr"
+        name="PaddleOCR"
+        subtitle="Local"
+        status="ready"
+        isSelected={false}
+        onClick={() => {}}
+        statusLabel="Ready"
+      />
+    )
+
+    expect(screen.getByRole("button")).toHaveTextContent("P")
   })
 
   it("accepts an icon override", () => {

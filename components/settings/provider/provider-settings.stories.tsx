@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
+import type { ComponentProps } from "react"
 
 import { ProviderSettings } from "./provider-settings"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
@@ -30,7 +31,7 @@ const meta = {
 } satisfies Meta<typeof ProviderSettings>
 
 export default meta
-type Story = StoryObj<typeof meta>
+type Story = StoryObj<ComponentProps<typeof ProviderSettings>>
 
 // No saved configuration — every catalog provider shows as not-configured.
 export const Default: Story = {}

@@ -4,6 +4,13 @@
  */
 
 import type { ProviderName } from "./provider"
+import type {
+  ModelMappingEntry,
+  ModelMappingParameterDefaults,
+  ModelMappingRetryPolicy,
+  ModelMappingSpecialFallbacks,
+} from "./model-mapping"
+import type { FilterNotes } from "./deployment-filter"
 // Type-only cross-domain reference to the shared agent-mode union. Erased at
 // runtime (JS output has zero coupling); resolved via the `@/*` path alias in
 // app typecheck, jest, and this package's tsconfig (`@/* → ../../*`). Kept as a
@@ -15,6 +22,7 @@ export type RoutingMode = "rule-based" | "llm-based" | "hybrid"
 
 // Routing strategy - what to optimize for
 export type RoutingStrategy =
+  | "reliability" // Prefer statistically healthy deployments before cost/latency
   | "quality" // Always use the best model available
   | "cost" // Minimize cost while maintaining quality
   | "speed" // Prioritize fast response times
@@ -41,6 +49,146 @@ export type TaskCategory =
   | "translation"
   | "summarization"
 
+export type RoutingSurface = "chat" | "gateway" | "workflow" | "council" | "agent"
+
+export type ModelRoutingSelection =
+  | {
+      kind: "manual"
+      providerId: string
+      modelId: string
+      deploymentId?: string
+    }
+  | { kind: "alias"; alias: string }
+  | { kind: "auto" }
+
+export interface RoutingCapabilityRequirements {
+  tools?: boolean
+  vision?: boolean
+  audio?: boolean
+  video?: boolean
+  reasoning?: boolean
+  structuredOutput?: boolean
+  streaming?: boolean
+  minContextTokens?: number
+}
+
+export interface RoutingCandidateCapabilities {
+  tools?: boolean
+  vision?: boolean
+  audio?: boolean
+  video?: boolean
+  reasoning?: boolean
+  structuredOutput?: boolean
+  streaming?: boolean
+  contextTokens?: number
+}
+
+export interface RoutingDataPolicy {
+  locality: "any" | "local-only"
+  allowedProviderIds?: string[]
+  excludedProviderIds?: string[]
+}
+
+export interface RoutingTaskHints {
+  hasCode?: boolean
+  attachmentKinds?: Array<"image" | "audio" | "video" | "document">
+  category?: TaskCategory
+}
+
+export interface RoutingRequest {
+  surface: RoutingSurface
+  selection: ModelRoutingSelection
+  /** Ordered low-to-high aliases used when Auto maps a local classification. */
+  candidateAliases?: string[]
+  promptText?: string
+  estimatedInputTokens?: number
+  requirements?: RoutingCapabilityRequirements
+  dataPolicy?: RoutingDataPolicy
+  taskHints?: RoutingTaskHints
+  /** Difficulty cut points used to choose the configured Auto alias tier. */
+  thresholds?: { balanced: number; powerful: number }
+  sessionId?: string
+  strategy?: RoutingStrategy | (string & {})
+  /** Compare the awaited decision with the synchronous compatibility path. */
+  shadowMode?: boolean
+}
+
+export type RoutingReasonCode =
+  | "manual-override"
+  | "alias-match"
+  | "auto-task-fit"
+  | "affinity-pin"
+  | "reliability-first"
+  | "capability-required"
+  | "context-window"
+  | "data-policy"
+  | "provider-unavailable"
+  | "circuit-open"
+  | "rate-limited"
+  | "budget-exceeded"
+  | "plugin-timeout"
+  | "plugin-error"
+  | "strategy-unavailable"
+  | "cold-start"
+  | "fallback-transient"
+  | "fallback-context"
+  | "fallback-content-policy"
+  | "committed-no-replay"
+  | `plugin:${string}:${string}`
+  | `filter:${string}`
+
+export interface RouteCandidate extends ModelMappingEntry {
+  deploymentId: string
+  reasonCodes: RoutingReasonCode[]
+}
+
+export interface RoutingPlan {
+  decisionId: string
+  surface: RoutingSurface
+  requested: ModelRoutingSelection
+  strategy: RoutingStrategy | (string & {})
+  selected: RouteCandidate
+  /** Primary is always index 0; remaining entries are attempted in order. */
+  orderedCandidates: RouteCandidate[]
+  reasonCodes: RoutingReasonCode[]
+  rejected: Array<{ reasonCode: RoutingReasonCode; count: number }>
+  classification?: TaskClassification
+  parameterDefaults?: ModelMappingParameterDefaults
+  specialFallbacks?: ModelMappingSpecialFallbacks
+  retryPolicy?: ModelMappingRetryPolicy
+  overBudgetWarning?: { providerId: string; spend: number; budget: number }
+  filterNotes?: FilterNotes
+  shadowComparison?: {
+    differs: boolean
+    selected: { providerId: string; modelId: string }
+  }
+  replayPolicy: "pre-commit-only"
+  createdAt: number
+}
+
+export type RoutingAttemptPhase =
+  "planned" | "inFlight" | "committed" | "completed" | "failed" | "cancelled"
+
+export interface RoutingAttemptState {
+  decisionId: string
+  phase: RoutingAttemptPhase
+  candidateIndex: number
+  committedAt?: number
+}
+
+/** Legacy strong/weak difficulty policy normalized into the unified router. */
+export interface DifficultyRoutingSettings {
+  enabled: boolean
+  weakModel?: { providerId: string; modelId: string }
+  strongModel?: { providerId: string; modelId: string }
+  threshold: number
+}
+
+export const DEFAULT_DIFFICULTY_ROUTING: DifficultyRoutingSettings = {
+  enabled: false,
+  threshold: 0.5,
+}
+
 // Model capabilities for filtering
 export interface ModelCapabilities {
   supportsVision: boolean
@@ -53,6 +201,8 @@ export interface ModelCapabilities {
 
 // Task classification result
 export interface TaskClassification {
+  /** Bounded local heuristic score used for transparent workload calibration. */
+  difficultyScore?: number
   complexity: TaskComplexity
   category: TaskCategory
   requiresReasoning: boolean
@@ -147,13 +297,27 @@ export interface AutoRouterSettings {
   // Fallback behavior
   fallbackTier: ModelTier
   fallbackProvider?: ProviderName
+
+  /** Selection used for sessions without an explicit provider/model. */
+  defaultSelection: "manual" | "auto"
+  /** Enforceable provider locality and allow/deny policy. */
+  dataPolicy: RoutingDataPolicy
+  /** Alias tiers used by the local classifier, ordered low to high. */
+  candidateAliases: string[]
+  /** Difficulty cut points for the alias tiers. */
+  thresholds: { balanced: number; powerful: number }
+  /** Compute and trace decisions without dispatching them. */
+  shadowMode: boolean
 }
+
+/** Settings-store spelling retained as an alias to the canonical type. */
+export type AutoRoutingSettings = AutoRouterSettings
 
 // Default auto router settings
 export const DEFAULT_AUTO_ROUTER_SETTINGS: AutoRouterSettings = {
-  enabled: true,
+  enabled: false,
   routingMode: "rule-based",
-  strategy: "balanced",
+  strategy: "reliability",
   showRoutingIndicator: true,
   allowOverride: true,
   preferredProviders: [],
@@ -165,7 +329,14 @@ export const DEFAULT_AUTO_ROUTER_SETTINGS: AutoRouterSettings = {
   cacheTTL: 300, // 5 minutes
   fallbackTier: "balanced",
   fallbackProvider: undefined,
+  defaultSelection: "manual",
+  dataPolicy: { locality: "any" },
+  candidateAliases: ["fast", "balanced", "powerful"],
+  thresholds: { balanced: 0.34, powerful: 0.67 },
+  shadowMode: true,
 }
+
+export const DEFAULT_AUTO_ROUTING = DEFAULT_AUTO_ROUTER_SETTINGS
 
 // Routing decision cache entry
 export interface RoutingCacheEntry {

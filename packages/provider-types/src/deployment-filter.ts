@@ -12,6 +12,11 @@
 import type { ModelMappingEntry, ProviderConstraint } from "./model-mapping"
 import type { CircuitBreakerStateValue } from "./circuit-breaker"
 import type { RoutingTelemetrySnapshot } from "./routing-strategy"
+import type {
+  RoutingCapabilityRequirements,
+  RoutingSurface,
+  TaskClassification,
+} from "./auto-router"
 
 /** One candidate route — an alias mapping entry. */
 export type DeploymentCandidate = ModelMappingEntry
@@ -22,8 +27,10 @@ export interface FilterRequest {
   alias?: string
   /** Rough token estimate of the outgoing prompt. */
   estimatedInputTokens?: number
-  /** Last user prompt text. */
-  promptText?: string
+  /** Locally derived request features; raw prompt text is never exposed. */
+  classification?: TaskClassification
+  requirements?: RoutingCapabilityRequirements
+  surface?: RoutingSurface
   /** Chat session id (affinity filter). */
   sessionId?: string
 }
@@ -44,6 +51,8 @@ export interface FilterNotes {
   affinityPinned?: string
   /** Filter ids that pruned at least one candidate (preview panel). */
   prunedBy?: string[]
+  /** Filters skipped because they timed out, threw, or returned invalid data. */
+  filterErrors?: Array<{ filterId: string; kind: "timeout" | "error" | "invalid" }>
 }
 
 /** Read-only environment the engine hands every filter. */
@@ -87,4 +96,10 @@ export interface DeploymentFilter {
     req: FilterRequest,
     ctx: FilterContext
   ) => FilterOutcome
+  /** Async companion used by subprocess-backed or otherwise awaitable plugins. */
+  filterAsync?: (
+    candidates: readonly DeploymentCandidate[],
+    req: FilterRequest,
+    ctx: FilterContext
+  ) => Promise<FilterOutcome>
 }

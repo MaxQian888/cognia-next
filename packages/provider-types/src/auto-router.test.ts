@@ -1,17 +1,56 @@
-import { DEFAULT_AUTO_ROUTER_SETTINGS, type RoutingStats } from "./auto-router"
+import {
+  DEFAULT_AUTO_ROUTER_SETTINGS,
+  type ModelRoutingSelection,
+  type RoutingPlan,
+  type RoutingStats,
+} from "./auto-router"
 
 describe("DEFAULT_AUTO_ROUTER_SETTINGS", () => {
-  it("enables balanced rule-based routing with cache and override support", () => {
+  it("keeps auto opt-in and defaults routed requests to reliability", () => {
     expect(DEFAULT_AUTO_ROUTER_SETTINGS).toMatchObject({
-      enabled: true,
+      enabled: false,
       routingMode: "rule-based",
-      strategy: "balanced",
+      strategy: "reliability",
       showRoutingIndicator: true,
       allowOverride: true,
       enableCache: true,
       cacheTTL: 300,
       fallbackTier: "balanced",
+      defaultSelection: "manual",
+      dataPolicy: { locality: "any" },
+      shadowMode: true,
     })
+  })
+})
+
+describe("routing plan contract", () => {
+  it("uses an explicit manual selection that cannot be confused with auto routing", () => {
+    const selection: ModelRoutingSelection = {
+      kind: "manual",
+      providerId: "openai",
+      modelId: "gpt-test",
+    }
+    const selected = {
+      providerId: "openai",
+      modelId: "gpt-test",
+      deploymentId: "openai::gpt-test",
+      reasonCodes: ["manual-override" as const],
+    }
+    const plan: RoutingPlan = {
+      decisionId: "decision-1",
+      surface: "chat",
+      requested: selection,
+      strategy: "reliability",
+      selected,
+      orderedCandidates: [selected],
+      reasonCodes: ["manual-override"],
+      rejected: [],
+      replayPolicy: "pre-commit-only",
+      createdAt: 1,
+    }
+
+    expect(plan.requested.kind).toBe("manual")
+    expect(plan.orderedCandidates[0]).toBe(plan.selected)
   })
 })
 

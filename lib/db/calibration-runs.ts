@@ -69,6 +69,13 @@ export async function listRunsBySet(setId: string): Promise<CalibrationRunRow[]>
   return rows
 }
 
+/** Latest calibration evidence across sets, for project judge preflight. */
+export async function listRecentCalibrationRuns(limit = 50): Promise<CalibrationRunRow[]> {
+  if (limit <= 0) return []
+  const rows = await getDb().calibrationRuns.orderBy("createdAt").reverse().limit(limit).toArray()
+  return rows
+}
+
 export async function deleteCalibrationRun(runId: string): Promise<void> {
   if (!runId) return
   await getDb().calibrationRuns.delete(runId)

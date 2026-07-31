@@ -19,6 +19,7 @@ import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 import type { RoutingStrategy } from "@cognia/provider-types/auto-router"
 
 const STRATEGIES: RoutingStrategy[] = [
+  "reliability",
   "quality",
   "cost",
   "speed",

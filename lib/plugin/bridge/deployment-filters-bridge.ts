@@ -92,7 +92,8 @@ async function registerOne(
   importer: NonNullable<DeploymentFiltersBridgeOptions["importer"]>
 ): Promise<void> {
   const filterId = `${pluginId}:${def.id}`
-  const filterLike = isPythonBackedContribution(def, pluginType)
+  const pythonBacked = isPythonBackedContribution(def, pluginType)
+  const filterLike = pythonBacked
     ? createPythonBackedProxy<Awaited<ReturnType<PluginDeploymentFilterFactory>>>({
         pluginId,
         contributionId: def.id,
@@ -105,7 +106,20 @@ async function registerOne(
     {
       id: filterId,
       label: def.label,
-      filter: (candidates, req, ctx) => filterLike.filter(candidates, req, ctx),
+      // Legacy synchronous routing cannot enter the Python subprocess, so it
+      // keeps the current candidates. planRoute uses filterAsync below.
+      filter: (candidates, req, ctx) =>
+        pythonBacked ? { candidates: [...candidates] } : filterLike.filter(candidates, req, ctx),
+      ...(pythonBacked
+        ? {
+            filterAsync: (candidates, req, ctx) =>
+              Promise.resolve(filterLike.filter(candidates, req, ctx)),
+          }
+        : filterLike.filterAsync
+          ? {
+              filterAsync: (candidates, req, ctx) => filterLike.filterAsync!(candidates, req, ctx),
+            }
+          : {}),
     },
     { pluginId }
   )

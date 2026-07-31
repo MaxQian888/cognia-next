@@ -45,6 +45,11 @@ export interface PluginDeploymentFilterLike {
     req: FilterRequest,
     ctx: FilterContext
   ) => FilterOutcome
+  filterAsync?: (
+    candidates: readonly DeploymentCandidate[],
+    req: FilterRequest,
+    ctx: FilterContext
+  ) => Promise<FilterOutcome>
 }
 
 /** Factory context handed to the plugin's exported factory. */

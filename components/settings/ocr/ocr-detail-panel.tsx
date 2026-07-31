@@ -10,6 +10,7 @@
 import React from "react"
 import { useTranslations } from "next-intl"
 import { Check, X } from "lucide-react"
+import { BrandIcon, hasBrandIcon } from "@/components/icons/brand-icon"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -54,9 +55,13 @@ export function OcrDetailPanel({
     <div className="flex flex-1 flex-col overflow-hidden" data-testid="ocr-detail-panel">
       {/* Header */}
       <div className="flex shrink-0 items-center gap-3 border-b px-4 py-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-lg">
-          {ocrProviderInitial(provider.id)}
-        </div>
+        {hasBrandIcon(provider.id) ? (
+          <BrandIcon id={provider.id} label={provider.name} size={40} />
+        ) : (
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-lg">
+            {ocrProviderInitial(provider.id)}
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-base font-semibold">{provider.name}</h3>
           <p className="truncate text-xs text-muted-foreground">

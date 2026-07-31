@@ -6,8 +6,9 @@
  * stores (health metrics, circuit breaker, today-spend mirror, rate window)
  * plus the given `AppSettings` — exactly what `resolveSendOptions` uses, so a
  * preview answers "which provider WOULD the next send pick right now".
- * Selection is pure + synchronous: building and consulting the engine has no
- * side effects and never awaits.
+ * Catalog construction is memoized by the immutable settings snapshot. The
+ * normal routing path performs no database or network work; only contributed
+ * plugin selectors/filters may be awaited.
  */
 
 import { createMappingRegistry } from "./model-mapping-registry"
@@ -15,10 +16,12 @@ import { ProviderRoutingEngine, type RoutingEngineDeps } from "./provider-routin
 import { getSessionDeployment, releaseSessionDeployment } from "./session-affinity-store"
 import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 import { getModelConfig } from "@cognia/provider-types/provider"
+import { isLocalProviderName } from "@cognia/provider-types/local-provider"
 import {
   resolveModelPriceUsdPer1M,
   type PriceLookupSettings,
 } from "@cognia/provider-core/providers/model-pricing"
+import { getCatalogModelMetadata } from "@cognia/provider-core/providers/models-dev-sync"
 import {
   getModelContextLimits,
   getModelMaxTokens,
@@ -28,6 +31,8 @@ import {
 // (send path + preview panel) can resolve it by id.
 import "./difficulty-router"
 import type { ModelMapping, RoutingConfig } from "@cognia/provider-types/model-mapping"
+import { collectOptions } from "./model-option-source"
+import type { RoutingCandidateCapabilities } from "@cognia/provider-types/auto-router"
 
 /** The slice of AppSettings the engine deps actually read. */
 export interface RoutingEngineSettings extends PriceLookupSettings {
@@ -46,9 +51,112 @@ export interface RoutingEngineSettings extends PriceLookupSettings {
   }>
 }
 
+export interface RoutingCatalogSnapshot {
+  candidates: readonly { providerId: string; modelId: string }[]
+  capabilities: ReadonlyMap<string, RoutingCandidateCapabilities | undefined>
+}
+
+const catalogSnapshots = new WeakMap<object, RoutingCatalogSnapshot>()
+
+function catalogKey(providerId: string, modelId: string): string {
+  return `${providerId}\0${modelId}`
+}
+
+function resolveCandidateCapabilities(
+  appSettings: RoutingEngineSettings,
+  id: string,
+  modelId: string
+): RoutingCandidateCapabilities | undefined {
+  const discovered = appSettings.providerSettings?.[id]?.discoveredModels?.find(
+    (model) => model.id === modelId
+  )
+  const custom = appSettings.customProviders?.find((provider) => provider.id === id)
+    ?.customModelMetadata?.[modelId]
+  const catalog = getCatalogModelMetadata(id, modelId)
+  const builtIn = getModelConfig(id, modelId)
+  const source = discovered ?? custom ?? catalog ?? builtIn
+  if (!source) {
+    // Custom OpenAI-compatible gateways are dispatched through streamText even
+    // when the user has not supplied optional per-model metadata. Preserve
+    // fail-closed behavior for undeclared rich capabilities, but do not reject
+    // an explicitly configured custom provider from the mandatory streaming
+    // path solely because its model has no catalog row.
+    return appSettings.customProviders?.some((provider) => provider.id === id)
+      ? { streaming: true }
+      : undefined
+  }
+  const customCapabilities =
+    "capabilities" in source
+      ? (source.capabilities as
+          | {
+              vision?: boolean
+              functionCalling?: boolean
+              streaming?: boolean
+            }
+          | undefined)
+      : undefined
+  const asBoolean = (value: unknown): boolean | undefined =>
+    typeof value === "boolean" ? value : undefined
+  return {
+    tools: asBoolean(
+      ("supportsTools" in source ? source.supportsTools : undefined) ??
+        customCapabilities?.functionCalling
+    ),
+    vision: asBoolean(
+      ("supportsVision" in source ? source.supportsVision : undefined) ?? customCapabilities?.vision
+    ),
+    audio: asBoolean("supportsAudio" in source ? source.supportsAudio : undefined),
+    video: asBoolean("supportsVideo" in source ? source.supportsVideo : undefined),
+    reasoning: asBoolean("supportsReasoning" in source ? source.supportsReasoning : undefined),
+    structuredOutput: asBoolean(
+      "supportsStructuredOutput" in source ? source.supportsStructuredOutput : undefined
+    ),
+    streaming: asBoolean(
+      ("supportsStreaming" in source ? source.supportsStreaming : undefined) ??
+        customCapabilities?.streaming
+    ),
+    contextTokens:
+      "contextLength" in source && typeof source.contextLength === "number"
+        ? source.contextLength
+        : undefined,
+  }
+}
+
+/** Memoized projection of the existing provider/model option pipeline. */
+export function getRoutingCatalogSnapshot(
+  appSettings: RoutingEngineSettings
+): RoutingCatalogSnapshot {
+  const existing = catalogSnapshots.get(appSettings)
+  if (existing) return existing
+
+  const seen = new Set<string>()
+  const candidates = collectOptions(
+    appSettings.providerSettings as Parameters<typeof collectOptions>[0],
+    appSettings.customProviders as Parameters<typeof collectOptions>[1]
+  )
+    .map(({ providerId, modelId }) => ({ providerId, modelId }))
+    .filter(({ providerId, modelId }) => {
+      const key = catalogKey(providerId, modelId)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  const capabilities = new Map<string, RoutingCandidateCapabilities | undefined>()
+  for (const candidate of candidates) {
+    capabilities.set(
+      catalogKey(candidate.providerId, candidate.modelId),
+      resolveCandidateCapabilities(appSettings, candidate.providerId, candidate.modelId)
+    )
+  }
+  const snapshot = { candidates, capabilities }
+  catalogSnapshots.set(appSettings, snapshot)
+  return snapshot
+}
+
 /** Build the live-store-backed deps `resolveSendOptions` wires into the engine. */
 export function buildRoutingEngineDeps(appSettings: RoutingEngineSettings): RoutingEngineDeps {
   const runtime = getProviderRoutingRuntimeAdapters()
+  const catalogSnapshot = getRoutingCatalogSnapshot(appSettings)
   return {
     // Real reliability telemetry (ADR-0043 Phase 4), fed per-turn by
     // `recordProviderOutcome`. A provider with zero recorded requests reports
@@ -106,6 +214,9 @@ export function buildRoutingEngineDeps(appSettings: RoutingEngineSettings): Rout
       runtime.releaseSessionDeployment(sessionId)
       releaseSessionDeployment(sessionId)
     },
+    listCandidates: () => catalogSnapshot.candidates,
+    getCapabilities: (id, modelId) => catalogSnapshot.capabilities.get(catalogKey(id, modelId)),
+    isLocalProvider: (id) => isLocalProviderName(id as Parameters<typeof isLocalProviderName>[0]),
   }
 }
 

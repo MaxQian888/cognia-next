@@ -200,6 +200,23 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(within(gallery).getByTestId("preset-card-opencode-v2-preview")).toBeInTheDocument()
   })
 
+  it("renders agent brand icons in preset cards and configured-agent rows", () => {
+    render(<ExternalAgentSettings />)
+
+    expect(screen.getByTestId("preset-card-codex").querySelector("img")).toHaveAttribute(
+      "src",
+      "/icons/lobe/codex-color.svg"
+    )
+    expect(screen.getByTestId("preset-card-claude-code").querySelector("img")).toHaveAttribute(
+      "src",
+      "/icons/lobe/claudecode-color.svg"
+    )
+    expect(screen.getByTestId("agent-row-agent-1").querySelector("img")).toHaveAttribute(
+      "src",
+      "/icons/lobe/codex-color.svg"
+    )
+  })
+
   it("shows the native Codex app-server preset and marks it Recommended when the codex CLI is detected", async () => {
     render(<ExternalAgentSettings />)
     const gallery = screen.getByTestId("preset-gallery-card")

@@ -103,6 +103,23 @@ describe("deployment-filters-bridge", () => {
     ).toEqual(["b"])
   })
 
+  it("preserves an asynchronous JavaScript filter for the awaited planner path", async () => {
+    const importer = jest.fn(async () => ({
+      createFilter: () => ({
+        filter: (candidates: typeof ENTRIES) => ({ candidates: [...candidates] }),
+        filterAsync: async (candidates: typeof ENTRIES) => ({
+          candidates: candidates.slice(1),
+        }),
+      }),
+    }))
+
+    await registerDeploymentFiltersForPlugin(MANIFEST, "/plugins/filter-plugin", { importer })
+    const filter = getDeploymentFilter("filter-plugin:drop-first")
+    await expect(filter?.filterAsync?.(ENTRIES, { alias: "x" }, CTX)).resolves.toEqual({
+      candidates: [ENTRIES[1]],
+    })
+  })
+
   it("collects per-entry errors without blocking other filters", async () => {
     const manifest = {
       ...MANIFEST,

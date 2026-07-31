@@ -178,6 +178,39 @@ describe("attemptRoutingFallback", () => {
     })
   })
 
+  it("resolves credentials again for the fallback provider", async () => {
+    useSettingsStore.setState({
+      settings: {
+        routingFallbackEnabled: true,
+        defaultProvider: "openai",
+        providerSettings: {
+          openai: { apiKey: "sk-primary" },
+          groq: { apiKey: "sk-fallback" },
+        },
+      } as never,
+    })
+    seedCache("s1", [
+      { providerId: "openai", modelId: "gpt-4o-mini" },
+      { providerId: "groq", modelId: "llama" },
+    ])
+    const cached = useChatStore.getState().lastSendBySession.s1!
+    useChatStore.getState().setLastSend("s1", {
+      ...cached,
+      options: {
+        ...cached.options,
+        providerCredentials: { apiKey: "sk-primary", protocol: "openai" },
+      },
+    })
+
+    await attemptRoutingFallback("s1", "rate limit exceeded")
+    const options = sendPromptMock.mock.calls[0]?.[2] as SendOptions
+    expect(options.providerCredentials).toMatchObject({
+      apiKey: "sk-fallback",
+      protocol: "openai",
+    })
+    expect(options.providerCredentials?.apiKey).not.toBe("sk-primary")
+  })
+
   it("retries using the structured httpStatus when the message is unclassifiable", async () => {
     seedCache("s1", [
       { providerId: "openai", modelId: "gpt-4o-mini" },
@@ -198,6 +231,17 @@ describe("attemptRoutingFallback", () => {
     ])
     const result = await attemptRoutingFallback("s1", "upstream connect error")
     expect(result).toBe(false)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("never retries after the turn has emitted visible output or a tool frame", async () => {
+    seedCache("s1", [
+      { providerId: "openai", modelId: "gpt-4o-mini" },
+      { providerId: "anthropic", modelId: "claude-haiku-4-5" },
+    ])
+    useChatStore.getState().markLastSendCommitted("s1")
+
+    await expect(attemptRoutingFallback("s1", "503")).resolves.toBe(false)
     expect(sendPromptMock).not.toHaveBeenCalled()
   })
 

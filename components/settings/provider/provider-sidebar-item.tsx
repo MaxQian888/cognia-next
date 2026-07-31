@@ -4,6 +4,8 @@ import React, { useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { Check, AlertTriangle, X, Circle, Info } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { hasBrandIcon } from "@/components/icons/brand-icon"
+import { ProviderIcon } from "@/components/providers/ai/provider-icon"
 import { cn } from "@/lib/utils"
 
 export type ProviderConnectionStatus =
@@ -91,31 +93,6 @@ const STATUS_CONFIG: Record<
   },
 }
 
-const PROVIDER_ICON_MAP: Record<string, string> = {
-  openai: "O",
-  anthropic: "A",
-  google: "G",
-  deepseek: "D",
-  groq: "Q",
-  mistral: "M",
-  cohere: "C",
-  ollama: "L",
-  openrouter: "R",
-  together: "T",
-  fireworks: "F",
-  cerebras: "B",
-  xai: "X",
-  sambanova: "S",
-}
-
-function getProviderIcon(providerId: string): string {
-  const base = providerId.toLowerCase().replace(/[^a-z]/g, "")
-  for (const [key, letter] of Object.entries(PROVIDER_ICON_MAP)) {
-    if (base.includes(key)) return letter
-  }
-  return providerId.charAt(0).toUpperCase()
-}
-
 export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
   providerId,
   name,
@@ -132,6 +109,7 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
   const StatusIcon = statusCfg.icon
   const statusLabel = t(statusCfg.labelKey)
   const statusReason = t(statusCfg.reasonKey)
+  const branded = hasBrandIcon(providerId)
 
   return (
     <button
@@ -145,14 +123,18 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
           : "hover:bg-muted/50"
       )}
     >
-      <div
-        className={cn(
-          "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs font-semibold",
-          isSelected ? "bg-primary-foreground/20" : "bg-muted"
-        )}
-      >
-        {icon ?? getProviderIcon(providerId)}
-      </div>
+      {branded || icon == null ? (
+        <ProviderIcon providerId={providerId} label={name} size={28} />
+      ) : (
+        <div
+          className={cn(
+            "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs font-semibold",
+            isSelected ? "bg-primary-foreground/20" : "bg-muted"
+          )}
+        >
+          {icon}
+        </div>
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="truncate text-sm font-medium">{name}</span>

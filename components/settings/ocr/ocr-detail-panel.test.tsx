@@ -26,6 +26,12 @@ describe("OcrDetailPanel", () => {
     expect(screen.getByText(/Document OCR/i)).toBeInTheDocument()
   })
 
+  it("renders the provider brand icon", () => {
+    setup()
+
+    expect(document.querySelector('img[src="/icons/lobe/mistral-color.svg"]')).not.toBeNull()
+  })
+
   it("renders all three tabs", () => {
     setup()
     expect(screen.getByRole("tab", { name: /Config/i })).toBeInTheDocument()

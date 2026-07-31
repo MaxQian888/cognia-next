@@ -12,13 +12,14 @@ describe("DEFAULT_MODEL_MAPPING_REGISTRY", () => {
 })
 
 describe("DEFAULT_ROUTING_CONFIG", () => {
-  it("keeps balanced strategy and bounded fallback attempts", () => {
+  it("defaults to reliability with bounded plugin and fallback attempts", () => {
     expect(DEFAULT_ROUTING_CONFIG).toEqual({
-      strategy: "balanced",
+      strategy: "reliability",
       allowPerRequestOverride: true,
       providerConstraints: [],
       requestTimeoutMs: 30000,
       maxFallbackAttempts: 3,
+      pluginTimeoutMs: 250,
       // Reliability default: breaker ships enabled with conservative thresholds.
       circuitBreaker: {
         enabled: true,

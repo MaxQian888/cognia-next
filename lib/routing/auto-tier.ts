@@ -10,6 +10,7 @@
  */
 
 import type { AutoRoutingSettings } from "@/types/routing/tool-route"
+import { pickAutoAlias as pickCanonicalAutoAlias } from "@cognia/provider-routing/difficulty-router"
 
 /**
  * Pick the tier alias for a prompt of the given difficulty `score`.
@@ -28,30 +29,10 @@ export function pickAutoAlias(
   settings: AutoRoutingSettings,
   availableAliases: Set<string>
 ): string | undefined {
-  const tiers = settings.candidateAliases
-  if (!tiers || tiers.length === 0) return undefined
-
-  const { balanced, powerful } = settings.thresholds
-  let target: number
-  if (score < balanced) target = 0
-  else if (score < powerful) target = Math.min(1, tiers.length - 1)
-  else target = tiers.length - 1
-  target = Math.max(0, Math.min(target, tiers.length - 1))
-
-  const present = (i: number): string | undefined => {
-    const alias = tiers[i]?.toLowerCase()
-    return alias && availableAliases.has(alias) ? alias : undefined
-  }
-
-  // Prefer the target tier, then degrade toward cheaper enabled tiers.
-  for (let i = target; i >= 0; i--) {
-    const hit = present(i)
-    if (hit) return hit
-  }
-  // Nothing at or below the target is enabled — climb to the cheapest above.
-  for (let i = target + 1; i < tiers.length; i++) {
-    const hit = present(i)
-    if (hit) return hit
-  }
-  return undefined
+  return pickCanonicalAutoAlias(
+    score,
+    settings.candidateAliases,
+    settings.thresholds,
+    availableAliases
+  )
 }

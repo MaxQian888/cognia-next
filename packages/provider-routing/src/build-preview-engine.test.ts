@@ -2,7 +2,11 @@
 // in-memory stores + given settings; selection answers "what would the next
 // send pick right now" with zero side effects.
 
-import { buildRoutingEngine, buildRoutingEngineDeps } from "./build-preview-engine"
+import {
+  buildRoutingEngine,
+  buildRoutingEngineDeps,
+  getRoutingCatalogSnapshot,
+} from "./build-preview-engine"
 import {
   resetProviderRoutingRuntimeAdaptersForTesting,
   setProviderRoutingRuntimeAdapters,
@@ -200,6 +204,98 @@ describe("buildRoutingEngine", () => {
 })
 
 describe("buildRoutingEngineDeps", () => {
+  it("marks uncatalogued custom provider models as streaming-capable", () => {
+    const deps = buildRoutingEngineDeps({
+      customProviders: [
+        {
+          id: "my-gateway",
+          enabled: true,
+          defaultModel: "custom-model",
+        },
+      ],
+    })
+
+    expect(deps.getCapabilities?.("my-gateway", "custom-model")).toEqual({ streaming: true })
+  })
+
+  it("memoizes the provider catalog for one immutable settings snapshot", () => {
+    const settings = {
+      providerSettings: {
+        openai: { ...ps("openai"), defaultModel: "gpt-4o" },
+      },
+      customProviders: [],
+    }
+    const first = getRoutingCatalogSnapshot(settings)
+    const second = getRoutingCatalogSnapshot(settings)
+    const refreshed = getRoutingCatalogSnapshot({ ...settings })
+
+    expect(second).toBe(first)
+    expect(refreshed).not.toBe(first)
+    expect(first.candidates).toContainEqual({ providerId: "openai", modelId: "gpt-4o" })
+  })
+
+  it("projects discovered and custom capability metadata into live deps", () => {
+    const deps = buildRoutingEngineDeps({
+      providerSettings: {
+        discovered: {
+          ...ps("discovered"),
+          discoveredModels: [
+            {
+              id: "vision-tools",
+              supportsTools: true,
+              supportsVision: true,
+              supportsStreaming: false,
+              contextLength: 64_000,
+            } as never,
+          ],
+        },
+      },
+      customProviders: [
+        {
+          id: "custom",
+          providerId: "custom",
+          enabled: true,
+          defaultModel: "custom-model",
+          models: [{ id: "custom-model" }],
+          customModelMetadata: {
+            "custom-model": {
+              capabilities: {
+                vision: true,
+                functionCalling: true,
+                streaming: true,
+              },
+            },
+          },
+        },
+      ] as never,
+    })
+
+    expect(deps.listCandidates?.()).toEqual(
+      expect.arrayContaining([
+        { providerId: "discovered", modelId: "vision-tools" },
+        { providerId: "custom", modelId: "custom-model" },
+      ])
+    )
+    expect(deps.getCapabilities?.("discovered", "vision-tools")).toMatchObject({
+      tools: true,
+      vision: true,
+      streaming: false,
+      contextTokens: 64_000,
+    })
+    expect(deps.getCapabilities?.("custom", "custom-model")).toMatchObject({
+      tools: true,
+      vision: true,
+      streaming: true,
+    })
+    expect(deps.getCapabilities?.("custom", "unknown")).toBeUndefined()
+  })
+
+  it("identifies local providers through the existing provider registry", () => {
+    const deps = buildRoutingEngineDeps({})
+    expect(deps.isLocalProvider?.("ollama")).toBe(true)
+    expect(deps.isLocalProvider?.("openai")).toBe(false)
+  })
+
   it("treats a provider with an explicit enabled:false as unavailable", () => {
     const deps = buildRoutingEngineDeps({
       providerSettings: { openai: ps("openai", false) },

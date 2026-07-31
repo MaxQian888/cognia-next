@@ -8,7 +8,12 @@
 
 import type { ModelMappingEntry } from "./model-mapping"
 import type { ProviderHealthMetrics } from "./health-metrics"
-import type { RoutingStrategy } from "./auto-router"
+import type {
+  RoutingCapabilityRequirements,
+  RoutingStrategy,
+  RoutingSurface,
+  TaskClassification,
+} from "./auto-router"
 
 /**
  * A strategy id: one of the built-in `RoutingStrategy` union members or a
@@ -37,10 +42,14 @@ export interface RoutingTelemetrySnapshot {
 
 /** Per-request context available to context-aware selectors. */
 export interface RoutingDecisionContext {
-  /** Last user prompt text (difficulty heuristics). */
+  /** Last user prompt text, reserved for the built-in difficulty selector. */
   promptText?: string
   /** Rough token estimate of the outgoing prompt. */
   estimatedInputTokens?: number
+  /** Locally derived request features available to plugin selectors. */
+  classification?: TaskClassification
+  requirements?: RoutingCapabilityRequirements
+  surface?: RoutingSurface
 }
 
 /**
@@ -56,4 +65,10 @@ export interface RoutingStrategySelector {
     telemetry: RoutingTelemetrySnapshot,
     ctx?: RoutingDecisionContext
   ) => ModelMappingEntry | null
+  /** Async companion used by subprocess-backed or otherwise awaitable plugins. */
+  selectAsync?: (
+    entries: readonly ModelMappingEntry[],
+    telemetry: RoutingTelemetrySnapshot,
+    ctx?: RoutingDecisionContext
+  ) => Promise<ModelMappingEntry | null>
 }

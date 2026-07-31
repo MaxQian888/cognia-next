@@ -34,14 +34,21 @@ describe("RoutingStrategyPicker", () => {
     expect(setRoutingConfig).toHaveBeenCalledWith({ strategy: "cost" })
   })
 
-  it("supports the difficulty and least-busy strategies", () => {
+  it("supports reliability, difficulty, and least-busy strategies", () => {
     const saved = stateRef.current
     try {
+      stateRef.current = {
+        settings: { routingConfig: { ...DEFAULT_ROUTING_CONFIG, strategy: "reliability" } },
+        setRoutingConfig,
+      }
+      const { rerender } = render(<RoutingStrategyPicker />)
+      expect(screen.getAllByText(/healthy samples/i).length).toBeGreaterThan(0)
+
       stateRef.current = {
         settings: { routingConfig: { ...DEFAULT_ROUTING_CONFIG, strategy: "difficulty" } },
         setRoutingConfig,
       }
-      const { rerender } = render(<RoutingStrategyPicker />)
+      rerender(<RoutingStrategyPicker />)
       expect(screen.getAllByText(/strong model/i).length).toBeGreaterThan(0)
 
       stateRef.current = {

@@ -11,6 +11,9 @@
 import { RoutingNoCandidatesError } from "@cognia/provider-routing/provider-routing-engine"
 import type { ProviderRoutingEngine } from "@cognia/provider-routing/provider-routing-engine"
 import type { GatewaySnapshotEntry } from "@/types/gateway"
+import type { RoutingDataPolicy } from "@cognia/provider-types/auto-router"
+
+export const GATEWAY_ROUTING_DEADLINE_MS = 800
 
 export interface GatewayDecideRequest {
   requestId: string
@@ -32,30 +35,42 @@ export interface GatewayDecideRequest {
  * when the model isn't an alias (the gateway's snapshot resolution handles
  * `provider:model` / bare ids) or when every candidate is unavailable.
  */
-export function resolveGatewayDecision(
+export async function resolveGatewayDecision(
   req: GatewayDecideRequest,
-  engine: ProviderRoutingEngine
-): GatewaySnapshotEntry[] {
-  let result
+  engine: ProviderRoutingEngine,
+  deadlineMs = GATEWAY_ROUTING_DEADLINE_MS,
+  dataPolicy?: RoutingDataPolicy
+): Promise<GatewaySnapshotEntry[]> {
+  let plan
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    result = engine.selectProvider({
-      model: req.model,
-      ...(req.promptText ? { promptText: req.promptText } : {}),
-      ...(req.estimatedInputTokens != null
-        ? { estimatedInputTokens: req.estimatedInputTokens }
-        : {}),
-      ...(req.sessionId ? { sessionId: req.sessionId } : {}),
-    })
+    plan = await Promise.race([
+      engine.planRoute({
+        surface: "gateway",
+        selection: { kind: "alias", alias: req.model },
+        ...(req.promptText ? { promptText: req.promptText } : {}),
+        ...(req.estimatedInputTokens != null
+          ? { estimatedInputTokens: req.estimatedInputTokens }
+          : {}),
+        ...(req.sessionId ? { sessionId: req.sessionId } : {}),
+        dataPolicy,
+      }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("gateway-routing-deadline")), deadlineMs)
+      }),
+    ])
   } catch (err) {
     // Alias matched but every deployment is unavailable → empty = let the
     // gateway try its snapshot (which may still surface something).
-    if (err instanceof RoutingNoCandidatesError) return []
+    if (
+      err instanceof RoutingNoCandidatesError ||
+      (err instanceof Error && err.message === "gateway-routing-deadline")
+    ) {
+      return []
+    }
     throw err
+  } finally {
+    if (timer) clearTimeout(timer)
   }
-  // No alias match (or no direct provider+model) → defer to the snapshot.
-  if (!result || !result.fromAlias) return []
-  return [
-    { providerId: result.providerId, modelId: result.modelId },
-    ...result.fallbackEntries.map((e) => ({ providerId: e.providerId, modelId: e.modelId })),
-  ]
+  return plan.orderedCandidates.map(({ providerId, modelId }) => ({ providerId, modelId }))
 }

@@ -71,6 +71,7 @@ export {
 } from "./filter-registry"
 
 export { runFilterChain } from "./run-filter-chain"
+export { RoutingAttemptController } from "./routing-attempt-controller"
 
 export {
   circuitFilter,
@@ -99,6 +100,7 @@ export { pruneToolsSemantica, DEFAULT_SEMANTIC_EMBEDDING } from "./semantic-tool
 
 export {
   BUILT_IN_ROUTING_SELECTORS,
+  reliabilitySelector,
   makeTelemetrySnapshot,
   qualitySelector,
   costSelector,

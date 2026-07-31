@@ -115,6 +115,21 @@ describe("QuickAddProviderDialog", () => {
       expect(screen.getByText("Moonshot AI (月之暗面)")).toBeInTheDocument()
     })
 
+    it("displays a brand asset for a supported provider preset", async () => {
+      const { container } = render(<QuickAddProviderDialog {...defaultProps} />)
+      const qwen = QUICK_ADD_PRESETS.find((preset) => preset.id === "qwen")
+
+      expect(qwen).toBeDefined()
+      const presetButton = screen.getByText(qwen!.name).closest("button")
+      expect(presetButton?.querySelector("img")).toHaveAttribute(
+        "src",
+        "/icons/lobe/qwen-color.svg"
+      )
+
+      await userEvent.click(presetButton!)
+      expect(container.querySelector('img[src="/icons/lobe/qwen-color.svg"]')).toBeInTheDocument()
+    })
+
     it("displays cancel button in footer", () => {
       render(<QuickAddProviderDialog {...defaultProps} />)
       expect(screen.getByText("cancel")).toBeInTheDocument()

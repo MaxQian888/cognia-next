@@ -55,11 +55,20 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
       {children}
     </div>
   ),
-  DropdownMenuRadioItem: ({ children, value }: { children: React.ReactNode; value: string }) => (
+  DropdownMenuRadioItem: ({
+    children,
+    value,
+    disabled,
+  }: {
+    children: React.ReactNode
+    value: string
+    disabled?: boolean
+  }) => (
     <div
       data-testid={`radio-item-${value}`}
       role="menuitemradio"
       aria-checked={false}
+      aria-disabled={disabled ?? false}
       data-value={value}
     >
       {children}
@@ -85,7 +94,8 @@ jest.mock("@/stores/agent", () => ({
 }))
 
 const externalAgentState = {
-  agents: {} as Record<string, { name: string }>,
+  enabled: true,
+  agents: {} as Record<string, { name: string; enabled: boolean }>,
 }
 
 jest.mock("@/stores/agent/external-agent-store", () => ({
@@ -96,6 +106,7 @@ jest.mock("@/stores/agent/external-agent-store", () => ({
 beforeEach(() => {
   runtimeState.runtime = "claude-sdk"
   runtimeState.externalAgentId = null
+  externalAgentState.enabled = true
   externalAgentState.agents = {}
   mockSetRuntime.mockClear()
 })
@@ -120,7 +131,7 @@ describe("AgentRuntimeSelector — render", () => {
   it("shows the external agent name when runtime is external and agent is known", () => {
     runtimeState.runtime = "external"
     runtimeState.externalAgentId = "agent-1"
-    externalAgentState.agents = { "agent-1": { name: "Codex" } }
+    externalAgentState.agents = { "agent-1": { name: "Codex", enabled: true } }
     render(<AgentRuntimeSelector />)
     expect(screen.getAllByText("Codex").length).toBeGreaterThan(0)
   })
@@ -163,10 +174,23 @@ describe("AgentRuntimeSelector — className prop", () => {
 
 describe("AgentRuntimeSelector — runtime switching", () => {
   it("calls setRuntime with 'external' when onValueChange fires with 'external'", () => {
+    externalAgentState.agents = { "agent-1": { name: "Codex", enabled: true } }
     render(<AgentRuntimeSelector />)
     const hookBtn = screen.getByTestId("set-runtime-external")
     fireEvent.click(hookBtn)
     expect(mockSetRuntime).toHaveBeenCalledWith("external")
+  })
+
+  it("does not select the external runtime when no enabled agent is configured", () => {
+    render(<AgentRuntimeSelector />)
+    fireEvent.click(screen.getByTestId("set-runtime-external"))
+    expect(mockSetRuntime).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the built-in runtime when an invalid external selection is restored", () => {
+    runtimeState.runtime = "external"
+    render(<AgentRuntimeSelector />)
+    expect(mockSetRuntime).toHaveBeenCalledWith("claude-sdk")
   })
 
   it("calls setRuntime with 'claude-sdk' when onValueChange fires with 'claude-sdk'", () => {
@@ -185,8 +209,21 @@ describe("AgentRuntimeSelector — labels in content", () => {
   })
 
   it("shows external description key in menu", () => {
+    externalAgentState.agents = { "agent-1": { name: "Codex", enabled: true } }
     render(<AgentRuntimeSelector />)
     expect(screen.getByText("externalDesc")).toBeInTheDocument()
+  })
+
+  it("shows setup guidance and disables external selection when no agent is configured", () => {
+    render(<AgentRuntimeSelector />)
+    expect(screen.getByText("externalEmpty")).toBeInTheDocument()
+    expect(screen.getByTestId("radio-item-external")).toHaveAttribute("aria-disabled", "true")
+  })
+
+  it("allows the runtime label to use available toolbar width before truncating", () => {
+    render(<AgentRuntimeSelector />)
+    const trigger = screen.getByRole("button", { name: "ariaLabel" })
+    expect(trigger.className).not.toContain("max-w-[9rem]")
   })
 
   it("shows label translation key as menu heading", () => {

@@ -851,6 +851,19 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
     pricingUrl: "https://together.ai/pricing",
     models: [
       {
+        id: "moonshotai/Kimi-K3",
+        name: "Kimi K3",
+        contextLength: 1048576,
+        maxOutputTokens: 131072,
+        supportsTools: true,
+        supportsVision: true,
+        supportsStreaming: true,
+        supportsAudio: false,
+        supportsVideo: true,
+        supportsReasoning: true,
+        pricing: { promptPer1M: 3, completionPer1M: 15 },
+      },
+      {
         id: "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
         name: "Llama 4 Maverick",
         contextLength: 128000,
@@ -1289,6 +1302,19 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
     pricingUrl: "https://cohere.com/pricing",
     models: [
       {
+        id: "command-a-plus-05-2026",
+        name: "Command A Plus",
+        contextLength: 128000,
+        maxOutputTokens: 64000,
+        supportsTools: true,
+        supportsVision: true,
+        supportsStreaming: true,
+        supportsAudio: false,
+        supportsVideo: false,
+        supportsReasoning: true,
+        pricing: { promptPer1M: 2.5, completionPer1M: 10 },
+      },
+      {
         id: "command-r-plus",
         name: "Command R+",
         contextLength: 128000,
@@ -1344,6 +1370,21 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
     website: "https://fireworks.ai",
     dashboardUrl: "https://fireworks.ai/account/api-keys",
     docsUrl: "https://docs.fireworks.ai",
+    models: [
+      {
+        id: "accounts/fireworks/models/deepseek-v4-pro",
+        name: "DeepSeek V4 Pro",
+        contextLength: 1000000,
+        maxOutputTokens: 384000,
+        supportsTools: true,
+        supportsVision: false,
+        supportsStreaming: true,
+        supportsAudio: false,
+        supportsVideo: false,
+        supportsReasoning: true,
+        pricing: { promptPer1M: 1.74, completionPer1M: 3.48, cachedInputPer1M: 0.145 },
+      },
+    ],
   },
   cerebras: {
     id: "cerebras",
@@ -1362,6 +1403,21 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
     website: "https://cerebras.ai",
     dashboardUrl: "https://cloud.cerebras.ai/platform",
     docsUrl: "https://inference-docs.cerebras.ai",
+    models: [
+      {
+        id: "gpt-oss-120b",
+        name: "GPT OSS 120B",
+        contextLength: 131072,
+        maxOutputTokens: 40960,
+        supportsTools: true,
+        supportsVision: false,
+        supportsStreaming: true,
+        supportsAudio: false,
+        supportsVideo: false,
+        supportsReasoning: true,
+        pricing: { promptPer1M: 0.35, completionPer1M: 0.75 },
+      },
+    ],
   },
   sambanova: {
     id: "sambanova",
@@ -1604,7 +1660,22 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
       mode: "shortcut",
       category: "china",
     },
-    models: createQuickAddModelEntries(["step-1-8k", "step-1-32k", "step-1v-8k"]),
+    models: [
+      {
+        id: "step-3.7-flash",
+        name: "Step 3.7 Flash",
+        contextLength: 256000,
+        maxOutputTokens: 256000,
+        supportsTools: true,
+        supportsVision: true,
+        supportsStreaming: true,
+        supportsAudio: false,
+        supportsVideo: true,
+        supportsReasoning: true,
+        pricing: { promptPer1M: 0.185, completionPer1M: 1.11, cachedInputPer1M: 0.037 },
+      },
+      ...createQuickAddModelEntries(["step-1-8k", "step-1-32k", "step-1v-8k"]),
+    ],
     compatibility: {
       protocol: "openai",
       baseURLs: ["https://api.stepfun.com/v1"],
@@ -1703,6 +1774,18 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
     },
     models: [
       {
+        id: "moonshotai/Kimi-K3",
+        name: "Kimi K3",
+        contextLength: 1048576,
+        maxOutputTokens: 131072,
+        supportsTools: true,
+        supportsVision: true,
+        supportsStreaming: true,
+        supportsAudio: false,
+        supportsVideo: false,
+        supportsReasoning: true,
+      },
+      {
         id: "meta-llama/Llama-3.3-70B-Instruct",
         name: "Llama 3.3 70B",
         contextLength: 128000,
@@ -1779,10 +1862,25 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
       mode: "shortcut",
       category: "global",
     },
-    models: createQuickAddModelEntries([
-      "meta-llama/llama-3.1-70b-instruct",
-      "meta-llama/llama-3.1-8b-instruct",
-    ]),
+    models: [
+      {
+        id: "moonshotai/kimi-k3",
+        name: "Kimi K3",
+        contextLength: 1048576,
+        maxOutputTokens: 1048576,
+        supportsTools: true,
+        supportsVision: true,
+        supportsStreaming: true,
+        supportsAudio: false,
+        supportsVideo: true,
+        supportsReasoning: true,
+        pricing: { promptPer1M: 3, completionPer1M: 15, cachedInputPer1M: 0.3 },
+      },
+      ...createQuickAddModelEntries([
+        "meta-llama/llama-3.1-70b-instruct",
+        "meta-llama/llama-3.1-8b-instruct",
+      ]),
+    ],
     compatibility: {
       protocol: "openai",
       baseURLs: ["https://api.novita.ai/v3/openai"],
@@ -2706,6 +2804,19 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
     quickAdd: { mode: "shortcut", category: "china" },
     models: [
       {
+        id: "glm-4.7",
+        name: "GLM-4.7",
+        contextLength: 204800,
+        maxOutputTokens: 131072,
+        supportsTools: true,
+        supportsVision: false,
+        supportsAudio: false,
+        supportsVideo: false,
+        supportsStreaming: true,
+        supportsReasoning: true,
+        pricing: { promptPer1M: 0.6, completionPer1M: 2.2, cachedInputPer1M: 0.11 },
+      },
+      {
         id: "glm-4-plus",
         name: "GLM-4 Plus",
         contextLength: 128000,
@@ -2777,6 +2888,24 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
     docsUrl: "https://docs.aws.amazon.com/bedrock",
     pricingUrl: "https://aws.amazon.com/bedrock/pricing/",
     models: [
+      {
+        id: "us.anthropic.claude-sonnet-5",
+        name: "Claude Sonnet 5 (US)",
+        contextLength: 1000000,
+        maxOutputTokens: 128000,
+        supportsTools: true,
+        supportsVision: true,
+        supportsStreaming: true,
+        supportsAudio: false,
+        supportsVideo: false,
+        supportsReasoning: true,
+        pricing: {
+          promptPer1M: 2,
+          completionPer1M: 10,
+          cachedInputPer1M: 0.2,
+          cacheCreationPer1M: 2.5,
+        },
+      },
       {
         id: "us.amazon.nova-pro-v1:0",
         name: "Nova Pro",
@@ -3679,20 +3808,26 @@ export function getQuickAddProviderCatalogEntries(): BuiltInProviderCatalogEntry
 export function buildQuickAddProviderPresets(): BuiltInProviderQuickAddPreset[] {
   return getQuickAddProviderCatalogEntries()
     .filter((entry) => Boolean(entry.defaultBaseURL))
-    .map((entry) => ({
-      id: entry.id,
-      name: entry.name,
-      description: entry.description || entry.name,
-      baseURL: entry.defaultBaseURL as string,
-      apiProtocol: entry.protocol,
-      models: entry.models?.map((model) => model.id) || [entry.defaultModel],
-      modelEntries: entry.models || createQuickAddModelEntries([entry.defaultModel]),
-      defaultModel: entry.defaultModel,
-      docsUrl: entry.docsUrl,
-      dashboardUrl: entry.dashboardUrl,
-      category: entry.quickAdd?.category || "global",
-      popular: entry.quickAdd?.popular,
-    }))
+    .map((entry) => {
+      const catalogModels = entry.models ?? []
+      const modelEntries = catalogModels.some((model) => model.id === entry.defaultModel)
+        ? catalogModels
+        : [...catalogModels, ...createQuickAddModelEntries([entry.defaultModel])]
+      return {
+        id: entry.id,
+        name: entry.name,
+        description: entry.description || entry.name,
+        baseURL: entry.defaultBaseURL as string,
+        apiProtocol: entry.protocol,
+        models: modelEntries.map((model) => model.id),
+        modelEntries,
+        defaultModel: entry.defaultModel,
+        docsUrl: entry.docsUrl,
+        dashboardUrl: entry.dashboardUrl,
+        category: entry.quickAdd?.category || "global",
+        popular: entry.quickAdd?.popular,
+      }
+    })
 }
 
 export function getBuiltInProviderCatalogEntry(

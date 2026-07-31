@@ -195,6 +195,12 @@ describe("built-in provider catalog", () => {
 
     expect(presets.length).toBeGreaterThan(0)
     expect(presets.every((preset) => preset.baseURL.length > 0)).toBe(true)
+    expect(presets.every((preset) => preset.models.includes(preset.defaultModel))).toBe(true)
+    expect(
+      presets.every((preset) =>
+        preset.modelEntries.some((model) => model.id === preset.defaultModel)
+      )
+    ).toBe(true)
     expect(presets.some((preset) => preset.id === "modelscope")).toBe(true)
   })
 })

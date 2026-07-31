@@ -31,6 +31,7 @@ describe("RuntimeBadge", () => {
     expect(screen.getByText("Claude")).toBeInTheDocument()
     const badge = screen.getByTestId("runtime-badge-claude")
     expect(badge).toHaveAttribute("data-runtime", "claude")
+    expect(badge.querySelector("img")).toHaveAttribute("src", "/icons/lobe/claude-color.svg")
   })
 
   it("renders the Codex label", () => {
@@ -41,11 +42,19 @@ describe("RuntimeBadge", () => {
   it("renders the Claude Code label", () => {
     renderBadge("claude-code")
     expect(screen.getByText("Claude Code")).toBeInTheDocument()
+    expect(screen.getByTestId("runtime-badge-claude-code").querySelector("img")).toHaveAttribute(
+      "src",
+      "/icons/lobe/claudecode-color.svg"
+    )
   })
 
   it("renders the Gemini label", () => {
     renderBadge("gemini-cli")
     expect(screen.getByText("Gemini")).toBeInTheDocument()
+    expect(screen.getByTestId("runtime-badge-gemini-cli").querySelector("img")).toHaveAttribute(
+      "src",
+      "/icons/lobe/geminicli-color.svg"
+    )
   })
 
   it("renders the Cursor label", () => {

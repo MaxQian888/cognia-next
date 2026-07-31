@@ -93,6 +93,19 @@ describe("routing-strategies-bridge", () => {
     expect(selector?.select(ENTRIES, telemetry)?.providerId).toBe("b")
   })
 
+  it("preserves an asynchronous JavaScript selector for the awaited planner path", async () => {
+    const importer = jest.fn(async () => ({
+      createStrategy: () => ({
+        select: (entries: typeof ENTRIES) => entries[0] ?? null,
+        selectAsync: async (entries: typeof ENTRIES) => entries[1] ?? null,
+      }),
+    }))
+
+    await registerRoutingStrategiesForPlugin(MANIFEST, "/plugins/router-plugin", { importer })
+    const selector = getRoutingStrategy("router-plugin:always-last")
+    await expect(selector?.selectAsync?.(ENTRIES, telemetry)).resolves.toBe(ENTRIES[1])
+  })
+
   it("collects per-entry errors without blocking other strategies", async () => {
     const manifest = {
       ...MANIFEST,

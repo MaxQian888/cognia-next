@@ -64,6 +64,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Empty, EmptyMedia, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { BrandIcon } from "@/components/icons/brand-icon"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { useExternalAgent } from "@/hooks/agent/use-external-agent"
 import { DelegationRulesSection } from "./delegation-rules-section"
@@ -1221,9 +1222,12 @@ function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) {
             {presets.map(({ id, config }) => (
               <Card key={id} data-testid={`preset-card-${id}`} className="space-y-2 p-3">
                 <div className="flex flex-wrap items-start justify-between gap-1">
-                  <p className="text-sm font-medium">
-                    {id === "opencode-v2-preview" ? t("opencodeV2PresetName") : config.name}
-                  </p>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <BrandIcon id={id} size={24} />
+                    <p className="truncate text-sm font-medium">
+                      {id === "opencode-v2-preview" ? t("opencodeV2PresetName") : config.name}
+                    </p>
+                  </div>
                   {(CODEX_EXECUTABLE_PRESET_IDS as readonly string[]).includes(id) &&
                     id === preferredCodexPreset && (
                       <Badge
@@ -1818,6 +1822,11 @@ export function ExternalAgentSettings() {
                         >
                           <div className="flex items-center gap-2">
                             <ConnectionStatusIcon status={status} />
+                            <BrandIcon
+                              id={fromPresetId ?? agent.name}
+                              label={agent.name}
+                              size={20}
+                            />
                             <span
                               className={cn(
                                 "truncate text-sm",

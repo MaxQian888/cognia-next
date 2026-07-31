@@ -25,7 +25,7 @@ beforeEach(() => {
 describe("AutoRoutingSection", () => {
   it("renders default OFF and toggles enabled via a save patch", () => {
     render(<AutoRoutingSection />)
-    const toggle = screen.getByRole("switch")
+    const toggle = screen.getByRole("switch", { name: "enabled" })
     expect(toggle).toHaveAttribute("aria-checked", "false")
     fireEvent.click(toggle)
     expect(saveMock).toHaveBeenCalledWith({

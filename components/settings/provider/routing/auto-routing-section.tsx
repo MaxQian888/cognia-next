@@ -17,7 +17,19 @@ import { DEFAULT_AUTO_ROUTING, type AutoRoutingSettings } from "@/types/routing/
 
 export function AutoRoutingSection() {
   const t = useTranslations("providers.routingView.auto")
-  const settings = useSettingsStore((s) => s.settings?.autoRouting) ?? DEFAULT_AUTO_ROUTING
+  const stored = useSettingsStore((s) => s.settings?.autoRouting)
+  const settings: AutoRoutingSettings = {
+    ...DEFAULT_AUTO_ROUTING,
+    ...(stored ?? {}),
+    dataPolicy: {
+      ...DEFAULT_AUTO_ROUTING.dataPolicy,
+      ...(stored?.dataPolicy ?? {}),
+    },
+    thresholds: {
+      ...DEFAULT_AUTO_ROUTING.thresholds,
+      ...(stored?.thresholds ?? {}),
+    },
+  }
   const save = useSettingsStore((s) => s.save)
 
   const patch = (partial: Partial<AutoRoutingSettings>) =>
@@ -40,6 +52,59 @@ export function AutoRoutingSection() {
           id="auto-routing-enabled"
           checked={settings.enabled}
           onCheckedChange={(checked) => patch({ enabled: checked === true })}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="space-y-0.5">
+          <Label htmlFor="auto-routing-default" className="text-xs">
+            {t("defaultSelection")}
+          </Label>
+          <p className="text-[11px] text-muted-foreground">{t("defaultSelectionHint")}</p>
+        </div>
+        <Switch
+          id="auto-routing-default"
+          checked={settings.defaultSelection === "auto"}
+          onCheckedChange={(checked) =>
+            patch({ defaultSelection: checked === true ? "auto" : "manual" })
+          }
+          disabled={!settings.enabled}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="space-y-0.5">
+          <Label htmlFor="auto-routing-local-only" className="text-xs">
+            {t("localOnly")}
+          </Label>
+          <p className="text-[11px] text-muted-foreground">{t("localOnlyHint")}</p>
+        </div>
+        <Switch
+          id="auto-routing-local-only"
+          checked={settings.dataPolicy.locality === "local-only"}
+          onCheckedChange={(checked) =>
+            patch({
+              dataPolicy: {
+                ...settings.dataPolicy,
+                locality: checked === true ? "local-only" : "any",
+              },
+            })
+          }
+          disabled={!settings.enabled}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="space-y-0.5">
+          <Label htmlFor="auto-routing-shadow" className="text-xs">
+            {t("shadowMode")}
+          </Label>
+          <p className="text-[11px] text-muted-foreground">{t("shadowModeHint")}</p>
+        </div>
+        <Switch
+          id="auto-routing-shadow"
+          checked={settings.shadowMode}
+          onCheckedChange={(checked) => patch({ shadowMode: checked === true })}
         />
       </div>
 

@@ -32,6 +32,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { BrandIcon } from "@/components/icons/brand-icon"
 import { cn } from "@/lib/utils"
 import { ExternalAgentManager } from "./manager"
 import { ConnectionStatusBadge } from "./connection-status-badge"
@@ -39,6 +40,7 @@ import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import type { ExternalAgentConnectionStatus } from "@/types/agent/external-agent"
 import { getExternalAgentExecutionBlockReason } from "@/lib/ai/agent/external/config-normalizer"
 import { onProtocolAdapterRegistryChange } from "@/lib/ai/agent/external/protocol-adapter"
+import { isFromPreset } from "@/lib/ai/agent/external/presets"
 
 // =============================================================================
 // Types
@@ -153,6 +155,11 @@ export function ExternalAgentSelector({
         >
           {selectedAgent ? (
             <>
+              <BrandIcon
+                id={isFromPreset(selectedAgent) ?? selectedAgent.name}
+                label={selectedAgent.name}
+                size={18}
+              />
               <ConnectionStatusIcon status={getConnectionStatus(selectedAgent.id)} />
               <span className="hidden sm:inline max-w-[140px] truncate">{selectedAgent.name}</span>
             </>
@@ -213,14 +220,11 @@ export function ExternalAgentSelector({
                       className="flex items-center gap-2 p-2"
                       disabled={!!executionBlockedReason}
                     >
-                      <div
-                        className={cn(
-                          "flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
-                          isSelected ? "bg-primary text-primary-foreground" : "bg-muted"
-                        )}
-                      >
-                        <ConnectionStatusIcon status={status} />
-                      </div>
+                      <BrandIcon
+                        id={isFromPreset(agent) ?? agent.name}
+                        label={agent.name}
+                        size={24}
+                      />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="truncate font-medium text-sm">{agent.name}</span>

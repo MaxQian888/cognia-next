@@ -9,6 +9,7 @@ import { useMemo, useState } from "react"
 import { ExternalLink, Eye, EyeOff, Zap, Search } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
+import { ProviderIcon } from "@/components/providers/ai/provider-icon"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
@@ -243,6 +244,7 @@ export function QuickAddProviderDialog({
                     )}
                   >
                     <div className="flex items-center gap-2 w-full">
+                      <ProviderIcon providerId={preset.id} size={24} />
                       <span className="font-medium text-sm truncate flex-1">{preset.name}</span>
                       {preset.popular && (
                         <Badge variant="secondary" className="text-[10px] shrink-0">
@@ -274,7 +276,10 @@ export function QuickAddProviderDialog({
             <div className="rounded-lg border p-3 bg-muted/30">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="font-medium">{selectedPreset.name}</p>
+                  <div className="flex items-center gap-2">
+                    <ProviderIcon providerId={selectedPreset.id} size={24} />
+                    <p className="font-medium">{selectedPreset.name}</p>
+                  </div>
                   <p className="text-sm text-muted-foreground mt-0.5">
                     {selectedPreset.description}
                   </p>

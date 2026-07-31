@@ -17,6 +17,9 @@ import { useChatStore, type LastSendCacheEntry } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { SendOptions } from "@cognia/agent-config-types"
 import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
+import { recordEvent } from "@cognia/agent-trace/emitter"
+import { RoutingAttemptController } from "@cognia/provider-routing/routing-attempt-controller"
+import { resolveProviderAttemptOptions } from "./provider-attempt-options"
 import {
   classifyProviderErrorInfo,
   isTransientErrorClass,
@@ -71,10 +74,24 @@ async function issueRetry(
   nextEntry: ModelMappingEntry,
   cacheUpdate: Pick<LastSendCacheEntry, "attemptIndex" | "specialAttempts">
 ): Promise<boolean> {
+  const settings = useSettingsStore.getState().settings
+  let attemptOptions: Awaited<ReturnType<typeof resolveProviderAttemptOptions>> = {}
+  try {
+    if (settings) {
+      attemptOptions = await resolveProviderAttemptOptions(nextEntry.providerId, settings)
+    }
+  } catch (error) {
+    console.warn("routing-fallback credential resolution failed", error)
+    return false
+  }
   const retryOptions: SendOptions = {
     ...cached.options,
     provider: nextEntry.providerId,
     model: nextEntry.modelId,
+    providerCredentials: attemptOptions.providerCredentials,
+    protocolAdapterSpec: attemptOptions.protocolAdapterSpec,
+    modelParams: attemptOptions.modelParams,
+    fallbackModel: undefined,
     aliasResolution: cached.options.aliasResolution
       ? {
           ...cached.options.aliasResolution,
@@ -119,6 +136,23 @@ async function issueRetry(
         },
       })
     )
+    if (retryOptions.spanId) {
+      const attributes = {
+        attemptIndex: cacheUpdate.attemptIndex,
+        providerId: nextEntry.providerId,
+        modelId: nextEntry.modelId,
+      }
+      recordEvent(retryOptions.spanId, {
+        name: "routing.fallback",
+        at: Date.now(),
+        attributes,
+      })
+      recordEvent(retryOptions.spanId, {
+        name: "routing.attempt",
+        at: Date.now(),
+        attributes,
+      })
+    }
     return true
   } catch (err) {
     // The next `session_ended` event will route through this function
@@ -149,6 +183,8 @@ export async function attemptRoutingFallback(
 
   const cached = useChatStore.getState().lastSendBySession[sessionId]
   if (!cached) return false
+  // Never replay after the first visible assistant frame or tool dispatch.
+  if (cached.routingCommitted) return false
 
   // Use the structured meta (real HTTP status) when the sidecar captured it so
   // an unclassifiable message ("upstream connect error" with a 429) still
@@ -181,11 +217,24 @@ export async function attemptRoutingFallback(
   }
 
   const fallbackEntries = cached.options.aliasResolution?.fallbackEntries ?? []
-  // `attemptIndex` is the index of the entry currently in `cached.options`.
-  // The first retry shifts to `attemptIndex + 1`. When that index is out
-  // of bounds the chain is exhausted — surface the original error.
-  const nextIndex = cached.attemptIndex + 1
-  if (fallbackEntries.length === 0 || nextIndex >= fallbackEntries.length) {
+  let nextIndex = cached.attemptIndex + 1
+  let nextEntry: ModelMappingEntry | undefined
+  if (cached.options.routingPlan) {
+    const controller = new RoutingAttemptController(
+      cached.options.routingPlan,
+      settings?.routingConfig?.maxFallbackAttempts ?? 3,
+      () => Date.now(),
+      {
+        phase: cached.routingCommitted ? "committed" : "inFlight",
+        candidateIndex: cached.attemptIndex,
+      }
+    )
+    nextEntry = controller.failAndAdvance() ?? undefined
+    nextIndex = controller.state.candidateIndex
+  } else {
+    nextEntry = fallbackEntries[nextIndex]
+  }
+  if (!nextEntry) {
     useChatStore.getState().clearLastSend(sessionId)
     return false
   }
@@ -197,7 +246,7 @@ export async function attemptRoutingFallback(
   const budget = cached.options.aliasResolution?.retryPolicy?.[errorClass]?.maxRetries
   if (budget !== undefined && nextIndex > budget) return false
 
-  return issueRetry(sessionId, cached, fallbackEntries[nextIndex], {
+  return issueRetry(sessionId, cached, nextEntry, {
     attemptIndex: nextIndex,
     specialAttempts: cached.specialAttempts,
   })

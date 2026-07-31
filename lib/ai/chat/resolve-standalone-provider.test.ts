@@ -30,6 +30,21 @@ describe("resolveStandaloneProvider", () => {
     if (res.kind === "resolved") expect(res.providerId).toBe("openai")
   })
 
+  it("resolves an explicitly requested provider without falling back", () => {
+    const settings = {
+      defaultProvider: "openai",
+      providerSettings: {
+        openai: { enabled: true, apiKey: "sk-oai" },
+        anthropic: { enabled: true, apiKey: "sk-ant" },
+      },
+      customProviders: [],
+    } as unknown as Slice
+
+    const requested = resolveStandaloneProvider(settings, "anthropic")
+    expect(requested).toMatchObject({ kind: "resolved", providerId: "anthropic" })
+    expect(resolveStandaloneProvider(settings, "missing").kind).toBe("unresolved")
+  })
+
   it("is unresolved when no provider has a key", () => {
     const res = resolveStandaloneProvider({
       defaultProvider: undefined,

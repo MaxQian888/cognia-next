@@ -1,4 +1,4 @@
-import { scoreDifficulty, createDifficultySelector } from "./difficulty-router"
+import { classifyRoutingTask, scoreDifficulty, createDifficultySelector } from "./difficulty-router"
 import { makeTelemetrySnapshot } from "./strategies/built-in"
 import type { DifficultyRoutingSettings } from "./routing-types"
 
@@ -37,6 +37,81 @@ describe("scoreDifficulty", () => {
   it("recognizes Chinese reasoning keywords and empty input", () => {
     expect(scoreDifficulty("")).toBe(0)
     expect(scoreDifficulty("请推理并证明这个算法的复杂度,然后给出优化方案")).toBeGreaterThan(0.2)
+  })
+})
+
+describe("classifyRoutingTask", () => {
+  it("classifies multilingual coding, reasoning, and attachment requirements locally", () => {
+    const result = classifyRoutingTask({
+      text: "请逐步分析并重构这个 TypeScript 算法，然后证明复杂度",
+      estimatedInputTokens: 40_000,
+      requirements: { tools: true, structuredOutput: true },
+      taskHints: { hasCode: true, attachmentKinds: ["image"] },
+    })
+
+    expect(result).toMatchObject({
+      category: "coding",
+      requiresCoding: true,
+      requiresReasoning: true,
+      requiresTools: true,
+      requiresVision: true,
+      requiresLongContext: true,
+      estimatedInputTokens: 40_000,
+    })
+    expect(result.confidence).toBeGreaterThan(0.5)
+  })
+
+  it("uses safe defaults for empty conversational prompts", () => {
+    expect(classifyRoutingTask({ text: "" })).toMatchObject({
+      complexity: "simple",
+      category: "conversation",
+      requiresTools: false,
+      requiresVision: false,
+      estimatedInputTokens: 0,
+    })
+  })
+
+  it.each([
+    ["math", "请证明这个微积分方程", "math"],
+    ["translation", "Translate this paragraph into Chinese", "translation"],
+    ["summarization", "总结这份长文", "summarization"],
+    ["research", "Research the literature and cite sources", "research"],
+    ["creative", "Write a creative poem", "creative"],
+    ["analysis", "Compare and evaluate these options", "analysis"],
+    ["general", "What is a bicycle?", "general"],
+  ])("classifies %s prompts", (_name, text, category) => {
+    expect(classifyRoutingTask({ text }).category).toBe(category)
+  })
+
+  it("honors explicit hints and derives every complexity band", () => {
+    expect(
+      classifyRoutingTask({
+        text: "plain",
+        taskHints: { category: "research" },
+        requirements: { vision: true, minContextTokens: 64_000 },
+      })
+    ).toMatchObject({
+      category: "research",
+      requiresVision: true,
+      requiresLongContext: true,
+    })
+
+    const moderate = classifyRoutingTask({ text: "`code` analyze" })
+    const complex = classifyRoutingTask({
+      text:
+        "```ts\nconst value = solve()\n```\n" +
+        "Analyze and prove this algorithm step by step, then implement and optimize it.",
+    })
+    const expert = classifyRoutingTask({
+      text:
+        "```ts\nconst value = solve()\n```\n" +
+        "Analyze and prove this theorem step by step. Implement, refactor, debug, optimize, " +
+        "and redesign the architecture. Explain the math and calculus constraints. ".repeat(8),
+    })
+
+    expect(moderate.complexity).toBe("moderate")
+    expect(complex.complexity).toBe("complex")
+    expect(expert.complexity).toBe("expert")
   })
 })
 

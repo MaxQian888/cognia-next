@@ -36,6 +36,6 @@ describe("RoutingConfigPanel", () => {
     expect(
       screen.getByText(/Circuit-breaker behavior and the pre-call filter chain/)
     ).toBeInTheDocument()
-    expect(screen.getByText("Routing Preview")).toBeInTheDocument()
+    expect(screen.getByText("Routing Workbench")).toBeInTheDocument()
   })
 })

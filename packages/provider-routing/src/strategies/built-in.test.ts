@@ -4,8 +4,8 @@ import {
   balancedSelector,
   costSelector,
   leastBusySelector,
-  makeTelemetrySnapshot,
   qualitySelector,
+  reliabilitySelector,
   speedSelector,
 } from "./built-in"
 import type { ProviderHealthMetrics } from "@cognia/provider-types/health-metrics"
@@ -26,21 +26,26 @@ function telemetry(
   parts: {
     pricing?: Record<string, number>
     health?: Record<string, ProviderHealthMetrics>
+    deploymentHealth?: Record<string, ProviderHealthMetrics>
+    deploymentInFlight?: Record<string, number>
     inFlight?: Record<string, number>
     now?: number
   } = {}
 ): RoutingTelemetrySnapshot {
-  return makeTelemetrySnapshot({
+  return {
     getHealthMetrics: (providerId) => parts.health?.[providerId],
     getPricing: (providerId, modelId) => parts.pricing?.[`${providerId}:${modelId}`],
     getInFlight: (providerId) => parts.inFlight?.[providerId] ?? 0,
+    getDeploymentHealth: (deploymentId) => parts.deploymentHealth?.[deploymentId],
+    getDeploymentInFlight: (deploymentId) => parts.deploymentInFlight?.[deploymentId] ?? 0,
     now: () => parts.now ?? 1_000_000,
-  })
+  }
 }
 
 describe("built-in routing selectors", () => {
   it("registers the canonical selector set", () => {
     expect(BUILT_IN_ROUTING_SELECTORS.map((selector) => selector.id)).toEqual([
+      "reliability",
       "quality",
       "cost",
       "speed",
@@ -72,6 +77,34 @@ describe("built-in routing selectors", () => {
     expect(leastBusySelector.select(entries, telemetry({ inFlight: { openai: 5, groq: 1 } }))).toBe(
       entries[2]
     )
+  })
+
+  it("keeps configured order for cold deployments and ranks warm deployments by success then p95", () => {
+    expect(reliabilitySelector.select(entries, telemetry())).toBe(entries[0])
+    expect(
+      reliabilitySelector.select(
+        entries,
+        telemetry({
+          deploymentHealth: {
+            "openai::gpt-4o": metrics({
+              totalRequests: 20,
+              successRate: 0.98,
+              latencyP95: 900,
+            }),
+            "groq::llama": metrics({
+              totalRequests: 20,
+              successRate: 0.99,
+              latencyP95: 400,
+            }),
+            "anthropic::sonnet": metrics({
+              totalRequests: 20,
+              successRate: 0.99,
+              latencyP95: 700,
+            }),
+          },
+        })
+      )
+    ).toBe(entries[1])
   })
 
   it("scores balanced and adaptive selectors with success, latency, price, and recency", () => {

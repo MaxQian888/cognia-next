@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState, useCallback, useRef } from "react"
+import { createPortal } from "react-dom"
 import { Plus, Menu, Settings, Key, Globe, PlugZap, Loader2 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
@@ -277,7 +278,11 @@ function CustomProviderInlineConfig({
 
 /* ── Main ───────────────────────────────────────────────────────────────────── */
 
-export function ProviderSettings() {
+interface ProviderSettingsProps {
+  headerActionsTarget?: HTMLElement | null
+}
+
+export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps = {}) {
   const t = useTranslations("providers")
   const s = useProviderSettings()
   const setProviderConfig = useSettingsStore((store) => store.setProviderConfig)
@@ -696,6 +701,22 @@ export function ProviderSettings() {
     )
   }
 
+  const verifyEnabledButton = (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="gap-1.5"
+      data-testid="verify-enabled-providers"
+      disabled={batchVerification.isRunning || batchEligibleCount === 0}
+      title={batchEligibleCount === 0 ? t("batchNoEligibleProviders") : undefined}
+      onClick={() => void runBatchVerification()}
+    >
+      <PlugZap className="h-3.5 w-3.5" />
+      {t("batchOperationVerifyEnabled")}
+    </Button>
+  )
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
       <ProviderOnboardingBanner
@@ -709,22 +730,13 @@ export function ProviderSettings() {
         }}
       />
 
+      {headerActionsTarget ? (
+        createPortal(verifyEnabledButton, headerActionsTarget)
+      ) : (
+        <div className="flex justify-end">{verifyEnabledButton}</div>
+      )}
+
       <div className="space-y-2">
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            data-testid="verify-enabled-providers"
-            disabled={batchVerification.isRunning || batchEligibleCount === 0}
-            title={batchEligibleCount === 0 ? t("batchNoEligibleProviders") : undefined}
-            onClick={() => void runBatchVerification()}
-          >
-            <PlugZap className="h-3.5 w-3.5" />
-            {t("batchOperationVerifyEnabled")}
-          </Button>
-        </div>
         <BatchTestProgress
           isRunning={batchVerification.isRunning}
           progress={

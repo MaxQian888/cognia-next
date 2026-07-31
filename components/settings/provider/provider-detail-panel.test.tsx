@@ -53,6 +53,10 @@ describe("ProviderDetailPanel", () => {
       />
     )
     expect(screen.getByText("OpenAI")).toBeInTheDocument()
+    expect(
+      screen.getByText("OpenAI").closest("div")?.parentElement?.querySelector("img")
+    ).toHaveAttribute("src", "/icons/lobe/openai.svg")
+    expect(screen.queryByText("🤖")).not.toBeInTheDocument()
     expect(screen.getByText("Config")).toBeInTheDocument()
     expect(screen.getByText("Models")).toBeInTheDocument()
     expect(screen.getByText("Cost")).toBeInTheDocument()
@@ -77,6 +81,12 @@ describe("ProviderDetailPanel", () => {
     expect(screen.queryByText("Models")).not.toBeInTheDocument()
     expect(screen.queryByText("Cost")).not.toBeInTheDocument()
     expect(screen.queryByText("Advanced")).not.toBeInTheDocument()
+  })
+
+  it("preserves a supplied legacy icon for an unknown provider", () => {
+    render(<ProviderDetailPanel provider={{ id: "custom-provider", name: "Custom", icon: "🧪" }} />)
+
+    expect(screen.getByText("🧪")).toBeInTheDocument()
   })
 
   it("shows a green Connected badge for connectionStatus='connected'", () => {

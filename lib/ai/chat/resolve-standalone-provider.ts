@@ -27,7 +27,8 @@ type ProviderSettingsSlice = Pick<
  * exists; `"unresolved"` carries a `nextAction` hint for the UI.
  */
 export function resolveStandaloneProvider(
-  settings: ProviderSettingsSlice | null | undefined
+  settings: ProviderSettingsSlice | null | undefined,
+  providerId?: string
 ): ProviderResolution {
   const snapshot = createProviderSettingsSnapshot({
     defaultProvider: settings?.defaultProvider,
@@ -39,9 +40,9 @@ export function resolveStandaloneProvider(
     {
       featureId: "standalone-chat",
       routeProfile: "general-text",
-      selectionMode: snapshot.defaultProvider ? "explicit-provider" : "any",
-      providerId: snapshot.defaultProvider,
-      fallbackMode: "first-eligible",
+      selectionMode: providerId || snapshot.defaultProvider ? "explicit-provider" : "any",
+      providerId: providerId || snapshot.defaultProvider,
+      fallbackMode: providerId ? "none" : "first-eligible",
     },
     snapshot
   )

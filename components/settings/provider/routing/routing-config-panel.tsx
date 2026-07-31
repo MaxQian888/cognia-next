@@ -9,7 +9,6 @@ import { useTranslations } from "next-intl"
 import {
   Activity,
   FlaskConical,
-  Gauge,
   GitMerge,
   Globe,
   Layers,
@@ -31,7 +30,6 @@ import { ProviderConstraintsEditor } from "./provider-constraints-editor"
 import { RoutingTestPanel } from "./routing-test-panel"
 import { ReliabilitySection } from "./reliability-section"
 import { SemanticRoutingSection } from "./semantic-routing-section"
-import { DifficultyRoutingSection } from "./difficulty-routing-section"
 import { AutoRoutingSection } from "./auto-routing-section"
 
 export function RoutingConfigPanel() {
@@ -115,18 +113,6 @@ export function RoutingConfigPanel() {
         defaultOpen={false}
       >
         <AutoRoutingSection />
-      </SettingsCard>
-
-      <SettingsDivider />
-
-      <SettingsCard
-        icon={<Gauge className="h-4 w-4" />}
-        title={t("difficulty.title")}
-        description={t("difficulty.desc")}
-        collapsible
-        defaultOpen={false}
-      >
-        <DifficultyRoutingSection />
       </SettingsCard>
 
       <SettingsDivider />

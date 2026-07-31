@@ -155,6 +155,8 @@ export interface RoutingConfig {
   requestTimeoutMs: number
   /** Maximum fallback attempts */
   maxFallbackAttempts: number
+  /** Time budget for one asynchronous plugin selector or filter. */
+  pluginTimeoutMs?: number
   /**
    * Ordered pre-call filter chain (built-in + plugin filter ids) the engine
    * runs before strategy selection. Undefined (default) keeps the built-in
@@ -170,11 +172,12 @@ export interface RoutingConfig {
 
 /** Default routing config */
 export const DEFAULT_ROUTING_CONFIG: RoutingConfig = {
-  strategy: "balanced",
+  strategy: "reliability",
   allowPerRequestOverride: true,
   providerConstraints: [],
   requestTimeoutMs: 30000,
   maxFallbackAttempts: 3,
+  pluginTimeoutMs: 250,
   // Reliability default: the breaker ships ENABLED with conservative
   // thresholds so a flapping provider is routed around and auto-recovers. A
   // 50% failure-rate trip needs ≥10 requests in the 60s window, so it never

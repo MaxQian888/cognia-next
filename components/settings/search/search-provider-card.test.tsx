@@ -23,6 +23,7 @@ let providerSettings: {
   enabled: false,
   priority: 1,
 }
+let hasStoredProviderSettings = true
 
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(
@@ -30,7 +31,9 @@ jest.mock("@/stores/settings", () => ({
   ) =>
     selector({
       settings: {
-        searchProviders: { [providerSettings.providerId]: providerSettings },
+        searchProviders: hasStoredProviderSettings
+          ? { [providerSettings.providerId]: providerSettings }
+          : {},
       },
       ...mocks,
     } as never),
@@ -104,6 +107,7 @@ function renderCard(props: Partial<React.ComponentProps<typeof SearchProviderCar
 beforeEach(() => {
   Object.values(mocks).forEach((m) => m.mockReset())
   mockLogInfo.mockReset()
+  hasStoredProviderSettings = true
   providerSettings = {
     providerId: "tavily",
     apiKey: "",
@@ -116,6 +120,37 @@ describe("SearchProviderCard", () => {
   it("renders provider name", () => {
     renderCard()
     expect(screen.getAllByText("Tavily").length).toBeGreaterThan(0)
+  })
+
+  it("renders the provider brand icon", () => {
+    renderCard()
+
+    expect(document.querySelector('img[src="/icons/lobe/tavily-color.svg"]')).not.toBeNull()
+  })
+
+  it("renders a collapsed provider with its default settings", () => {
+    hasStoredProviderSettings = false
+    const { container } = renderCard({ isExpanded: false })
+
+    expect(container.querySelector(".opacity-70")).not.toBeNull()
+    expect(container.querySelector(".lucide-chevron-down")).not.toBeNull()
+  })
+
+  it("reveals the key and shows the busy connection state", () => {
+    providerSettings = {
+      providerId: "tavily",
+      apiKey: "tvly-1234567890abc",
+      enabled: true,
+      priority: 5,
+    }
+    const { container } = renderCard({
+      showKey: true,
+      testState: { testing: true, result: null },
+    })
+
+    expect(screen.getAllByPlaceholderText(/tvly-/)[0]).toHaveAttribute("type", "text")
+    expect(container.querySelector(".lucide-eye-off")).not.toBeNull()
+    expect(container.querySelector(".lucide-loader-circle")).not.toBeNull()
   })
 
   it("updates API key on input change", () => {

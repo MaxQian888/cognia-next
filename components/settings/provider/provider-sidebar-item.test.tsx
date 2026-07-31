@@ -41,6 +41,32 @@ describe("ProviderSidebarItem", () => {
     expect(screen.getByText("GPT-4o · Connected")).toBeInTheDocument()
   })
 
+  it("prefers a branded provider asset over a legacy emoji", () => {
+    const { container } = render(<ProviderSidebarItem {...defaultProps} />)
+
+    expect(container.querySelector("img")).toHaveAttribute("src", "/icons/lobe/openai.svg")
+    expect(screen.queryByText("🤖")).not.toBeInTheDocument()
+  })
+
+  it("preserves a supplied legacy icon for an unknown provider", () => {
+    render(<ProviderSidebarItem {...defaultProps} providerId="custom-provider" icon="🧪" />)
+
+    expect(screen.getByText("🧪")).toBeInTheDocument()
+  })
+
+  it("renders a monogram when an unknown provider has no supplied icon", () => {
+    render(
+      <ProviderSidebarItem
+        {...defaultProps}
+        providerId="custom-provider"
+        name="Custom Provider"
+        icon={undefined}
+      />
+    )
+
+    expect(screen.getByText("C")).toBeInTheDocument()
+  })
+
   it("shows green status dot when connected", () => {
     const { container } = render(<ProviderSidebarItem {...defaultProps} />)
     const dot = container.querySelector('[data-status="connected"]')

@@ -8,6 +8,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
+import { hasBrandIcon } from "@/components/icons/brand-icon"
+import { ProviderIcon } from "@/components/providers/ai/provider-icon"
 
 interface ProviderDetailPanelProvider {
   id: string
@@ -76,9 +78,13 @@ export function ProviderDetailPanel({
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-3 border-b px-4 py-3 shrink-0">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-lg">
-          {provider.icon ?? provider.name.charAt(0)}
-        </div>
+        {hasBrandIcon(provider.id) || provider.icon == null ? (
+          <ProviderIcon providerId={provider.id} label={provider.name} size={40} />
+        ) : (
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-lg">
+            {provider.icon}
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-base font-semibold">{provider.name}</h3>
           <p className="truncate text-xs text-muted-foreground">

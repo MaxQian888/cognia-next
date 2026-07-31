@@ -12,6 +12,9 @@ import {
 } from "@cognia/provider-types/model-mapping"
 import type { ProviderHealthMetrics } from "@cognia/provider-types/health-metrics"
 import type { CircuitBreakerStateValue } from "@cognia/provider-types/circuit-breaker"
+import type { RoutingCandidateCapabilities } from "@cognia/provider-types/auto-router"
+import { registerRoutingStrategy, unregisterRoutingStrategy } from "./strategy-registry"
+import { registerDeploymentFilter, unregisterDeploymentFilter } from "./filter-registry"
 
 function entry(
   providerId: string,
@@ -55,6 +58,10 @@ interface DepsState {
   /** Session → pinned deployment key (affinity filter). */
   pins?: Record<string, string>
   released?: string[]
+  candidates?: ModelMappingEntry[]
+  capabilities?: Record<string, RoutingCandidateCapabilities | undefined>
+  localProviders?: Set<string>
+  deploymentMetrics?: Record<string, ProviderHealthMetrics>
 }
 
 function makeDeps(state: DepsState = {}): RoutingEngineDeps {
@@ -76,6 +83,19 @@ function makeDeps(state: DepsState = {}): RoutingEngineDeps {
           getSessionDeployment: (sessionId) => state.pins?.[sessionId],
           releaseSessionDeployment: (sessionId) => state.released?.push(sessionId),
         }
+      : {}),
+    ...(state.candidates ? { listCandidates: () => state.candidates ?? [] } : {}),
+    ...(state.capabilities
+      ? {
+          getCapabilities: (providerId, modelId) =>
+            state.capabilities?.[`${providerId}:${modelId}`],
+        }
+      : {}),
+    ...(state.localProviders
+      ? { isLocalProvider: (providerId) => state.localProviders?.has(providerId) ?? false }
+      : {}),
+    ...(state.deploymentMetrics
+      ? { getDeploymentHealth: (key) => state.deploymentMetrics?.[key] }
       : {}),
   }
 }
@@ -797,6 +817,261 @@ describe("ProviderRoutingEngine", () => {
       )
       const result = engine.selectProvider({ model: "alias" })
       expect(result?.filterNotes?.prunedBy).toEqual(["circuit"])
+    })
+  })
+
+  describe("unified routing plan", () => {
+    it("keeps a concrete model as a single-candidate manual override", async () => {
+      const engine = new ProviderRoutingEngine(
+        registry([mapping("gpt-test", [entry("groq", "other")])]),
+        DEFAULT_ROUTING_CONFIG,
+        makeDeps()
+      )
+
+      const plan = await engine.planRoute({
+        surface: "chat",
+        selection: { kind: "manual", providerId: "openai", modelId: "gpt-test" },
+      })
+
+      expect(plan.requested.kind).toBe("manual")
+      expect(plan.selected).toMatchObject({
+        providerId: "openai",
+        modelId: "gpt-test",
+        reasonCodes: ["manual-override"],
+      })
+      expect(plan.orderedCandidates).toHaveLength(1)
+    })
+
+    it("uses configured Auto thresholds and degrades to an enabled tier", async () => {
+      const engine = new ProviderRoutingEngine(
+        registry([
+          mapping("fast", [entry("openai", "small")]),
+          mapping("powerful", [entry("anthropic", "large")]),
+        ]),
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+        makeDeps()
+      )
+
+      const hard = await engine.planRoute({
+        surface: "chat",
+        selection: { kind: "auto" },
+        promptText:
+          "```ts\nsolve()\n``` Analyze and prove this algorithm step by step, then optimize it.",
+        candidateAliases: ["fast", "balanced", "powerful"],
+        thresholds: { balanced: 0.1, powerful: 0.2 },
+      })
+      const moderateWithMissingMiddle = await engine.planRoute({
+        surface: "chat",
+        selection: { kind: "auto" },
+        promptText: "`code` analyze",
+        candidateAliases: ["fast", "balanced", "powerful"],
+        thresholds: { balanced: 0.1, powerful: 0.9 },
+      })
+
+      expect(hard.selected).toMatchObject({ providerId: "anthropic", modelId: "large" })
+      expect(moderateWithMissingMiddle.selected).toMatchObject({
+        providerId: "openai",
+        modelId: "small",
+      })
+    })
+
+    it("fails a manual override that violates a declared hard capability", async () => {
+      const engine = new ProviderRoutingEngine(
+        registry([]),
+        DEFAULT_ROUTING_CONFIG,
+        makeDeps({ capabilities: { "openai:text": { vision: false } } })
+      )
+
+      await expect(
+        engine.planRoute({
+          surface: "chat",
+          selection: { kind: "manual", providerId: "openai", modelId: "text" },
+          requirements: { vision: true },
+        })
+      ).rejects.toBeInstanceOf(RoutingNoCandidatesError)
+    })
+
+    it("returns one ordered alias chain with the primary at index zero", async () => {
+      const engine = new ProviderRoutingEngine(
+        registry([
+          mapping("fast", [
+            entry("openai", "expensive"),
+            entry("groq", "cheap"),
+            entry("anthropic", "backup"),
+          ]),
+        ]),
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "cost" },
+        makeDeps({
+          pricing: {
+            "openai:expensive": 20,
+            "groq:cheap": 1,
+            "anthropic:backup": 5,
+          },
+        })
+      )
+
+      const plan = await engine.planRoute({
+        surface: "workflow",
+        selection: { kind: "alias", alias: "fast" },
+      })
+
+      expect(plan.selected.providerId).toBe("groq")
+      expect(plan.orderedCandidates.map((candidate) => candidate.providerId)).toEqual([
+        "groq",
+        "openai",
+        "anthropic",
+      ])
+      expect(plan.orderedCandidates[0]).toBe(plan.selected)
+      expect(plan.replayPolicy).toBe("pre-commit-only")
+    })
+
+    it.each(["chat", "gateway", "workflow", "council"] as const)(
+      "keeps equivalent request ordering identical on the %s surface",
+      async (surface) => {
+        const engine = new ProviderRoutingEngine(
+          registry([
+            mapping("fast", [
+              entry("openai", "primary"),
+              entry("groq", "cheap"),
+              entry("anthropic", "backup"),
+            ]),
+          ]),
+          { ...DEFAULT_ROUTING_CONFIG, strategy: "cost" },
+          makeDeps({
+            pricing: {
+              "openai:primary": 10,
+              "groq:cheap": 1,
+              "anthropic:backup": 5,
+            },
+          })
+        )
+
+        const plan = await engine.planRoute({
+          surface,
+          selection: { kind: "alias", alias: "fast" },
+        })
+        expect(
+          plan.orderedCandidates.map(({ providerId, modelId }) => `${providerId}:${modelId}`)
+        ).toEqual(["groq:cheap", "openai:primary", "anthropic:backup"])
+      }
+    )
+
+    it("fails closed when a required capability is unknown and enforces local-only", async () => {
+      const candidates = [
+        entry("openai", "unknown"),
+        entry("ollama", "vision"),
+        entry("ollama", "text"),
+      ]
+      const engine = new ProviderRoutingEngine(
+        registry([mapping("vision", candidates)]),
+        DEFAULT_ROUTING_CONFIG,
+        makeDeps({
+          capabilities: {
+            "openai:unknown": undefined,
+            "ollama:vision": { vision: true, streaming: true, contextTokens: 32_000 },
+            "ollama:text": { vision: false, streaming: true, contextTokens: 32_000 },
+          },
+          localProviders: new Set(["ollama"]),
+        })
+      )
+
+      const plan = await engine.planRoute({
+        surface: "chat",
+        selection: { kind: "alias", alias: "vision" },
+        requirements: { vision: true, streaming: true },
+        dataPolicy: { locality: "local-only" },
+      })
+
+      expect(plan.orderedCandidates).toHaveLength(1)
+      expect(plan.selected).toMatchObject({ providerId: "ollama", modelId: "vision" })
+      expect(plan.rejected).toEqual(
+        expect.arrayContaining([
+          { reasonCode: "capability-required", count: 1 },
+          { reasonCode: "data-policy", count: 1 },
+        ])
+      )
+    })
+
+    it("awaits asynchronous plugin strategies and falls back after the plugin budget", async () => {
+      registerRoutingStrategy({
+        id: "test:async",
+        select: (entries) => entries[0] ?? null,
+        selectAsync: async (entries) => entries[1] ?? null,
+      })
+      registerRoutingStrategy({
+        id: "test:timeout",
+        select: (entries) => entries[0] ?? null,
+        selectAsync: () => new Promise(() => undefined),
+      })
+      const engine = new ProviderRoutingEngine(
+        registry([mapping("alias", [entry("openai", "first"), entry("groq", "second")])]),
+        { ...DEFAULT_ROUTING_CONFIG, pluginTimeoutMs: 5 },
+        makeDeps()
+      )
+
+      try {
+        const asyncPlan = await engine.planRoute({
+          surface: "gateway",
+          selection: { kind: "alias", alias: "alias" },
+          strategy: "test:async",
+          shadowMode: true,
+        })
+        expect(asyncPlan.selected.providerId).toBe("groq")
+        expect(asyncPlan.shadowComparison).toEqual({
+          differs: true,
+          selected: { providerId: "openai", modelId: "first" },
+        })
+
+        const timedOutPlan = await engine.planRoute({
+          surface: "gateway",
+          selection: { kind: "alias", alias: "alias" },
+          strategy: "test:timeout",
+        })
+        expect(timedOutPlan.selected.providerId).toBe("openai")
+        expect(timedOutPlan.reasonCodes).toContain("plugin-timeout")
+      } finally {
+        unregisterRoutingStrategy("test:async")
+        unregisterRoutingStrategy("test:timeout")
+      }
+    })
+
+    it("awaits asynchronous plugin filters and reports timeout without dropping safe candidates", async () => {
+      registerDeploymentFilter({
+        id: "test:async-filter",
+        filter: (candidates) => ({ candidates: [...candidates] }),
+        filterAsync: async (candidates) => ({ candidates: candidates.slice(1) }),
+      })
+      registerDeploymentFilter({
+        id: "test:timeout-filter",
+        filter: (candidates) => ({ candidates: [...candidates] }),
+        filterAsync: () => new Promise(() => undefined),
+      })
+      const engine = new ProviderRoutingEngine(
+        registry([mapping("alias", [entry("openai", "first"), entry("groq", "second")])]),
+        {
+          ...DEFAULT_ROUTING_CONFIG,
+          filterChain: ["test:async-filter", "test:timeout-filter"],
+          pluginTimeoutMs: 5,
+        },
+        makeDeps()
+      )
+
+      try {
+        const plan = await engine.planRoute({
+          surface: "gateway",
+          selection: { kind: "alias", alias: "alias" },
+        })
+        expect(plan.selected).toMatchObject({ providerId: "groq", modelId: "second" })
+        expect(plan.filterNotes?.prunedBy).toEqual(["test:async-filter"])
+        expect(plan.filterNotes?.filterErrors).toContainEqual({
+          filterId: "test:timeout-filter",
+          kind: "timeout",
+        })
+        expect(plan.reasonCodes).toContain("plugin-timeout")
+      } finally {
+        unregisterDeploymentFilter("test:async-filter")
+        unregisterDeploymentFilter("test:timeout-filter")
+      }
     })
   })
 })

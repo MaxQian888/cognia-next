@@ -88,7 +88,7 @@ export async function loadBundledModelsDevShards(
   const basePath = (options.basePath ?? DEFAULT_BASE_PATH).replace(/\/+$/, "")
   const concurrency = Math.max(1, Math.min(options.concurrency ?? 8, 32))
   const manifestResponse = await fetcher(`${basePath}/manifest.json`, {
-    cache: "force-cache",
+    cache: "no-cache",
     signal: options.signal,
   })
   if (!manifestResponse.ok) {
@@ -102,7 +102,8 @@ export async function loadBundledModelsDevShards(
     const batch = manifest.providers.slice(offset, offset + concurrency)
     const loaded = await Promise.all(
       batch.map(async (entry) => {
-        const content = await fetchJsonText(fetcher, `${basePath}/${entry.path}`, options.signal)
+        const shardUrl = `${basePath}/${entry.path}?v=${encodeURIComponent(entry.checksum)}`
+        const content = await fetchJsonText(fetcher, shardUrl, options.signal)
         if ((await sha256(content)) !== entry.checksum) {
           throw new Error(`models.dev bundled shard checksum mismatch for "${entry.id}"`)
         }

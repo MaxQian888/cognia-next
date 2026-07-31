@@ -63,44 +63,9 @@ export const DEFAULT_SEMANTIC_TOOL_ROUTING: SemanticToolRoutingSettings = {
   pinnedTools: [],
 }
 
-/** Settings block: opt-in heuristic strong/weak difficulty routing. */
-export interface DifficultyRoutingSettings {
-  /** Default OFF. */
-  enabled: boolean
-  /** Cheap model for low-difficulty prompts. */
-  weakModel?: { providerId: string; modelId: string }
-  /** Capable model for high-difficulty prompts. */
-  strongModel?: { providerId: string; modelId: string }
-  /** Difficulty score (0–1) at or above which the strong model is used. */
-  threshold: number
-}
-
-export const DEFAULT_DIFFICULTY_ROUTING: DifficultyRoutingSettings = {
-  enabled: false,
-  threshold: 0.5,
-}
-
-/**
- * Settings block: opt-in automatic tier routing (default OFF). When enabled,
- * `resolveSendOptions` scores each outgoing prompt's difficulty and rewrites a
- * non-alias model to one of `candidateAliases`, which the existing alias engine
- * then resolves. A strict no-op until opted in and until matching aliases exist
- * in `modelMappings`. See `lib/routing/auto-tier.ts`.
- */
-export interface AutoRoutingSettings {
-  /** Default OFF — the send path is a strict no-op until opted in. */
-  enabled: boolean
-  /**
-   * Difficulty-score (0–1) cut points: `score < balanced` → the low tier,
-   * `< powerful` → the mid tier, else the top tier (see `candidateAliases`).
-   */
-  thresholds: { balanced: number; powerful: number }
-  /** Candidate tier aliases ordered low → high capability. */
-  candidateAliases: string[]
-}
-
-export const DEFAULT_AUTO_ROUTING: AutoRoutingSettings = {
-  enabled: false,
-  thresholds: { balanced: 0.34, powerful: 0.67 },
-  candidateAliases: ["fast", "balanced", "powerful"],
-}
+export {
+  DEFAULT_AUTO_ROUTING,
+  DEFAULT_DIFFICULTY_ROUTING,
+  type AutoRoutingSettings,
+  type DifficultyRoutingSettings,
+} from "@cognia/provider-types/auto-router"

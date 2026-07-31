@@ -1,5 +1,6 @@
 import type { ClaudeEvent, SendOptions } from "@cognia/agent-config-types"
 import { loggers } from "@cognia/logging"
+import type { RoutingPlan } from "@cognia/provider-types/auto-router"
 
 import { streamText } from "ai"
 
@@ -32,6 +33,10 @@ jest.mock("@/lib/claude/plugin-tool-ipc", () => ({
 jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: { getState: () => ({ settings: {} }) },
 }))
+let mockPiiSafe = true
+jest.mock("@cognia/redact", () => ({
+  hasNoLeakingPiiDeep: () => mockPiiSafe,
+}))
 
 const mockResolve = resolveStandaloneProvider as jest.MockedFunction<
   typeof resolveStandaloneProvider
@@ -46,6 +51,35 @@ const resolved = {
   model: "claude-sonnet-4-6",
   isCustomProvider: false,
   useProxy: false,
+}
+
+function routingPlan(): RoutingPlan {
+  const orderedCandidates = [
+    {
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4-6",
+      deploymentId: "anthropic::claude-sonnet-4-6",
+      reasonCodes: [],
+    },
+    {
+      providerId: "openai",
+      modelId: "gpt-5.6",
+      deploymentId: "openai::gpt-5.6",
+      reasonCodes: [],
+    },
+  ]
+  return {
+    decisionId: "standalone-route",
+    surface: "chat",
+    requested: { kind: "auto" },
+    strategy: "reliability",
+    selected: orderedCandidates[0],
+    orderedCandidates,
+    reasonCodes: [],
+    rejected: [],
+    replayPolicy: "pre-commit-only",
+    createdAt: 1,
+  }
 }
 
 function fakeStream(parts: unknown[], usage?: unknown) {
@@ -64,7 +98,9 @@ function run(over: Partial<Parameters<typeof runStandaloneTurn>[0]> = {}) {
     sessionId: "s1",
     messages: [],
     sendOptions: { systemPrompt: "be nice" } as SendOptions,
-    emit: (e) => events.push(e),
+    emit: (e) => {
+      events.push(e)
+    },
     signal: controller.signal,
     streamTextImpl: fakeStream([{ type: "text-delta", text: "hi" }]),
     ...over,
@@ -75,9 +111,47 @@ function run(over: Partial<Parameters<typeof runStandaloneTurn>[0]> = {}) {
 beforeEach(() => {
   jest.clearAllMocks()
   mockResolve.mockReturnValue(resolved)
+  mockPiiSafe = true
 })
 
 describe("runStandaloneTurn", () => {
+  it("waits for each event consumer before emitting the terminal event", async () => {
+    let releaseFirstEvent: (() => void) | undefined
+    const firstEventPersisted = new Promise<void>((resolve) => {
+      releaseFirstEvent = resolve
+    })
+    let observeFirstEvent: (() => void) | undefined
+    const firstEventObserved = new Promise<void>((resolve) => {
+      observeFirstEvent = resolve
+    })
+    const events: ClaudeEvent[] = []
+    let firstEvent = true
+
+    const promise = runStandaloneTurn({
+      sessionId: "s1",
+      messages: [],
+      sendOptions: {} as SendOptions,
+      emit: async (event) => {
+        events.push(event)
+        if (firstEvent) {
+          firstEvent = false
+          observeFirstEvent?.()
+          await firstEventPersisted
+        }
+      },
+      signal: new AbortController().signal,
+      streamTextImpl: fakeStream([{ type: "text-delta", text: "durable" }]),
+    })
+
+    await firstEventObserved
+    expect(events).toHaveLength(1)
+    expect(events[0]).not.toMatchObject({ type: "session_ended" })
+
+    releaseFirstEvent?.()
+    await promise
+    expect(events.at(-1)).toEqual({ type: "session_ended", sessionId: "s1" })
+  })
+
   it("streams assistant snapshots, a result envelope, then a clean session_ended", async () => {
     const { events, promise } = run({
       streamTextImpl: fakeStream([
@@ -126,6 +200,91 @@ describe("runStandaloneTurn", () => {
     })
   })
 
+  it("treats an error stream part as a failed turn", async () => {
+    const { events, promise } = run({
+      streamTextImpl: fakeStream([
+        {
+          type: "error",
+          error: new Error("401 invalid api key"),
+        },
+      ]),
+    })
+
+    await promise
+
+    expect(events.at(-1)).toMatchObject({
+      type: "session_ended",
+      sessionId: "s1",
+      error: expect.stringContaining("401 invalid api key"),
+    })
+  })
+
+  it("executes the plan-selected provider and retries locally before commitment", async () => {
+    mockResolve.mockImplementation((_settings, providerId) => ({
+      ...resolved,
+      providerId: providerId ?? "anthropic",
+      protocol: providerId === "openai" ? ("openai" as const) : ("anthropic" as const),
+    }))
+    const impl = jest
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("primary unavailable")
+      })
+      .mockImplementationOnce(fakeStream([{ type: "text-delta", text: "fallback" }]))
+
+    const { events, promise } = run({
+      sendOptions: { routingPlan: routingPlan() } as SendOptions,
+      streamTextImpl: impl as never,
+    })
+    await promise
+
+    expect(mockResolve.mock.calls.map((call) => call[1])).toEqual(["anthropic", "openai"])
+    expect(impl).toHaveBeenCalledTimes(2)
+    expect(events.at(-1)).toEqual({ type: "session_ended", sessionId: "s1" })
+  })
+
+  it("fails closed before resending private history to a fallback provider", async () => {
+    mockPiiSafe = false
+    const impl = jest.fn().mockImplementationOnce(() => {
+      throw new Error("primary unavailable")
+    })
+
+    const { events, promise } = run({
+      messages: [{ id: "m1", role: "user", parts: [{ type: "text", text: "alice@example.com" }] }],
+      sendOptions: { routingPlan: routingPlan() } as SendOptions,
+      streamTextImpl: impl as never,
+    })
+    await promise
+
+    expect(impl).toHaveBeenCalledTimes(1)
+    expect(events.at(-1)).toMatchObject({
+      type: "session_ended",
+      error: expect.stringContaining("private data"),
+    })
+  })
+
+  it("never replays a routed standalone turn after visible output commits it", async () => {
+    const impl = (() => ({
+      fullStream: (async function* () {
+        yield { type: "text-delta", text: "partial" }
+        throw new Error("failed after output")
+      })(),
+      usage: Promise.resolve(undefined),
+    })) as never
+
+    const { events, promise } = run({
+      sendOptions: { routingPlan: routingPlan() } as SendOptions,
+      streamTextImpl: impl,
+    })
+    await promise
+
+    expect(mockResolve).toHaveBeenCalledTimes(1)
+    expect(events.at(-1)).toMatchObject({
+      type: "session_ended",
+      error: "failed after output",
+    })
+  })
+
   it("treats an aborted turn as a clean stop (no error)", async () => {
     const controller = new AbortController()
     controller.abort()
@@ -134,7 +293,9 @@ describe("runStandaloneTurn", () => {
       sessionId: "s1",
       messages: [],
       sendOptions: {} as SendOptions,
-      emit: (e) => events.push(e),
+      emit: (e) => {
+        events.push(e)
+      },
       signal: controller.signal,
       streamTextImpl: (() => {
         const err = new Error("aborted")
@@ -175,7 +336,9 @@ describe("runStandaloneTurn", () => {
       sessionId: "s1",
       messages: [],
       sendOptions: {} as SendOptions,
-      emit: (e) => events.push(e),
+      emit: (e) => {
+        events.push(e)
+      },
       signal: new AbortController().signal,
     })
     expect(streamText).toHaveBeenCalled()
@@ -197,7 +360,9 @@ describe("runStandaloneTurn", () => {
       sessionId: "s1",
       messages: [],
       sendOptions: {} as SendOptions,
-      emit: (e) => events.push(e),
+      emit: (e) => {
+        events.push(e)
+      },
       signal: controller.signal,
       streamTextImpl: fakeStream([{ type: "text-delta", text: "never-seen" }]),
     })

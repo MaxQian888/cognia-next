@@ -18,6 +18,13 @@ import type {
 } from "@cognia/provider-types/model-mapping"
 import type { RequestRoutingOverride } from "@cognia/provider-types/auto-router"
 import type {
+  RouteCandidate,
+  RoutingCandidateCapabilities,
+  RoutingPlan,
+  RoutingReasonCode,
+  RoutingRequest,
+} from "@cognia/provider-types/auto-router"
+import type {
   RoutingDecisionContext,
   RoutingStrategyId,
   RoutingTelemetrySnapshot,
@@ -33,8 +40,9 @@ import { deploymentKeyOfEntry } from "@cognia/provider-types/deployment"
 import type { ProviderName } from "@cognia/provider-types"
 import { resolveModelAlias, type ProviderHealthMetricsLite } from "./alias-resolver"
 import { DEFAULT_FILTER_CHAIN, getDeploymentFilter } from "./filter-registry"
-import { runFilterChain } from "./run-filter-chain"
+import { runFilterChain, runFilterChainAsync } from "./run-filter-chain"
 import { getRoutingStrategy } from "./strategy-registry"
+import { classifyRoutingTask, pickAutoAlias, scoreDifficulty } from "./difficulty-router"
 
 /** Provider info needed for routing decisions */
 export interface ProviderRoutingInfo {
@@ -96,7 +104,18 @@ export interface RoutingEngineDeps {
   getSessionDeployment?: (sessionId: string) => string | undefined
   /** Release an unhealthy affinity pin. */
   releaseSessionDeployment?: (sessionId: string) => void
+  /** Dynamic enabled provider/model catalog used by explicit Auto routing. */
+  listCandidates?: () => readonly ModelMappingEntry[]
+  /** Catalog capabilities. Unknown required capabilities fail closed. */
+  getCapabilities?: (
+    providerId: string,
+    modelId: string
+  ) => RoutingCandidateCapabilities | undefined
+  /** Locality source for the enforceable local-only data policy. */
+  isLocalProvider?: (providerId: string) => boolean
 }
+
+let decisionSequence = 0
 
 /**
  * Thrown when an alias matched but the pre-call filter chain emptied the
@@ -162,6 +181,189 @@ export class ProviderRoutingEngine {
     private config: RoutingConfig,
     private deps: RoutingEngineDeps
   ) {}
+
+  /**
+   * Canonical routing API. Unlike selectProvider, this awaits plugin
+   * strategies/filters and returns one complete, ordered attempt plan.
+   */
+  async planRoute(request: RoutingRequest): Promise<RoutingPlan> {
+    const strategy = request.strategy ?? this.config.strategy
+    const classification =
+      request.selection.kind === "auto"
+        ? classifyRoutingTask({
+            text: request.promptText ?? "",
+            estimatedInputTokens: request.estimatedInputTokens,
+            requirements: request.requirements,
+            taskHints: request.taskHints,
+          })
+        : undefined
+
+    let entries: ModelMappingEntry[]
+    let alias: string | undefined
+    let parameterDefaults: AliasResolutionResult["parameterDefaults"]
+    let specialFallbacks: ModelMappingSpecialFallbacks | undefined
+    let retryPolicy: ModelMappingRetryPolicy | undefined
+    const reasonCodes: RoutingReasonCode[] = []
+
+    if (request.selection.kind === "manual") {
+      entries = [
+        {
+          providerId: request.selection.providerId,
+          modelId: request.selection.modelId,
+        },
+      ]
+      reasonCodes.push("manual-override")
+    } else if (request.selection.kind === "alias") {
+      alias = request.selection.alias
+      const resolution = resolveModelAlias(alias, this.registry, this.buildLiteMetricsMap(alias))
+      if (!resolution.found || resolution.entries.length === 0) {
+        throw new RoutingNoCandidatesError(alias)
+      }
+      entries = resolution.entries
+      parameterDefaults = resolution.parameterDefaults
+      specialFallbacks = resolution.mapping?.specialFallbacks
+      retryPolicy = resolution.mapping?.retryPolicy
+      reasonCodes.push("alias-match")
+    } else {
+      const configuredAliases = request.candidateAliases?.filter(Boolean)
+      const availableAliases = new Set(
+        this.registry.mappings
+          .filter((mapping) => mapping.enabled)
+          .map((mapping) => mapping.alias.toLowerCase())
+      )
+      const preferredAlias = pickAutoAlias(
+        scoreDifficulty(request.promptText ?? ""),
+        configuredAliases?.length ? configuredAliases : ["fast", "balanced", "powerful"],
+        request.thresholds ?? { balanced: 0.34, powerful: 0.67 },
+        availableAliases
+      )
+      const resolution = resolveModelAlias(
+        preferredAlias ?? "",
+        this.registry,
+        this.buildLiteMetricsMap(preferredAlias ?? "")
+      )
+      if (resolution.found && resolution.entries.length > 0) {
+        alias = preferredAlias
+        entries = resolution.entries
+        parameterDefaults = resolution.parameterDefaults
+        specialFallbacks = resolution.mapping?.specialFallbacks
+        retryPolicy = resolution.mapping?.retryPolicy
+      } else {
+        const liveCandidates = this.deps.listCandidates?.() ?? []
+        entries = this.dedupeEntries(
+          liveCandidates.length > 0
+            ? liveCandidates
+            : this.registry.mappings
+                .filter((mapping) => mapping.enabled)
+                .flatMap((mapping) => mapping.providers)
+        )
+      }
+      if (entries.length === 0) throw new RoutingNoCandidatesError("auto")
+      reasonCodes.push("auto-task-fit")
+    }
+
+    const hardFiltered = this.applyHardConstraints(entries, request)
+    if (hardFiltered.candidates.length === 0) {
+      throw new RoutingNoCandidatesError(alias ?? request.selection.kind)
+    }
+
+    const req: FilterRequest = {
+      alias,
+      estimatedInputTokens: request.estimatedInputTokens,
+      sessionId: request.sessionId,
+      classification,
+      requirements: request.requirements,
+      surface: request.surface,
+    }
+    const chain = (this.config.filterChain ?? DEFAULT_FILTER_CHAIN)
+      .map((id) => getDeploymentFilter(id))
+      .filter((filter): filter is NonNullable<typeof filter> => filter !== undefined)
+    const filtered = await runFilterChainAsync(
+      chain,
+      hardFiltered.candidates,
+      req,
+      this.filterContext(),
+      this.config.pluginTimeoutMs ?? 250
+    )
+    if (filtered.candidates.length === 0) {
+      throw new RoutingNoCandidatesError(alias ?? request.selection.kind)
+    }
+
+    const bypassStrategy = Boolean(filtered.notes?.windowFallback || filtered.notes?.affinityPinned)
+    const decisionContext: RoutingDecisionContext = {
+      estimatedInputTokens: request.estimatedInputTokens,
+      classification,
+      requirements: request.requirements,
+      surface: request.surface,
+      // Raw prompt text is reserved for the built-in deterministic selector.
+      ...(strategy === "difficulty" ? { promptText: request.promptText } : {}),
+    }
+    const selectionResult = bypassStrategy
+      ? { selected: filtered.candidates[0], reasonCode: undefined }
+      : await this.applyStrategyAsync(filtered.candidates, strategy, decisionContext)
+    const selected = selectionResult.selected ?? filtered.candidates[0]
+    if (!selected) throw new RoutingNoCandidatesError(alias ?? request.selection.kind)
+    if (selectionResult.reasonCode) reasonCodes.push(selectionResult.reasonCode)
+    if (filtered.notes?.affinityPinned) reasonCodes.push("affinity-pin")
+    if (strategy === "reliability" && request.selection.kind !== "manual") {
+      reasonCodes.push("reliability-first")
+    }
+    for (const error of filtered.notes?.filterErrors ?? []) {
+      reasonCodes.push(error.kind === "timeout" ? "plugin-timeout" : "plugin-error")
+    }
+
+    const orderedEntries = [
+      selected,
+      ...filtered.candidates.filter(
+        (entry) => entry.providerId !== selected.providerId || entry.modelId !== selected.modelId
+      ),
+    ]
+    const orderedCandidates = orderedEntries.map((entry, index) =>
+      this.toRouteCandidate(entry, index === 0 ? reasonCodes : [])
+    )
+    const rejected = Array.from(hardFiltered.rejected.entries()).map(([reasonCode, count]) => ({
+      reasonCode,
+      count,
+    }))
+    const shadowSelected =
+      request.shadowMode && request.selection.kind !== "manual"
+        ? this.applyStrategy(filtered.candidates, strategy, decisionContext)
+        : null
+
+    return {
+      decisionId: `${this.deps.now?.() ?? Date.now()}-${++decisionSequence}`,
+      surface: request.surface,
+      requested: request.selection,
+      strategy,
+      selected: orderedCandidates[0],
+      orderedCandidates,
+      reasonCodes: [...new Set(reasonCodes)],
+      rejected,
+      classification,
+      parameterDefaults,
+      specialFallbacks,
+      retryPolicy,
+      overBudgetWarning: filtered.notes?.overBudget?.find(
+        (warning) => warning.providerId === selected.providerId
+      ),
+      filterNotes: filtered.notes,
+      ...(shadowSelected
+        ? {
+            shadowComparison: {
+              differs:
+                shadowSelected.providerId !== selected.providerId ||
+                shadowSelected.modelId !== selected.modelId,
+              selected: {
+                providerId: shadowSelected.providerId,
+                modelId: shadowSelected.modelId,
+              },
+            },
+          }
+        : {}),
+      replayPolicy: "pre-commit-only",
+      createdAt: this.deps.now?.() ?? Date.now(),
+    }
+  }
 
   /**
    * Select the best provider:model for a request.
@@ -297,7 +499,7 @@ export class ProviderRoutingEngine {
     promptText?: string,
     sessionId?: string
   ): RoutingResult | null {
-    const req: FilterRequest = { alias, estimatedInputTokens, promptText, sessionId }
+    const req: FilterRequest = { alias, estimatedInputTokens, sessionId }
     const chain = (this.config.filterChain ?? DEFAULT_FILTER_CHAIN)
       .map((id) => getDeploymentFilter(id))
       .filter((f): f is NonNullable<typeof f> => f !== undefined)
@@ -387,6 +589,141 @@ export class ProviderRoutingEngine {
       return selector.select(entries, this.telemetrySnapshot(), ctx) ?? entries[0]
     } catch {
       return entries[0]
+    }
+  }
+
+  private async applyStrategyAsync(
+    entries: ModelMappingEntry[],
+    strategy: RoutingStrategyId,
+    ctx?: RoutingDecisionContext
+  ): Promise<{
+    selected: ModelMappingEntry | null
+    reasonCode?: RoutingReasonCode
+  }> {
+    if (entries.length === 0) return { selected: null }
+    if (entries.length === 1) return { selected: entries[0] }
+    const selector = getRoutingStrategy(strategy)
+    if (!selector) return { selected: entries[0], reasonCode: "strategy-unavailable" }
+
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const selected = await Promise.race([
+        Promise.resolve(
+          selector.selectAsync
+            ? selector.selectAsync(entries, this.telemetrySnapshot(), ctx)
+            : selector.select(entries, this.telemetrySnapshot(), ctx)
+        ),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("routing-plugin-timeout")),
+            this.config.pluginTimeoutMs ?? 250
+          )
+        }),
+      ])
+      if (
+        selected &&
+        entries.some(
+          (entry) => entry.providerId === selected.providerId && entry.modelId === selected.modelId
+        )
+      ) {
+        return { selected }
+      }
+      return { selected: entries[0], reasonCode: "plugin-error" }
+    } catch (error) {
+      return {
+        selected: entries[0],
+        reasonCode:
+          error instanceof Error && error.message === "routing-plugin-timeout"
+            ? "plugin-timeout"
+            : "plugin-error",
+      }
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+
+  private applyHardConstraints(
+    entries: readonly ModelMappingEntry[],
+    request: RoutingRequest
+  ): {
+    candidates: ModelMappingEntry[]
+    rejected: Map<RoutingReasonCode, number>
+  } {
+    const rejected = new Map<RoutingReasonCode, number>()
+    const reject = (reasonCode: RoutingReasonCode) =>
+      rejected.set(reasonCode, (rejected.get(reasonCode) ?? 0) + 1)
+    const allowed = request.dataPolicy?.allowedProviderIds
+      ? new Set(request.dataPolicy.allowedProviderIds)
+      : undefined
+    const excluded = new Set(request.dataPolicy?.excludedProviderIds ?? [])
+    const requiredContext = Math.max(
+      request.estimatedInputTokens ?? 0,
+      request.requirements?.minContextTokens ?? 0
+    )
+
+    const candidates = entries.filter((entry) => {
+      if (
+        (allowed && !allowed.has(entry.providerId)) ||
+        excluded.has(entry.providerId) ||
+        (request.dataPolicy?.locality === "local-only" &&
+          !this.deps.isLocalProvider?.(entry.providerId))
+      ) {
+        reject("data-policy")
+        return false
+      }
+
+      const requirements = request.requirements
+      if (!requirements) return true
+      const capabilities = this.deps.getCapabilities?.(entry.providerId, entry.modelId)
+      const requiredFlags: Array<[keyof RoutingCandidateCapabilities, boolean | undefined]> = [
+        ["tools", requirements.tools],
+        ["vision", requirements.vision],
+        ["audio", requirements.audio],
+        ["video", requirements.video],
+        ["reasoning", requirements.reasoning],
+        ["structuredOutput", requirements.structuredOutput],
+        ["streaming", requirements.streaming],
+      ]
+      if (
+        requiredFlags.some(
+          ([capability, required]) => required === true && capabilities?.[capability] !== true
+        )
+      ) {
+        reject("capability-required")
+        return false
+      }
+      if (requiredContext > 0) {
+        const contextTokens =
+          capabilities?.contextTokens ??
+          this.deps.getContextWindow?.(entry.providerId, entry.modelId)
+        if (contextTokens === undefined || contextTokens < requiredContext) {
+          reject("context-window")
+          return false
+        }
+      }
+      return true
+    })
+    return { candidates, rejected }
+  }
+
+  private dedupeEntries(entries: readonly ModelMappingEntry[]): ModelMappingEntry[] {
+    const seen = new Set<string>()
+    return entries.filter((entry) => {
+      const key = `${entry.providerId}\0${entry.modelId}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }
+
+  private toRouteCandidate(
+    entry: ModelMappingEntry,
+    reasonCodes: RoutingReasonCode[]
+  ): RouteCandidate {
+    return {
+      ...entry,
+      deploymentId: deploymentKeyOfEntry(entry) ?? `${entry.providerId}::${entry.modelId}`,
+      reasonCodes: [...new Set(reasonCodes)],
     }
   }
 

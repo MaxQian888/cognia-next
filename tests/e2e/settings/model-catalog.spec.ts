@@ -31,6 +31,10 @@ test.describe("settings — AI Connections and Model Catalog", () => {
       waitUntil: "domcontentloaded",
     })
 
+    await expect(page.locator('[data-slot="feature-page-header"]').first()).toHaveAttribute(
+      "data-variant",
+      "compact"
+    )
     await expect(page.getByRole("heading", { name: "Model Catalog" })).toBeVisible({
       timeout: 30_000,
     })

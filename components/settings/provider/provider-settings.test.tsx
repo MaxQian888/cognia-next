@@ -11,7 +11,7 @@
  * (`provider-config-tab.test.tsx`, `provider-cost-tab.test.tsx`, etc.).
  */
 import React from "react"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { ProviderSettings } from "./provider-settings"
 
 const mockSyncModelsDev = jest.fn(async () => {})
@@ -645,8 +645,13 @@ describe("ProviderSettings (cognia-next slim port)", () => {
       outcome: "verified",
     })
 
-    render(<ProviderSettings />)
-    fireEvent.click(screen.getByTestId("verify-enabled-providers"))
+    const headerActionsTarget = document.createElement("div")
+    document.body.append(headerActionsTarget)
+    const { container } = render(<ProviderSettings headerActionsTarget={headerActionsTarget} />)
+    const verifyButton = within(headerActionsTarget).getByTestId("verify-enabled-providers")
+
+    expect(container).not.toContainElement(verifyButton)
+    fireEvent.click(verifyButton)
 
     await waitFor(() => expect(mockHookState.testProvider).toHaveBeenCalledWith("openai"))
   })

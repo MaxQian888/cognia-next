@@ -178,6 +178,29 @@ describe("ExternalAgentSelector", () => {
     expect(matches.length).toBeGreaterThanOrEqual(1)
   })
 
+  it("renders the selected agent brand in the trigger and dropdown", () => {
+    const agent = makeAgent({
+      id: "a1",
+      name: "My Claude",
+      metadata: { preset: "claude-code" },
+    })
+    mockGetAllAgents.mockReturnValue([agent])
+
+    render(wrap(<ExternalAgentSelector selectedAgentId="a1" onAgentChange={jest.fn()} />))
+
+    expect(screen.getByRole("button", { name: /My Claude/ }).querySelector("img")).toHaveAttribute(
+      "src",
+      "/icons/lobe/claudecode-color.svg"
+    )
+    const menuLabel = screen
+      .getAllByText("My Claude")
+      .find((element) => element.closest("[role='menuitem']"))
+    expect(menuLabel?.closest("[role='menuitem']")?.querySelector("img")).toHaveAttribute(
+      "src",
+      "/icons/lobe/claudecode-color.svg"
+    )
+  })
+
   it("shows the selectAgent label in the dropdown content", () => {
     render(wrap(<ExternalAgentSelector selectedAgentId={null} onAgentChange={jest.fn()} />))
     // With the inline mock, DropdownMenuContent always renders

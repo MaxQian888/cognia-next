@@ -4,6 +4,7 @@ import {
   saveCalibrationRun,
   getCalibrationRun,
   listRunsBySet,
+  listRecentCalibrationRuns,
   deleteCalibrationRun,
   deleteRunsBySet,
   type CalibrationRunRow,
@@ -62,6 +63,15 @@ describe("calibration runs", () => {
     await saveCalibrationRun(run({ runId: "r3", setId: "set-b", createdAt: 3 }))
     const rows = await listRunsBySet("set-a")
     expect(rows.map((r) => r.runId)).toEqual(["r2", "r1"])
+  })
+
+  it("lists recent runs across calibration sets", async () => {
+    await saveCalibrationRun(run({ runId: "r1", createdAt: 1 }))
+    await saveCalibrationRun(run({ runId: "r2", setId: "set-b", createdAt: 3 }))
+    await saveCalibrationRun(run({ runId: "r3", createdAt: 2 }))
+
+    expect((await listRecentCalibrationRuns(2)).map((item) => item.runId)).toEqual(["r2", "r3"])
+    expect(await listRecentCalibrationRuns(0)).toEqual([])
   })
 
   it("returns [] for empty setId", async () => {
