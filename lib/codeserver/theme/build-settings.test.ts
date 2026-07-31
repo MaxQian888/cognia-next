@@ -129,6 +129,7 @@ describe("buildCodeServerSettings", () => {
     expect(buildCodeServerSettings({ colors: dark(), variant: "dark" })).toMatchObject({
       "workbench.colorTheme": "Default Dark Modern",
       "workbench.startupEditor": "none",
+      "workbench.secondarySideBar.defaultVisibility": "hidden",
     })
     expect(
       buildCodeServerSettings({ colors: DEFAULT_FALLBACKS.light, variant: "light" })

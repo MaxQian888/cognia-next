@@ -21,6 +21,12 @@
 import os from "node:os"
 import path from "node:path"
 
+// `serveCommand` is also imported directly by embedders and tests, bypassing
+// the executable entry point. Install IndexedDB synchronously before any
+// `@/lib` dependency can construct an eager Dexie singleton (notably the
+// scheduler database); the async installer below adds the window/storage shims.
+import "../db/install-indexeddb"
+
 import { bootstrapHeadlessRuntimes } from "@/lib/headless/bootstrap"
 import { loadMessageResolver } from "@/lib/headless/i18n"
 import { installFakeIndexedDb } from "@/lib/headless/node-indexeddb"

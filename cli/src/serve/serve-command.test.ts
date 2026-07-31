@@ -202,13 +202,30 @@ describe("serveCommand", () => {
     expect(joined).toContain("desktop-sync-source")
 
     // The shutdown flush persisted the seeded row.
-    const snapshotPath = path.join(home, "db-local_acct_a.json")
-    void snapshotPath
+    const snapshotDirectory = path.join(home, "db-local_acct_a.json.tables")
     const files = fs.readdirSync(home)
-    expect(files).toContain("db-local_acct_a.json")
-    const snapshot = fs.readFileSync(path.join(home, "db-local_acct_a.json"), "utf8")
-    expect(snapshot).toContain("s-e2e")
+    expect(files).toContain("db-local_acct_a.json.tables")
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(snapshotDirectory, "manifest.json"), "utf8")
+    ) as { snapshotFormat: number; dbs: Record<string, { tables: string[] }> }
+    expect(manifest.snapshotFormat).toBe(3)
+    const primaryDatabaseName = Object.keys(manifest.dbs).find(
+      (name) => name !== "CogniaSchedulerDB"
+    )
+    expect(primaryDatabaseName).toBeDefined()
+    expect(manifest.dbs[primaryDatabaseName!].tables).toContain("sessions")
+    const sessionsFile = fs
+      .readdirSync(snapshotDirectory)
+      .find((name) => name.endsWith("--sessions.json"))
+    expect(sessionsFile).toBeDefined()
+    const sessions = JSON.parse(
+      fs.readFileSync(path.join(snapshotDirectory, sessionsFile!), "utf8")
+    ) as Array<{ id: string }>
+    expect(sessions.some((session) => session.id === "s-e2e")).toBe(true)
 
+    const { __resetDbForTesting } = await import("@/lib/db/schema")
+    __resetDbForTesting()
     __resetCliDbForTesting()
+    fs.rmSync(home, { recursive: true, force: true })
   }, 30_000)
 })

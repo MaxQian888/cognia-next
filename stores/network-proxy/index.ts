@@ -22,6 +22,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { isTauri } from "@/lib/tauri"
+import { isMainAppWindow } from "@/lib/pet/window-role"
 import { buildProxyUrl, isProxyActive } from "@/lib/network/proxy-config"
 import { loggers } from "@cognia/logging"
 import {
@@ -136,10 +137,12 @@ let lastPushedSerialized: string | null = null
 /**
  * Send the latest proxy config to the Rust `proxy_config::set_current`
  * setter. Cheap to call repeatedly — short-circuits when the serialized
- * payload hasn't changed since the last push. No-op outside Tauri.
+ * payload hasn't changed since the last push. No-op outside Tauri and in
+ * least-privilege secondary windows, where process-level proxy commands are
+ * intentionally unavailable.
  */
 export async function applyProxyToRust(cfg?: NetworkProxySettings | null): Promise<void> {
-  if (!isTauri()) return
+  if (!isTauri() || !isMainAppWindow()) return
   const settings = cfg ?? getNetworkProxy()
   const payload = {
     mode: settings.mode,
@@ -183,12 +186,13 @@ export function resetApplyProxyDedupeForTesting(): void {
  * clients (Clash, V2Ray, …) can pick a different port between launches, so an
  * `auto` config that was pinned once would otherwise silently break.
  *
- * No-op outside Tauri, when mode isn't `auto`, or when detection finds nothing
- * (the previously-stored host is left untouched rather than wiped). Never
- * throws — a failed probe just leaves the config as-is.
+ * No-op outside Tauri, in least-privilege secondary windows, when mode isn't
+ * `auto`, or when detection finds nothing (the previously-stored host is left
+ * untouched rather than wiped). Never throws — a failed probe just leaves the
+ * config as-is.
  */
 export async function maybeAutoDetectProxy(): Promise<void> {
-  if (!isTauri()) return
+  if (!isTauri() || !isMainAppWindow()) return
   const cfg = getNetworkProxy()
   if (cfg.mode !== "auto") return
   try {

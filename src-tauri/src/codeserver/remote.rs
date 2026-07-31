@@ -129,7 +129,7 @@ impl RemoteCodeServerState {
 
         let port = reserve_loopback_port()?;
         let relay_id = Uuid::new_v4().simple().to_string();
-        let args = code_server_args(&canonical, port, &paths);
+        let args = code_server_args(&canonical, port, &paths, profile);
         let mut envs = Vec::new();
         if broker_enabled {
             let channel = super::agent_channel::global();
@@ -452,20 +452,31 @@ fn version_output_matches(output: &str) -> bool {
     })
 }
 
-fn code_server_args(root: &str, port: u16, paths: &ProfilePaths) -> Vec<String> {
-    vec![
+fn code_server_args(
+    root: &str,
+    port: u16,
+    paths: &ProfilePaths,
+    profile: IdeProfile,
+) -> Vec<String> {
+    let mut args = vec![
         "--bind-addr".to_string(),
         format!("127.0.0.1:{port}"),
         "--auth".to_string(),
         "none".to_string(),
         "--disable-telemetry".to_string(),
         "--disable-update-check".to_string(),
+    ];
+    if profile == IdeProfile::Managed {
+        args.push("--disable-workspace-trust".to_string());
+    }
+    args.extend([
         "--user-data-dir".to_string(),
         paths.user_data_dir.to_string_lossy().into_owned(),
         "--extensions-dir".to_string(),
         paths.extensions_dir.to_string_lossy().into_owned(),
         root.to_string(),
-    ]
+    ]);
+    args
 }
 
 fn reserve_loopback_port() -> Result<u16, String> {
@@ -978,6 +989,16 @@ mod tests {
         let value = serde_json::to_value(status).unwrap();
         assert_eq!(value["relayPath"], "/ide/v1/relay/opaque/");
         assert!(value["port"].is_null());
+    }
+
+    #[test]
+    fn managed_profile_grants_full_workspace_access_but_native_keeps_trust() {
+        let paths = ProfilePaths::new(Path::new("/srv/cognia/code-server"), IdeProfile::Managed);
+        let managed = code_server_args("/work/proj", 43117, &paths, IdeProfile::Managed);
+        let native = code_server_args("/work/proj", 43117, &paths, IdeProfile::Native);
+
+        assert!(managed.iter().any(|arg| arg == "--disable-workspace-trust"));
+        assert!(!native.iter().any(|arg| arg == "--disable-workspace-trust"));
     }
 
     #[test]

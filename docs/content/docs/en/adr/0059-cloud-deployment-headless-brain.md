@@ -159,6 +159,18 @@ Work packages are ordered by dependency. Every TS/Rust item follows repo rules: 
 | F4 | Connectors go public: webhook routes exposed via the front door's public URL; retire the tunnel requirement in docs/UI for cloud installs | biggest structural win |
 | F5 | Capability degradation matrix in UI: hide/disable desktop-only features when the transport is cloud-companion | i18n; per-feature capability flags already exist for mobile — extend, don't fork |
 
+### 2026-07-31 Web dual-runtime completion
+
+Phase 2 no longer selects behavior from `web` versus `tauri` alone. The Web shell now activates one account-scoped `RuntimeTarget` at a time:
+
+- `standalone` executes AI SDK chat, browser-safe tools, attachments, memories, and provider routing locally.
+- `companion` resolves an encrypted credential reference from the unlocked browser Vault, binds transport and synchronization to that target, and uses only healthy, granted operations advertised by `HostRuntimeManifestV2`.
+- `legacy-readonly` preserves unclassified pre-migration data without allowing it to be written back to an arbitrary host.
+
+Target metadata is account-scoped, while each target has a physically separate Dexie database. Switching follows stop subscriptions → activate database → rebind transport → refresh manifest/sync; a failed transport rebind rolls back the active pointer. Outbound queue rows carry both `accountId` and `targetId`, and are never replayed against a different target. Browser secrets (provider keys, device JWTs, signaling JWKs) are encrypted by the PBKDF2/AES-GCM Vault and never stored in the public target book.
+
+Public navigation and deep links consume the shared `SurfaceContract` registry. Each route therefore resolves to executable, remote, cached read-only, queued, or an explicit localized recovery state. Host build ids are diagnostic only: compatibility is negotiated from protocol range and per-feature versions, and undeclared, unhealthy, or ungranted operations fail closed.
+
 ### Phase 3 — Scale-out (only if/when multi-tenant is wanted)
 
 `ExecBackend::Container` (per-workspace runners) → per-tenant units on gVisor/Kata → K8s orchestration + `ExecutionBroker`-backed quotas → observability per the services convention (Prometheus `/metrics` everywhere).

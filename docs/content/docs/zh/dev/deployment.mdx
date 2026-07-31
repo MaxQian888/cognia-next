@@ -287,6 +287,20 @@ ghcr.io/maxqian888/cognia-runner        # T2 每 agent 一容器的 runner 镜�
 - **冒烟** —— `scripts/smoke/compose-smoke.mjs` 按 tier（`services` / `server` / `tls`）驱动运行中的栈；`compose-e2e.yml` 在每个触及套件的 PR 上跑它。
 - 完整架构与隔离/拓扑阶梯：ADR-0059（英文版：`docs/content/docs/en/adr/0059-cloud-deployment-headless-brain.md`）。
 
+### 浏览器 Companion 安全要求
+
+生产环境的 Web 客户端只接受以下 Companion 通道：
+
+- 公共 CA 信任的 HTTPS；
+- 管理员本地 CA 签发、且浏览器已经信任的 HTTPS；或
+- 加密 WebRTC（直连或 TURN 中继）。
+
+浏览器无法自动安装或绕过本地 CA。配对前必须先把 CA 安装到操作系统/浏览器信任库，并在浏览器中验证完整证书链；Companion server 同时配置对应证书和私钥。生产构建拒绝明文 HTTP。只有非生产构建显式设置 `NEXT_PUBLIC_ALLOW_INSECURE_COMPANION_HTTP=1` 时才允许 HTTP，并持续显示不安全警告；高风险控制不得使用该模式。
+
+Web Origin 必须按完整 HTTPS Origin（`scheme://host[:port]`）精确授权。带认证的接口禁止使用 `*`；methods、headers 和 preflight 保持最小范围，Private Network Access 也只能放行管理员明确配置的 Origin。排障时分别识别证书不受信、Origin/CORS、PNA、JWT 过期或撤销、缺少 TURN、宿主离线，不能统一显示为“网络错误”。
+
+同一浏览器账号可以保存多个加密 Companion 目标，但一次只激活一个。Provider key、device JWT、OIDC token 与 signaling 私钥只进入浏览器 Vault，公开目标簿只保存连接元数据；每个目标还拥有独立 IndexedDB 数据库和 outbound queue 作用域。
+
 ## CI/CD
 
 `.github/workflows/` 的真实清单：

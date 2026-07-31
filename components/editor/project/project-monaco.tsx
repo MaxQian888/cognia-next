@@ -146,6 +146,12 @@ export function ProjectMonaco({
         resolved.colors,
         variant
       )
+      // @monaco-editor/react applies the `theme` prop before `onMount`. On the
+      // first project-editor mount our custom theme is not registered yet, so
+      // Monaco falls back to `vs`; defining the theme afterward does not select
+      // it. Activate it explicitly so canvas-transparent tokens (notably the
+      // minimap and overview ruler backgrounds) take effect immediately.
+      monaco.editor.setTheme(COGNIA_ACTIVE_THEME_ID)
     }
 
     handleRef.current = mountMonacoWorkbench(

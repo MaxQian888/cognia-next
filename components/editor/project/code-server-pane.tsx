@@ -35,6 +35,8 @@ interface Props {
    * uncancellable download feel like a trap in the first place.
    */
   onCancelled?: () => void
+  /** Make the host's file surface visible before a bridge capability uses the IDE. */
+  beforeOpen?: () => void
 }
 
 /** Join a project root with a project-relative path into an absolute path. */
@@ -44,7 +46,7 @@ export function joinProjectPath(root: string, relative: string): string {
   return clean ? `${base}/${clean}` : base
 }
 
-export function CodeServerPane({ root, ownerId, onRevoked, onCancelled }: Props) {
+export function CodeServerPane({ root, ownerId, onRevoked, onCancelled, beforeOpen }: Props) {
   const t = useTranslations("projectEditor")
   const ref = useRef<HTMLDivElement>(null)
   // A1: the single native pane is shared with the Agent Team editor tab; claiming
@@ -143,8 +145,14 @@ export function CodeServerPane({ root, ownerId, onRevoked, onCancelled }: Props)
     )
     const unregister = registerProjectEditorOpener({
       root,
-      open: (path, line, column) => openQueue.request(path, line, column),
-      applyEdit: (path, line, column) => editQueue.request(path, line, column),
+      open: (path, line, column) => {
+        beforeOpen?.()
+        openQueue.request(path, line, column)
+      },
+      applyEdit: (path, line, column) => {
+        beforeOpen?.()
+        editQueue.request(path, line, column)
+      },
       // Registered only from `ready`, like the openers above: before that the
       // companion extension isn't connected and a read would reject rather than
       // fall through to whichever editor *is* live.
@@ -153,11 +161,21 @@ export function CodeServerPane({ root, ownerId, onRevoked, onCancelled }: Props)
       // flushing them is what stops a turn reading stale content and overwriting
       // the user's unsaved work.
       saveDirty: async () => (await codeServerClient.saveAll(root)).failed,
-      showDiff: (path, content, title) =>
-        codeServerClient.showDiff(root, joinProjectPath(root, path), content, title),
-      reveal: (path) => codeServerClient.reveal(root, joinProjectPath(root, path)),
-      runInTerminal: (command, options) =>
-        codeServerClient.runInTerminal(root, command, { cwd: options?.cwd ?? root, ...options }),
+      showDiff: (path, content, title) => {
+        beforeOpen?.()
+        return codeServerClient.showDiff(root, joinProjectPath(root, path), content, title)
+      },
+      reveal: (path) => {
+        beforeOpen?.()
+        return codeServerClient.reveal(root, joinProjectPath(root, path))
+      },
+      runInTerminal: (command, options) => {
+        beforeOpen?.()
+        return codeServerClient.runInTerminal(root, command, {
+          cwd: options?.cwd ?? root,
+          ...options,
+        })
+      },
       notify: (message, kind) => codeServerClient.notify(root, message, kind),
     })
     return () => {
@@ -165,7 +183,7 @@ export function CodeServerPane({ root, ownerId, onRevoked, onCancelled }: Props)
       openQueue.dispose()
       editQueue.dispose()
     }
-  }, [phase, root, t])
+  }, [beforeOpen, phase, root, t])
 
   return (
     <div className="relative h-full w-full overflow-hidden" data-testid="code-server-pane">

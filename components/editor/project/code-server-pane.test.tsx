@@ -93,7 +93,12 @@ import { PRO_IDE_REGION_ATTR } from "@/lib/codeserver/pane-manager"
 import { CodeServerPane, joinProjectPath } from "./code-server-pane"
 
 const renderPane = (
-  props: Partial<{ root: string; onRevoked: () => void; onCancelled?: () => void }> = {}
+  props: Partial<{
+    root: string
+    onRevoked: () => void
+    onCancelled?: () => void
+    beforeOpen: () => void
+  }> = {}
 ) =>
   render(
     <CodeServerPane
@@ -101,6 +106,7 @@ const renderPane = (
       ownerId="team:t1"
       onRevoked={props.onRevoked ?? jest.fn()}
       onCancelled={"onCancelled" in props ? props.onCancelled : jest.fn()}
+      beforeOpen={props.beforeOpen}
     />
   )
 
@@ -140,6 +146,18 @@ it("prefers the extension (absolute path) for file navigation once ready", () =>
   unmount()
   expect(unregister).toHaveBeenCalled()
   expect(queueDispose).toHaveBeenCalled()
+})
+
+it("activates its file surface before a bridge-driven open", () => {
+  const beforeOpen = jest.fn()
+  paneState.phase = "ready"
+  paneState.mounted = true
+  renderPane({ beforeOpen })
+
+  registeredOpener?.open("src/index.ts", 9, 2)
+
+  expect(beforeOpen).toHaveBeenCalledTimes(1)
+  expect(beforeOpen.mock.invocationCallOrder[0]).toBeLessThan(driveOpen.mock.invocationCallOrder[0])
 })
 
 it("falls back to the CLI reuse-window path when the extension isn't connected", async () => {

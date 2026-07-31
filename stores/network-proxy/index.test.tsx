@@ -13,10 +13,16 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(),
 }))
 
+jest.mock("@/lib/pet/window-role", () => ({
+  isMainAppWindow: jest.fn(),
+}))
+
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const tauriCore = require("@tauri-apps/api/core") as { invoke: jest.Mock }
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const tauri = require("@/lib/tauri") as { isTauri: jest.Mock }
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const windowRole = require("@/lib/pet/window-role") as { isMainAppWindow: jest.Mock }
 
 const { useSettingsStore } =
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -40,6 +46,7 @@ const baseSettings = (np: Partial<typeof DEFAULT_NETWORK_PROXY_SETTINGS> = {}) =
 
 beforeEach(() => {
   jest.clearAllMocks()
+  windowRole.isMainAppWindow.mockReturnValue(true)
   jest.spyOn(console, "warn").mockImplementation(() => {})
   jest.spyOn(console, "debug").mockImplementation(() => {})
   useSettingsStore.setState({ settings: null, loaded: false, providerKeys: {} })
@@ -187,6 +194,15 @@ describe("applyProxyToRust", () => {
     expect(tauriCore.invoke).not.toHaveBeenCalled()
   })
 
+  it("does not invoke proxy_set from a least-privilege secondary window", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    windowRole.isMainAppWindow.mockReturnValue(false)
+
+    await proxyStore.applyProxyToRust()
+
+    expect(tauriCore.invoke).not.toHaveBeenCalled()
+  })
+
   it("invokes proxy_set with the snake_case payload in Tauri", async () => {
     tauri.isTauri.mockReturnValue(true)
     tauriCore.invoke.mockResolvedValue(undefined)
@@ -296,6 +312,20 @@ describe("maybeAutoDetectProxy", () => {
   it("is a no-op outside Tauri", async () => {
     tauri.isTauri.mockReturnValue(false)
     await proxyStore.maybeAutoDetectProxy()
+    expect(tauriCore.invoke).not.toHaveBeenCalled()
+  })
+
+  it("does not invoke proxy detection from a least-privilege secondary window", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    windowRole.isMainAppWindow.mockReturnValue(false)
+    useSettingsStore.setState({
+      settings: baseSettings({ mode: "auto" }),
+      loaded: true,
+      providerKeys: {},
+    })
+
+    await proxyStore.maybeAutoDetectProxy()
+
     expect(tauriCore.invoke).not.toHaveBeenCalled()
   })
 

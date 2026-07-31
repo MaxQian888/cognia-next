@@ -64,14 +64,16 @@ the implementation plan):
    is the safe default — the app never silently drives a remote machine on boot
    — and it sidesteps boot-time re-activation wiring.
 
-4. **The remote terminal reuses the ws session, gated on the active host.**
+4. **The remote terminal reuses the durable host session, gated on the active host.**
    `selectTerminalTransport()` returns `tauri-channel` (local PTY) when no host
    is active and `ws` (`RemoteTerminalSession`) when one is — the only place
    "desktop targeting remote" leaks into the terminal stack. The companion
    endpoint resolver, previously never wired in production, is installed to
-   resolve the active host's `{ baseUrl, deviceJwt }`. No new session subclass;
-   the `/ws/v1/terminal` handler is already headless-capable and reconnect/replay
-   comes for free.
+   resolve the active host's `{ baseUrl, deviceJwt }`. No new session subclass.
+   The canonical endpoint is `/ws/terminal`; `/ws/v1/terminal` remains a
+   compatibility alias. A device JWT is exchanged for a short-lived,
+   single-use socket ticket and never appears in the WebSocket URL.
+   Reconnect/replay belongs to the durable host process.
 
 5. **Files and git are remote for free.** `workspace-fs` and `git/commands` are
    pure `transport.call` wrappers, so they follow `RoutingTransport` with zero
@@ -99,8 +101,28 @@ the implementation plan):
    - **Remote code-server / LSP** — `codeserver_*` are Tauri commands and no
      `lsp_*` companion arm exists; promoting them is VS Code Remote-SSH-scale
      work. Deferred (v3).
-   - **SSH provisioning / tunnel fallback / bare SSH terminal** — a new `russh`
-     dependency and a host-key trust model; deferred (v2/v3).
+   - **SSH provisioning / tunnel fallback** — automated provisioning and
+     implicit tunnel creation remain deferred (v3). The explicit SSH terminal
+     profile described below is not a provisioning mechanism.
+
+8. **SSH terminal security amendment (accepted 2026-07-31).** Explicit SSH
+   terminal profiles are permitted under the following fail-closed boundary:
+   - The native terminal host owns the `russh` connection. The renderer and a
+     remote device may select only a synchronized profile id; passwords and key
+     passphrases are resolved in native code from the `cognia-ssh` OS-keyring
+     namespace and never enter profile JSON or the terminal wire protocol.
+   - Server keys use a dedicated owner-only `known_hosts` file. First use is
+     recorded with its fingerprint (TOFU); later connections must match, and a
+     changed key aborts the connection. The UI surfaces whether the key was
+     learned or verified and its fingerprint.
+   - Private-key paths are local host configuration, never caller-supplied
+     remote input. Remote clients can spawn only host-synchronized profiles;
+     they cannot submit an arbitrary SSH hostname, username, credential ref,
+     key path, or shell command.
+   - SSH adds outbound connectivity only after the user creates and selects a
+     profile. It does not bind a new inbound port, provision a server, weaken
+     TLS/device pairing, or bypass terminal grants, controller leases, replay
+     limits, and per-device session quotas.
 
 ## Consequences
 
@@ -117,8 +139,9 @@ the implementation plan):
 - CONTROL-tier remote operations (write, commit, push) fail with a clear
   capability error until the remote grants this device control — this is a
   server-side allow-list decision, not a client bug.
-- The remote-agent, remote-LSP, and SSH phases inherit this ADR's active-host
-  model and registry; they add capability, not a second connection mechanism.
+- The remote-agent, remote-LSP, and SSH provisioning phases inherit this ADR's
+  active-host model and registry; they add capability, not a second connection
+  mechanism.
 
 ## 2026-07 operation-level capability contract
 

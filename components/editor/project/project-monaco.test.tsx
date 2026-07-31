@@ -43,6 +43,7 @@ jest.mock("@/components/editor/monaco-diagnostics-bar", () => ({
 const revealLineInCenter = jest.fn()
 const setPosition = jest.fn()
 const focus = jest.fn()
+const setTheme = jest.fn()
 const getOffsetAt = jest.fn(({ column }: { column: number }) => column - 1)
 let cursorSelectionListener: ((event: unknown) => void) | null = null
 let capturedOnChange: ((v: string) => void) | null = null
@@ -73,7 +74,7 @@ jest.mock("@monaco-editor/react", () => {
           return { dispose: jest.fn() }
         },
       }
-      onMount(editor, { editor: {}, languages: {} })
+      onMount(editor, { editor: { setTheme }, languages: {} })
     }, [onMount])
     return React.createElement("div", { "data-testid": "monaco" })
   }
@@ -96,6 +97,7 @@ beforeEach(() => {
   mountMock.mockClear()
   registerActionsMock.mockClear()
   revealLineInCenter.mockClear()
+  setTheme.mockClear()
   capturedOnChange = null
   cursorSelectionListener = null
   mockResolvedTheme = "dark"
@@ -224,6 +226,21 @@ describe("ProjectMonaco", () => {
       />
     )
     expect(mountMock).toHaveBeenCalled()
+  })
+
+  it("activates the wallpaper-aware theme after registering it on mount", () => {
+    render(
+      <ProjectMonaco
+        file={file}
+        projectRoot="/repo"
+        onChange={jest.fn()}
+        actions={[]}
+        actionLabels={{}}
+        bindings={{}}
+      />
+    )
+
+    expect(setTheme).toHaveBeenCalledWith("cognia-active")
   })
 
   it("ignores goto events for other files", () => {

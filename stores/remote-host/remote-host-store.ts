@@ -386,6 +386,7 @@ export const useRemoteHostStore = create<RemoteHostState>()(
         setActiveRemoteEndpoint({
           baseUrl: host.config.baseUrl,
           deviceJwt: host.config.deviceJwt,
+          deviceId: host.config.deviceId,
           serverFingerprint: host.config.serverFingerprint,
         })
         set({

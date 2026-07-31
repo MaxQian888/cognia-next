@@ -50,12 +50,13 @@ WAN 机制的前提下,获得外向"连接远程 Cognia 主机"模式。
    "哪台被激活"。每次启动都从本地开始;用户显式激活某台主机才进入远程会话。这是
    安全默认——app 永不在启动时静默驱动一台远程机器——也省去了启动时重激活的接线。
 
-4. **远程终端复用 ws 会话,以当前主机为门。** 无激活主机时
+4. **远程终端复用持久主机会话,以当前主机为门。** 无激活主机时
    `selectTerminalTransport()` 返回 `tauri-channel`(本地 PTY),有激活主机时返回
    `ws`(`RemoteTerminalSession`)——这是"桌面指向远程"唯一渗入终端栈的地方。此前
    生产从未接线的 companion 端点解析器被安装,用以解析当前主机的
-   `{ baseUrl, deviceJwt }`。无新 session 子类;`/ws/v1/terminal` 处理器本就支持
-   无头,断线重连 / 回放免费获得。
+   `{ baseUrl, deviceJwt }`。无新 session 子类。规范端点为 `/ws/terminal`,同时保留
+   `/ws/v1/terminal` 兼容别名。device JWT 只用于换取短时、单次 socket ticket,
+   不进入 WebSocket URL;断线重连 / 回放由持久终端主机进程负责。
 
 5. **文件与 git 免费即远程。** `workspace-fs` 与 `git/commands` 是纯
    `transport.call` 包装,故零新代码即跟随 `RoutingTransport`。
@@ -77,8 +78,21 @@ WAN 机制的前提下,获得外向"连接远程 Cognia 主机"模式。
      **以及**无头 external-agent initializer 抽取(ADR-0059)。两者落地前推迟。
    - **远程 code-server / LSP** —— `codeserver_*` 是 Tauri 命令,且不存在 `lsp_*`
      companion 臂;把它们提上来是 VS Code Remote-SSH 量级的活。推迟(v3)。
-   - **SSH provisioning / 隧道 fallback / 裸 SSH 终端** —— 需新增 `russh` 依赖与
-     主机密钥信任模型;推迟(v2/v3)。
+   - **SSH provisioning / 隧道 fallback** —— 自动 provisioning 与隐式建隧道仍
+     推迟(v3)。下述显式 SSH 终端 profile 不属于 provisioning。
+
+8. **SSH 终端安全补充决策（2026-07-31 接受）。** 显式 SSH 终端 profile 仅在以下
+   fail-closed 边界内允许:
+   - 原生终端主机拥有 `russh` 连接。renderer 与远程设备只能选择已同步的 profile
+     id;密码与私钥口令由原生代码从 `cognia-ssh` OS keyring namespace 解析,绝不进入
+     profile JSON 或终端 wire protocol。
+   - 服务端 key 使用专用、仅 owner 可读写的 `known_hosts`。首次连接记录指纹(TOFU);
+     后续必须匹配,变更即拒绝连接。UI 显示 key 是 learned 还是 verified 及其指纹。
+   - 私钥路径是本地主机配置,不是远程调用参数。远程客户端只能启动主机已同步的
+     profile,不能提交任意 SSH host、username、credential ref、key path 或 shell command。
+   - SSH 仅在用户创建并选择 profile 后产生外向连接;它不新增 inbound 监听端口、
+     不 provisioning 服务器、不削弱 TLS/device pairing,也不绕过 terminal grant、
+     controller lease、replay 限额与单设备 session 配额。
 
 ## 影响
 
@@ -90,8 +104,8 @@ WAN 机制的前提下,获得外向"连接远程 Cognia 主机"模式。
   面在其变化时重新订阅。切换前后打开的终端各自指向 spawn 时激活的主机。
 - CONTROL 级远程操作(写、commit、push)在远程授权本设备控制前会以清晰的能力
   错误失败——这是服务端 allow-list 决策,不是客户端 bug。
-- 远程 agent、远程 LSP、SSH 各阶段继承本 ADR 的当前主机模型与注册表;它们增加的
-  是能力,不是第二套连接机制。
+- 远程 agent、远程 LSP、SSH provisioning 各阶段继承本 ADR 的当前主机模型与
+  注册表;它们增加的是能力,不是第二套连接机制。
 
 ## 2026-07 operation 级能力契约
 

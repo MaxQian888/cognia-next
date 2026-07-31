@@ -179,7 +179,7 @@ impl CodeServerState {
         std::fs::create_dir_all(&extensions_dir)
             .map_err(|e| format!("create {}: {e}", extensions_dir.display()))?;
         let port = pick_free_loopback_port()?;
-        let args = code_server_args(&canonical, port, &user_data_dir, &extensions_dir);
+        let args = code_server_args(&canonical, port, &user_data_dir, &extensions_dir, profile);
 
         // Side-load the agent-bridge extension (best-effort, once per version) BEFORE
         // the child starts so it activates on this launch. A missing/failed install
@@ -878,27 +878,35 @@ pub async fn install_language_pack(
 
 /// Build the code-server argv. Pure so the flag set is unit-tested. Loopback
 /// bind + `--auth none` keep it reachable only from this machine; workspace
-/// telemetry is disabled. Workspace Trust intentionally remains enabled and is
-/// enforced conjunctively with Cognia permissions.
+/// telemetry is disabled. The managed profile runs with full workspace access:
+/// its bundled Cognia broker is part of the editor contract and must activate
+/// on startup. The native third-party-extension profile retains Workspace Trust.
 fn code_server_args(
     root: &str,
     port: u16,
     user_data_dir: &Path,
     extensions_dir: &Path,
+    profile: IdeProfile,
 ) -> Vec<String> {
-    vec![
+    let mut args = vec![
         "--bind-addr".to_string(),
         format!("127.0.0.1:{port}"),
         "--auth".to_string(),
         "none".to_string(),
         "--disable-telemetry".to_string(),
         "--disable-update-check".to_string(),
+    ];
+    if profile == IdeProfile::Managed {
+        args.push("--disable-workspace-trust".to_string());
+    }
+    args.extend([
         "--user-data-dir".to_string(),
         user_data_dir.to_string_lossy().into_owned(),
         "--extensions-dir".to_string(),
         extensions_dir.to_string_lossy().into_owned(),
         root.to_string(),
-    ]
+    ]);
+    args
 }
 
 /// Build a second code-server CLI invocation that talks to the already-running
@@ -1369,12 +1377,13 @@ mod tests {
     }
 
     #[test]
-    fn args_bind_loopback_and_preserve_workspace_trust() {
+    fn managed_args_bind_loopback_and_grant_full_workspace_access() {
         let args = code_server_args(
             "/work/proj",
             43117,
             Path::new("/data/ud"),
             Path::new("/data/ext"),
+            IdeProfile::Managed,
         );
         // Loopback bind with the chosen port.
         let bind_idx = args.iter().position(|a| a == "--bind-addr").unwrap();
@@ -1382,14 +1391,28 @@ mod tests {
         // Auth disabled (loopback-only).
         let auth_idx = args.iter().position(|a| a == "--auth").unwrap();
         assert_eq!(args[auth_idx + 1], "none");
-        // Workspace Trust remains a mandatory, independent security decision.
-        assert!(!args.iter().any(|a| a == "--disable-workspace-trust"));
+        // The managed Cognia broker must activate with its complete capability
+        // set instead of being suppressed by VS Code Workspace Trust.
+        assert!(args.iter().any(|a| a == "--disable-workspace-trust"));
         assert!(args.iter().any(|a| a == "--disable-telemetry"));
         // Isolated state dirs.
         assert!(args.iter().any(|a| a == "/data/ud"));
         assert!(args.iter().any(|a| a == "/data/ext"));
         // The project root is the trailing positional arg.
         assert_eq!(args.last().unwrap(), "/work/proj");
+    }
+
+    #[test]
+    fn native_args_preserve_workspace_trust() {
+        let args = code_server_args(
+            "/work/proj",
+            43117,
+            Path::new("/data/ud"),
+            Path::new("/data/ext"),
+            IdeProfile::Native,
+        );
+
+        assert!(!args.iter().any(|a| a == "--disable-workspace-trust"));
     }
 
     #[test]

@@ -57,6 +57,25 @@ describe("ProjectEditorTabs", () => {
     expect(onSelect).toHaveBeenCalledTimes(1)
   })
 
+  it("keeps trailing editor controls on the same strip as fixed tabs", () => {
+    render(
+      <ProjectEditorTabs
+        fixedTabs={[{ id: "review", label: "Review", active: true, onSelect: jest.fn() }]}
+        trailingContent={<button data-testid="engine-toggle">Engine</button>}
+        files={[]}
+        activePath={null}
+        dirtyCount={0}
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+        onSaveAll={jest.fn()}
+      />
+    )
+
+    expect(screen.getByTestId("project-editor-tabs")).toContainElement(
+      screen.getByTestId("engine-toggle")
+    )
+  })
+
   it("renders one tab per open file and marks the active one", () => {
     render(
       <ProjectEditorTabs

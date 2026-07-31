@@ -20,6 +20,8 @@ export interface ProjectEditorFixedTab {
 
 interface Props {
   fixedTabs?: ProjectEditorFixedTab[]
+  /** Controls that share the tab-strip row without participating in tab semantics. */
+  trailingContent?: ReactNode
   density?: "compact" | "touch"
   files: OpenFile[]
   activePath: string | null
@@ -31,6 +33,7 @@ interface Props {
 
 export function ProjectEditorTabs({
   fixedTabs = [],
+  trailingContent,
   density = "compact",
   files,
   activePath,
@@ -40,10 +43,10 @@ export function ProjectEditorTabs({
   onSaveAll,
 }: Props) {
   const t = useTranslations("projectEditor")
-  if (files.length === 0 && fixedTabs.length === 0) return null
+  if (files.length === 0 && fixedTabs.length === 0 && !trailingContent) return null
   return (
-    <div className="flex items-center border-b" data-testid="project-editor-tabs" role="tablist">
-      <div className="flex min-w-0 flex-1 overflow-x-auto">
+    <div className="flex items-center border-b" data-testid="project-editor-tabs">
+      <div className="flex min-w-0 flex-1 overflow-x-auto" role="tablist">
         {fixedTabs.map((tab) => (
           <button
             key={tab.id}
@@ -124,6 +127,11 @@ export function ProjectEditorTabs({
           <SaveIcon className="size-3.5" />
           {t("saveAll", { count: dirtyCount })}
         </Button>
+      ) : null}
+      {trailingContent ? (
+        <div className="shrink-0 px-1" data-testid="project-editor-tabs-trailing">
+          {trailingContent}
+        </div>
       ) : null}
     </div>
   )

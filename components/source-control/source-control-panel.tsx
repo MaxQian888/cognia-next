@@ -18,6 +18,7 @@ import {
 } from "lucide-react"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Button } from "@/components/ui/button"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -185,52 +186,55 @@ export function SourceControlPanel() {
       data-bg-target="chat"
       data-testid="source-control-panel"
     >
-      <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-2">
-        <div className="flex min-w-0 items-center gap-1">
-          <RootSwitcher />
-          <BranchHeader
-            branch={status?.branch ?? null}
-            ahead={status?.ahead ?? 0}
-            behind={status?.behind ?? 0}
-            branches={branches}
-            actions={actions}
-          />
-        </div>
-        <div className="flex items-center gap-0.5">
-          <SyncToolbar
-            actions={actions}
-            onOpenStash={() => setStashOpen(true)}
-            onOpenTimeline={() => openTimelineFor(null)}
-            onOpenRemotes={() => setRemoteOpen(true)}
-            onOpenTags={() => setTagOpen(true)}
-            onOpenCompare={() => setCompareOpen(true)}
-            onOpenWorktrees={() => setWorktreesOpen(true)}
-            onRefresh={() => void refresh()}
-          />
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="relative size-7 text-muted-foreground hover:text-foreground"
-                aria-label={t("viewSettings.label")}
-                data-testid="sc-view-settings-trigger"
-              >
-                <SlidersHorizontalIcon className="size-3.5" />
-                {!prefsIsDefault && (
-                  <span
-                    className="absolute right-1 top-1 size-1.5 rounded-full bg-blue-500"
-                    aria-hidden
-                  />
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-72">
-              <SourceControlViewSettings />
-            </PopoverContent>
-          </Popover>
-        </div>
-      </header>
+      <FeaturePageHeader
+        variant="compact"
+        icon={<GitBranchIcon />}
+        title={t("title")}
+        breadcrumb={<RootSwitcher />}
+        actions={
+          <div className="flex min-w-0 items-center gap-0.5">
+            <BranchHeader
+              branch={status?.branch ?? null}
+              ahead={status?.ahead ?? 0}
+              behind={status?.behind ?? 0}
+              branches={branches}
+              actions={actions}
+            />
+            <SyncToolbar
+              actions={actions}
+              onOpenStash={() => setStashOpen(true)}
+              onOpenTimeline={() => openTimelineFor(null)}
+              onOpenRemotes={() => setRemoteOpen(true)}
+              onOpenTags={() => setTagOpen(true)}
+              onOpenCompare={() => setCompareOpen(true)}
+              onOpenWorktrees={() => setWorktreesOpen(true)}
+              onRefresh={() => void refresh()}
+            />
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="relative size-7 text-muted-foreground hover:text-foreground"
+                  aria-label={t("viewSettings.label")}
+                  data-testid="sc-view-settings-trigger"
+                >
+                  <SlidersHorizontalIcon className="size-3.5" />
+                  {!prefsIsDefault && (
+                    <span
+                      className="absolute right-1 top-1 size-1.5 rounded-full bg-blue-500"
+                      aria-hidden
+                    />
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72">
+                <SourceControlViewSettings />
+              </PopoverContent>
+            </Popover>
+          </div>
+        }
+      />
 
       {repoState?.operationInProgress && (
         <div

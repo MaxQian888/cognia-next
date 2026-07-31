@@ -159,6 +159,7 @@ describe("activateHost / deactivate", () => {
     expect(getActiveRemoteEndpoint()).toEqual({
       baseUrl: "https://box.example:27890",
       deviceJwt: "device-jwt",
+      deviceId: "device-1",
       serverFingerprint: "sha256:paired-spki",
     })
     expect(useRemoteHostStore.getState().hosts[0].lastActiveAt).toBeGreaterThan(0)
@@ -327,6 +328,7 @@ describe("default transport factory", () => {
     expect(getActiveRemoteEndpoint()).toEqual({
       baseUrl: "https://box.example:27890",
       deviceJwt: "device-jwt",
+      deviceId: "device-1",
       serverFingerprint: "sha256:paired-spki",
     })
   })

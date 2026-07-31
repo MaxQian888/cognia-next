@@ -47,6 +47,7 @@ export const CODESERVER_MANAGED_SETTING_KEYS = [
   "window.autoDetectColorScheme",
   "window.autoDetectHighContrast",
   "workbench.startupEditor",
+  "workbench.secondarySideBar.defaultVisibility",
   // Editor typography + layout
   "editor.fontFamily",
   "editor.fontSize",
@@ -228,6 +229,10 @@ export function buildCodeServerSettings(input: CodeServerSettingsInput): Record<
   const settings: Record<string, unknown> = {
     // A Welcome tab is noise in a pane the user opened to look at one project.
     "workbench.startupEditor": "none",
+    // VS Code otherwise opens workspace-scoped AI/chat views in the right-side
+    // Secondary Side Bar. Keep the embedded editor focused by default; users
+    // can still reveal it from View → Appearance when they want it.
+    "workbench.secondarySideBar.defaultVisibility": "hidden",
     "workbench.reduceMotion": reduceMotion ? "on" : "off",
     "workbench.list.smoothScrolling": !reduceMotion,
     "terminal.integrated.smoothScrolling": !reduceMotion,
