@@ -517,7 +517,6 @@ export class ConnectorBus {
       adapterId: event.adapterId,
       platform: event.platform,
     })
-
     // ── Step 1.5: eager OCR of inbound images (ADR-0024) ─────────────────────
     // Attaches `ocrText` to image segments that carry inline bytes, so trigger
     // matching (Step 6), the stored message, the agent prompt, and the digest

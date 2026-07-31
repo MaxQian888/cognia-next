@@ -280,7 +280,7 @@ export function ConversationList({
     <div className="@container/conversation-list flex h-full min-h-0 flex-col">
       {header}
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden">
         {emptyState ? (
           <div className="px-3 py-4" data-testid="conversation-list-empty">
             <StateCard.Empty title={emptyState.primary} description={emptyState.secondary ?? ""} />

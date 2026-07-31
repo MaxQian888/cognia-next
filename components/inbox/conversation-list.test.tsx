@@ -64,7 +64,13 @@ jest.mock("./unread-pill", () => ({
     count > 0 ? <span data-testid="unread-pill">{count}</span> : null,
 }))
 
-jest.mock("@/components/ui/scroll-area")
+jest.mock("@/components/ui/scroll-area", () => ({
+  ScrollArea: ({ children, className }: { children: React.ReactNode; className?: string }) => (
+    <div data-slot="scroll-area" className={className}>
+      {children}
+    </div>
+  ),
+}))
 // The four filter chips live in a DropdownMenu now (they were permanently
 // visible Toggles). The shared manual mock renders menu content
 // unconditionally and fires `onCheckedChange` on click, so the chip test ids
@@ -163,9 +169,12 @@ describe("ConversationList", () => {
       { session: makeSession("s1", "ck1", 1000), override: undefined, unreadCount: 0 },
       { session: makeSession("s2", "ck2", 2000), override: undefined, unreadCount: 0 },
     ]
-    render(<ConversationList />)
+    const { container } = render(<ConversationList />)
     expect(screen.getByTestId("conversation-row-ck1")).toBeInTheDocument()
     expect(screen.getByTestId("conversation-row-ck2")).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass(
+      "[&_[data-slot=scroll-area-scrollbar]]:hidden"
+    )
   })
 
   it("pinned conversations appear before unread conversations", () => {
