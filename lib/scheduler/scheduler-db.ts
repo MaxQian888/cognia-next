@@ -166,10 +166,12 @@ class SchedulerDatabase extends Dexie {
     const task = await this.tasks.get(taskId)
     if (!task) return false
 
-    await this.transaction("rw", [this.tasks, this.executions], async () => {
-      await this.executions.where("taskId").equals(taskId).delete()
-      await this.tasks.delete(taskId)
-    })
+    await this.transaction("rw", [this.tasks, this.executions], () =>
+      Promise.all([
+        this.executions.where("taskId").equals(taskId).delete(),
+        this.tasks.delete(taskId),
+      ]).then(() => undefined)
+    )
 
     return true
   }
@@ -502,10 +504,12 @@ class SchedulerDatabase extends Dexie {
    * Clear all data (for testing/reset)
    */
   async clearAll(): Promise<void> {
-    await this.transaction("rw", [this.tasks, this.executions], async () => {
-      await this.tasks.clear()
-      await this.executions.clear()
-    })
+    await this.transaction("rw", [this.tasks, this.executions], () =>
+      this.tasks
+        .clear()
+        .then(() => this.executions.clear())
+        .then(() => undefined)
+    )
   }
 }
 

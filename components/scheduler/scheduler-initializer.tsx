@@ -76,7 +76,6 @@ export function SchedulerInitializer() {
     const handleBeforeUnload = () => {
       try {
         stopSchedulerSystem()
-        setSchedulerStatus("stopped")
       } catch (error) {
         log.error("[SchedulerInitializer] Error on beforeunload:", error as Error)
       }
@@ -84,7 +83,7 @@ export function SchedulerInitializer() {
 
     window.addEventListener("beforeunload", handleBeforeUnload)
     return () => window.removeEventListener("beforeunload", handleBeforeUnload)
-  }, [setSchedulerStatus])
+  }, [])
 
   return null
 }

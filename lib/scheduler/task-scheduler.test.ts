@@ -75,6 +75,7 @@ jest.mock("@cognia/logging", () => {
 import { schedulerDb } from "./scheduler-db"
 import { getNextCronTime, validateCronExpression } from "./cron-parser"
 import { CATCHUP_GRACE_WINDOW_MS, CATCHUP_MAX_REPLAYED_RUNS } from "./catchup-policy"
+import { loggers } from "@cognia/logging"
 
 const mockSchedulerDb = schedulerDb as jest.Mocked<typeof schedulerDb>
 
@@ -1389,6 +1390,28 @@ describe("TaskScheduler", () => {
       expect(mockSchedulerDb.getTasksByStatus).toHaveBeenCalledWith("active")
       sched.stop()
       expect(driver.stop).toHaveBeenCalled()
+    })
+
+    it("keeps event-triggered tasks off the timing driver without warning", async () => {
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      mockSchedulerDb.getTasksByStatus.mockResolvedValueOnce([])
+      await sched.initialize()
+      jest.mocked(driver.arm).mockClear()
+      jest.mocked(loggers.scheduler.warn).mockClear()
+
+      const task = await sched.createTask({
+        name: "Connector callback binding cleanup",
+        type: "connection:housekeeping:callback-bindings",
+        trigger: { type: "event", eventType: "connection:housekeeping:daily" },
+      })
+
+      expect(task.nextRunAt).toBeUndefined()
+      expect(driver.arm).not.toHaveBeenCalled()
+      expect(loggers.scheduler.warn).not.toHaveBeenCalledWith(
+        "Could not calculate next run time for task: Connector callback binding cleanup"
+      )
+      sched.stop()
     })
 
     it("does not finish initialization after it is stopped during driver startup", async () => {

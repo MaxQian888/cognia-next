@@ -990,6 +990,7 @@ class TaskSchedulerImpl {
   private async scheduleTask(task: ScheduledTask, expectedVersion?: number): Promise<void> {
     if (expectedVersion !== undefined && expectedVersion !== this.lifecycleVersion) return
     if (task.status !== "active") return
+    if (task.trigger.type === "event") return
 
     // Lazy lifecycle check: never arm a task that has crossed its bounds.
     if (isPastEndAt(task, new Date()) || isAtMaxRuns(task)) {

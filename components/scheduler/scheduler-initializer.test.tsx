@@ -36,18 +36,34 @@ type StoreState = {
 }
 
 let storeState: StoreState
+const storeListeners = new Set<() => void>()
 
 jest.mock("@/stores/scheduler", () => ({
-  useSchedulerStore: <T,>(selector: (s: StoreState) => T) => selector(storeState),
+  useSchedulerStore: <T,>(selector: (s: StoreState) => T) => {
+    const { useSyncExternalStore } = jest.requireActual<typeof import("react")>("react")
+    return useSyncExternalStore(
+      (listener) => {
+        storeListeners.add(listener)
+        return () => storeListeners.delete(listener)
+      },
+      () => selector(storeState),
+      () => selector(storeState)
+    )
+  },
 }))
 
 import { SchedulerInitializer } from "./scheduler-initializer"
 
 beforeEach(() => {
+  storeListeners.clear()
   storeState = {
     initialize: jest.fn(async () => undefined),
     isInitialized: false,
-    setSchedulerStatus: jest.fn(),
+    setSchedulerStatus: jest.fn((status) => {
+      if (status !== "stopped" || !storeState.isInitialized) return
+      storeState = { ...storeState, isInitialized: false }
+      storeListeners.forEach((listener) => listener())
+    }),
   }
   stopSchedulerSystem.mockClear()
   logInfo.mockClear()
@@ -163,6 +179,33 @@ describe("SchedulerInitializer", () => {
     stopSchedulerSystem.mockClear()
     window.dispatchEvent(new Event("beforeunload"))
     expect(stopSchedulerSystem).toHaveBeenCalled()
+  })
+
+  it("does not update scheduler subscribers during another component's render", async () => {
+    function Router({ isNavigating }: { isNavigating: boolean }) {
+      if (isNavigating) window.dispatchEvent(new Event("beforeunload"))
+      return null
+    }
+
+    storeState.isInitialized = true
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined)
+    const view = render(
+      <>
+        <SchedulerInitializer />
+        <Router isNavigating={false} />
+      </>
+    )
+
+    view.rerender(
+      <>
+        <SchedulerInitializer />
+        <Router isNavigating />
+      </>
+    )
+
+    const warnings = consoleError.mock.calls.flat().join(" ")
+    consoleError.mockRestore()
+    expect(warnings).not.toContain("Cannot update a component")
   })
 
   it("logs an error when stopSchedulerSystem throws on unmount", async () => {

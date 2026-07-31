@@ -19,6 +19,10 @@ test.describe("scheduler — app task lifecycle", () => {
     await ensureCogniaAccount(page)
     await page.goto("about:blank")
     await page.goto("/scheduler", { waitUntil: "domcontentloaded" })
+    await expect(page.locator('[data-slot="feature-page-header"]')).toHaveAttribute(
+      "data-variant",
+      "management"
+    )
     await expect(page.getByTestId("scheduler-new-task-button")).toBeVisible()
   })
 
