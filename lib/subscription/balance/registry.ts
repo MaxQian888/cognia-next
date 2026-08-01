@@ -15,6 +15,7 @@ import { novitaBalanceAdapter } from "./adapters/novita"
 import { openrouterBalanceAdapter } from "./adapters/openrouter"
 import { ppioBalanceAdapter } from "./adapters/ppio"
 import { siliconflowBalanceAdapter } from "./adapters/siliconflow"
+import { stepfunBalanceAdapter } from "./adapters/stepfun"
 import { threeOTwoBalanceAdapter } from "./adapters/threeotwo"
 
 // Researched 2026-06-07: Zhipu/bigmodel, MiniMax, Together (dashboard-only) and
@@ -28,6 +29,7 @@ export const BALANCE_ADAPTERS: readonly BalanceAdapter[] = [
   deepseekBalanceAdapter,
   openrouterBalanceAdapter,
   siliconflowBalanceAdapter,
+  stepfunBalanceAdapter,
   moonshotBalanceAdapter,
   novitaBalanceAdapter,
   deepinfraBalanceAdapter,

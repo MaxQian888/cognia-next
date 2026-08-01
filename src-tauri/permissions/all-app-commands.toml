@@ -717,6 +717,7 @@ commands.allow = [
   "ssh_terminal_spawn",
   "ssh_terminal_write",
   "subscription_authed_get",
+  "subscription_authed_request",
   "subscription_delete_account",
   "subscription_delete_preset",
   "subscription_get_account",

@@ -12,7 +12,7 @@ import { refreshCodexAccountIfStale } from "@/lib/subscription/codex/refresh"
 import { isCodexCredentialFresh } from "@/lib/subscription/codex/oauth"
 import { accessTokenOf, resolvePresetForAccount } from "@/lib/subscription/balance/runner"
 import {
-  authedGet as defaultAuthedGet,
+  authedRequest,
   getAccount as defaultGetAccount,
   listPresets as defaultListPresets,
 } from "@/lib/subscription/core/transport"
@@ -56,7 +56,13 @@ export interface LimitsRunnerDeps {
 }
 
 const DEFAULT_DEPS: LimitsRunnerDeps = {
-  authedGet: defaultAuthedGet,
+  authedGet: async (url, headers) => {
+    const response = await authedRequest({ url, method: "GET", headers })
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`${response.status}: ${response.body}`)
+    }
+    return response.body
+  },
   getAccount: defaultGetAccount,
   listPresets: defaultListPresets,
   now: () => Date.now(),

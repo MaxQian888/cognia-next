@@ -628,6 +628,7 @@ pub fn run() {
             subscription::commands::subscription_delete_preset,
             subscription::commands::subscription_set_default_preset,
             subscription::commands::subscription_authed_get,
+            subscription::commands::subscription_authed_request,
             provider_diagnostics::provider_diagnostics_migrate_balance_token,
             provider_diagnostics::provider_diagnostics_clear_balance_token,
             provider_diagnostics::provider_diagnostics_run_balance_script,

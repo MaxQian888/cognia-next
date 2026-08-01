@@ -6,6 +6,7 @@
 // submodules (`anthropic::commands::*`, `codex::commands::*`,
 // `opencode::commands::*`).
 
+use futures_util::StreamExt;
 use tauri::{AppHandle, Manager, State};
 
 use crate::api_key::ApiKeyState;
@@ -460,6 +461,38 @@ pub struct AuthedGetHeader {
     value: String,
 }
 
+const AUTHED_REQUEST_MAX_HEADERS: usize = 64;
+const AUTHED_REQUEST_MAX_HEADER_NAME_BYTES: usize = 128;
+const AUTHED_REQUEST_MAX_HEADER_VALUE_BYTES: usize = 8 * 1024;
+const AUTHED_REQUEST_MAX_BODY_BYTES: usize = 1024 * 1024;
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthedHttpRequest {
+    url: String,
+    method: String,
+    #[serde(default)]
+    headers: Vec<AuthedGetHeader>,
+    body: Option<String>,
+    timeout_ms: u64,
+    max_body_bytes: usize,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthedHttpHeader {
+    name: String,
+    value: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthedHttpResponse {
+    status: u16,
+    headers: Vec<AuthedHttpHeader>,
+    body: String,
+}
+
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvEntry {
@@ -501,30 +534,112 @@ pub(crate) fn build_authed_get_client(url: &str) -> Result<reqwest::Client, Stri
         .map_err(|e| format!("http client build failed: {e}"))
 }
 
+fn validate_authed_headers(headers: &[AuthedGetHeader]) -> Result<(), String> {
+    if headers.len() > AUTHED_REQUEST_MAX_HEADERS {
+        return Err(format!(
+            "too many request headers (maximum {AUTHED_REQUEST_MAX_HEADERS})"
+        ));
+    }
+    for header in headers {
+        if header.name.len() > AUTHED_REQUEST_MAX_HEADER_NAME_BYTES
+            || header.value.len() > AUTHED_REQUEST_MAX_HEADER_VALUE_BYTES
+        {
+            return Err("request header exceeds size limit".into());
+        }
+        reqwest::header::HeaderName::from_bytes(header.name.as_bytes())
+            .map_err(|_| format!("invalid request header name: {}", header.name))?;
+        reqwest::header::HeaderValue::from_str(&header.value)
+            .map_err(|_| format!("invalid request header value: {}", header.name))?;
+    }
+    Ok(())
+}
+
+async fn send_authed_request(request: AuthedHttpRequest) -> Result<AuthedHttpResponse, String> {
+    validate_authed_headers(&request.headers)?;
+    let method = match request.method.to_ascii_uppercase().as_str() {
+        "GET" => reqwest::Method::GET,
+        "POST" => reqwest::Method::POST,
+        _ => return Err("authenticated request method must be GET or POST".into()),
+    };
+    let timeout_ms = request.timeout_ms.clamp(1, 30_000);
+    let max_body_bytes = request
+        .max_body_bytes
+        .clamp(1, AUTHED_REQUEST_MAX_BODY_BYTES);
+    let client = build_authed_get_client(&request.url)?;
+    let mut builder = client
+        .request(method, &request.url)
+        .timeout(std::time::Duration::from_millis(timeout_ms));
+    for header in &request.headers {
+        builder = builder.header(header.name.as_str(), header.value.as_str());
+    }
+    if let Some(body) = request.body {
+        if body.len() > AUTHED_REQUEST_MAX_BODY_BYTES {
+            return Err("request body exceeds 1 MiB limit".into());
+        }
+        builder = builder.body(body);
+    }
+
+    let response = builder
+        .send()
+        .await
+        .map_err(|error| format!("request failed: {error}"))?;
+    let status = response.status().as_u16();
+    let mut headers = Vec::with_capacity(response.headers().len().min(AUTHED_REQUEST_MAX_HEADERS));
+    for (name, value) in response.headers().iter().take(AUTHED_REQUEST_MAX_HEADERS) {
+        let value = value.to_str().unwrap_or_default();
+        headers.push(AuthedHttpHeader {
+            name: name.as_str().to_string(),
+            value: value
+                .chars()
+                .take(AUTHED_REQUEST_MAX_HEADER_VALUE_BYTES)
+                .collect(),
+        });
+    }
+
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| format!("response read failed: {error}"))?;
+        if bytes.len().saturating_add(chunk.len()) > max_body_bytes {
+            return Err(format!("response body exceeds {max_body_bytes} byte limit"));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let body =
+        String::from_utf8(bytes).map_err(|_| "response body is not valid UTF-8".to_string())?;
+
+    Ok(AuthedHttpResponse {
+        status,
+        headers,
+        body,
+    })
+}
+
+#[tauri::command]
+pub async fn subscription_authed_request(
+    request: AuthedHttpRequest,
+) -> Result<AuthedHttpResponse, String> {
+    send_authed_request(request).await
+}
+
 #[tauri::command]
 pub async fn subscription_authed_get(
     url: String,
     headers: Vec<AuthedGetHeader>,
 ) -> Result<String, String> {
-    let client = build_authed_get_client(&url)?;
-    // Caller-supplied headers win. The Anthropic quota client deliberately does
-    // not impersonate Claude Code's User-Agent; reqwest attaches no default one.
-    let mut req = client.get(&url);
-    for header in &headers {
-        req = req.header(header.name.as_str(), header.value.as_str());
+    let response = send_authed_request(AuthedHttpRequest {
+        url,
+        method: "GET".into(),
+        headers,
+        body: None,
+        timeout_ms: 30_000,
+        max_body_bytes: AUTHED_REQUEST_MAX_BODY_BYTES,
+    })
+    .await?;
+    if !(200..300).contains(&response.status) {
+        return Err(format!("{}: {}", response.status, response.body));
     }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| format!("request failed: {e}"))?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("{status}: {body}"));
-    }
-    resp.text()
-        .await
-        .map_err(|e| format!("response read failed: {e}"))
+    Ok(response.body)
 }
 
 // ---------------------------------------------------------------------------
@@ -1072,5 +1187,30 @@ mod tests {
             build_authed_get_client("http://127.0.0.1:65535/x").is_ok(),
             "client must build for a bypassed loopback URL"
         );
+    }
+
+    #[test]
+    fn authenticated_request_rejects_unsupported_methods_and_oversized_headers() {
+        let headers = (0..=AUTHED_REQUEST_MAX_HEADERS)
+            .map(|index| AuthedGetHeader {
+                name: format!("x-test-{index}"),
+                value: "ok".into(),
+            })
+            .collect::<Vec<_>>();
+        assert!(validate_authed_headers(&headers).is_err());
+
+        let request = AuthedHttpRequest {
+            url: "https://example.com".into(),
+            method: "DELETE".into(),
+            headers: Vec::new(),
+            body: None,
+            timeout_ms: 1_000,
+            max_body_bytes: 1_024,
+        };
+        let error = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(send_authed_request(request))
+            .unwrap_err();
+        assert!(error.contains("GET or POST"));
     }
 }

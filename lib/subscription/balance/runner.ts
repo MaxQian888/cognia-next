@@ -6,7 +6,7 @@
 // via the optional `deps` arg so the runner is fully testable offline.
 
 import {
-  authedGet as defaultAuthedGet,
+  authedRequest as defaultAuthedRequest,
   getAccount as defaultGetAccount,
   listPresets as defaultListPresets,
 } from "../core/transport"
@@ -21,13 +21,13 @@ import type {
 } from "@/types/subscription"
 
 export interface BalanceRunnerDeps {
-  authedGet: (url: string, headers?: Record<string, string>) => Promise<string>
+  authedRequest: typeof defaultAuthedRequest
   getAccount: (provider: ProviderId, accountId: string) => Promise<Account | null>
   listPresets: (provider: ProviderId) => Promise<ProviderPreset[]>
 }
 
 const DEFAULT_DEPS: BalanceRunnerDeps = {
-  authedGet: defaultAuthedGet,
+  authedRequest: defaultAuthedRequest,
   getAccount: defaultGetAccount,
   listPresets: defaultListPresets,
 }
@@ -71,7 +71,7 @@ export async function queryAccountBalance(
   accountId: string,
   deps: Partial<BalanceRunnerDeps> = {}
 ): Promise<BalanceSnapshot | null> {
-  const { authedGet, getAccount, listPresets } = { ...DEFAULT_DEPS, ...deps }
+  const { authedRequest, getAccount, listPresets } = { ...DEFAULT_DEPS, ...deps }
 
   const account = await getAccount(provider, accountId)
   if (!account) return null
@@ -96,9 +96,13 @@ export async function queryAccountBalance(
   }
   const descriptor = adapter.request(query)
 
-  let body: string
+  let response: Awaited<ReturnType<typeof authedRequest>>
   try {
-    body = await authedGet(descriptor.url, descriptor.headers)
+    response = await authedRequest({
+      url: descriptor.url,
+      method: "GET",
+      headers: descriptor.headers,
+    })
   } catch (err) {
     return {
       fetchedAt: Date.now(),
@@ -110,8 +114,5 @@ export async function queryAccountBalance(
     }
   }
 
-  // The Tauri passthrough returns the raw body as text but not the status
-  // code; the adapters treat a parseable JSON body as 200 and surface their
-  // own `error` field when the documented fields are missing.
-  return adapter.parse(200, body, query)
+  return adapter.parse(response.status, response.body, query)
 }
