@@ -19,6 +19,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { useSkillUpdate } from "@/hooks/skills"
 import { duplicateSkill, inferCategory, inferSource, setSkillStatus } from "@/lib/db/skills"
 import { listResourcesForSkill } from "@/lib/db/skill-resources"
+import { countRecordingsForSkill } from "@/lib/db/skill-recordings"
 import { getCategoryMeta, getSourceMeta } from "@/lib/skills/categories"
 import { useSkillsStore } from "@/stores/skills"
 import { serializeSkill, skillFilename } from "@/lib/claude/skills-io"
@@ -27,6 +28,7 @@ import { toast } from "sonner"
 import type { Skill } from "@cognia/agent-config-types"
 import { SkillResourceManager } from "./skill-resource-manager"
 import { SkillSecurityScanner } from "./skill-security-scanner"
+import { SkillRecordingsSection } from "./skill-recordings-section"
 import { SkillValidationSection } from "./skill-validation-section"
 import { SkillSyncSection } from "./skill-sync-section"
 import { useSkillValidation } from "@/hooks/skills"
@@ -40,6 +42,7 @@ export function SkillDetail({ skill }: Props) {
   const t = useTranslations("skills")
   const tDetail = useTranslations("skills.detail")
   const tToasts = useTranslations("skills.toasts")
+  const tVersions = useTranslations("skills.recorder.versions")
   const category = getCategoryMeta(inferCategory(skill))
   const source = getSourceMeta(inferSource(skill))
   const Icon = category.icon
@@ -49,6 +52,10 @@ export function SkillDetail({ skill }: Props) {
   const setActiveTab = useSkillsStore((s) => s.setActiveTab)
   const closeDetail = useSkillsStore((s) => s.closeDetail)
   const resources = useLiveQuery(() => listResourcesForSkill(skill.id), [skill.id])
+  // Counted rather than loaded: the tab only needs to know whether this skill
+  // has a source capture, and the section itself does the reading.
+  const recordingCount = useLiveQuery(() => countRecordingsForSkill(skill.id), [skill.id], 0)
+  const hasRecordings = recordingCount > 0
   useSkillValidation(skill.id)
 
   const handleDuplicate = async () => {
@@ -195,6 +202,14 @@ export function SkillDetail({ skill }: Props) {
             <TabsTrigger value="security" className="whitespace-nowrap">
               {tDetail("tabSecurity")}
             </TabsTrigger>
+            {/* Only a recorded skill has a source capture behind it; an
+                empty tab on every hand-written skill would be noise. */}
+            {hasRecordings ? (
+              <TabsTrigger value="recordings" className="whitespace-nowrap">
+                {tVersions("tabLabel")}
+                <span className="ml-1 text-[10px] opacity-60">{recordingCount}</span>
+              </TabsTrigger>
+            ) : null}
             <TabsTrigger value="validation" className="whitespace-nowrap">
               {tDetail("tabValidation")}
               {skill.validationErrors && skill.validationErrors.length > 0 && (
@@ -218,6 +233,11 @@ export function SkillDetail({ skill }: Props) {
           <TabsContent value="security" className="m-0 px-5 py-4">
             <SkillSecurityScanner skill={skill} />
           </TabsContent>
+          {hasRecordings ? (
+            <TabsContent value="recordings" className="m-0 px-5 py-4">
+              <SkillRecordingsSection skillId={skill.id} />
+            </TabsContent>
+          ) : null}
           <TabsContent value="validation" className="m-0 px-5 py-4">
             <SkillValidationSection errors={skill.validationErrors ?? []} />
           </TabsContent>

@@ -313,11 +313,22 @@ impl<'a> Call<'a> {
         matches!(self.command, "bash" | "text_editor" | "bash:restart")
     }
 
+    /// Commands that must face an informed prompt regardless of the effective
+    /// tier, once the surface itself is enabled.
+    ///
+    /// Shell-class calls (arbitrary code), plus `record_start`: arming a global
+    /// input hook and continuous screen capture is categorically more invasive
+    /// than any single action, and a `Whitelist` tier would otherwise auto-allow
+    /// it with no review at all.
+    pub fn forces_per_call(&self) -> bool {
+        self.is_shell_class() || matches!(self.command, "record_start")
+    }
+
     pub fn kind(&self) -> CallKind {
         match self.command {
             "click" | "type" | "keys" | "invoke_pattern" | "window_op" | "mouse_move" | "drag"
             | "scroll" | "hold_key" | "mouse_button" | "paste" | "launch_app" | "computer_use"
-            | "perform_action" | "bash" | "text_editor" => CallKind::Driving,
+            | "perform_action" | "bash" | "text_editor" | "record_start" => CallKind::Driving,
             _ => CallKind::ReadOnly,
         }
     }
@@ -374,6 +385,23 @@ pub struct ConsentPrompt {
     /// for 30 minutes" grant must not leak into a different conversation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_key: Option<String>,
+}
+
+impl ConsentPrompt {
+    /// Prompts that may never be covered by, or converted into, a session grant.
+    ///
+    /// `record_start` arms a global input hook and continuous screen capture.
+    /// "Don't ask again" is not an approval a user can meaningfully give in
+    /// advance for that: they would be pre-authorizing a future recording whose
+    /// scope, duration and content they cannot know. Authorization here is
+    /// per-session by construction.
+    ///
+    /// Note that `session_key: None` does **not** achieve this on its own —
+    /// `GrantKey::from_prompt` keys happily on `None`, so a grant would still
+    /// form and still match.
+    pub fn is_one_shot(&self) -> bool {
+        self.command == "record_start"
+    }
 }
 
 /// Build a consent prompt for `call` (command-detail filled later by the
@@ -521,11 +549,11 @@ impl PermissionGate {
             }
         }
 
-        // Shell-class calls always require consent regardless of tier (once the
-        // surface is enabled): a Whitelist tier would otherwise auto-allow an
-        // untargeted `bash` with zero per-command review (the whitelist gate is
-        // skipped when there is no target window).
-        if call.is_shell_class() {
+        // Always-consent calls, regardless of tier (once the surface is
+        // enabled): a Whitelist tier would otherwise auto-allow an untargeted
+        // `bash` — or a whole recording session — with zero per-command review
+        // (the whitelist gate is skipped when there is no target window).
+        if call.forces_per_call() {
             return Decision::RequireConsent {
                 prompt: consent_prompt(call),
             };
@@ -699,6 +727,140 @@ mod tests {
         // operator who explicitly turned scaling off has `enabled: false`
         // persisted and keeps it.
         assert!(s.screenshot_scaling.enabled);
+    }
+
+    fn record_start_call() -> Call<'static> {
+        Call {
+            command: "record_start",
+            surface: Surface::ComputerUse,
+            plugin_id: Some("cognia-skill-recorder"),
+            target: TargetMeta {
+                process_name: Some("Safari".into()),
+                window_title: Some("Invoices".into()),
+            },
+        }
+    }
+
+    #[test]
+    fn record_start_is_a_driving_call() {
+        assert!(matches!(record_start_call().kind(), CallKind::Driving));
+    }
+
+    #[test]
+    fn record_start_forces_per_call_even_on_a_whitelist_tier() {
+        // The whole point: `Whitelist` would otherwise auto-allow arming a
+        // global input hook plus continuous screen capture with no review.
+        let mut whitelist = Whitelist::default();
+        whitelist.process_names.push("Safari".into());
+        let gate = PermissionGate::new(AutomationSettings {
+            enabled: true,
+            default_tier: Tier::Whitelist,
+            whitelist,
+            ..AutomationSettings::default()
+        });
+        assert!(matches!(
+            gate.evaluate(&record_start_call()),
+            Decision::RequireConsent { .. }
+        ));
+    }
+
+    #[test]
+    fn forces_per_call_still_covers_shell_class() {
+        let bash = Call {
+            command: "bash",
+            surface: Surface::ComputerUse,
+            plugin_id: None,
+            target: TargetMeta::default(),
+        };
+        assert!(bash.forces_per_call());
+        assert!(record_start_call().forces_per_call());
+        let click = Call {
+            command: "click",
+            surface: Surface::ComputerUse,
+            plugin_id: None,
+            target: TargetMeta::default(),
+        };
+        assert!(!click.forces_per_call());
+    }
+
+    #[test]
+    fn kill_switch_denies_record_start_before_any_prompt() {
+        // The ordering IS the security contract: `evaluate` must reach the deny
+        // before it can construct a consent prompt, so an engaged kill switch
+        // can never produce a dialog that a user might approve.
+        let gate = PermissionGate::new(AutomationSettings {
+            enabled: true,
+            default_tier: Tier::Whitelist,
+            ..AutomationSettings::default()
+        });
+        gate.engage_kill_switch();
+        assert!(matches!(
+            gate.evaluate(&record_start_call()),
+            Decision::Deny(AutomationError::KillSwitchActive)
+        ));
+    }
+
+    #[test]
+    fn disabled_engine_denies_record_start_without_prompting() {
+        let gate = PermissionGate::new(AutomationSettings {
+            enabled: false,
+            default_tier: Tier::Whitelist,
+            ..AutomationSettings::default()
+        });
+        assert!(matches!(
+            gate.evaluate(&record_start_call()),
+            Decision::Deny(AutomationError::PermissionDenied { .. })
+        ));
+    }
+
+    #[test]
+    fn record_start_outside_the_whitelist_is_denied_not_prompted() {
+        // Scope-derived target metadata is what makes this reachable at all —
+        // the old bypassed path passed no target, so the whitelist never applied
+        // to a recording.
+        let mut whitelist = Whitelist::default();
+        whitelist.process_names.push("Mail".into());
+        let gate = PermissionGate::new(AutomationSettings {
+            enabled: true,
+            default_tier: Tier::Whitelist,
+            whitelist,
+            ..AutomationSettings::default()
+        });
+        assert!(matches!(
+            gate.evaluate(&record_start_call()),
+            Decision::Deny(AutomationError::WhitelistMiss)
+        ));
+    }
+
+    #[test]
+    fn record_start_prompt_is_one_shot() {
+        match PermissionGate::new(AutomationSettings {
+            enabled: true,
+            default_tier: Tier::PerCall,
+            ..AutomationSettings::default()
+        })
+        .evaluate(&record_start_call())
+        {
+            Decision::RequireConsent { prompt } => {
+                assert!(prompt.is_one_shot());
+                assert_eq!(prompt.command, "record_start");
+            }
+            other => panic!("expected a consent prompt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordinary_prompts_are_not_one_shot() {
+        let prompt = ConsentPrompt {
+            command: "click".into(),
+            surface: Surface::ComputerUse,
+            plugin_id: None,
+            process_name: None,
+            window_title: None,
+            command_detail: None,
+            session_key: None,
+        };
+        assert!(!prompt.is_one_shot());
     }
 
     #[test]

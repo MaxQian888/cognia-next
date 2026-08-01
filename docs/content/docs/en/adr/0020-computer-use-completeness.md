@@ -536,3 +536,19 @@ Two follow-on defects made the macOS Inspector effectively dead even though the
    deferred `AXUIElementCopyElementAtPosition` pick hit-test is now unblocked by
    the same bridge. The Inspector's default `maxDepth` was raised 2 → 4 (cap 6 →
    10) so the tree reaches real content by default.
+
+---
+
+## Addendum — recorder gating and emergency stop (2026-08-01, see [ADR-0106](/docs/en/adr/0106-end-to-end-skill-recorder))
+
+Adding a skill recorder — a session that installs a global input hook and outlives the call that started it — exposed three gaps in the gate contract this ADR established. All three are fixed here rather than worked around in the recorder.
+
+1. **`run_gated` gated one-shot actions, not sessions.** Resolution: **gate the transition, not the session.** "Armed a recording" genuinely is one-shot and completes in milliseconds, so `record_start` goes through `dispatcher::run_gated` normally; teardown needs no authorization and writes its own paired `audit_session_end` row, so Diagnostics shows a matched pair instead of a one-sided `record_start`.
+
+2. **A `Whitelist` tier could auto-allow a global input hook.** `Call::forces_per_call()` now returns true for the shell class *and* `record_start`, and `record_start` joins the `CallKind::Driving` arm. Because `evaluate`'s existing order is kill switch → disabled → tier-off → whitelist → consent, and nothing in `run_gated_impl` runs before it, "reject before prompting" comes out of the existing ordering rather than a new check. The call site passes `process_name` / `window_title` derived from the capture scope; the previous bypassed path passed `None` for both and skipped the whitelist entirely.
+
+3. **Consent was never one-shot.** `request_with_thumbnail` short-circuited on `has_session_grant`, and `resolve` inserted a grant whenever the renderer passed `persist: true` — `session_key: None` did not prevent it. `ConsentPrompt::is_one_shot()` now returns true for `record_start`; `has_session_grant` returns false early for it and `resolve` skips the insert. A "don't ask again" that silently re-arms a global input hook is not a grant a user can meaningfully give in advance.
+
+**Emergency stop was three different features.** `automation_kill_switch` (commands.rs), the global shortcut (`shortcuts/registry.rs`) and the tray item (`tray/mod.rs`) each did a different subset of the work: the first never emitted the event, the second skipped persistence and virtual-display release, the third skipped grant clearing. They now share `automation::kill_switch::engage`, which does engage → persist → clear session grants → release virtual displays → `recorder.interrupt_blocking(KillSwitch)` → emit one `automation:kill-switch`. The event *name* is unchanged so existing TS listeners keep working; its payload goes from `null` to a `KillSwitchEvent`. `interrupt_blocking` takes no `AppHandle` (it uses the stored `EventSink`), which is what lets `engage` stay generic over `R: Runtime` without infecting `ActiveSession`.
+
+Two supporting additions: a non-prompting `platform/shared/input_monitoring.rs` (`IOHIDCheckAccess`, same 5s cache as `screen_capture.rs`) so preflight can report input-monitoring state without the only signal being `HookGuard::install` failing; and `InputEvent::KeyDown` gaining a layout-decoded `text` field (macOS `CGEventKeyboardGetUnicodeString`, Windows `ToUnicodeEx`), because `keys_to_hint` produced uppercase ASCII only.

@@ -151,6 +151,7 @@ import type {
 } from "./provider-catalog"
 import type { OpenRouterCatalogRow } from "./openrouter-catalog"
 import type { SessionStateRow } from "./session-state"
+import type { SkillRecordingRow } from "./skill-recordings"
 import type { TrustedPublisherRow } from "./trusted-publishers"
 import type { TtsProviderKeyRow } from "@cognia/tts/types"
 import type {
@@ -3157,6 +3158,27 @@ export class CogniaDB extends Dexie {
       providerEndpointChanges: "&id, providerId, appliedAt, rolledBackAt, [providerId+appliedAt]",
     })
 
+    // v141 — Skill recorder source versions (ADR-0106). Additive only; no
+    // upgrade hook, because the table is new.
+    //
+    // DEVICE-LOCAL BY CONSTRUCTION. This table appears in none of the
+    // backup / sync / export allow-lists, and `lib/db/skill-recordings.test.ts`
+    // asserts that rather than leaving the omission to be noticed later. A
+    // recording is a video of the user's screen in all but name.
+    //
+    // The row holds the user's review edits and counts — never the capture. The
+    // trace and every frame live in the native bundle under the app-data
+    // directory, addressed by `bundleId`. That is what keeps a saved source
+    // version immutable (re-opening replays edits over an untouched bundle) and
+    // what keeps a 400-step recording from putting hundreds of megabytes of PNG
+    // into IndexedDB.
+    //
+    // `[skillId+createdAt]` is the compound the "Recording versions" tab pages
+    // through, newest first.
+    this.version(141).stores({
+      skillRecordings: "&id, skillId, status, updatedAt, [skillId+createdAt]",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -3164,6 +3186,10 @@ export class CogniaDB extends Dexie {
     }
   }
 
+  // v141 — Skill recorder source versions (ADR-0106). Provenance + review
+  // edits only; the capture itself lives in the native bundle. See
+  // `lib/db/skill-recordings.ts`.
+  skillRecordings!: Table<SkillRecordingRow, string>
   sessionState!: Table<SessionStateRow, string>
   tts_provider_keys!: Table<TtsProviderKeyRow, string>
   openVsxCache!: Table<OpenVsxCacheRow, string>
@@ -3313,6 +3339,7 @@ export type { TerminalHistoryRow } from "./terminal-history"
 export type { ProviderCostDailyRow } from "./provider-cost-daily"
 export type { UnattendedExecAuditRow } from "./terminal-audit"
 export type { ActionReviewReceiptRow } from "./action-review-receipts"
+export type { SkillRecordingRow, SkillRecordingStatus } from "./skill-recordings"
 export type {
   ConversationLabelRow,
   ConversationAssignmentEventRow,

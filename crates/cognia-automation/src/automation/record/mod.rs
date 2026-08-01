@@ -12,5 +12,15 @@
 //! Input Monitoring permission); other platforms degrade gracefully
 //! (`hook_stub` returns Unsupported).
 
+pub mod assets;
+pub mod coalesce;
 pub mod commands;
+pub mod events;
+pub mod journal;
+pub mod limits;
+pub mod ocr_fallback;
+pub mod plugin_facts;
+pub mod preflight;
+pub mod scope;
+pub mod secure_input;
 pub mod session;

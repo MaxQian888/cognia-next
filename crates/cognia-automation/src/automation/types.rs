@@ -45,7 +45,10 @@ pub struct Capabilities {
 /// virtual-desktop pixels — the same coordinate space `click` /
 /// `mouse_move` / `pick_at_point` use, so a caller can target a specific
 /// monitor by offsetting into its rect.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// `PartialEq` so types that embed a monitor list (the recorder's
+// `BundleManifest`) can be compared in tests. `scale_factor` is an `f32`, so
+// `Eq` is deliberately absent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MonitorInfo {
     pub id: String,

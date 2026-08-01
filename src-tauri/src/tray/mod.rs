@@ -287,9 +287,15 @@ fn apply_native<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
             let _ = app.emit("tray://open-logs", serde_json::Value::Null);
         }
         "automation-kill" => {
+            // Was the least complete of the three triggers: engine flag + event
+            // only, leaving consent grants, a screen-off virtual display and a
+            // live recording all running.
             let state = app.state::<crate::automation::commands::AutomationState>();
-            state.gate.engage_kill_switch();
-            let _ = app.emit("automation:kill-switch", serde_json::Value::Null);
+            crate::automation::kill_switch::engage(
+                app,
+                &state,
+                crate::automation::kill_switch::KillSwitchCause::Tray,
+            );
         }
         "pet-toggle" => {
             // Toggle the desktop pet: hide if visible, otherwise open with

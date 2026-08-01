@@ -58,6 +58,17 @@ pub enum InputEvent {
     },
     KeyDown {
         vk: u32,
+        /// Layout-decoded character, resolved inside the hook while the OS
+        /// keyboard state still matches the press.
+        ///
+        /// A virtual-key code alone is layout-blind: `vk` says the same thing
+        /// for a US `;` and a German `ö`. The recorder needs the actual
+        /// character to transcribe typed text, and only the hook can produce it
+        /// — by the time a consumer sees the event, dead-key and modifier state
+        /// have moved on. `None` means the decode was unavailable, which
+        /// downstream reads as "describe this key structurally", never as a
+        /// guess.
+        text: Option<char>,
         ts_ms: i64,
     },
 }
@@ -210,11 +221,6 @@ impl InputMonitor {
     }
 
     #[cfg(test)]
-    pub(crate) fn subscribe_for_test(&self, capacity: usize) -> InputSubscription {
-        self.hub.subscribe(capacity)
-    }
-
-    #[cfg(test)]
     pub(crate) fn subscribe_safety_for_test(&self) -> SafetyInputSubscription {
         self.hub.subscribe_safety()
     }
@@ -256,8 +262,16 @@ mod tests {
         let mut fast = hub.subscribe(2);
         let _slow_rx = slow.take_receiver();
         let mut fast_rx = fast.take_receiver();
-        let first = InputEvent::KeyDown { vk: 1, ts_ms: 1 };
-        let second = InputEvent::KeyDown { vk: 2, ts_ms: 2 };
+        let first = InputEvent::KeyDown {
+            vk: 1,
+            text: None,
+            ts_ms: 1,
+        };
+        let second = InputEvent::KeyDown {
+            vk: 2,
+            text: None,
+            ts_ms: 2,
+        };
 
         hub.publish(first);
         hub.publish(second);
@@ -272,10 +286,21 @@ mod tests {
         let mut safety = hub.subscribe_safety();
         let mut rx = safety.take_receiver();
         for vk in 0..1_000 {
-            hub.publish(InputEvent::KeyDown { vk, ts_ms: 1 });
+            hub.publish(InputEvent::KeyDown {
+                vk,
+                text: None,
+                ts_ms: 1,
+            });
         }
         for vk in 0..1_000 {
-            assert_eq!(rx.recv().await, Some(InputEvent::KeyDown { vk, ts_ms: 1 }));
+            assert_eq!(
+                rx.recv().await,
+                Some(InputEvent::KeyDown {
+                    vk,
+                    text: None,
+                    ts_ms: 1
+                })
+            );
         }
     }
 }

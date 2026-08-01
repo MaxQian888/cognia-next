@@ -198,6 +198,12 @@ function queueChars(c: Character[], t: Team[]) {
   teamsRef.current = t
 }
 
+import {
+  __resetRecorderAvailabilityForTesting,
+  setRecorderAvailability,
+} from "@/lib/skills/recording/recorder-availability"
+import { useRecorderStore } from "@/stores/skills/recorder-store"
+
 async function openWithShortcut() {
   const user = userEvent.setup()
   await user.keyboard("{Control>}k{/Control}")
@@ -472,4 +478,36 @@ test("labels a plugin panel from its own namespace, falling back to its literal"
   await openWithShortcut()
   expect(screen.getByText("Acme board")).toBeInTheDocument()
   expect(screen.getByText("bare")).toBeInTheDocument()
+})
+
+describe("the Record Skill entry", () => {
+  beforeEach(() => {
+    __resetRecorderAvailabilityForTesting()
+    useRecorderStore.getState().reset()
+  })
+
+  it("is absent until the owning plugin publishes", async () => {
+    // Gated on the plugin rather than on `isTauri()` — disabling the Skill
+    // Recorder has to withdraw every entry point at once.
+    queueChars([], [])
+    render(<CommandPalette onOpenSettings={jest.fn()} />)
+    await openWithShortcut()
+    await waitFor(() => expect(screen.getByText("actions.newChat")).toBeInTheDocument())
+    expect(screen.queryByText("entry.paletteLabel")).not.toBeInTheDocument()
+  })
+
+  it("opens the global recorder and closes the palette behind it", async () => {
+    queueChars([], [])
+    act(() => {
+      setRecorderAvailability({ available: true, pluginId: "cognia-skill-recorder" })
+    })
+    render(<CommandPalette onOpenSettings={jest.fn()} />)
+    const user = await openWithShortcut()
+    const item = await screen.findByText("entry.paletteLabel")
+    await user.click(item)
+
+    expect(useRecorderStore.getState().sheetOpen).toBe(true)
+    expect(useRecorderStore.getState().phase).toBe("setup")
+    await waitFor(() => expect(screen.queryByText("actions.newChat")).not.toBeInTheDocument())
+  })
 })

@@ -10,6 +10,7 @@
 //!     but validates chords through this module too.
 
 pub mod credential_window;
+pub mod input_monitoring;
 // ADR-0020 W2 — keymap is consumed by the macOS / Linux backends (and
 // by tests on every platform). Gating it out of the Windows lib build
 // avoids "never used" warnings on the Windows-only target without

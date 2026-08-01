@@ -188,6 +188,26 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     },
   },
   {
+    // Also declared by the `cognia-skill-recorder` plugin manifest and handled
+    // there; this built-in is what makes the command resolve from the
+    // composer's slash menu, which reads the built-in registry. Both end at the
+    // same `openRecorder`, so there is one flow either way.
+    name: "record-skill",
+    description: "Record a desktop workflow as a skill.",
+    scope: "builtin",
+    category: "system",
+    handler: async (ctx) => {
+      const { runRecordSkillCommand } = await import("./actions/record-skill")
+      const outcome = await runRecordSkillCommand()
+      if (outcome.opened) return
+      ctx.pushSystemMessage(
+        outcome.reason === "desktopOnly"
+          ? "Skill recording is desktop-only."
+          : "The Skill Recorder plugin is turned off. Enable it in Settings → Plugins."
+      )
+    },
+  },
+  {
     name: "model",
     description: "Switch the model for this session.",
     scope: "builtin",

@@ -34,6 +34,7 @@
     "skillsClearSelection": "Clear selection / close detail",
     "skillsCreate": "Create skill",
     "skillsDelete": "Delete selected skill",
+    "skillsRecord": "Record a skill",
     "skillsSearch": "Focus skills search",
     "skillsSelectAll": "Select all skills",
     "terminalToggle": "Toggle terminal",

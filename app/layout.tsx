@@ -100,6 +100,7 @@ import { CaptureMount } from "@/components/capture/capture-mount"
 import { PetWindowShell } from "@/components/pet/pet-window-shell"
 import { TtsNowPlayingBar } from "@/components/tts/tts-now-playing-bar"
 import { AskUserDialog } from "@/components/chat/ask-user-dialog"
+import { SkillRecorderRoot } from "@/components/skills/recorder/recorder-root"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -382,6 +383,11 @@ export default async function RootLayout({
                         {/* Modal for the agent's `ask_user` tool — self-hides when
                          * no prompt is pending. */}
                         <AskUserDialog />
+                        {/* ADR-0106 — mounted at the root, not in the Skills panel:
+                            the command palette, the `skills.record` shortcut and
+                            `/record-skill` all fire on any route. Renders null
+                            unless a recording flow is open. */}
+                        <SkillRecorderRoot />
                         {/* Persistent notice when `settings.load()` fell back to
                          * DEFAULTS. Self-hides unless the store's `loadFailed`
                          * flag is set, so it costs one selector in the normal

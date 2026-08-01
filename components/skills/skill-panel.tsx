@@ -8,6 +8,7 @@ import { SparklesIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { loggers } from "@cognia/logging"
 import { createSkill, deleteSkill, getSkill } from "@/lib/db/skills"
+import { deleteRecording, listRecordingsForSkill } from "@/lib/db/skill-recordings"
 import { useSkills, useSkillShortcuts, useSkillPrefsHydration } from "@/hooks/skills"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { useSkillsStore } from "@/stores/skills"
@@ -271,15 +272,31 @@ function SkillDeleteHost() {
   const tToasts = useTranslations("skills.toasts")
   const target = useSkillsStore((s) => s.deleteTarget)
   const setTarget = useSkillsStore((s) => s.setDeleteTarget)
+  // Only recorded skills have a source capture, so the extra choice only
+  // appears for them.
+  // `?? []` as well as the default: a stubbed `useLiveQuery` (and the very
+  // first render before Dexie answers) can hand back `undefined`.
+  const recordings =
+    useLiveQuery(
+      () => (target ? listRecordingsForSkill(target.skillId) : Promise.resolve([])),
+      [target?.skillId],
+      []
+    ) ?? []
   return (
     <SkillDeleteDialog
       open={target !== null}
       skillName={target?.name ?? ""}
+      recordingCount={recordings.length}
       onCancel={() => setTarget(null)}
-      onConfirm={async () => {
+      onConfirm={async ({ deleteRecordings }) => {
         if (!target) return
         try {
           await deleteSkill(target.skillId)
+          // Rows always go — a recording pointing at a skill that no longer
+          // exists is orphaned provenance. The *bundle* only goes if asked.
+          for (const row of recordings) {
+            await deleteRecording(row.id, { deleteBundle: deleteRecordings }).catch(() => undefined)
+          }
           // Drop any stale ad-hoc attachment so a deleted skill can't linger
           // as a dead id in the composer's ephemeral list.
           useChatStore.getState().removeEphemeralSkillIds([target.skillId])

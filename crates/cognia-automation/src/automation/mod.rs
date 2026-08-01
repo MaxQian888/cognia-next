@@ -23,6 +23,7 @@ pub mod dispatcher;
 pub mod events;
 pub mod input_monitor;
 pub mod instruction_pack;
+pub mod kill_switch;
 pub mod locked_use;
 pub mod permission;
 pub mod persist;

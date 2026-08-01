@@ -105,5 +105,6 @@
     "[ADR 0100 — Unified Template Platform](/en/docs/adr/0100-unified-template-platform)",
     "[ADR 0101 — 完整模型评估实验室](/zh/docs/adr/0101-model-evaluation-lab)",
     "0104-provider-diagnostics-control-plane",
+    "0106-end-to-end-skill-recorder"
   ]
 }

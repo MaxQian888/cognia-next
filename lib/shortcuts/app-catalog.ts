@@ -297,6 +297,25 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
     altChords: ["backspace"],
   },
   {
+    // Deliberately not a bare letter like its `skills.*` siblings: those are
+    // panel-scoped by mount, this one opens the recorder from anywhere.
+    //
+    // `ctrl+alt+r` is free in this catalog (the only other `ctrl+alt+*` chords
+    // are the workbench arrows) and in `reserved.ts` on every platform.
+    // `ctrl+shift+r` was rejected — it is Chromium hard-reload, and the app
+    // runs against a browser dev server.
+    //
+    // `when: "platform.tauri"` makes it inert in the web build with no extra
+    // guard; registration is additionally suppressed while the owning plugin is
+    // disabled, so a disabled recorder never swallows the chord.
+    id: "skills.record",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.skillsRecord",
+    category: "app.skills",
+    defaultChord: "ctrl+alt+r",
+    when: "platform.tauri",
+  },
+  {
     id: "observability.toggleEdit",
     scope: "app",
     labelKey: "settings.shortcuts.catalog.observabilityToggleEdit",

@@ -21,11 +21,26 @@ export { URL_INSTALL_INVALID, useUrlInstall, type UseUrlInstall } from "./use-ur
 export { useSkillSync, type UseSkillSync } from "./use-skill-sync"
 export { useSkillValidation } from "./use-skill-validation"
 export { useSkillShortcuts } from "./use-skill-shortcuts"
-export { useSkillRecording, type UseSkillRecording } from "./use-skill-recording"
-export { useSkillGeneration, type UseSkillGeneration } from "./use-skill-generation"
 export {
   useEffectiveSkills,
   type EffectiveSkillItem,
   type EffectiveSkillsView,
 } from "./use-effective-skills"
 export { useSkillPanelPrefs, useSkillPrefsHydration } from "./use-skill-prefs"
+export {
+  useRecorderAvailable,
+  useRecorderCandidate,
+  useRecorderDraft,
+  useRecorderError,
+  useRecorderIncludedCount,
+  useRecorderInterrupt,
+  useRecorderOptions,
+  useRecorderPhase,
+  useRecorderPreflight,
+  useRecorderSelectedStep,
+  useRecorderSheetOpen,
+  useRecorderStage,
+  useRecorderSteps,
+  useRecorderUsage,
+  useRecorderVariables,
+} from "./use-skill-recorder"

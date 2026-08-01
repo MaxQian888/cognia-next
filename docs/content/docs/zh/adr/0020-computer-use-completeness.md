@@ -319,3 +319,19 @@ Bash/Edit/Write 也路由进同一容器）。因绑定已是一等实体，收�
 Dexie 升至 `v57`（仅新增，无升级钩子）——新增 `sandboxConnections` 表。
 `Character.computerUseTarget` / `ChatSession.computerUseTarget` 均可选；既有行
 原样可读。
+
+---
+
+## 补遗 —— 录制器闸门与紧急停止（2026-08-01，参见 [ADR-0106](/docs/zh/adr/0106-end-to-end-skill-recorder)）
+
+新增技能录制器——一个会安装全局输入钩子、且生命周期长于发起调用的会话——暴露了本 ADR 所建立的闸门契约中的三处缺口。三处都在此修复，而不是在录制器里绕开。
+
+1. **`run_gated` 闸的是一次性动作，不是会话。** 解决方式：**闸迁移，而非闸会话。** 「已武装一次录制」确实是一次性的、毫秒级完成，因此 `record_start` 照常走 `dispatcher::run_gated`；拆除不需要授权，并写入自己成对的 `audit_session_end` 行，于是诊断页看到的是成对记录，而不是孤立的 `record_start`。
+
+2. **`Whitelist` 等级曾能自动放行全局输入钩子。** `Call::forces_per_call()` 现在对 shell 类**以及** `record_start` 返回 true，`record_start` 也并入 `CallKind::Driving` 分支。由于 `evaluate` 既有顺序为 紧急停止 → 已禁用 → 等级关闭 → 白名单 → 同意，且 `run_gated_impl` 中没有任何逻辑先于它执行，「先拒绝、再谈弹窗」是既有顺序的自然结果，而非新增检查。调用点传入由捕获范围推导的 `process_name` / `window_title`；此前被绕开的路径两者都传 `None`，等于完全跳过白名单。
+
+3. **同意从来不是一次性的。** `request_with_thumbnail` 会在 `has_session_grant` 处短路，而只要渲染端传 `persist: true`，`resolve` 就会写入授权——`session_key: None` 并不能阻止。现在 `ConsentPrompt::is_one_shot()` 对 `record_start` 返回 true；`has_session_grant` 对它提前返回 false，`resolve` 跳过写入。一个会静默地重新武装全局输入钩子的「不再询问」，不是用户能事先有意义授予的授权。
+
+**紧急停止此前是三个不同的功能。** `automation_kill_switch`（commands.rs）、全局快捷键（`shortcuts/registry.rs`）与托盘项（`tray/mod.rs`）各自只做了一部分：第一个从不发出事件，第二个跳过落盘与虚拟显示器释放，第三个跳过授权清理。三者现在共用 `automation::kill_switch::engage`：接通闸门 → 落盘 → 清除会话授权 → 释放虚拟显示器 → `recorder.interrupt_blocking(KillSwitch)` → 发出唯一一次 `automation:kill-switch`。事件**名称**不变，因此既有 TS 监听器继续可用；其负载由 `null` 变为 `KillSwitchEvent`。`interrupt_blocking` 不接收 `AppHandle`（它使用已存的 `EventSink`），这正是让 `engage` 能在 `R: Runtime` 上保持泛型而不污染 `ActiveSession` 的原因。
+
+另有两项配套改动：新增不弹窗的 `platform/shared/input_monitoring.rs`（`IOHIDCheckAccess`，与 `screen_capture.rs` 相同的 5 秒缓存），使预检能报告输入监控状态，而不必以 `HookGuard::install` 失败作为唯一信号；以及 `InputEvent::KeyDown` 新增按键盘布局解码的 `text` 字段（macOS `CGEventKeyboardGetUnicodeString`，Windows `ToUnicodeEx`），因为 `keys_to_hint` 只能产出大写 ASCII。

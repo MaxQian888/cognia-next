@@ -84,6 +84,7 @@ mod process_registry;
 /// renderer's Dexie v121 tables).
 pub mod provider_profiles;
 mod proxy_config;
+mod recorder_window;
 // ADR-0067 follow-up — extracted to `crates/cognia-remote-control`;
 // re-aliased so `crate::remote_control::…` (gateway, generate_handler!)
 // resolves unchanged.
@@ -1250,10 +1251,29 @@ pub fn run() {
             automation::commands::automation_drain_init_failure,
             automation::commands::desktop_pick_session_start,
             automation::commands::desktop_pick_session_cancel,
+            automation::record::commands::record_preflight,
+            // Enumerates pickable window / application targets for the setup
+            // screen. Unprivileged: it arms nothing and returns only titles the
+            // user can already see on their own screen.
+            automation::record::commands::record_list_capture_targets,
             automation::record::commands::record_start,
+            automation::record::commands::record_pause,
+            automation::record::commands::record_resume,
+            automation::record::commands::record_undo_last,
             automation::record::commands::record_stop,
+            automation::record::commands::record_interrupt,
             automation::record::commands::record_status,
-            automation::record::commands::record_cancel,
+            // Bundle surface. `record_cancel` deliberately no longer exists: it
+            // used to delete the capture directory, which is exactly what the
+            // append-only journal forbids. Ending a recording keeps the bundle
+            // (`record_stop` / `record_interrupt`); destroying one is a separate,
+            // explicit act (`record_delete_bundle`).
+            automation::record::commands::record_list_recoverable,
+            automation::record::commands::record_load_bundle,
+            automation::record::commands::record_read_asset,
+            automation::record::commands::record_delete_bundle,
+            recorder_window::recorder_controller_set_collapsed,
+            recorder_window::recorder_controller_begin_drag,
             automation::commands::virtual_display_health_probe,
             automation::commands::virtual_display_setup,
             automation::commands::virtual_display_probe,
@@ -1544,8 +1564,15 @@ pub fn run() {
             // that reports `MissingBinding` so the frontend can fall back.
             {
                 let ocr_state = app.state::<ocr::NativeOcrRegistry>().inner().clone();
+                let recorder_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     ocr::install_default_backends(&ocr_state).await;
+                    // ADR-0106 — the skill recorder's seams, registered AFTER the
+                    // OCR backends so `available_ids` reflects the real set.
+                    // Without this the recorder's preflight reports the plugin as
+                    // not installed and refuses to record: the defaults fail
+                    // closed on purpose, so a missed wiring is loud.
+                    recorder_window::adapters::register(&recorder_handle).await;
                 });
             }
 
@@ -1875,6 +1902,16 @@ pub fn run() {
                     .inner()
                     .clone();
                 tauri::async_runtime::block_on(cua.shutdown_all());
+                // ADR-0106 — a quit mid-recording must leave a recoverable
+                // bundle rather than a half-written one. `interrupt_blocking`
+                // detaches the input hook and stamps the journal `Interrupted`
+                // from this thread; it never deletes.
+                app_handle
+                    .state::<automation::commands::AutomationState>()
+                    .recorder
+                    .interrupt_blocking(
+                        automation::record::journal::InterruptReason::AppShutdown,
+                    );
                 // Stop every cognia-spawned child process — external agents,
                 // ACP terminals, chat sidecar, integrated terminal PTYs, the
                 // MCP server, code-server instances, and the cloudflared

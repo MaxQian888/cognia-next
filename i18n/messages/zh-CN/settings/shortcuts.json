@@ -34,6 +34,7 @@
     "skillsClearSelection": "清除选择 / 关闭详情",
     "skillsCreate": "新建技能",
     "skillsDelete": "删除所选技能",
+    "skillsRecord": "录制技能",
     "skillsSearch": "聚焦技能搜索",
     "skillsSelectAll": "全选技能",
     "terminalToggle": "切换终端",

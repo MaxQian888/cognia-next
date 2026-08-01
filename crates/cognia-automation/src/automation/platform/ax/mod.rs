@@ -827,6 +827,14 @@ fn read_focused_window() -> Result<FocusedSnapshot> {
     Ok(snap)
 }
 
+/// Whether this process holds the macOS Accessibility grant.
+///
+/// Narrow re-export of `raw::is_trusted` so the recorder's preflight can report
+/// the grant without opening the whole `raw` FFI module up.
+pub(crate) fn accessibility_trusted() -> bool {
+    raw::is_trusted()
+}
+
 pub(crate) fn focused_window_credential_signals() -> Option<(Option<String>, Option<String>, bool)>
 {
     if !raw::is_trusted() {
