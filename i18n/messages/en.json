@@ -10381,6 +10381,174 @@
       "toolArgs": "Arguments",
       "toolName": "Tool",
       "totalTokens": "Total"
+    },
+    "workspace": {
+      "advanced": {
+        "capabilities": {
+          "description": "Per-platform capture and artifact availability reported by the active runtime.",
+          "status": "Runtime reported",
+          "title": "Capability diagnostics"
+        },
+        "queues": {
+          "description": "Durable upload progress, retries, cancellations, and last flush watermarks.",
+          "status": "Local queues",
+          "title": "Upload queues"
+        },
+        "schema": {
+          "description": "Versioned structured fields, correlation context, redaction version, and spool sequence.",
+          "status": "ObservabilityEventV1",
+          "title": "Event schema"
+        },
+        "symbols": {
+          "description": "Build-ID keyed source maps and native symbol artifacts used during processing.",
+          "status": "Service managed",
+          "title": "Symbol status"
+        }
+      },
+      "breadcrumbHome": "Home",
+      "consent": {
+        "description": "Nothing is uploaded until you review the redacted report and explicitly submit it.",
+        "descriptionLabel": "Description for support",
+        "descriptionPlaceholder": "Optional: describe what you were doing before the failure",
+        "minidump": "Include native minidump",
+        "minidumpDescription": "May contain process memory. It is unchecked by default and scanned again by the service.",
+        "screenshot": "Include current-state screenshot",
+        "screenshotDescription": "Captured only now after consent; it is never presented as a crash-time screenshot.",
+        "title": "Submission preview"
+      },
+      "delete": {
+        "action": "Delete local report",
+        "cancel": "Keep report",
+        "confirm": "Delete report",
+        "description": "This removes the local diagnostic artifacts from this device. The action cannot be undone.",
+        "title": "Delete this crash report?"
+      },
+      "density": {
+        "comfortable": "Comfortable",
+        "compact": "Compact",
+        "label": "Workspace density",
+        "spacious": "Spacious"
+      },
+      "detail": {
+        "description": "Review redacted local diagnostics and optional attachments.",
+        "loading": "Loading redacted preview…",
+        "noPreview": "Select the report again to load its local preview.",
+        "previewDescription": "This is the local, redacted payload. Optional attachments remain excluded.",
+        "previewTitle": "Redacted preview",
+        "resize": "Resize incident detail pane",
+        "runtime": "Runtime",
+        "state": "State",
+        "title": "Incident detail"
+      },
+      "filters": {
+        "sourceLabel": "Incident source",
+        "sources": {
+          "all": "All devices",
+          "desktop": "Desktop",
+          "mobile": "Mobile"
+        },
+        "stateLabel": "Incident state"
+      },
+      "health": {
+        "cards": {
+          "capture": {
+            "description": "Structured logs and crash markers are retained locally with bounded storage.",
+            "title": "Local capture"
+          },
+          "privacy": {
+            "description": "Versioned redaction runs before IPC, export, or upload, with a second server scan.",
+            "title": "Privacy gate"
+          },
+          "retention": {
+            "description": "Logs and reports remain on this device until retention or an explicit deletion applies.",
+            "title": "Durable retention"
+          },
+          "submission": {
+            "description": "Crash reports require a previewed consent unless automatic submission is separately enabled.",
+            "title": "Controlled submission"
+          }
+        },
+        "description": "A plain-language view of capture, privacy, retention, and submission readiness.",
+        "localIncidents": "Reports retained on this device",
+        "localIncidentsDescription": "These reports have not been treated as uploaded unless a receipt is present.",
+        "status": {
+          "consent": "Consent required",
+          "local": "Local first",
+          "protected": "Redaction active",
+          "ready": "Ready"
+        },
+        "title": "Diagnostics health"
+      },
+      "incidentCount": "{count, plural, =0 {No local incidents} =1 {1 local incident} other {# local incidents}}",
+      "incidents": {
+        "emptyDescription": "New crash reports and abnormal exits will be retained here before submission.",
+        "emptyTitle": "No matching incidents",
+        "error": "Local incident storage could not be read.",
+        "loading": "Loading local incidents…"
+      },
+      "navigation": {
+        "collapse": "Collapse diagnostics navigation",
+        "expand": "Expand diagnostics navigation",
+        "label": "Diagnostics workspace views",
+        "resize": "Resize diagnostics navigation"
+      },
+      "receipts": {
+        "emptyDescription": "Accepted or processing submissions will show their stable support code here.",
+        "emptyTitle": "No submission receipts"
+      },
+      "recovery": {
+        "checkpoints": {
+          "account": {
+            "description": "Keep account access and reporting available in the minimal shell.",
+            "title": "Account and diagnostics"
+          },
+          "automation": {
+            "description": "Enable automation and schedulers last, after all earlier checks remain healthy.",
+            "title": "Automation"
+          },
+          "data": {
+            "description": "Verify read-only local data, backup, and export before enabling writers.",
+            "title": "Local data"
+          },
+          "plugins": {
+            "description": "Enable plugin groups progressively and return to the minimal shell on failure.",
+            "title": "Plugins"
+          },
+          "sidecars": {
+            "description": "Start child runtimes with bounded retries and a health checkpoint.",
+            "title": "Sidecars and connectors"
+          }
+        },
+        "checkpointsDescription": "Safe mode exits by enabling subsystem groups one at a time and recording each health result.",
+        "checkpointsTitle": "Progressive recovery order",
+        "description": "Two unhealthy starts for the same build within ten minutes activate the diagnostics-first minimal shell.",
+        "normalDescription": "No safe-mode activation is currently reported by this renderer. Recovery counters reset after ten stable minutes.",
+        "normalTitle": "Normal startup mode",
+        "title": "Crash-loop recovery"
+      },
+      "refresh": "Refresh",
+      "reset": "Reset layout",
+      "states": {
+        "accepted": "Accepted",
+        "all": "All states",
+        "awaitingConsent": "Awaiting consent",
+        "cancelled": "Cancelled",
+        "deleted": "Deleted",
+        "detected": "Detected",
+        "processing": "Processing",
+        "queued": "Queued",
+        "rejected": "Rejected",
+        "uploading": "Uploading"
+      },
+      "title": "Logs and diagnostics",
+      "views": {
+        "advanced": "Advanced",
+        "health": "Health",
+        "incidents": "Incidents",
+        "logs": "Logs",
+        "receipts": "Receipts",
+        "recovery": "Recovery"
+      }
     }
   },
   "loop": {

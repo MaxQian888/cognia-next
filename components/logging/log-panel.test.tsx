@@ -325,11 +325,12 @@ describe("LogPanel — detail panel rendering", () => {
     )
     render(<LogPanel />)
     expect(screen.getByTestId("log-detail-sheet")).toBeInTheDocument()
-    // The Sheet class should have responsive heights
+    // Mobile uses full-height list-to-detail navigation; tablets keep a bounded drawer.
     expect(screen.getByTestId("log-detail-sheet")).toHaveClass(
-      "h-[85vh]",
+      "h-dvh",
+      "max-h-dvh",
       "md:h-[75vh]",
-      "lg:h-[80vh]"
+      "md:max-h-[75vh]"
     )
   })
 
