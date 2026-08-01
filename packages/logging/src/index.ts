@@ -112,6 +112,19 @@ export {
   type ObservabilitySpoolTransportOptions,
 } from "./transports/observability-spool-transport"
 
+export {
+  createRecoveryState,
+  recordChildFailure,
+  recordHealthyCheckpoint,
+  recordRendererFailure,
+  recordSubsystemCheckpoint,
+  recordUnhealthyStart,
+  type ChildRecoveryAction,
+  type RecoveryAuditEntry,
+  type RecoveryMode,
+  type RecoveryState,
+} from "./recovery-policy"
+
 // Context exports
 export { logContext, generateTraceId, traced } from "./context"
 
