@@ -125,6 +125,18 @@ export {
   type RecoveryState,
 } from "./recovery-policy"
 
+export {
+  assembleDiagnosticIncident,
+  transitionIncident,
+  type AssembleDiagnosticIncidentInput,
+  type DiagnosticIncident,
+  type IncidentAttachment,
+  type IncidentAttachmentInput,
+  type IncidentAttachmentKind,
+  type IncidentState,
+  type IncidentTransition,
+} from "./incident"
+
 // Context exports
 export { logContext, generateTraceId, traced } from "./context"
 
