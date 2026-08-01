@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use axum::{
     body::Bytes,
-    extract::{DefaultBodyLimit, Path, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post, put},
@@ -25,10 +25,13 @@ use crate::{
         GrantClaims, GrantRole, GrantSigner,
     },
     config::ServerConfig,
-    db::{CreateIncident, DiagnosticRepository, IncidentRecord, UploadPartRecord},
-    fingerprint_incident,
+    db::{
+        CreateIncident, CreateSymbol, DiagnosticRepository, IncidentRecord, SymbolRecord,
+        UploadPartRecord,
+    },
     model::{IncidentLimits, MAX_ATTACHMENT_BYTES, MAX_INCIDENT_BYTES, MAX_MINIDUMP_BYTES},
     privacy::PrivacyGate,
+    processing::validate_symbol_relative_path,
     storage::ArtifactStore,
 };
 
@@ -87,6 +90,11 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/v1/incidents/{incident_id}/withdraw",
             post(withdraw_consent),
+        )
+        .route("/v1/admin/symbols", get(list_symbols))
+        .route(
+            "/v1/admin/symbols/{build_id}/{platform}",
+            put(upload_symbol),
         )
         .layer(DefaultBodyLimit::max(MAX_MINIDUMP_BYTES as usize))
         .layer(PropagateRequestIdLayer::x_request_id())
@@ -352,6 +360,7 @@ async fn upload_part(
         .get("x-artifact-kind")
         .and_then(|value| value.to_str().ok())
         .unwrap_or("attachment");
+    validate_artifact_kind(artifact_kind)?;
     let limit = if artifact_kind == "minidump" {
         MAX_MINIDUMP_BYTES
     } else {
@@ -385,6 +394,7 @@ async fn upload_part(
         stored_bytes: scan.sanitized.len() as i64,
         redaction_version: scan.redaction_version.to_owned(),
         removed_fields: scan.removed_fields.into_iter().map(str::to_owned).collect(),
+        artifact_kind: artifact_kind.to_owned(),
         created_at: Utc::now(),
     };
     if let Err(error) = state
@@ -401,17 +411,18 @@ async fn upload_part(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CompleteUploadRequest {
-    symbolized_frames: Vec<String>,
+    #[serde(default, rename = "symbolizedFrames")]
+    _legacy_symbolized_frames: Vec<String>,
 }
 
 async fn complete_upload(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(incident_id): Path<Uuid>,
-    Json(request): Json<CompleteUploadRequest>,
+    _request: Option<Json<CompleteUploadRequest>>,
 ) -> ApiResult<Json<IncidentRecord>> {
     let claims = authorize(&state, &headers, GrantRole::Uploader)?;
-    let incident = owned_incident(&state, &claims, incident_id).await?;
+    owned_incident(&state, &claims, incident_id).await?;
     let parts = state
         .repository
         .parts(claims.tenant_id, incident_id)
@@ -424,16 +435,9 @@ async fn complete_upload(
     if total_bytes > MAX_INCIDENT_BYTES {
         return Err(ApiError::payload_too_large("incident_too_large"));
     }
-    let fingerprint = fingerprint_incident(
-        &incident.platform,
-        &incident.exception,
-        &compatible_build_family(&incident.build_id),
-        &incident.module,
-        &request.symbolized_frames,
-    );
     let incident = state
         .repository
-        .mark_processing(claims.tenant_id, incident_id, &fingerprint)
+        .queue_processing(claims.tenant_id, incident_id)
         .await
         .map_err(ApiError::internal)?;
     Ok(Json(incident))
@@ -485,6 +489,88 @@ async fn delete_incident(
         .await
         .map_err(ApiError::internal)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ListSymbolsQuery {
+    build_id: Option<String>,
+}
+
+async fn list_symbols(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ListSymbolsQuery>,
+) -> ApiResult<Json<Vec<SymbolRecord>>> {
+    let claims = authorize(&state, &headers, GrantRole::Admin)?;
+    let symbols = state
+        .repository
+        .symbols(
+            claims.tenant_id,
+            claims.project_id,
+            query.build_id.as_deref(),
+        )
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(symbols))
+}
+
+async fn upload_symbol(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((build_id, platform)): Path<(String, String)>,
+    body: Bytes,
+) -> ApiResult<(StatusCode, Json<SymbolRecord>)> {
+    let claims = authorize(&state, &headers, GrantRole::Admin)?;
+    if !validate_path_segment(&build_id, 256) || !validate_path_segment(&platform, 64) {
+        return Err(ApiError::bad_request("invalid_symbol_identity"));
+    }
+    let sha256 = required_header(&headers, "x-symbol-sha256")?;
+    validate_hex_sha256(sha256)?;
+    if sha256_hex(&body) != sha256 {
+        return Err(ApiError::unprocessable("symbol_checksum_mismatch"));
+    }
+    let relative_path = required_header(&headers, "x-symbol-relative-path")?;
+    if relative_path.len() > 512 || !validate_symbol_relative_path(relative_path) {
+        return Err(ApiError::bad_request("invalid_symbol_relative_path"));
+    }
+    let symbol_type = required_header(&headers, "x-symbol-type")?;
+    if !matches!(
+        symbol_type,
+        "breakpad" | "pdb" | "dsym" | "elf" | "android_mapping" | "android_native" | "source_map"
+    ) {
+        return Err(ApiError::bad_request("invalid_symbol_type"));
+    }
+    let object_key = format!(
+        "tenants/{}/projects/{}/symbols/{}/{}/{}",
+        claims.tenant_id, claims.project_id, build_id, platform, sha256
+    );
+    state
+        .artifacts
+        .put_part(&object_key, body.to_vec())
+        .await
+        .map_err(ApiError::internal)?;
+    let record = match state
+        .repository
+        .upsert_symbol(CreateSymbol {
+            tenant_id: claims.tenant_id,
+            project_id: claims.project_id,
+            build_id,
+            platform,
+            object_key: object_key.clone(),
+            relative_path: relative_path.to_owned(),
+            symbol_type: symbol_type.to_owned(),
+            sha256: sha256.to_owned(),
+        })
+        .await
+    {
+        Ok(record) => record,
+        Err(error) => {
+            let _ = state.artifacts.delete(&object_key).await;
+            return Err(ApiError::internal(error));
+        }
+    };
+    Ok((StatusCode::CREATED, Json(record)))
 }
 
 async fn delete_artifacts(state: &AppState, tenant_id: Uuid, incident_id: Uuid) -> ApiResult<()> {
@@ -551,16 +637,29 @@ fn validate_hex_sha256(value: &str) -> ApiResult<()> {
     Ok(())
 }
 
-fn sha256_hex(value: &[u8]) -> String {
-    hex::encode(Sha256::digest(value))
+fn validate_artifact_kind(value: &str) -> ApiResult<()> {
+    if matches!(
+        value,
+        "manifest" | "events" | "attachment" | "minidump" | "screenshot"
+    ) {
+        Ok(())
+    } else {
+        Err(ApiError::bad_request("invalid_artifact_kind"))
+    }
 }
 
-fn compatible_build_family(build_id: &str) -> String {
-    build_id
-        .split(['+', '-'])
-        .next()
-        .unwrap_or(build_id)
-        .to_owned()
+fn validate_path_segment(value: &str, max_len: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= max_len
+        && value != "."
+        && value != ".."
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-'))
+}
+
+fn sha256_hex(value: &[u8]) -> String {
+    hex::encode(Sha256::digest(value))
 }
 
 type ApiResult<T> = Result<T, ApiError>;
@@ -630,11 +729,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn validates_checksums_and_build_families() {
+    fn validates_checksums_and_artifact_kinds() {
         assert!(validate_hex_sha256(&"a".repeat(64)).is_ok());
         assert!(validate_hex_sha256("not-a-hash").is_err());
-        assert_eq!(compatible_build_family("1.2.3+abc"), "1.2.3");
-        assert_eq!(compatible_build_family("2026.08.01-beta"), "2026.08.01");
+        assert!(validate_artifact_kind("minidump").is_ok());
+        assert!(validate_artifact_kind("raw_database").is_err());
+        assert!(validate_path_segment("1.2.3+macos", 256));
+        assert!(!validate_path_segment("../secret", 256));
     }
 
     #[test]

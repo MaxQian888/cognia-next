@@ -108,6 +108,52 @@ paths:
         - {$ref: '#/components/parameters/IncidentId'}
       responses:
         '204': {description: Processing blocked and deletion scheduled immediately}
+  /admin/symbols:
+    get:
+      operationId: listSymbols
+      description: Administrator-only symbol index inspection.
+      parameters:
+        - name: buildId
+          in: query
+          schema: {type: string}
+      responses:
+        '200': {description: Tenant/project-scoped symbol records}
+        '403': {$ref: '#/components/responses/Error'}
+  /admin/symbols/{buildId}/{platform}:
+    parameters:
+      - name: buildId
+        in: path
+        required: true
+        schema: {type: string, maxLength: 256}
+      - name: platform
+        in: path
+        required: true
+        schema: {type: string, maxLength: 64}
+    put:
+      operationId: uploadSymbol
+      description: Administrator-only idempotent symbol upload keyed by build and SHA-256.
+      parameters:
+        - name: x-symbol-sha256
+          in: header
+          required: true
+          schema: {type: string, pattern: '^[a-fA-F0-9]{64}$'}
+        - name: x-symbol-relative-path
+          in: header
+          required: true
+          schema: {type: string, maxLength: 512}
+        - name: x-symbol-type
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: [breakpad, pdb, dsym, elf, android_mapping, android_native, source_map]
+      requestBody:
+        required: true
+        content:
+          application/octet-stream: {schema: {type: string, format: binary}}
+      responses:
+        '201': {description: Indexed symbol record}
+        '403': {$ref: '#/components/responses/Error'}
 components:
   securitySchemes:
     uploadGrant:

@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf};
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use anyhow::{bail, Context};
 
@@ -17,6 +17,12 @@ pub struct ServerConfig {
     pub oidc_issuer: String,
     pub oidc_audience: String,
     pub oidc_public_key_pem: String,
+    pub processing_enabled: bool,
+    pub processing_interval: Duration,
+    pub processing_batch_size: usize,
+    pub processing_temp_dir: PathBuf,
+    pub minidump_stackwalk_path: PathBuf,
+    pub minidump_stackwalk_timeout: Duration,
 }
 
 impl ServerConfig {
@@ -37,6 +43,12 @@ impl ServerConfig {
         if grant_signing_key.len() < 32 {
             bail!("GRANT_SIGNING_KEY must contain at least 32 bytes");
         }
+        let processing_batch_size = env_or("PROCESSING_BATCH_SIZE", "32")
+            .parse()
+            .context("parse PROCESSING_BATCH_SIZE")?;
+        if processing_batch_size == 0 || processing_batch_size > 1_000 {
+            bail!("PROCESSING_BATCH_SIZE must be between 1 and 1000");
+        }
         Ok(Self {
             bind_address,
             database_url,
@@ -51,6 +63,28 @@ impl ServerConfig {
             oidc_issuer: required("OIDC_ISSUER")?,
             oidc_audience: required("OIDC_AUDIENCE")?,
             oidc_public_key_pem: required("OIDC_PUBLIC_KEY_PEM")?.replace("\\n", "\n"),
+            processing_enabled: parse_bool(
+                "PROCESSING_ENABLED",
+                &env_or("PROCESSING_ENABLED", "true"),
+            )?,
+            processing_interval: Duration::from_millis(
+                env_or("PROCESSING_INTERVAL_MS", "1000")
+                    .parse()
+                    .context("parse PROCESSING_INTERVAL_MS")?,
+            ),
+            processing_batch_size,
+            processing_temp_dir: std::env::var_os("PROCESSING_TEMP_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| std::env::temp_dir().join("cognia-diagnostic-processing")),
+            minidump_stackwalk_path: PathBuf::from(env_or(
+                "MINIDUMP_STACKWALK_PATH",
+                "/usr/local/bin/minidump-stackwalk",
+            )),
+            minidump_stackwalk_timeout: Duration::from_secs(
+                env_or("MINIDUMP_STACKWALK_TIMEOUT_SECONDS", "120")
+                    .parse()
+                    .context("parse MINIDUMP_STACKWALK_TIMEOUT_SECONDS")?,
+            ),
         })
     }
 }
@@ -61,4 +95,24 @@ fn required(name: &str) -> anyhow::Result<String> {
 
 fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_owned())
+}
+
+fn parse_bool(name: &str, value: &str) -> anyhow::Result<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => bail!("{name} must be a boolean"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_explicit_boolean_forms_and_rejects_ambiguous_values() {
+        assert!(parse_bool("FLAG", "yes").unwrap());
+        assert!(!parse_bool("FLAG", "OFF").unwrap());
+        assert!(parse_bool("FLAG", "sometimes").is_err());
+    }
 }

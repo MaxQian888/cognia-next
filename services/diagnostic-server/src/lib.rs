@@ -4,7 +4,9 @@ pub mod config;
 pub mod db;
 pub mod model;
 pub mod privacy;
+pub mod processing;
 pub mod storage;
+pub mod worker;
 
 pub use model::{
     fingerprint_incident, IncidentLimits, IncidentState, IncidentTransition, LimitViolation,
@@ -17,3 +19,4 @@ pub use config::ServerConfig;
 pub use db::DiagnosticRepository;
 pub use privacy::{PrivacyGate, PrivacyScan};
 pub use storage::ArtifactStore;
+pub use worker::{build_processor, DiagnosticProcessor};

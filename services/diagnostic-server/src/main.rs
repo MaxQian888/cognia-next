@@ -2,8 +2,8 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::Context;
 use cognia_diagnostic_server::{
-    build_router, AppState, ArtifactStore, DiagnosticRepository, GrantSigner, PrivacyGate,
-    ServerConfig,
+    build_processor, build_router, AppState, ArtifactStore, DiagnosticRepository, GrantSigner,
+    PrivacyGate, ServerConfig,
 };
 use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
@@ -34,21 +34,43 @@ async fn main() -> anyhow::Result<()> {
     let repository = DiagnosticRepository::new(pool);
     let artifacts = ArtifactStore::from_config(&config)?;
     let signer = GrantSigner::new(config.grant_signing_key.as_bytes())?;
-    let state = AppState::new(
-        config.clone(),
-        repository,
-        artifacts,
-        signer,
-        PrivacyGate::v1(),
-    );
+    let privacy = PrivacyGate::v1();
+    let processor = config
+        .processing_enabled
+        .then(|| {
+            build_processor(
+                repository.clone(),
+                artifacts.clone(),
+                privacy.clone(),
+                &config,
+            )
+        })
+        .transpose()?;
+    let state = AppState::new(config.clone(), repository, artifacts, signer, privacy);
     let listener = TcpListener::bind(config.bind_address)
         .await
         .context("bind diagnostic service")?;
     tracing::info!(address = %config.bind_address, "diagnostic service listening");
-    axum::serve(listener, build_router(state))
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("serve diagnostic API")
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let mut processor_handle = processor.map(|processor| tokio::spawn(processor.run(shutdown_rx)));
+    let shutdown_signal_tx = shutdown_tx.clone();
+    let server_result = axum::serve(listener, build_router(state))
+        .with_graceful_shutdown(async move {
+            shutdown_signal().await;
+            let _ = shutdown_signal_tx.send(true);
+        })
+        .await;
+    let _ = shutdown_tx.send(true);
+    if let Some(handle) = processor_handle.as_mut() {
+        if tokio::time::timeout(Duration::from_secs(5), &mut *handle)
+            .await
+            .is_err()
+        {
+            tracing::warn!("diagnostic processor drain timed out; unfinished work remains queued");
+            handle.abort();
+        }
+    }
+    server_result.context("serve diagnostic API")
 }
 
 async fn shutdown_signal() {
