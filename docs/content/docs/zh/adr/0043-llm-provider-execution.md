@@ -5,6 +5,8 @@ description: "弥合 Cognia 庞大的 LLM 提供商「配置面」与真实「�
 
 # ADR-0043 — LLM 提供商执行与本地提供商支持
 
+> 协议感知的建议性测速由 [ADR-0104 — 提供商诊断控制平面](/docs/zh/adr/0104-provider-diagnostics-control-plane) 定义。
+
 **状态**：已接受（设计）；分阶段增量实现——请按阶段对照代码核实。在 `feat/unified-plan-execution-hub` 分支上，**非-Anthropic 派发器**部分——受门控的工具调用（Phase 2）、AI SDK v6 字段映射（`text` / `output` / `tool-error`）、内置本地引擎协议解析、以及 `modelParams` 透传——已在内置 Agent P0 波次中从 `qc-stash-backup` 快照恢复并落地（2026-06-03）。**Phase 3（多 key 轮换）**与 **Phase 4（路由遥测）**的发送路径接线**尚未进入本分支**：类型/UI 已存在，但 `selectApiKey` / `recordProviderOutcome` 在此尚未被 `build-options` / `use-claude-chat` 调用——推迟到 provider-routing 波次。
 **作者**：Max Qian + Claude Opus 4.8
 **基于**：多提供商移植（`SendOptions` 上的 `provider`/`providerCredentials`、`anthropic` 与 `ai-sdk` 双分发路径）、`lib/ai/provider-consumption.ts`、models.dev 目录同步，以及既有的提供商设置 UI（`components/settings/provider/*`，约 50 个组件）

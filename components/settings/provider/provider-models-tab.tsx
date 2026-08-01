@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
+import type { ProviderDiagnosticBadgeStatus } from "./provider-sidebar-item"
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -84,6 +85,7 @@ export interface ProviderModelsTabProps {
    * reserve space for the capability chips instead of growing them in later.
    */
   metadataLoading?: boolean
+  diagnosticStatusByModel?: Record<string, ProviderDiagnosticBadgeStatus>
 }
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
@@ -119,6 +121,7 @@ interface ModelCardProps {
   formatModes: (count: number) => string
   /** See `ProviderModelsTabProps.metadataLoading`. */
   metadataLoading?: boolean
+  diagnosticStatus?: ProviderDiagnosticBadgeStatus
 }
 
 function ModelCard({
@@ -132,7 +135,9 @@ function ModelCard({
   openWeightsLabel,
   formatModes,
   metadataLoading = false,
+  diagnosticStatus,
 }: ModelCardProps) {
+  const t = useTranslations("providers.sidebar")
   const caps: string[] = model.capabilities ?? []
   const variants = model.variants ?? []
   const statusVariant = statusBadgeVariant(model.status)
@@ -156,6 +161,21 @@ function ModelCard({
             {model.openWeights && (
               <Badge variant="outline" className="text-[10px] px-1.5 py-0">
                 {openWeightsLabel}
+              </Badge>
+            )}
+            {diagnosticStatus && (
+              <Badge
+                variant="outline"
+                data-testid={`model-diagnostic-${model.id}`}
+                data-diagnostic-status={diagnosticStatus}
+                className={cn(
+                  "text-[10px] px-1.5 py-0",
+                  diagnosticStatus === "passed" && "border-emerald-500/30 text-emerald-600",
+                  diagnosticStatus === "failed" && "border-destructive/30 text-destructive",
+                  diagnosticStatus === "stale" && "text-muted-foreground"
+                )}
+              >
+                {t(`diagnostic${diagnosticStatus[0].toUpperCase()}${diagnosticStatus.slice(1)}`)}
               </Badge>
             )}
           </div>
@@ -241,6 +261,7 @@ export function ProviderModelsTab({
   onTestConnection,
   isTesting = false,
   metadataLoading = false,
+  diagnosticStatusByModel = {},
 }: ProviderModelsTabProps) {
   const t = useTranslations("providers")
   const [search, setSearch] = useState("")
@@ -482,6 +503,7 @@ export function ProviderModelsTab({
               openWeightsLabel={t("modelsTab.openWeights")}
               formatModes={(count) => t("modelsTab.modes", { count })}
               metadataLoading={metadataLoading}
+              diagnosticStatus={diagnosticStatusByModel[model.id]}
             />
           ))}
         </div>

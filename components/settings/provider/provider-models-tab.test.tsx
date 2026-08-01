@@ -112,6 +112,23 @@ describe("ProviderModelsTab", () => {
     expect(badges.length).toBeGreaterThanOrEqual(4)
   })
 
+  it("shows the latest diagnostic state on the matching model row", () => {
+    render(
+      <ProviderModelsTab
+        {...defaultProps}
+        diagnosticStatusByModel={{ "gpt-4o": "passed", o1: "failed" }}
+      />
+    )
+    expect(screen.getByTestId("model-diagnostic-gpt-4o")).toHaveAttribute(
+      "data-diagnostic-status",
+      "passed"
+    )
+    expect(screen.getByTestId("model-diagnostic-o1")).toHaveAttribute(
+      "data-diagnostic-status",
+      "failed"
+    )
+  })
+
   it("formats context window size correctly (128K)", () => {
     render(<ProviderModelsTab {...defaultProps} />)
     // 128000 → "128K"

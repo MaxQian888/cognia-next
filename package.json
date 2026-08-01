@@ -125,6 +125,7 @@
     "version:sync:test": "node --test scripts/sync/version-sync.test.mjs",
     "test": "jest",
     "test:watch": "jest --watch",
+    "provider-diagnostics:live": "node scripts/provider-diagnostics-live.mjs",
     "test:changed": "jest --changedSince=origin/dev",
     "test:coverage": "node scripts/test/run-coverage.mjs",
     "test:coverage:changed": "node scripts/test/coverage-changed.mjs",

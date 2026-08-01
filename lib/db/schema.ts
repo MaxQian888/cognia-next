@@ -30,6 +30,13 @@ import type {
   ProviderProfile,
   TransportProfile,
 } from "@cognia/provider-types/provider-profile"
+import type {
+  ProviderBalanceSnapshot,
+  ProviderDiagnosticJob,
+  ProviderDiagnosticSample,
+  ProviderDiagnosticsRefreshState,
+  ProviderEndpointChange,
+} from "@cognia/provider-types/provider-diagnostics"
 import type { ProfileStoreMetaRow } from "./provider-profiles"
 import type { AgentCompatibilityRecordRow } from "./agent-compatibility"
 import type { BackupHistoryRow } from "./backup-history"
@@ -3136,6 +3143,20 @@ export class CogniaDB extends Dexie {
         "&id, decidedAt, expiresAt, outcome, authority, tier, channel, sessionId, runId, projectId, [channel+decidedAt], [sessionId+decidedAt], *surfaceIds",
     })
 
+    // v140 — Provider diagnostics control plane. Additive history, balance,
+    // scheduler-state, and endpoint rollback tables; no historical rows need
+    // rewriting and legacy subscription snapshots remain intact.
+    this.version(140).stores({
+      providerDiagnosticJobs: "&id, providerId, status, startedAt, [providerId+startedAt]",
+      providerDiagnosticSamples:
+        "&id, jobId, targetId, providerId, modelId, status, startedAt, [providerId+startedAt], [targetId+startedAt]",
+      providerBalanceSnapshots:
+        "&id, providerId, sourceId, accountId, fetchedAt, [providerId+fetchedAt], [sourceId+fetchedAt]",
+      providerDiagnosticsRefreshState:
+        "&sourceId, providerId, status, nextDueAt, [providerId+nextDueAt]",
+      providerEndpointChanges: "&id, providerId, appliedAt, rolledBackAt, [providerId+appliedAt]",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -3203,6 +3224,12 @@ export class CogniaDB extends Dexie {
   // reviewed action across every decision point. See
   // `lib/db/action-review-receipts.ts`.
   actionReviewReceipts!: Table<import("./action-review-receipts").ActionReviewReceiptRow, string>
+  // v140 — Provider diagnostics and balance history.
+  providerDiagnosticJobs!: Table<ProviderDiagnosticJob, string>
+  providerDiagnosticSamples!: Table<ProviderDiagnosticSample, string>
+  providerBalanceSnapshots!: Table<ProviderBalanceSnapshot, string>
+  providerDiagnosticsRefreshState!: Table<ProviderDiagnosticsRefreshState, string>
+  providerEndpointChanges!: Table<ProviderEndpointChange, string>
   // v75 — Provider cost rollups. See `lib/db/provider-cost-daily.ts`.
   providerCostDaily!: Table<ProviderCostDailyRow, string>
   // v76 — Semantic tool routes. See `lib/db/tool-routes.ts`.

@@ -27,6 +27,7 @@ jest.mock("next-intl", () => ({
       "tabs.config": "Config",
       "tabs.models": "Models",
       "tabs.cost": "Cost",
+      "tabs.diagnostics": "Diagnostics",
       "tabs.advanced": "Advanced",
     }
     return map[key] ?? key
@@ -49,6 +50,7 @@ describe("ProviderDetailPanel", () => {
         configTab={<div />}
         modelsTab={<div />}
         costTab={<div />}
+        diagnosticsTab={<div />}
         advancedTab={<div />}
       />
     )
@@ -60,6 +62,7 @@ describe("ProviderDetailPanel", () => {
     expect(screen.getByText("Config")).toBeInTheDocument()
     expect(screen.getByText("Models")).toBeInTheDocument()
     expect(screen.getByText("Cost")).toBeInTheDocument()
+    expect(screen.getByText("Diagnostics")).toBeInTheDocument()
     expect(screen.getByText("Advanced")).toBeInTheDocument()
   })
 
@@ -80,6 +83,7 @@ describe("ProviderDetailPanel", () => {
     expect(screen.getByTestId("local-config")).toBeInTheDocument()
     expect(screen.queryByText("Models")).not.toBeInTheDocument()
     expect(screen.queryByText("Cost")).not.toBeInTheDocument()
+    expect(screen.queryByText("Diagnostics")).not.toBeInTheDocument()
     expect(screen.queryByText("Advanced")).not.toBeInTheDocument()
   })
 

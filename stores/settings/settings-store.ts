@@ -326,6 +326,11 @@ interface SettingsState {
 
   setDefaultProvider: (providerId: string) => Promise<void>
   setProviderConfig: (providerId: string, patch: Partial<UserProviderSettings>) => Promise<void>
+  compareAndSwapProviderEndpoint: (
+    providerId: string,
+    expectedEndpoint: string,
+    nextEndpoint: string
+  ) => Promise<boolean>
   /** Cognia-compatible alias for `setProviderConfig`. */
   updateProviderSettings: (
     providerId: string,
@@ -1445,6 +1450,34 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
           }
         }
       }),
+
+    compareAndSwapProviderEndpoint: async (providerId, expectedEndpoint, nextEndpoint) => {
+      let swapped = false
+      await enqueueProviderMutation(async () => {
+        const current = get().settings
+        const existing = current?.providerSettings?.[providerId]
+        if ((existing?.baseURL ?? "") !== expectedEndpoint) return
+        const map = { ...(current?.providerSettings ?? {}) }
+        map[providerId] = {
+          ...(existing ?? { providerId, enabled: false, defaultModel: "" }),
+          providerId,
+          baseURL: nextEndpoint,
+        }
+        const next = await saveSettings({ providerSettings: map })
+        set({ settings: next })
+        swapped = true
+        if (isTauri() && providerId === "anthropic" && next.defaultProvider === providerId) {
+          const config = map[providerId]
+          try {
+            await setProviderEnv(config?.apiKey ?? null, nextEndpoint)
+            scheduleAnthropicSidecarRestart(config?.apiKey ?? null, nextEndpoint)
+          } catch (error) {
+            console.warn("setProviderEnv failed", error)
+          }
+        }
+      })
+      return swapped
+    },
 
     updateProviderSettings: async (providerId, patch) => {
       // Cognia-compatible alias — components written for Cognia call this.

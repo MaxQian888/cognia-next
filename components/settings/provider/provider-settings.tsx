@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState, useCallback, useRef } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
 import { createPortal } from "react-dom"
 import { Plus, Menu, Settings, Key, Globe, PlugZap, Loader2 } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -43,7 +44,8 @@ import { ProviderModelsTab } from "./provider-models-tab"
 import { ProviderCostTab } from "./provider-cost-tab"
 import { ProviderParametersTab } from "./provider-parameters-tab"
 import { RoutingTab } from "./routing-tab"
-import { HealthTab } from "./health-tab"
+import { ProviderDiagnosticsTab } from "./provider-diagnostics-tab"
+import { getDb } from "@/lib/db/schema"
 import { ProviderSidebar } from "./provider-sidebar"
 import { ProviderEmptyState } from "./provider-empty-state"
 import { ProviderSkeleton } from "./provider-skeleton"
@@ -53,6 +55,7 @@ import { BatchTestProgress, TestResultsSummary } from "./batch-test-progress"
 import { OAuthLoginButton } from "./oauth-login-button"
 import { useSettingsStore } from "@/stores/settings"
 import type { ProviderConnectionStatus } from "./provider-sidebar-item"
+import type { ProviderDiagnosticBadgeStatus } from "./provider-sidebar-item"
 import { deriveStatus, providerMatchesCategory } from "./provider-status-utils"
 import {
   getBuiltInProviderReadiness,
@@ -68,6 +71,7 @@ type SidebarProvider = {
   status: ProviderConnectionStatus
   isCustom: boolean
   modelCount?: number
+  diagnosticStatus?: ProviderDiagnosticBadgeStatus
 }
 
 type ProviderStatusFilter = NonNullable<ProviderUIPreferences["statusFilter"]>
@@ -294,6 +298,43 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
   // landed. Show the skeleton until we actually know.
   const settingsLoaded = useSettingsStore((store) => store.loaded)
   const { providers: liveProviderHealth } = useProviderManager()
+  const diagnosticSamples = useLiveQuery(
+    () =>
+      getDb()
+        .providerDiagnosticSamples.toArray()
+        .catch(() => []),
+    [],
+    []
+  )
+  const [diagnosticNow, setDiagnosticNow] = useState(() => Date.now())
+  useEffect(() => {
+    const interval = window.setInterval(() => setDiagnosticNow(Date.now()), 60_000)
+    return () => window.clearInterval(interval)
+  }, [])
+  const diagnosticBadges = useMemo(() => {
+    const latest = new Map<string, (typeof diagnosticSamples)[number]>()
+    for (const sample of diagnosticSamples) {
+      const providerKey = sample.providerId
+      const modelKey = `${sample.providerId}:${sample.modelId ?? ""}`
+      for (const key of [providerKey, modelKey]) {
+        const current = latest.get(key)
+        if (!current || sample.startedAt > current.startedAt) latest.set(key, sample)
+      }
+    }
+    return new Map(
+      [...latest].map(
+        ([key, sample]) =>
+          [
+            key,
+            diagnosticNow - (sample.completedAt ?? sample.startedAt) > 2 * 60 * 60_000
+              ? "stale"
+              : sample.status === "completed"
+                ? "passed"
+                : "failed",
+          ] as const
+      )
+    )
+  }, [diagnosticNow, diagnosticSamples])
 
   const [search, setSearch] = useState("")
   const [categoryFilterOverride, setCategoryFilterOverride] = useState<string | null>(null)
@@ -319,7 +360,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
   const [showQuickAdd, setShowQuickAdd] = useState(false)
   const [customDialogOpen, setCustomDialogOpen] = useState(false)
   const [editingCustomId, setEditingCustomId] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<"parameters" | "routing" | "health">("parameters")
+  const [activeTab, setActiveTab] = useState<"parameters" | "routing">("parameters")
   const [compareOpen, setCompareOpen] = useState(false)
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
   const [testingConnection, setTestingConnection] = useState<Record<string, boolean>>({})
@@ -369,6 +410,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
           ),
           isCustom: false,
           modelCount: cfg.models.length,
+          diagnosticStatus: diagnosticBadges.get(id),
         }
       })
 
@@ -391,6 +433,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
         status: deriveStatus(cp.apiKey, cp.baseURL, effectiveTest.ok, effectiveTest.outcome),
         isCustom: true,
         modelCount: cp.customModels?.length ?? 0,
+        diagnosticStatus: diagnosticBadges.get(id),
       })
     }
 
@@ -405,6 +448,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
     liveProviderHealth,
     search,
     categoryFilter,
+    diagnosticBadges,
   ])
 
   // Auto-select first provider
@@ -1045,6 +1089,12 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                       onTestConnection={handleTestConnection}
                       isTesting={!!s.testingProviders[selectedId]}
                       metadataLoading={modelsDevLoading}
+                      diagnosticStatusByModel={Object.fromEntries(
+                        enrichedBuiltInModels.flatMap((model) => {
+                          const status = diagnosticBadges.get(`${selectedId}:${model.id}`)
+                          return status ? [[model.id, status]] : []
+                        })
+                      )}
                     />
                   ) : (
                     <div className="text-sm text-muted-foreground">
@@ -1053,6 +1103,18 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                   )
                 }
                 costTab={isLocalProvider ? undefined : <ProviderCostTab providerId={selectedId} />}
+                diagnosticsTab={
+                  <ProviderDiagnosticsTab
+                    providerId={selectedId}
+                    providerName={selectedName ?? selectedId}
+                    modelIds={
+                      isCustom
+                        ? (selectedCustom?.customModels ?? [])
+                        : enrichedBuiltInModels.map((model) => model.id)
+                    }
+                    defaultModel={selectedSettings?.defaultModel ?? selectedCustom?.defaultModel}
+                  />
+                }
                 advancedTab={
                   isLocalProvider ? undefined : (
                     <Tabs
@@ -1065,9 +1127,6 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                         </TabsTrigger>
                         <TabsTrigger value="routing">
                           {t("tabs.routing" as never) as string}
-                        </TabsTrigger>
-                        <TabsTrigger value="health">
-                          {t("tabs.health" as never) as string}
                         </TabsTrigger>
                       </TabsList>
                       <TabsContent value="parameters">
@@ -1085,21 +1144,6 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                       </TabsContent>
                       <TabsContent value="routing">
                         <RoutingTab />
-                      </TabsContent>
-                      <TabsContent value="health">
-                        <HealthTab
-                          providerId={selectedId}
-                          onTestConnection={async () => {
-                            const result = await s.testProvider(selectedId)
-                            return {
-                              success: !!result?.success,
-                              latency: result?.latency_ms,
-                              error: result?.success ? undefined : result?.message,
-                              outcome: result?.outcome,
-                            }
-                          }}
-                          isTesting={!!s.testingProviders[selectedId]}
-                        />
                       </TabsContent>
                     </Tabs>
                   )

@@ -68,6 +68,9 @@ export type ScheduledTaskType =
   // Attention Radar report — registered in
   // `lib/scheduler/executors/radar-report-executor.ts`.
   | "radar-report"
+  // Free provider reachability and configured balance refresh only. The
+  // executor is forbidden from scheduling paid generation/embedding jobs.
+  | "provider-diagnostics-refresh"
 
 // Task execution status
 export type TaskExecutionStatus =

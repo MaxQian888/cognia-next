@@ -10,6 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { ProviderSidebarItem } from "./provider-sidebar-item"
 import type { ProviderConnectionStatus } from "./provider-sidebar-item"
+import type { ProviderDiagnosticBadgeStatus } from "./provider-sidebar-item"
 
 /** Provider-type categories shown as a horizontally-scrollable tab strip. */
 const CATEGORY_KEYS = ["all", "ai", "local", "voice", "vision", "custom"] as const
@@ -32,6 +33,7 @@ interface ProviderSidebarProps {
     subtitle: string
     status: ProviderConnectionStatus
     modelCount?: number
+    diagnosticStatus?: ProviderDiagnosticBadgeStatus
   }>
   selectedId: string | null
   onSelect: (id: string) => void
@@ -188,6 +190,7 @@ export function ProviderSidebar({
               isSelected={p.id === selectedId}
               onClick={onSelect}
               modelCount={p.modelCount}
+              diagnosticStatus={p.diagnosticStatus}
             />
           ))
         )}

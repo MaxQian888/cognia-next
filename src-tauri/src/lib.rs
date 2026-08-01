@@ -112,6 +112,7 @@ mod shutdown;
 // re-aliased so `crate::skills::…` (companion_api rpc + generate_handler!)
 // resolves unchanged.
 pub use cognia_skills as skills;
+mod provider_diagnostics;
 mod subscription;
 mod supervision_backoff;
 pub mod task_workspace;
@@ -626,6 +627,9 @@ pub fn run() {
             subscription::commands::subscription_delete_preset,
             subscription::commands::subscription_set_default_preset,
             subscription::commands::subscription_authed_get,
+            provider_diagnostics::provider_diagnostics_migrate_balance_token,
+            provider_diagnostics::provider_diagnostics_clear_balance_token,
+            provider_diagnostics::provider_diagnostics_run_balance_script,
             subscription::volcengine::subscription_volcengine_usage,
             // ADR-0028 — per-`query()` env injection (per-session multi-account).
             subscription::commands::claude_env_for_account,

@@ -102,6 +102,7 @@
     "0098-persistent-workbench-rail",
     "0100-unified-template-platform",
     "0101-model-evaluation-lab",
-    "0102-unified-observability-crash-diagnostics"
+    "0102-unified-observability-crash-diagnostics",
+    "0104-provider-diagnostics-control-plane",
   ]
 }

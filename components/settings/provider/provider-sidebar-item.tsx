@@ -2,7 +2,7 @@
 
 import React, { useCallback } from "react"
 import { useTranslations } from "next-intl"
-import { Check, AlertTriangle, X, Circle, Info } from "lucide-react"
+import { Check, AlertTriangle, X, Circle, Info, Activity } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { hasBrandIcon } from "@/components/icons/brand-icon"
 import { ProviderIcon } from "@/components/providers/ai/provider-icon"
@@ -22,6 +22,8 @@ export type ProviderConnectionStatus =
    */
   | "untested"
 
+export type ProviderDiagnosticBadgeStatus = "passed" | "failed" | "stale"
+
 interface ProviderSidebarItemProps {
   providerId: string
   name: string
@@ -31,6 +33,7 @@ interface ProviderSidebarItemProps {
   isSelected: boolean
   onClick: (providerId: string) => void
   modelCount?: number
+  diagnosticStatus?: ProviderDiagnosticBadgeStatus
 }
 
 /**
@@ -102,6 +105,7 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
   isSelected,
   onClick,
   modelCount,
+  diagnosticStatus,
 }: ProviderSidebarItemProps) {
   const t = useTranslations("providers.sidebar")
   const handleClick = useCallback(() => onClick(providerId), [onClick, providerId])
@@ -149,6 +153,26 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
             >
               {modelCount}
             </Badge>
+          )}
+          {diagnosticStatus && (
+            <span
+              data-testid="provider-diagnostic-badge"
+              data-diagnostic-status={diagnosticStatus}
+              title={t(
+                `diagnostic${diagnosticStatus[0].toUpperCase()}${diagnosticStatus.slice(1)}`
+              )}
+              aria-label={t(
+                `diagnostic${diagnosticStatus[0].toUpperCase()}${diagnosticStatus.slice(1)}`
+              )}
+              className={cn(
+                "inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full",
+                diagnosticStatus === "passed" && "bg-emerald-500/15 text-emerald-600",
+                diagnosticStatus === "failed" && "bg-destructive/15 text-destructive",
+                diagnosticStatus === "stale" && "bg-muted text-muted-foreground"
+              )}
+            >
+              <Activity className="h-2.5 w-2.5" />
+            </span>
           )}
         </div>
         <div

@@ -40,6 +40,7 @@ interface ProviderDetailPanelProps {
   configTab?: React.ReactNode
   modelsTab?: React.ReactNode
   costTab?: React.ReactNode
+  diagnosticsTab?: React.ReactNode
   advancedTab?: React.ReactNode
 }
 
@@ -56,6 +57,7 @@ export function ProviderDetailPanel({
   configTab,
   modelsTab,
   costTab,
+  diagnosticsTab,
   advancedTab,
 }: ProviderDetailPanelProps) {
   const t = useTranslations("providers")
@@ -187,6 +189,7 @@ export function ProviderDetailPanel({
           <TabsTrigger value="config">{t("tabs.config")}</TabsTrigger>
           {modelsTab && <TabsTrigger value="models">{t("tabs.models")}</TabsTrigger>}
           {costTab && <TabsTrigger value="cost">{t("tabs.cost")}</TabsTrigger>}
+          {diagnosticsTab && <TabsTrigger value="diagnostics">{t("tabs.diagnostics")}</TabsTrigger>}
           {advancedTab && <TabsTrigger value="advanced">{t("tabs.advanced")}</TabsTrigger>}
         </TabsList>
         {/* Themed `ScrollArea`, matching this feature's dialogs — a native
@@ -211,6 +214,11 @@ export function ProviderDetailPanel({
             {costTab && (
               <TabsContent value="cost" className="m-0 p-4">
                 {costTab}
+              </TabsContent>
+            )}
+            {diagnosticsTab && (
+              <TabsContent value="diagnostics" className="m-0 p-4">
+                {diagnosticsTab}
               </TabsContent>
             )}
             {advancedTab && (

@@ -19,6 +19,7 @@ import { DEFAULT_SIDEBAR_LAYOUT, DEFAULT_SIDEBAR_SIDE } from "@/types/shell/side
 import { DEFAULT_EVAL_SETTINGS } from "@/types/eval/settings"
 import { DEFAULT_AUTO_ROUTING, type AutoRoutingSettings } from "@cognia/provider-types/auto-router"
 import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
+import { DEFAULT_PROVIDER_DIAGNOSTICS_PREFERENCES } from "@cognia/provider-types"
 import type { DifficultyRoutingSettings } from "@/types/routing/tool-route"
 import { getDb, withDbReopenRetry } from "./schema"
 
@@ -57,6 +58,7 @@ export const DEFAULTS: AppSettings = {
     defaultPropagation: [],
   },
   customLimitsSources: [],
+  providerDiagnostics: { ...DEFAULT_PROVIDER_DIAGNOSTICS_PREFERENCES },
   limitsQueryEnabledAccounts: [],
   lastUpdateCheckAt: undefined,
   updates: { ...DEFAULT_UPDATE_SETTINGS },

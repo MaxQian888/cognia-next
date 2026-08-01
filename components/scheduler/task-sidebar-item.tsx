@@ -9,6 +9,7 @@
 import React from "react"
 import { useTranslations } from "next-intl"
 import {
+  Activity,
   MoreVertical,
   Workflow,
   Bot,
@@ -198,6 +199,11 @@ const taskTypeConfig: Record<
     icon: <Radar className="h-3.5 w-3.5" />,
     bg: "bg-amber-500/10",
     color: "text-amber-500",
+  },
+  "provider-diagnostics-refresh": {
+    icon: <Activity className="h-3.5 w-3.5" />,
+    bg: "bg-emerald-500/10",
+    color: "text-emerald-500",
   },
 }
 

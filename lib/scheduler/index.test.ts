@@ -9,6 +9,11 @@
 const registerBuiltInExecutorsMock = jest.fn()
 const initTaskSchedulerMock = jest.fn(async (_driver?: unknown) => undefined)
 const stopTaskSchedulerMock = jest.fn()
+const installProviderDiagnosticsRefreshScheduleMock = jest.fn(async () => undefined)
+
+jest.mock("@/lib/provider-diagnostics/refresh", () => ({
+  installProviderDiagnosticsRefreshSchedule: () => installProviderDiagnosticsRefreshScheduleMock(),
+}))
 
 jest.mock("./executors", () => ({
   registerBuiltInExecutors: () => registerBuiltInExecutorsMock(),
@@ -59,6 +64,7 @@ beforeEach(() => {
   registerBuiltInExecutorsMock.mockClear()
   initTaskSchedulerMock.mockClear()
   stopTaskSchedulerMock.mockClear()
+  installProviderDiagnosticsRefreshScheduleMock.mockClear()
 })
 
 describe("scheduler barrel re-exports", () => {
@@ -142,6 +148,7 @@ describe("initSchedulerSystem", () => {
     await barrel.initSchedulerSystem()
     expect(registerBuiltInExecutorsMock).toHaveBeenCalled()
     expect(initTaskSchedulerMock).toHaveBeenCalled()
+    expect(installProviderDiagnosticsRefreshScheduleMock).toHaveBeenCalled()
   })
 
   it("forwards an injected timing driver to the scheduler singleton", async () => {
