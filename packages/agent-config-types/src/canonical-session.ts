@@ -8,6 +8,8 @@
 // loss report every conversion must return. Zero dependencies; hand-written
 // guards like the rest of this package.
 
+import { isNonEmptyString } from "./ref-safety"
+
 export type SessionFidelity =
   "native-exact" | "structured" | "contextual" | "summary-only" | "unsupported"
 
@@ -144,10 +146,6 @@ export function computeSequenceDigest(turns: readonly CanonicalTurn[]): string {
 }
 
 // ---- Validation -------------------------------------------------------------
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0
-}
 
 /** Validate a canonical session. Returns violations (empty = valid). */
 export function validateCanonicalSession(value: unknown): string[] {

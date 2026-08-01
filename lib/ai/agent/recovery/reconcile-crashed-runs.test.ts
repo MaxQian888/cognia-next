@@ -50,6 +50,7 @@ function envelope(
   turnId = "t1"
 ): AgentEventEnvelope {
   return {
+    schemaVersion: 1,
     eventId: `${runId}:a1:${sequence}`,
     sequence,
     sessionId: "s1",

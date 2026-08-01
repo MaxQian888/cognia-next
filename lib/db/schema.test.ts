@@ -274,6 +274,43 @@ describe("getDb", () => {
     expect(db.integrationAudit.schema.indexes.map((index) => index.name)).toContain("createdAt")
   })
 
+  it("v139 opens the unified action-review receipt log", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(139)
+
+    const indexes = db.actionReviewReceipts.schema.indexes.map((index) => index.name)
+    expect(db.actionReviewReceipts.schema.primKey.name).toBe("id")
+    // The retention sweeper is a range delete over this index.
+    expect(indexes).toContain("expiresAt")
+    // The two compounds the audit UI pages through.
+    expect(indexes).toContain("[channel+decidedAt]")
+    expect(indexes).toContain("[sessionId+decidedAt]")
+    // multiEntry, so a per-surface query is an index hit not a table scan.
+    const surfaceIds = db.actionReviewReceipts.schema.indexes.find(
+      (index) => index.name === "surfaceIds"
+    )
+    expect(surfaceIds?.multi).toBe(true)
+  })
+
+  it("v140 opens the provider diagnostics control-plane tables", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(140)
+    expect(db.providerDiagnosticJobs.schema.indexes.map((index) => index.name)).toContain(
+      "[providerId+startedAt]"
+    )
+    expect(db.providerDiagnosticSamples.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["jobId", "[providerId+startedAt]", "[targetId+startedAt]"])
+    )
+    expect(db.providerBalanceSnapshots.schema.indexes.map((index) => index.name)).toContain(
+      "[providerId+fetchedAt]"
+    )
+    expect(db.providerEndpointChanges.schema.indexes.map((index) => index.name)).toContain(
+      "[providerId+appliedAt]"
+    )
+  })
+
   it("v130 partitions sync cursors by host", async () => {
     const db = getDb()
     await whenSeeded()

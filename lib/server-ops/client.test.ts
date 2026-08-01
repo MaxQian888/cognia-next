@@ -25,7 +25,7 @@ describe("OpsClient", () => {
 
   it("retries bounded GET failures and authenticates every request", async () => {
     const fetchImpl = jest
-      .fn<typeof fetch>()
+      .fn<Promise<Response>, Parameters<typeof fetch>>()
       .mockRejectedValueOnce(new TypeError("offline"))
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ items: [server] }), {
@@ -49,7 +49,7 @@ describe("OpsClient", () => {
 
   it("uses the caller's idempotency key for mutation retries", async () => {
     const fetchImpl = jest
-      .fn<typeof fetch>()
+      .fn<Promise<Response>, Parameters<typeof fetch>>()
       .mockRejectedValueOnce(new TypeError("connection reset"))
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ id: "op-1", state: "queued" }), {
@@ -80,7 +80,7 @@ describe("OpsClient", () => {
       capabilities: { snapshotProviders: [], secretProviders: [] },
     }
     const fetchImpl = jest
-      .fn<typeof fetch>()
+      .fn<Promise<Response>, Parameters<typeof fetch>>()
       .mockResolvedValueOnce(
         new Response(JSON.stringify(registered), {
           status: 201,
@@ -126,7 +126,7 @@ describe("OpsClient", () => {
   })
 
   it("requests rollback without accepting a client-selected release", async () => {
-    const fetchImpl = jest.fn<typeof fetch>().mockResolvedValue(
+    const fetchImpl = jest.fn<Promise<Response>, Parameters<typeof fetch>>().mockResolvedValue(
       new Response(JSON.stringify({ id: "op-rollback", state: "queued" }), {
         status: 202,
         headers: { "content-type": "application/json" },
@@ -204,7 +204,7 @@ describe("OpsClient", () => {
     }
     const operation = { id: "operation/a", state: "succeeded" }
     const fetchImpl = jest
-      .fn<typeof fetch>()
+      .fn<Promise<Response>, Parameters<typeof fetch>>()
       .mockResolvedValueOnce(jsonResponse(capabilities))
       .mockResolvedValueOnce(jsonResponse(detail))
       .mockResolvedValueOnce(jsonResponse({ items: [log] }))
@@ -238,7 +238,7 @@ describe("OpsClient", () => {
 
   it("sends typed mutation bodies and admin leases", async () => {
     const fetchImpl = jest
-      .fn<typeof fetch>()
+      .fn<Promise<Response>, Parameters<typeof fetch>>()
       .mockImplementation(async () => jsonResponse({ id: "op" }, 202))
     const client = new OpsClient({
       baseUrl: "http://127.0.0.1:4100",
@@ -291,7 +291,7 @@ describe("OpsClient", () => {
       `id: 3\ndata: ${JSON.stringify(second).slice(0, 20)}`,
       `${JSON.stringify(second).slice(20)}\n\n`,
     ]
-    const fetchImpl = jest.fn<typeof fetch>().mockResolvedValue(
+    const fetchImpl = jest.fn<Promise<Response>, Parameters<typeof fetch>>().mockResolvedValue(
       new Response(
         new ReadableStream({
           start(controller) {

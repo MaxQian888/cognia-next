@@ -789,13 +789,13 @@ function startReadLoop() {
         handleToolResultDecision(msg)
         break
       case "protocol_adapter_chunk":
-        handleProtocolAdapterChunk(msg)
+        if (!featureCalls.handleProtocolAdapterMessage(msg)) handleProtocolAdapterChunk(msg)
         break
       case "protocol_adapter_done":
-        handleProtocolAdapterDone(msg)
+        if (!featureCalls.handleProtocolAdapterMessage(msg)) handleProtocolAdapterDone(msg)
         break
       case "protocol_adapter_error":
-        handleProtocolAdapterError(msg)
+        if (!featureCalls.handleProtocolAdapterMessage(msg)) handleProtocolAdapterError(msg)
         break
       case "close":
         handleClose(msg)

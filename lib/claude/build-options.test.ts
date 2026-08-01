@@ -18,6 +18,7 @@ jest.mock("@/lib/db/characters", () => ({
 
 jest.mock("@/lib/db/skills", () => ({
   listEnabledSkillsByIds: jest.fn(),
+  listSkillsByIds: jest.fn(),
   recordSkillUsage: jest.fn(),
   renderSkillsSection: jest.fn(),
   renderSkillsCatalog: jest.fn(),
@@ -148,6 +149,7 @@ import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import {
   listEnabledSkillsByIds,
+  listSkillsByIds,
   recordSkillUsage,
   renderSkillsCatalog,
   renderSkillsSection,
@@ -189,6 +191,7 @@ import type { Project } from "@/types"
 const mGetCharacter = resolveCharacterById as jest.Mock
 const mListCharsByIds = listCharactersByIds as jest.Mock
 const mListSkills = listEnabledSkillsByIds as jest.Mock
+const mListSkillsByIds = listSkillsByIds as jest.Mock
 const mRecordUsage = recordSkillUsage as jest.Mock
 const mRender = renderSkillsSection as jest.Mock
 const mRenderCatalog = renderSkillsCatalog as jest.Mock
@@ -251,6 +254,7 @@ beforeEach(() => {
   // Sane defaults so the function doesn't error when a test forgets to set
   // an expectation.
   mListSkills.mockResolvedValue([])
+  mListSkillsByIds.mockResolvedValue([])
   mRecordUsage.mockResolvedValue(undefined)
   mRender.mockReturnValue("")
   mListMcp.mockResolvedValue([])
@@ -1631,6 +1635,64 @@ describe("resolveSendOptions — character + skills", () => {
     mRender.mockReturnValueOnce("body")
 
     await expect(resolveSendOptions({ character: ch })).resolves.toBeDefined()
+  })
+
+  it("loads the recorder's trial skill by id, past the enabled-status filter", async () => {
+    // ADR-0106: the recording is saved `disabled` on purpose — enabling it is
+    // the user's separate act after the trial. Resolving it through the normal
+    // path would honour that flag and inject nothing, leaving the trial unable
+    // to verify the skill it exists to verify.
+    mListSkillsByIds.mockResolvedValueOnce([
+      { id: "rec-1", name: "Recorded", content: "body", allowedTools: ["X"] } as unknown as Skill,
+    ])
+    mRender.mockReturnValueOnce("## Recorded\n\nbody")
+
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", trialSkillId: "rec-1" }),
+    })
+
+    expect(mListSkillsByIds).toHaveBeenCalledWith(["rec-1"])
+    expect(opts.systemPrompt).toContain("Recorded")
+    expect(opts.allowedTools).toEqual(expect.arrayContaining(["X"]))
+  })
+
+  it("makes the trial skill the whole set, so nothing else can explain the result", async () => {
+    const ch = makeChar({ id: "c1", skillIds: ["sk1"] })
+    mListSkills.mockResolvedValueOnce([
+      { id: "sk1", name: "Other", content: "other body", allowedTools: [] } as unknown as Skill,
+    ])
+    mListSkillsByIds.mockResolvedValueOnce([
+      { id: "rec-1", name: "Recorded", content: "body", allowedTools: [] } as unknown as Skill,
+    ])
+
+    await resolveSendOptions({
+      character: ch,
+      session: makeSession({ id: "s1", trialSkillId: "rec-1" }),
+    })
+
+    expect(mRender).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: "rec-1" })])
+    )
+    expect(mRender).not.toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: "sk1" })])
+    )
+  })
+
+  it("injects nothing when the trial skill row has gone", async () => {
+    mListSkillsByIds.mockResolvedValueOnce([])
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", trialSkillId: "rec-1" }),
+    })
+    expect(opts.systemPrompt).toBeUndefined()
+  })
+
+  it("leaves ordinary sessions on the enabled-status path", async () => {
+    const ch = makeChar({ id: "c1", skillIds: ["sk1"] })
+    mListSkills.mockResolvedValueOnce([
+      { id: "sk1", name: "Skill 1", content: "body", allowedTools: [] } as unknown as Skill,
+    ])
+    await resolveSendOptions({ character: ch, session: makeSession({ id: "s1" }) })
+    expect(mListSkillsByIds).not.toHaveBeenCalled()
   })
 
   it("skips skills altogether when the character has no skillIds", async () => {

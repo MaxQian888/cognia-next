@@ -520,6 +520,29 @@ export interface SendOptions {
   permissionRuleset?: import("@/lib/claude/permissions/ruleset").Ruleset
 
   /**
+   * Tool names that must ALWAYS reach the renderer as a `permission_request`,
+   * whatever else says otherwise (ADR-0102).
+   *
+   * This closes a hole the unified action-review layer cannot close on its own.
+   * {@link suppressApprovalForTools}, {@link alwaysAllowTools}, and the
+   * connector `yolo` mode all resolve `{ behavior: "allow" }` *inside the
+   * sidecar*, before any event is emitted — so the renderer-side policy engine
+   * physically cannot escalate a call it never sees. A tool listed here makes
+   * both sidecar `canUseTool` gates ignore those bypasses and emit the
+   * round-trip anyway.
+   *
+   * Computed by `resolveSendOptions` from the risk tables: the tool-id sets
+   * `classifyRisk` uses for the surfaces `RISK_SURFACES` marks `high`
+   * (external-send, computer-use, native-command, data-destructive). Serialized
+   * alongside {@link permissionRuleset}.
+   *
+   * This raises friction on purpose, and only for surfaces whose effects escape
+   * the app and cannot be undone by closing it. It does not override a `deny`:
+   * a denied tool is still denied without asking.
+   */
+  alwaysExplicitTools?: string[]
+
+  /**
    * Workspace confinement policy (ADR-0028 "lite") consulted by the sidecar
    * `canUseTool` gates. When set, the built-in file/bash tools are confined to
    * `roots`: a mutator call whose target escapes every root escalates to the
@@ -1075,6 +1098,8 @@ export interface FeatureCallRequest {
   providerId?: string
   model?: string
   credentials: FeatureCallCredentials
+  /** Same protocol-adapter descriptor used by ordinary provider execution. */
+  protocolAdapterSpec?: SendOptions["protocolAdapterSpec"]
   options?: Record<string, unknown>
 }
 
@@ -1443,6 +1468,17 @@ export interface ChatSession {
   teamId?: string
   /** Skills the user has temporarily disabled for this session only. */
   disabledSkillIds?: string[]
+  /**
+   * The skill recorder's controlled trial: the one skill this session exists to
+   * exercise (ADR-0106).
+   *
+   * It is loaded by id, bypassing the enabled-status filter, because a
+   * just-recorded skill is deliberately saved `disabled` — enabling it is the
+   * user's separate act *after* the trial convinces them. Without this the
+   * trial opened a chat with no skill in it at all and could not verify
+   * anything. Non-indexed optional column — no Dexie schema bump.
+   */
+  trialSkillId?: string
   /** Per-chat learned-memory recall override. */
   memoryUse?: boolean
   /** Per-chat automatic learned-memory write override. */
@@ -1591,7 +1627,35 @@ export interface ChatSession {
    * fresh id instead of clobbering it. Non-indexed optional column — no Dexie
    * schema bump.
    */
-  handoffSource?: "cli"
+  handoffSource?: "cli" | "thread-handoff"
+  /**
+   * Cross-host handoff lock (ADR-0103). **PRESENCE MEANS THIS ROW IS READ-ONLY.**
+   *
+   * Deliberately distinct from {@link importFrozen}, which means "stop
+   * mirroring the on-disk source" (ADR-0062) and is read only by the fs-watch
+   * re-import guard. Reusing that flag here would make the guard skip rows for
+   * the wrong reason. This one means "another host owns, or is about to own,
+   * the writable copy of this thread", and is enforced by
+   * `lib/chat/session-lock.ts` at every message/session mutation.
+   *
+   * `state: "frozen"` — a handoff is in flight; aborting clears the field and
+   * the thread is writable again. `state: "committed"` — permanent; the row
+   * stays read-only forever and links to `targetHostRef`/`targetSessionId`.
+   *
+   * Organizational operations (archive, folder, delete) are deliberately NOT
+   * blocked by this lock: a lock that prevents cleanup is a trap. Branching is
+   * also allowed — it creates a *new* writable thread, which does not violate
+   * the one-writable-copy invariant.
+   *
+   * Non-indexed optional column — no Dexie schema bump.
+   */
+  handoffLock?: {
+    ticketId: string
+    state: "frozen" | "committed"
+    targetHostRef?: string
+    targetSessionId?: string
+    at: number
+  }
   /** Per-session override for `--bare` (skip on-disk auto-discovery). */
   bareMode?: boolean
   /** Per-session override for `--debug` (verbose logging). */
@@ -3455,6 +3519,8 @@ export interface AppSettings {
   >
   /** UI preferences for the providers settings page (filter, sort, view mode). */
   providerUIPreferences?: import("@cognia/provider-types/provider").ProviderUIPreferences
+  /** Provider diagnostic limits, retention, refresh, and primary-source preferences. */
+  providerDiagnostics?: import("@cognia/provider-types").ProviderDiagnosticsPreferences
   /** Whether the user dismissed the first-time providers onboarding banner. */
   providerOnboardingDismissed?: boolean
   /**
@@ -3547,6 +3613,8 @@ export interface AppSettings {
   customCssScope?: "app" | "global"
   /** Per-component surface customization (tonality / elevation / radius). */
   componentStyles?: import("@/types/appearance").ComponentStyles
+  /** Mouse-pointer art (pack / size / tint) and the pointer effect layer. */
+  cursor?: import("@/types/appearance").CursorSettings
 
   // ---- WebRTC WAN transport (ADR-0021) ----
   /**

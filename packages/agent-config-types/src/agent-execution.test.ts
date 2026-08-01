@@ -1,5 +1,6 @@
 import {
   AGENT_CAPABILITY_IDS,
+  CANONICAL_AGENT_EVENT_KINDS,
   isAgentCapabilityId,
   isAgentEventEnvelope,
   validateAgentExecutionPolicy,
@@ -8,6 +9,7 @@ import {
 } from "./agent-execution"
 import type {
   AgentEventEnvelope,
+  CanonicalAgentEvent,
   AgentExecutionPolicy,
   AgentExecutionSendSpec,
   ResolvedAgentExecutionSpec,
@@ -173,6 +175,7 @@ describe("validateAgentExecutionSendSpec", () => {
 
 describe("isAgentEventEnvelope", () => {
   const envelope: AgentEventEnvelope = {
+    schemaVersion: 1,
     eventId: "s1:a1:0",
     sequence: 0,
     sessionId: "s1",
@@ -214,6 +217,39 @@ describe("isAgentEventEnvelope", () => {
     expect(isAgentEventEnvelope({ ...envelope, sequence: 1.5 })).toBe(false)
     expect(isAgentEventEnvelope({ ...envelope, event: { kind: "mystery" } })).toBe(false)
     expect(isAgentEventEnvelope({ ...envelope, providerAttemptId: 3 })).toBe(false)
+  })
+
+  it("rejects an envelope without schemaVersion 1", () => {
+    const { schemaVersion: _dropped, ...withoutVersion } = envelope
+    expect(isAgentEventEnvelope(withoutVersion)).toBe(false)
+    expect(isAgentEventEnvelope({ ...envelope, schemaVersion: 2 })).toBe(false)
+    expect(isAgentEventEnvelope({ ...envelope, schemaVersion: "1" })).toBe(false)
+  })
+
+  it("accepts the elicitation, retry, queue and resource kinds", () => {
+    const events: CanonicalAgentEvent[] = [
+      { kind: "elicitation-request", requestId: "e1", source: "ask_user", prompt: "which?" },
+      { kind: "elicitation-resolved", requestId: "e1", outcome: "timeout" },
+      { kind: "retry", phase: "scheduled", attempt: 1, maxRetries: 2, code: "provider_error" },
+      { kind: "queue", phase: "accepted", queueId: "q1", delivery: "after-settle" },
+      {
+        kind: "resource",
+        phase: "trusted",
+        resourceKind: "skill",
+        origin: "/repo/.cognia/skills/a.md",
+        digest: "sha256:abc",
+      },
+    ]
+    for (const event of events) {
+      expect(isAgentEventEnvelope({ ...envelope, event })).toBe(true)
+    }
+  })
+
+  it("lists every canonical event kind exactly once", () => {
+    expect(new Set(CANONICAL_AGENT_EVENT_KINDS).size).toBe(CANONICAL_AGENT_EVENT_KINDS.length)
+    for (const kind of CANONICAL_AGENT_EVENT_KINDS) {
+      expect(isAgentEventEnvelope({ ...envelope, event: { kind } })).toBe(true)
+    }
   })
 })
 

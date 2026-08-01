@@ -223,6 +223,20 @@ export interface AgentExecutionSendSpec {
  */
 export type CanonicalAgentEvent =
   | { kind: "lifecycle"; phase: "started" | "ended" | "interrupted"; detail?: string }
+  | {
+      /**
+       * The caller's input that opened this turn.
+       *
+       * Streaming rails never needed this — the caller already had the prompt
+       * it just sent. The PERSISTED log does: without it the event stream is a
+       * record of half a conversation, and `getMessages()` could not
+       * reconstruct the user side on resume. Attachments are recorded as
+       * references (path/digest/media type) only; bodies stay out of the log.
+       */
+      kind: "user-input"
+      text: string
+      attachments?: Array<{ kind: string; ref: string; digest?: string; mediaType?: string }>
+    }
   | { kind: "text-delta"; delta: string }
   | { kind: "thinking-delta"; delta: string }
   | { kind: "commentary-delta"; delta: string; messageId?: string; done?: boolean }
@@ -260,6 +274,83 @@ export type CanonicalAgentEvent =
       postTokens?: number
     }
   | { kind: "checkpoint"; checkpointId: string }
+  | {
+      /**
+       * The runtime is asking the *caller* (not the permission gate) for
+       * structured input — the `ask_user` tool and its RPC/SDK equivalents.
+       * Distinct from `permission-request`, which decides whether a tool may
+       * run; an elicitation decides what it runs *with*.
+       */
+      kind: "elicitation-request"
+      requestId: string
+      /** Tool / surface that raised it ("ask_user", an MCP server id, …). */
+      source: string
+      prompt: string
+      /** JSON Schema describing the expected answer, when the source supplied one. */
+      schema?: Record<string, unknown>
+    }
+  | {
+      kind: "elicitation-resolved"
+      requestId: string
+      /**
+       * `declined` is a user choice; `cancelled` and `timeout` are the runtime
+       * closing the request out (EOF, disconnect, shutdown, deadline). All
+       * three resolve the pending waiter — none of them leaves it dangling.
+       */
+      outcome: "answered" | "declined" | "cancelled" | "timeout"
+      /** Redaction-safe echo of what was returned. Never raw secret material. */
+      answerSummary?: string
+    }
+  | {
+      /**
+       * A transient provider/transport failure being retried BEFORE any side
+       * effect. `attempt` counts retries (1-based), so `attempt === maxRetries`
+       * on the last `scheduled`. `exhausted` is terminal and is always followed
+       * by a `failure`.
+       */
+      kind: "retry"
+      phase: "scheduled" | "started" | "succeeded" | "exhausted"
+      attempt: number
+      maxRetries: number
+      /** The failure code that triggered the retry. */
+      code: string
+      /** Backoff actually applied (post-jitter, post-`Retry-After` clamp). */
+      delayMs?: number
+      /** Server-advertised `Retry-After`, when one was honored. */
+      retryAfterMs?: number
+      message?: string
+    }
+  | {
+      /**
+       * Lifecycle of an enqueued follow-up prompt. `delivery` is the
+       * EFFECTIVE delivery, not the requested one: a runtime that does not
+       * advertise `steer` reports `after-settle` even when the caller asked
+       * for `next-safe-boundary`, and never claims mid-turn injection.
+       */
+      kind: "queue"
+      phase: "accepted" | "delivered" | "dropped"
+      queueId: string
+      delivery: "next-safe-boundary" | "after-settle"
+      /** True when native steering carried it (capability `steer` was effective). */
+      nativeSteering?: boolean
+      reason?: string
+    }
+  | {
+      /**
+       * Audit record for an executable / instructional resource. Paths only
+       * DISCOVER; `trusted` is emitted once the digest matched a trust record
+       * or an explicit `--trust-resource`, and `rejected` when it did not (or
+       * when the content changed after trust evaluation).
+       */
+      kind: "resource"
+      phase: "discovered" | "trusted" | "rejected"
+      resourceKind: "instructions" | "skill" | "plugin" | "mcp-config" | "command" | "attachment"
+      /** Resolved absolute origin (path or URL) — never the body. */
+      origin: string
+      /** `sha256:<hex>` over the resolved content. */
+      digest?: string
+      reason?: string
+    }
   | { kind: "warning"; code: string; message: string }
   | { kind: "failure"; code: string; message: string; retryable?: boolean }
   | { kind: "capability-error"; capability: AgentCapabilityId; command?: string }
@@ -271,6 +362,12 @@ export type CanonicalAgentEvent =
  * within an attempt.
  */
 export interface AgentEventEnvelope {
+  /**
+   * Wire-format version of the envelope itself. Bumped only for a breaking
+   * change to the envelope fields — the `event` vocabulary grows additively,
+   * and consumers must ignore unknown `event.kind` values rather than fail.
+   */
+  schemaVersion: 1
   eventId: string
   sequence: number
   sessionId: string
@@ -587,6 +684,7 @@ export function validateAgentExecutionSendSpec(
 
 const CANONICAL_EVENT_KINDS: readonly string[] = [
   "lifecycle",
+  "user-input",
   "text-delta",
   "thinking-delta",
   "commentary-delta",
@@ -598,14 +696,24 @@ const CANONICAL_EVENT_KINDS: readonly string[] = [
   "usage",
   "compact",
   "checkpoint",
+  "elicitation-request",
+  "elicitation-resolved",
+  "retry",
+  "queue",
+  "resource",
   "warning",
   "failure",
   "capability-error",
   "diagnostic",
 ]
 
+/** Every canonical event kind, in declaration order. Exported for exhaustiveness tests. */
+export const CANONICAL_AGENT_EVENT_KINDS: readonly CanonicalAgentEvent["kind"][] =
+  CANONICAL_EVENT_KINDS as readonly CanonicalAgentEvent["kind"][]
+
 export function isAgentEventEnvelope(v: unknown): v is AgentEventEnvelope {
   if (!isRecord(v)) return false
+  if (v.schemaVersion !== 1) return false
   if (typeof v.eventId !== "string" || v.eventId.length === 0) return false
   if (typeof v.sequence !== "number" || !Number.isInteger(v.sequence) || v.sequence < 0) {
     return false

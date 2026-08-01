@@ -62,3 +62,35 @@ test("requires every registration and v1 RPC to have the correct descriptor", ()
   assert(errors.some((error) => error.includes("missing_local")))
   assert(errors.some((error) => error.includes("missing_rpc")))
 })
+
+test("rejects a descriptor whose handler was deleted", () => {
+  // The regression: `record_cancel` outlived its Rust handler, so companions
+  // kept discovering a command that could only ever fail to dispatch.
+  const errors = compareCommandSets(
+    {
+      schemaVersion: 1,
+      commands: [descriptor({ name: "record_cancel", since: 2, target: "client" })],
+    },
+    new Set(),
+    new Set()
+  )
+
+  assert(errors.some((error) => error.includes("descriptor has no handler")))
+  assert(errors.some((error) => error.includes("record_cancel")))
+})
+
+test("accepts plugin-dispatched descriptors with no static registration", () => {
+  // `plugin_*` names come from a plugin's `executeIpc.invoke` at runtime, so
+  // they are absent from both static sets by design.
+  assert.deepEqual(
+    compareCommandSets(
+      {
+        schemaVersion: 1,
+        commands: [descriptor({ name: "plugin_computer_use_bash", since: 2, target: "client" })],
+      },
+      new Set(),
+      new Set()
+    ),
+    []
+  )
+})

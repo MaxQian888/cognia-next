@@ -3113,6 +3113,29 @@ export class CogniaDB extends Dexie {
         })
     })
 
+    // v139 — Unified action review (ADR-0102). Additive only; no upgrade hook,
+    // because the table is new.
+    //
+    // Deliberately ONE table. Cross-host handoff (ADR-0103) and the PR chat
+    // workspace (ADR-0105) each claim their own later version alongside their
+    // accessor module, rather than being batched here: a table declared before
+    // anything can read it is the "built but dormant" defect this repo keeps
+    // hitting. Version numbers are cheap and append-only (129 and 133 are
+    // already burned); a dormant table is not.
+    //
+    // `actionReviewReceipts` is the first durable home for an approval
+    // decision. Query columns are FLATTENED off the nested receipt by
+    // `toReceiptRow` (lib/db/action-review-receipts.ts): six single axes plus
+    // the two compounds the audit UI pages through, and a multiEntry
+    // `surfaceIds` so "every credential-auth decision this quarter" is an index
+    // hit rather than a full-table filter. `expiresAt` is the 90-day retention
+    // watermark, indexed so the sweeper is a range delete — and stamped per
+    // row, so changing the retention constant never re-dates existing rows.
+    this.version(139).stores({
+      actionReviewReceipts:
+        "&id, decidedAt, expiresAt, outcome, authority, tier, channel, sessionId, runId, projectId, [channel+decidedAt], [sessionId+decidedAt], *surfaceIds",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -3176,6 +3199,10 @@ export class CogniaDB extends Dexie {
   // v74 — Terminal durable history + unattended-exec audit.
   terminalHistory!: Table<TerminalHistoryRow, string>
   unattendedExecAudit!: Table<UnattendedExecAuditRow, string>
+  // v139 — Unified action-review receipts (ADR-0102). One durable row per
+  // reviewed action across every decision point. See
+  // `lib/db/action-review-receipts.ts`.
+  actionReviewReceipts!: Table<import("./action-review-receipts").ActionReviewReceiptRow, string>
   // v75 — Provider cost rollups. See `lib/db/provider-cost-daily.ts`.
   providerCostDaily!: Table<ProviderCostDailyRow, string>
   // v76 — Semantic tool routes. See `lib/db/tool-routes.ts`.
@@ -3258,6 +3285,7 @@ export type { PetSpritePackRow } from "./pet-sprite-packs"
 export type { TerminalHistoryRow } from "./terminal-history"
 export type { ProviderCostDailyRow } from "./provider-cost-daily"
 export type { UnattendedExecAuditRow } from "./terminal-audit"
+export type { ActionReviewReceiptRow } from "./action-review-receipts"
 export type {
   ConversationLabelRow,
   ConversationAssignmentEventRow,

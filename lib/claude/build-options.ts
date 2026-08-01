@@ -32,6 +32,7 @@ import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import {
   activeEffectiveSkillIds,
   listEnabledSkillsByIds,
+  listSkillsByIds,
   recordSkillUsage,
   renderSkillsCatalog,
   renderSkillsSection,
@@ -962,6 +963,15 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     if (wantedIds.length) {
       skills = await listEnabledSkillsByIds(wantedIds)
     }
+  }
+  // ADR-0106 controlled trial. The recorded skill is saved `disabled` on
+  // purpose — enabling it is the user's separate act after the trial — so it
+  // cannot come through the resolution above, which honours that flag. Loading
+  // it by id here is what makes the trial actually exercise the skill instead
+  // of opening an empty chat; it replaces the set rather than joining it, which
+  // is the "nothing else can explain the result" property the trial is for.
+  if (session?.trialSkillId) {
+    skills = await listSkillsByIds([session.trialSkillId])
   }
   // Bump usage counters for the skills that actually made it into the prompt.
   // Fire-and-forget: a failed write here shouldn't block the send.

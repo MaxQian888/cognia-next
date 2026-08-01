@@ -32,6 +32,7 @@ export function createEnvelopeSequencer(context: EnvelopeContext) {
   let sequence = 0
   return function envelope(event: CanonicalAgentEvent): AgentEventEnvelope {
     const out: AgentEventEnvelope = {
+      schemaVersion: 1,
       eventId: `${context.sessionId}:${context.attemptId}:${sequence}`,
       sequence,
       sessionId: context.sessionId,

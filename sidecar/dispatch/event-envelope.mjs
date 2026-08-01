@@ -82,6 +82,7 @@ export function createEnvelopeEmitter(params) {
     const event = canonicalEventFromWireMessage(msg)
     if (!event) return
     const envelope = {
+      schemaVersion: 1,
       eventId: `${sessionId}:${attemptId}:${sequence}`,
       sequence,
       sessionId,
