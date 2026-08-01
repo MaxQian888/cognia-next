@@ -33,6 +33,15 @@ pub struct ServerConfig {
     pub retention_enabled: bool,
     pub retention_interval: Duration,
     pub retention_batch_size: usize,
+    pub alert_enabled: bool,
+    pub alert_interval: Duration,
+    pub alert_batch_size: usize,
+    pub alert_timeout: Duration,
+    pub alert_webhook_url: Option<reqwest::Url>,
+    pub alert_webhook_secret: Option<String>,
+    pub alert_smtp_url: Option<String>,
+    pub alert_smtp_from: Option<String>,
+    pub alert_smtp_to: Option<String>,
     pub migrate_only: bool,
 }
 
@@ -65,6 +74,12 @@ impl ServerConfig {
             .context("parse RETENTION_BATCH_SIZE")?;
         if retention_batch_size == 0 || retention_batch_size > 1_000 {
             bail!("RETENTION_BATCH_SIZE must be between 1 and 1000");
+        }
+        let alert_batch_size = env_or("ALERT_BATCH_SIZE", "32")
+            .parse()
+            .context("parse ALERT_BATCH_SIZE")?;
+        if alert_batch_size == 0 || alert_batch_size > 1_000 {
+            bail!("ALERT_BATCH_SIZE must be between 1 and 1000");
         }
         let kms_region = env_or("KMS_REGION", "us-east-1");
         let kms_endpoint = env_or(
@@ -130,6 +145,25 @@ impl ServerConfig {
                     .context("parse RETENTION_INTERVAL_MS")?,
             ),
             retention_batch_size,
+            alert_enabled: parse_bool("ALERT_ENABLED", &env_or("ALERT_ENABLED", "true"))?,
+            alert_interval: Duration::from_millis(
+                env_or("ALERT_INTERVAL_MS", "1000")
+                    .parse()
+                    .context("parse ALERT_INTERVAL_MS")?,
+            ),
+            alert_batch_size,
+            alert_timeout: Duration::from_secs(
+                env_or("ALERT_TIMEOUT_SECONDS", "15")
+                    .parse()
+                    .context("parse ALERT_TIMEOUT_SECONDS")?,
+            ),
+            alert_webhook_url: optional("ALERT_WEBHOOK_URL")
+                .map(|value| value.parse().context("parse ALERT_WEBHOOK_URL"))
+                .transpose()?,
+            alert_webhook_secret: optional("ALERT_WEBHOOK_SECRET"),
+            alert_smtp_url: optional("ALERT_SMTP_URL"),
+            alert_smtp_from: optional("ALERT_SMTP_FROM"),
+            alert_smtp_to: optional("ALERT_SMTP_TO"),
             migrate_only: parse_bool(
                 "DIAGNOSTIC_MIGRATE_ONLY",
                 &env_or("DIAGNOSTIC_MIGRATE_ONLY", "false"),
@@ -144,6 +178,12 @@ fn required(name: &str) -> anyhow::Result<String> {
 
 fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_owned())
+}
+
+fn optional(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
 }
 
 fn parse_bool(name: &str, value: &str) -> anyhow::Result<bool> {

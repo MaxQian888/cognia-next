@@ -25,5 +25,14 @@ data:
   RETENTION_ENABLED: {{ .Values.config.retentionEnabled | quote }}
   RETENTION_INTERVAL_MS: {{ .Values.config.retentionIntervalMs | quote }}
   RETENTION_BATCH_SIZE: {{ .Values.config.retentionBatchSize | quote }}
+  ALERT_ENABLED: {{ .Values.config.alertEnabled | quote }}
+  ALERT_INTERVAL_MS: {{ .Values.config.alertIntervalMs | quote }}
+  ALERT_BATCH_SIZE: {{ .Values.config.alertBatchSize | quote }}
+  ALERT_TIMEOUT_SECONDS: {{ .Values.config.alertTimeoutSeconds | quote }}
+  {{- if .Values.config.alertWebhookUrl }}
+  ALERT_WEBHOOK_URL: {{ .Values.config.alertWebhookUrl | quote }}
+  {{- end }}
+  ALERT_SMTP_FROM: {{ .Values.config.alertSmtpFrom | quote }}
+  ALERT_SMTP_TO: {{ .Values.config.alertSmtpTo | quote }}
   PROCESSING_TEMP_DIR: /var/lib/cognia/diagnostics/tmp
   RUST_LOG: cognia_diagnostic_server=info,tower_http=info

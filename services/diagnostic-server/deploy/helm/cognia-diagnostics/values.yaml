@@ -43,6 +43,13 @@ config:
   retentionEnabled: "true"
   retentionIntervalMs: "5000"
   retentionBatchSize: "32"
+  alertEnabled: "true"
+  alertIntervalMs: "1000"
+  alertBatchSize: "32"
+  alertTimeoutSeconds: "15"
+  alertWebhookUrl: ""
+  alertSmtpFrom: diagnostics@example.com
+  alertSmtpTo: operators@example.com
 
 existingSecret:
   name: cognia-diagnostics
@@ -54,6 +61,8 @@ existingSecret:
     kmsAccessKeyId: KMS_ACCESS_KEY_ID
     kmsSecretAccessKey: KMS_SECRET_ACCESS_KEY
     kmsSessionToken: KMS_SESSION_TOKEN
+    alertWebhookSecret: ALERT_WEBHOOK_SECRET
+    alertSmtpUrl: ALERT_SMTP_URL
 
 resources:
   requests:

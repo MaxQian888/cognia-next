@@ -2,8 +2,8 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::Context;
 use cognia_diagnostic_server::{
-    build_processor, build_router, AppState, ArtifactStore, DiagnosticRepository, GrantSigner,
-    PrivacyGate, RetentionWorker, ServerConfig,
+    build_processor, build_router, AlertDispatcher, AlertWorker, AppState, ArtifactStore,
+    DiagnosticRepository, GrantSigner, PrivacyGate, RetentionWorker, ServerConfig,
 };
 use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
@@ -58,6 +58,17 @@ async fn main() -> anyhow::Result<()> {
             config.retention_batch_size,
         )
     });
+    let alerts = config
+        .alert_enabled
+        .then(|| {
+            Ok::<_, anyhow::Error>(AlertWorker::new(
+                repository.clone(),
+                AlertDispatcher::from_config(&config)?,
+                config.alert_interval,
+                config.alert_batch_size,
+            ))
+        })
+        .transpose()?;
     let state = AppState::new(config.clone(), repository, artifacts, signer, privacy);
     let listener = TcpListener::bind(config.bind_address)
         .await
@@ -69,7 +80,10 @@ async fn main() -> anyhow::Result<()> {
         worker_handles.push(tokio::spawn(processor.run(shutdown_rx.clone())));
     }
     if let Some(retention) = retention {
-        worker_handles.push(tokio::spawn(retention.run(shutdown_rx)));
+        worker_handles.push(tokio::spawn(retention.run(shutdown_rx.clone())));
+    }
+    if let Some(alerts) = alerts {
+        worker_handles.push(tokio::spawn(alerts.run(shutdown_rx)));
     }
     let shutdown_signal_tx = shutdown_tx.clone();
     let server_result = axum::serve(listener, build_router(state))

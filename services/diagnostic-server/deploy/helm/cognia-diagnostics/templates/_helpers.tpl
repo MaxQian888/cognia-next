@@ -72,6 +72,18 @@ app.kubernetes.io/instance: {{ .Release.Name }}
       name: {{ .Values.existingSecret.name }}
       key: {{ .Values.existingSecret.keys.kmsSessionToken }}
       optional: true
+- name: ALERT_WEBHOOK_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.existingSecret.name }}
+      key: {{ .Values.existingSecret.keys.alertWebhookSecret }}
+      optional: true
+- name: ALERT_SMTP_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.existingSecret.name }}
+      key: {{ .Values.existingSecret.keys.alertSmtpUrl }}
+      optional: true
 {{- end }}
 
 {{- define "cognia-diagnostics.configEnv" -}}
@@ -113,6 +125,22 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   value: {{ .Values.config.retentionIntervalMs | quote }}
 - name: RETENTION_BATCH_SIZE
   value: {{ .Values.config.retentionBatchSize | quote }}
+- name: ALERT_ENABLED
+  value: {{ .Values.config.alertEnabled | quote }}
+- name: ALERT_INTERVAL_MS
+  value: {{ .Values.config.alertIntervalMs | quote }}
+- name: ALERT_BATCH_SIZE
+  value: {{ .Values.config.alertBatchSize | quote }}
+- name: ALERT_TIMEOUT_SECONDS
+  value: {{ .Values.config.alertTimeoutSeconds | quote }}
+{{- if .Values.config.alertWebhookUrl }}
+- name: ALERT_WEBHOOK_URL
+  value: {{ .Values.config.alertWebhookUrl | quote }}
+{{- end }}
+- name: ALERT_SMTP_FROM
+  value: {{ .Values.config.alertSmtpFrom | quote }}
+- name: ALERT_SMTP_TO
+  value: {{ .Values.config.alertSmtpTo | quote }}
 - name: PROCESSING_TEMP_DIR
   value: /var/lib/cognia/diagnostics/tmp
 - name: RUST_LOG

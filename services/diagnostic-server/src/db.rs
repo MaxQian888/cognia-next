@@ -128,6 +128,19 @@ pub struct RetentionJobRecord {
     pub attempts: i32,
 }
 
+#[derive(Debug, Clone, FromRow)]
+pub struct AlertDeliveryRecord {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub project_id: Uuid,
+    pub incident_id: Option<Uuid>,
+    pub group_id: Option<Uuid>,
+    pub alert_kind: String,
+    pub transport: String,
+    pub attempts: i32,
+    pub payload: serde_json::Value,
+}
+
 impl DiagnosticRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -483,6 +496,82 @@ impl DiagnosticRepository {
         .await?;
         tx.commit().await?;
         Ok(record)
+    }
+
+    pub async fn claim_next_alert(
+        &self,
+        tenant_id: Uuid,
+    ) -> anyhow::Result<Option<AlertDeliveryRecord>> {
+        let mut tx = self.tenant_transaction(tenant_id).await?;
+        let record = sqlx::query_as::<_, AlertDeliveryRecord>(
+            r#"WITH candidate AS (
+                SELECT id FROM alert_deliveries
+                WHERE (
+                    state IN ('pending', 'failed') AND next_attempt_at <= now() AND attempts < 10
+                ) OR (
+                    state = 'sending' AND updated_at < now() - interval '10 minutes'
+                )
+                ORDER BY next_attempt_at, created_at
+                FOR UPDATE SKIP LOCKED LIMIT 1
+            )
+            UPDATE alert_deliveries SET state = 'sending', attempts = attempts + 1,
+                last_error_code = NULL, updated_at = now()
+            WHERE id = (SELECT id FROM candidate)
+            RETURNING id, tenant_id, project_id, incident_id, group_id, alert_kind,
+                transport, attempts, payload"#,
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(record)
+    }
+
+    pub async fn complete_alert(&self, delivery: &AlertDeliveryRecord) -> anyhow::Result<()> {
+        let mut tx = self.tenant_transaction(delivery.tenant_id).await?;
+        sqlx::query(
+            "UPDATE alert_deliveries SET state = 'sent', sent_at = now(), updated_at = now() WHERE id = $1",
+        )
+        .bind(delivery.id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn fail_alert(
+        &self,
+        delivery: &AlertDeliveryRecord,
+        error_code: &str,
+        retry_at: DateTime<Utc>,
+        retryable: bool,
+    ) -> anyhow::Result<()> {
+        let mut tx = self.tenant_transaction(delivery.tenant_id).await?;
+        sqlx::query(
+            r#"UPDATE alert_deliveries SET state = 'failed', last_error_code = $2,
+                next_attempt_at = $3, attempts = CASE WHEN $4 THEN attempts ELSE 10 END,
+                updated_at = now() WHERE id = $1"#,
+        )
+        .bind(delivery.id)
+        .bind(error_code)
+        .bind(retry_at)
+        .bind(retryable)
+        .execute(&mut *tx)
+        .await?;
+        if !retryable {
+            audit_admin(
+                &mut tx,
+                delivery.tenant_id,
+                "alert.permanent_failure",
+                Some(serde_json::json!({
+                    "deliveryId": delivery.id,
+                    "transport": delivery.transport,
+                    "code": error_code,
+                })),
+            )
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn complete_retention_artifact(

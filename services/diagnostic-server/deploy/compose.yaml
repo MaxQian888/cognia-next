@@ -102,6 +102,12 @@ services:
       RETENTION_ENABLED: "true"
       RETENTION_INTERVAL_MS: "5000"
       RETENTION_BATCH_SIZE: "32"
+      ALERT_ENABLED: "true"
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_WEBHOOK_SECRET: ${ALERT_WEBHOOK_SECRET:-}
+      ALERT_SMTP_URL: ${ALERT_SMTP_URL:-}
+      ALERT_SMTP_FROM: ${ALERT_SMTP_FROM:-diagnostics@localhost}
+      ALERT_SMTP_TO: ${ALERT_SMTP_TO:-operators@localhost}
     ports:
       - "18080:8080"
     volumes:

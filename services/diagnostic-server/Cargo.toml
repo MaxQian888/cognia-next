@@ -27,6 +27,7 @@ ed25519-dalek = "2"
 hex = "0.4"
 hmac = "0.12"
 jsonwebtoken = "9"
+lettre = { version = "0.11.22", default-features = false, features = ["builder", "smtp-transport", "pool", "tokio1-rustls", "ring", "webpki-roots"] }
 object_store = { version = "0.12", features = ["aws"] }
 rand = "0.8"
 regex = "1"

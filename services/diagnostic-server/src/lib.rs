@@ -1,3 +1,4 @@
+pub mod alert;
 pub mod api;
 pub mod auth;
 pub mod config;
@@ -16,6 +17,7 @@ pub use model::{
     ProcessingState,
 };
 
+pub use alert::{AlertDispatcher, AlertWorker};
 pub use api::{build_router, AppState};
 pub use auth::{GrantClaims, GrantRole, GrantSigner};
 pub use config::ServerConfig;
