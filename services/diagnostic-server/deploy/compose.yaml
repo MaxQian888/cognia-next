@@ -99,6 +99,9 @@ services:
       KMS_ACCESS_KEY_ID: test
       KMS_SECRET_ACCESS_KEY: test
       PROCESSING_ENABLED: "true"
+      RETENTION_ENABLED: "true"
+      RETENTION_INTERVAL_MS: "5000"
+      RETENTION_BATCH_SIZE: "32"
     ports:
       - "18080:8080"
     volumes:

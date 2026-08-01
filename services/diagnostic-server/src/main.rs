@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use anyhow::Context;
 use cognia_diagnostic_server::{
     build_processor, build_router, AppState, ArtifactStore, DiagnosticRepository, GrantSigner,
-    PrivacyGate, ServerConfig,
+    PrivacyGate, RetentionWorker, ServerConfig,
 };
 use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
@@ -50,13 +50,27 @@ async fn main() -> anyhow::Result<()> {
             )
         })
         .transpose()?;
+    let retention = config.retention_enabled.then(|| {
+        RetentionWorker::new(
+            repository.clone(),
+            artifacts.clone(),
+            config.retention_interval,
+            config.retention_batch_size,
+        )
+    });
     let state = AppState::new(config.clone(), repository, artifacts, signer, privacy);
     let listener = TcpListener::bind(config.bind_address)
         .await
         .context("bind diagnostic service")?;
     tracing::info!(address = %config.bind_address, "diagnostic service listening");
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-    let mut processor_handle = processor.map(|processor| tokio::spawn(processor.run(shutdown_rx)));
+    let mut worker_handles = Vec::new();
+    if let Some(processor) = processor {
+        worker_handles.push(tokio::spawn(processor.run(shutdown_rx.clone())));
+    }
+    if let Some(retention) = retention {
+        worker_handles.push(tokio::spawn(retention.run(shutdown_rx)));
+    }
     let shutdown_signal_tx = shutdown_tx.clone();
     let server_result = axum::serve(listener, build_router(state))
         .with_graceful_shutdown(async move {
@@ -65,12 +79,12 @@ async fn main() -> anyhow::Result<()> {
         })
         .await;
     let _ = shutdown_tx.send(true);
-    if let Some(handle) = processor_handle.as_mut() {
-        if tokio::time::timeout(Duration::from_secs(5), &mut *handle)
+    for mut handle in worker_handles {
+        if tokio::time::timeout(Duration::from_secs(5), &mut handle)
             .await
             .is_err()
         {
-            tracing::warn!("diagnostic processor drain timed out; unfinished work remains queued");
+            tracing::warn!("diagnostic worker drain timed out; unfinished work remains queued");
             handle.abort();
         }
     }

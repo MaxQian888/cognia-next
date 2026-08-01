@@ -30,6 +30,9 @@ pub struct ServerConfig {
     pub kms_secret_access_key: String,
     pub kms_session_token: Option<String>,
     pub kms_timeout: Duration,
+    pub retention_enabled: bool,
+    pub retention_interval: Duration,
+    pub retention_batch_size: usize,
     pub migrate_only: bool,
 }
 
@@ -56,6 +59,12 @@ impl ServerConfig {
             .context("parse PROCESSING_BATCH_SIZE")?;
         if processing_batch_size == 0 || processing_batch_size > 1_000 {
             bail!("PROCESSING_BATCH_SIZE must be between 1 and 1000");
+        }
+        let retention_batch_size = env_or("RETENTION_BATCH_SIZE", "32")
+            .parse()
+            .context("parse RETENTION_BATCH_SIZE")?;
+        if retention_batch_size == 0 || retention_batch_size > 1_000 {
+            bail!("RETENTION_BATCH_SIZE must be between 1 and 1000");
         }
         let kms_region = env_or("KMS_REGION", "us-east-1");
         let kms_endpoint = env_or(
@@ -111,6 +120,16 @@ impl ServerConfig {
                     .parse()
                     .context("parse KMS_TIMEOUT_SECONDS")?,
             ),
+            retention_enabled: parse_bool(
+                "RETENTION_ENABLED",
+                &env_or("RETENTION_ENABLED", "true"),
+            )?,
+            retention_interval: Duration::from_millis(
+                env_or("RETENTION_INTERVAL_MS", "5000")
+                    .parse()
+                    .context("parse RETENTION_INTERVAL_MS")?,
+            ),
+            retention_batch_size,
             migrate_only: parse_bool(
                 "DIAGNOSTIC_MIGRATE_ONLY",
                 &env_or("DIAGNOSTIC_MIGRATE_ONLY", "false"),

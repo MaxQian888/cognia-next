@@ -22,5 +22,8 @@ data:
   PROCESSING_BATCH_SIZE: {{ .Values.config.processingBatchSize | quote }}
   PROCESSING_INTERVAL_MS: {{ .Values.config.processingIntervalMs | quote }}
   MINIDUMP_STACKWALK_TIMEOUT_SECONDS: {{ .Values.config.minidumpStackwalkTimeoutSeconds | quote }}
+  RETENTION_ENABLED: {{ .Values.config.retentionEnabled | quote }}
+  RETENTION_INTERVAL_MS: {{ .Values.config.retentionIntervalMs | quote }}
+  RETENTION_BATCH_SIZE: {{ .Values.config.retentionBatchSize | quote }}
   PROCESSING_TEMP_DIR: /var/lib/cognia/diagnostics/tmp
   RUST_LOG: cognia_diagnostic_server=info,tower_http=info

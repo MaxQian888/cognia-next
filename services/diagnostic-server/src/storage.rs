@@ -103,10 +103,10 @@ impl ArtifactStore {
     }
 
     pub async fn delete(&self, key: &str) -> anyhow::Result<()> {
-        self.inner
-            .delete(&Path::from(key))
-            .await
-            .context("delete diagnostic artifact")
+        match self.inner.delete(&Path::from(key)).await {
+            Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
+            Err(error) => Err(error).context("delete diagnostic artifact"),
+        }
     }
 
     pub async fn delete_many(&self, keys: &[String]) -> anyhow::Result<()> {
@@ -212,6 +212,7 @@ mod tests {
             store.get(tenant_id, "tenant/incident/1").await.unwrap(),
             b"safe"
         );
+        store.delete("tenant/incident/1").await.unwrap();
         store.delete("tenant/incident/1").await.unwrap();
         assert!(store.get(tenant_id, "tenant/incident/1").await.is_err());
     }

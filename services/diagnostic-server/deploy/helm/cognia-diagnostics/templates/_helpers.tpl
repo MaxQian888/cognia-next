@@ -107,6 +107,12 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   value: {{ .Values.config.processingIntervalMs | quote }}
 - name: MINIDUMP_STACKWALK_TIMEOUT_SECONDS
   value: {{ .Values.config.minidumpStackwalkTimeoutSeconds | quote }}
+- name: RETENTION_ENABLED
+  value: {{ .Values.config.retentionEnabled | quote }}
+- name: RETENTION_INTERVAL_MS
+  value: {{ .Values.config.retentionIntervalMs | quote }}
+- name: RETENTION_BATCH_SIZE
+  value: {{ .Values.config.retentionBatchSize | quote }}
 - name: PROCESSING_TEMP_DIR
   value: /var/lib/cognia/diagnostics/tmp
 - name: RUST_LOG

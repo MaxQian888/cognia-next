@@ -40,6 +40,9 @@ config:
   processingBatchSize: "32"
   processingIntervalMs: "1000"
   minidumpStackwalkTimeoutSeconds: "120"
+  retentionEnabled: "true"
+  retentionIntervalMs: "5000"
+  retentionBatchSize: "32"
 
 existingSecret:
   name: cognia-diagnostics
@@ -94,4 +97,3 @@ migration:
   enabled: true
   backoffLimit: 3
   ttlSecondsAfterFinished: 86400
-

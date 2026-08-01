@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::{
     model::{IncidentState, ProcessingState},
     processing::{retry_delay, ProcessingFailure},
+    retention::RetentionPolicy,
 };
 
 #[derive(Clone)]
@@ -115,6 +116,16 @@ pub struct TenantKeyRecord {
     pub wrapped_dek: Vec<u8>,
     pub kms_key_id: String,
     pub state: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct RetentionJobRecord {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub incident_id: Option<Uuid>,
+    pub object_key: Option<String>,
+    pub resource_kind: String,
+    pub attempts: i32,
 }
 
 impl DiagnosticRepository {
@@ -446,6 +457,132 @@ impl DiagnosticRepository {
             .await?)
     }
 
+    pub async fn claim_next_retention(
+        &self,
+        tenant_id: Uuid,
+    ) -> anyhow::Result<Option<RetentionJobRecord>> {
+        let mut tx = self.tenant_transaction(tenant_id).await?;
+        let record = sqlx::query_as::<_, RetentionJobRecord>(
+            r#"WITH candidate AS (
+                SELECT id FROM retention_jobs
+                WHERE (
+                    state IN ('pending', 'failed') AND execute_after <= now() AND attempts < 10
+                ) OR (
+                    state = 'running' AND updated_at < now() - interval '10 minutes'
+                )
+                ORDER BY execute_after, created_at
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+            )
+            UPDATE retention_jobs SET state = 'running', attempts = attempts + 1,
+                last_error_code = NULL, updated_at = now()
+            WHERE id = (SELECT id FROM candidate)
+            RETURNING id, tenant_id, incident_id, object_key, resource_kind, attempts"#,
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(record)
+    }
+
+    pub async fn complete_retention_artifact(
+        &self,
+        job: &RetentionJobRecord,
+    ) -> anyhow::Result<()> {
+        let mut tx = self.tenant_transaction(job.tenant_id).await?;
+        let object_key = job.object_key.as_deref().unwrap_or_default();
+        match job.resource_kind.as_str() {
+            "incident_artifact" => {
+                sqlx::query("DELETE FROM upload_parts WHERE object_key = $1")
+                    .bind(object_key)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            "symbol" => {
+                sqlx::query("DELETE FROM symbols WHERE object_key = $1")
+                    .bind(object_key)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            _ => anyhow::bail!("retention job does not reference an artifact"),
+        }
+        sqlx::query(
+            "UPDATE retention_jobs SET state = 'complete', completed_at = now(), updated_at = now() WHERE id = $1",
+        )
+        .bind(job.id)
+        .execute(&mut *tx)
+        .await?;
+        audit_admin(
+            &mut tx,
+            job.tenant_id,
+            "retention.artifact_deleted",
+            Some(serde_json::json!({"jobId": job.id, "resourceKind": job.resource_kind})),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn complete_retention_metadata(
+        &self,
+        job: &RetentionJobRecord,
+    ) -> anyhow::Result<()> {
+        let incident_id = job
+            .incident_id
+            .ok_or_else(|| anyhow::anyhow!("metadata retention job is missing an incident"))?;
+        let mut tx = self.tenant_transaction(job.tenant_id).await?;
+        audit(
+            &mut tx,
+            job.tenant_id,
+            "retention.incident_deleted",
+            incident_id,
+            Some(serde_json::json!({"jobId": job.id})),
+        )
+        .await?;
+        sqlx::query(
+            "UPDATE retention_jobs SET state = 'complete', completed_at = now(), updated_at = now() WHERE id = $1",
+        )
+        .bind(job.id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("DELETE FROM incidents WHERE id = $1")
+            .bind(incident_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn fail_retention(
+        &self,
+        job: &RetentionJobRecord,
+        error_code: &str,
+        retry_at: DateTime<Utc>,
+        retryable: bool,
+    ) -> anyhow::Result<()> {
+        let mut tx = self.tenant_transaction(job.tenant_id).await?;
+        sqlx::query(
+            r#"UPDATE retention_jobs SET state = 'failed', last_error_code = $2,
+                execute_after = $3, updated_at = now() WHERE id = $1"#,
+        )
+        .bind(job.id)
+        .bind(error_code)
+        .bind(retry_at)
+        .execute(&mut *tx)
+        .await?;
+        if !retryable {
+            audit_admin(
+                &mut tx,
+                job.tenant_id,
+                "retention.permanent_failure",
+                Some(serde_json::json!({"jobId": job.id, "code": error_code})),
+            )
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn claim_next_processing(
         &self,
         tenant_id: Uuid,
@@ -586,6 +723,7 @@ impl DiagnosticRepository {
             })),
         )
         .await?;
+        schedule_symbol_retention(&mut tx, input.tenant_id, &record.object_key).await?;
         tx.commit().await?;
         Ok(record)
     }
@@ -710,6 +848,7 @@ impl DiagnosticRepository {
             )
             .await?;
         }
+        schedule_incident_retention(&mut tx, incident.tenant_id, incident.id, false).await?;
         audit(
             &mut tx,
             incident.tenant_id,
@@ -768,6 +907,7 @@ impl DiagnosticRepository {
         .bind(incident_id)
         .execute(&mut *tx)
         .await?;
+        schedule_incident_retention(&mut tx, tenant_id, incident_id, true).await?;
         audit(&mut tx, tenant_id, "consent.withdrawn", incident_id, None).await?;
         tx.commit().await?;
         Ok(())
@@ -793,6 +933,9 @@ impl DiagnosticRepository {
         .bind(state)
         .execute(&mut *tx)
         .await?;
+        if matches!(state, "cancelled" | "deleted") {
+            schedule_incident_retention(&mut tx, tenant_id, incident_id, true).await?;
+        }
         audit(&mut tx, tenant_id, action, incident_id, None).await?;
         tx.commit().await?;
         Ok(())
@@ -842,6 +985,118 @@ async fn enqueue_alert(
         .execute(&mut **tx)
         .await?;
     }
+    Ok(())
+}
+
+async fn tenant_retention_policy(
+    tx: &mut Transaction<'_, Postgres>,
+    tenant_id: Uuid,
+) -> anyhow::Result<RetentionPolicy> {
+    let overrides = sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT retention_overrides FROM tenants WHERE id = $1",
+    )
+    .bind(tenant_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(RetentionPolicy::from_overrides(&overrides))
+}
+
+async fn schedule_incident_retention(
+    tx: &mut Transaction<'_, Postgres>,
+    tenant_id: Uuid,
+    incident_id: Uuid,
+    immediate: bool,
+) -> anyhow::Result<()> {
+    let policy = tenant_retention_policy(tx, tenant_id).await?;
+    let parts = sqlx::query_as::<_, (String, String)>(
+        "SELECT object_key, artifact_kind FROM upload_parts WHERE incident_id = $1",
+    )
+    .bind(incident_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let now = Utc::now();
+    for (object_key, artifact_kind) in parts {
+        let execute_after = if immediate {
+            now
+        } else {
+            now + chrono::Duration::days(policy.artifact_days(&artifact_kind) as i64)
+        };
+        upsert_retention_job(
+            tx,
+            tenant_id,
+            Some(incident_id),
+            Some(&object_key),
+            "incident_artifact",
+            execute_after,
+        )
+        .await?;
+    }
+    let metadata_at = if immediate {
+        now
+    } else {
+        now + chrono::Duration::days(policy.metadata_days as i64)
+    };
+    upsert_retention_job(
+        tx,
+        tenant_id,
+        Some(incident_id),
+        None,
+        "incident_metadata",
+        metadata_at,
+    )
+    .await
+}
+
+async fn schedule_symbol_retention(
+    tx: &mut Transaction<'_, Postgres>,
+    tenant_id: Uuid,
+    object_key: &str,
+) -> anyhow::Result<()> {
+    let policy = tenant_retention_policy(tx, tenant_id).await?;
+    upsert_retention_job(
+        tx,
+        tenant_id,
+        None,
+        Some(object_key),
+        "symbol",
+        Utc::now() + chrono::Duration::days(policy.symbol_days as i64),
+    )
+    .await
+}
+
+async fn upsert_retention_job(
+    tx: &mut Transaction<'_, Postgres>,
+    tenant_id: Uuid,
+    incident_id: Option<Uuid>,
+    object_key: Option<&str>,
+    resource_kind: &str,
+    execute_after: DateTime<Utc>,
+) -> anyhow::Result<()> {
+    let dedupe_key = format!(
+        "{}:{}",
+        resource_kind,
+        object_key
+            .map(str::to_owned)
+            .or_else(|| incident_id.map(|id| id.to_string()))
+            .ok_or_else(|| anyhow::anyhow!("retention job requires an object or incident"))?
+    );
+    sqlx::query(
+        r#"INSERT INTO retention_jobs (
+            tenant_id, incident_id, object_key, resource_kind, dedupe_key, execute_after
+        ) VALUES ($1,$2,$3,$4,$5,$6)
+        ON CONFLICT (tenant_id, dedupe_key) DO UPDATE SET
+            execute_after = LEAST(retention_jobs.execute_after, EXCLUDED.execute_after),
+            state = CASE WHEN retention_jobs.state = 'complete' THEN 'complete' ELSE 'pending' END,
+            updated_at = now()"#,
+    )
+    .bind(tenant_id)
+    .bind(incident_id)
+    .bind(object_key)
+    .bind(resource_kind)
+    .bind(dedupe_key)
+    .bind(execute_after)
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 
