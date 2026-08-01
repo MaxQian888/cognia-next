@@ -1,7 +1,7 @@
 use crate::model::*;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
-use cognia_deployment::{OperationKind, OperationState};
+use cognia_deployment::{DeploymentTarget, DeploymentTopology, OperationKind, OperationState};
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
 use parking_lot::Mutex;
 use rustls::{ClientConfig, RootCertStore};
@@ -30,12 +30,23 @@ pub enum StoreError {
 
 #[async_trait]
 pub trait Store: Send + Sync {
+    async fn register_target(
+        &self,
+        tenant_id: &str,
+        target: DeploymentTarget,
+        idempotency_key: &str,
+    ) -> Result<ServerDetail, StoreError>;
     async fn list_servers(&self, tenant_id: &str) -> Result<Vec<ServerSummary>, StoreError>;
     async fn get_server(
         &self,
         tenant_id: &str,
         target_id: &str,
     ) -> Result<Option<ServerDetail>, StoreError>;
+    async fn get_deployment_target(
+        &self,
+        tenant_id: &str,
+        target_id: &str,
+    ) -> Result<Option<DeploymentTarget>, StoreError>;
     async fn list_logs(
         &self,
         tenant_id: &str,
@@ -100,6 +111,11 @@ pub trait Store: Send + Sync {
         target_id: &str,
         certificate_fingerprint: &str,
     ) -> Result<Option<AgentIdentity>, StoreError>;
+    async fn record_agent_heartbeat(
+        &self,
+        tenant_id: &str,
+        target_id: &str,
+    ) -> Result<(), StoreError>;
     async fn claim_operation_for_target(
         &self,
         tenant_id: &str,
@@ -126,12 +142,17 @@ pub trait Store: Send + Sync {
 #[derive(Default)]
 struct MemoryData {
     servers: HashMap<(String, String), ServerDetail>,
+    targets: HashMap<(String, String), DeploymentTarget>,
     operations: HashMap<Uuid, Operation>,
     idempotency: HashMap<(String, String), Uuid>,
     events: Vec<TenantOperationEvent>,
     leases: HashMap<String, MemoryLease>,
     enrollment_tokens: HashMap<String, MemoryEnrollment>,
     agents: HashMap<String, AgentIdentity>,
+    target_registrations: HashMap<(String, String), (Value, ServerDetail)>,
+    recovery_points: Vec<(String, RecoveryPoint)>,
+    logs: Vec<(String, LogEntry)>,
+    next_log_id: i64,
 }
 
 struct MemoryLease {
@@ -155,6 +176,36 @@ pub struct InMemoryStore {
 
 #[async_trait]
 impl Store for InMemoryStore {
+    async fn register_target(
+        &self,
+        tenant_id: &str,
+        target: DeploymentTarget,
+        idempotency_key: &str,
+    ) -> Result<ServerDetail, StoreError> {
+        let config = serde_json::to_value(&target)
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        let key = (tenant_id.to_owned(), idempotency_key.to_owned());
+        let mut data = self.inner.lock();
+        if let Some((registered_config, detail)) = data.target_registrations.get(&key) {
+            return if registered_config == &config {
+                Ok(detail.clone())
+            } else {
+                Err(StoreError::IdempotencyConflict)
+            };
+        }
+        let target_key = (tenant_id.to_owned(), target.metadata.id.clone());
+        let revision = data
+            .servers
+            .get(&target_key)
+            .map_or(1, |detail| detail.target_revision + 1);
+        let detail = target_detail(&target, revision);
+        data.servers.insert(target_key.clone(), detail.clone());
+        data.targets.insert(target_key, target);
+        data.target_registrations
+            .insert(key, (config, detail.clone()));
+        Ok(detail)
+    }
+
     async fn list_servers(&self, tenant_id: &str) -> Result<Vec<ServerSummary>, StoreError> {
         Ok(self
             .inner
@@ -179,21 +230,49 @@ impl Store for InMemoryStore {
             .cloned())
     }
 
+    async fn get_deployment_target(
+        &self,
+        tenant_id: &str,
+        target_id: &str,
+    ) -> Result<Option<DeploymentTarget>, StoreError> {
+        Ok(self
+            .inner
+            .lock()
+            .targets
+            .get(&(tenant_id.into(), target_id.into()))
+            .cloned())
+    }
+
     async fn list_logs(
         &self,
-        _tenant_id: &str,
-        _target_id: &str,
-        _limit: usize,
+        tenant_id: &str,
+        target_id: &str,
+        limit: usize,
     ) -> Result<Vec<LogEntry>, StoreError> {
-        Ok(Vec::new())
+        let data = self.inner.lock();
+        Ok(data
+            .logs
+            .iter()
+            .rev()
+            .filter(|(tenant, entry)| tenant == tenant_id && entry.server_id == target_id)
+            .take(limit.min(1000))
+            .map(|(_, entry)| entry.clone())
+            .collect())
     }
 
     async fn list_backups(
         &self,
-        _tenant_id: &str,
-        _target_id: &str,
+        tenant_id: &str,
+        target_id: &str,
     ) -> Result<Vec<RecoveryPoint>, StoreError> {
-        Ok(Vec::new())
+        Ok(self
+            .inner
+            .lock()
+            .recovery_points
+            .iter()
+            .filter(|(tenant, point)| tenant == tenant_id && point.server_id == target_id)
+            .map(|(_, point)| point.clone())
+            .collect())
     }
 
     async fn create_operation(&self, input: NewOperation) -> Result<Operation, StoreError> {
@@ -404,6 +483,21 @@ impl Store for InMemoryStore {
             .cloned())
     }
 
+    async fn record_agent_heartbeat(
+        &self,
+        tenant_id: &str,
+        target_id: &str,
+    ) -> Result<(), StoreError> {
+        let mut data = self.inner.lock();
+        let server = data
+            .servers
+            .get_mut(&(tenant_id.into(), target_id.into()))
+            .ok_or(StoreError::NotFound)?;
+        server.summary.health = ServerHealth::Healthy;
+        server.summary.last_seen_at = Some(Utc::now());
+        Ok(())
+    }
+
     async fn claim_operation_for_target(
         &self,
         tenant_id: &str,
@@ -458,7 +552,11 @@ impl Store for InMemoryStore {
         operation.result = result;
         operation.error = error;
         operation.updated_at = Utc::now();
-        Ok(operation.clone())
+        let operation = operation.clone();
+        if next == OperationState::Succeeded {
+            materialize_memory_result(&mut data, &operation)?;
+        }
+        Ok(operation)
     }
 }
 
@@ -628,6 +726,21 @@ impl PgStore {
         if !current.state.can_transition_to(next) {
             return Err(StoreError::InvalidTransition);
         }
+        let recovery_points = if next == OperationState::Succeeded {
+            recovery_points_from_result(&current, result.as_ref())?
+        } else {
+            Vec::new()
+        };
+        let release_digest = if next == OperationState::Succeeded {
+            release_digest_from_result(&current, result.as_ref())
+        } else {
+            None
+        };
+        let log_lines = if next == OperationState::Succeeded {
+            log_lines_from_result(&current, result.as_ref())?
+        } else {
+            Vec::new()
+        };
         let next_value = operation_state_string(next);
         let error_value = error
             .map(serde_json::to_value)
@@ -659,6 +772,59 @@ impl PgStore {
                 .await
                 .map_err(database_error)?;
         }
+        if next == OperationState::Succeeded {
+            transaction
+                .execute(
+                    "UPDATE server_reports SET health='healthy', last_seen_at=now(),
+                       release_digest=COALESCE($3, release_digest)
+                     WHERE tenant_id=$1 AND id=$2",
+                    &[&current.tenant_id, &current.target_id, &release_digest],
+                )
+                .await
+                .map_err(database_error)?;
+            for point in recovery_points {
+                let kind = serde_json::to_value(point.kind)
+                    .map_err(|error| StoreError::Database(error.to_string()))?
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                transaction
+                    .execute(
+                        "INSERT INTO recovery_points
+                           (tenant_id, target_id, id, kind, manifest_sha256, size_bytes, verified, created_at)
+                         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                         ON CONFLICT (tenant_id, target_id, id) DO UPDATE SET
+                           kind=EXCLUDED.kind,
+                           manifest_sha256=EXCLUDED.manifest_sha256,
+                           size_bytes=EXCLUDED.size_bytes,
+                           verified=EXCLUDED.verified,
+                           created_at=EXCLUDED.created_at",
+                        &[
+                            &current.tenant_id,
+                            &current.target_id,
+                            &point.id,
+                            &kind,
+                            &point.manifest_sha256,
+                            &point.size_bytes,
+                            &point.verified,
+                            &point.created_at,
+                        ],
+                    )
+                    .await
+                    .map_err(database_error)?;
+            }
+            for line in log_lines {
+                transaction
+                    .execute(
+                        "INSERT INTO log_entries
+                           (tenant_id, target_id, timestamp, level, component, message)
+                         VALUES ($1,$2,now(),'info','cognia-server',$3)",
+                        &[&current.tenant_id, &current.target_id, &line],
+                    )
+                    .await
+                    .map_err(database_error)?;
+            }
+        }
         transaction.commit().await.map_err(database_error)?;
         operation_from_row(&row)
     }
@@ -673,6 +839,118 @@ impl PgStore {
 
 #[async_trait]
 impl Store for PgStore {
+    async fn register_target(
+        &self,
+        tenant_id: &str,
+        target: DeploymentTarget,
+        idempotency_key: &str,
+    ) -> Result<ServerDetail, StoreError> {
+        let config = serde_json::to_value(&target)
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        let request_hash = hex::encode(Sha256::digest(config.to_string().as_bytes()));
+        let mut client = self.client().await?;
+        let transaction = client.transaction().await.map_err(database_error)?;
+        transaction
+            .query_one(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                &[&format!("{tenant_id}:{idempotency_key}")],
+            )
+            .await
+            .map_err(database_error)?;
+        if let Some(row) = transaction
+            .query_opt(
+                "SELECT request_hash, target_id FROM target_registrations
+                 WHERE tenant_id=$1 AND idempotency_key=$2",
+                &[&tenant_id, &idempotency_key],
+            )
+            .await
+            .map_err(database_error)?
+        {
+            let stored_hash: String = row.get("request_hash");
+            if stored_hash != request_hash {
+                return Err(StoreError::IdempotencyConflict);
+            }
+            let target_id: String = row.get("target_id");
+            let row = transaction
+                .query_one(
+                    "SELECT r.*, t.revision, t.production_certified, t.certification_issues
+                     FROM server_reports r JOIN deployment_targets t
+                       ON t.tenant_id=r.tenant_id AND t.id=r.id
+                     WHERE r.tenant_id=$1 AND r.id=$2",
+                    &[&tenant_id, &target_id],
+                )
+                .await
+                .map_err(database_error)?;
+            return server_detail_from_row(&row);
+        }
+
+        let issues = target
+            .production_certification_issues()
+            .into_iter()
+            .map(|issue| format!("{issue:?}"))
+            .collect::<Vec<_>>();
+        let production_certified = issues.is_empty();
+        let topology = topology_name(target.spec.topology);
+        let public_url = target.spec.public_url.to_string();
+        let target_id = target.metadata.id.clone();
+        let label = target.metadata.label.clone();
+        transaction
+            .query_one(
+                "INSERT INTO deployment_targets
+                   (tenant_id, id, label, config, revision, production_certified, certification_issues)
+                 VALUES ($1, $2, $3, $4, 1, $5, $6)
+                 ON CONFLICT (tenant_id, id) DO UPDATE SET
+                   label=EXCLUDED.label, config=EXCLUDED.config,
+                   revision=deployment_targets.revision + 1,
+                   production_certified=EXCLUDED.production_certified,
+                   certification_issues=EXCLUDED.certification_issues, updated_at=now()
+                 RETURNING revision",
+                &[
+                    &tenant_id,
+                    &target_id,
+                    &label,
+                    &config,
+                    &production_certified,
+                    &issues,
+                ],
+            )
+            .await
+            .map_err(database_error)?;
+        transaction
+            .execute(
+                "INSERT INTO server_reports
+                   (tenant_id, id, label, topology, public_url, health)
+                 VALUES ($1, $2, $3, $4, $5, 'unknown')
+                 ON CONFLICT (tenant_id, id) DO UPDATE SET
+                   label=EXCLUDED.label, topology=EXCLUDED.topology, public_url=EXCLUDED.public_url",
+                &[&tenant_id, &target_id, &label, &topology, &public_url],
+            )
+            .await
+            .map_err(database_error)?;
+        transaction
+            .execute(
+                "INSERT INTO target_registrations
+                   (tenant_id, idempotency_key, request_hash, target_id)
+                 VALUES ($1, $2, $3, $4)",
+                &[&tenant_id, &idempotency_key, &request_hash, &target_id],
+            )
+            .await
+            .map_err(database_error)?;
+        let row = transaction
+            .query_one(
+                "SELECT r.*, t.revision, t.production_certified, t.certification_issues
+                 FROM server_reports r JOIN deployment_targets t
+                   ON t.tenant_id=r.tenant_id AND t.id=r.id
+                 WHERE r.tenant_id=$1 AND r.id=$2",
+                &[&tenant_id, &target_id],
+            )
+            .await
+            .map_err(database_error)?;
+        let detail = server_detail_from_row(&row)?;
+        transaction.commit().await.map_err(database_error)?;
+        Ok(detail)
+    }
+
     async fn list_servers(&self, tenant_id: &str) -> Result<Vec<ServerSummary>, StoreError> {
         let client = self.client().await?;
         let rows = client
@@ -702,14 +980,25 @@ impl Store for PgStore {
             )
             .await
             .map_err(database_error)?;
+        row.map(|row| server_detail_from_row(&row)).transpose()
+    }
+
+    async fn get_deployment_target(
+        &self,
+        tenant_id: &str,
+        target_id: &str,
+    ) -> Result<Option<DeploymentTarget>, StoreError> {
+        let client = self.client().await?;
+        let row = client
+            .query_opt(
+                "SELECT config FROM deployment_targets WHERE tenant_id=$1 AND id=$2",
+                &[&tenant_id, &target_id],
+            )
+            .await
+            .map_err(database_error)?;
         row.map(|row| {
-            Ok(ServerDetail {
-                summary: server_from_row(&row)?,
-                target_revision: row.get("revision"),
-                production_certified: row.get("production_certified"),
-                certification_issues: row.get("certification_issues"),
-                capabilities: ProviderCapabilities::default(),
-            })
+            serde_json::from_value(row.get("config"))
+                .map_err(|error| StoreError::Database(error.to_string()))
         })
         .transpose()
     }
@@ -1036,6 +1325,26 @@ impl Store for PgStore {
         }))
     }
 
+    async fn record_agent_heartbeat(
+        &self,
+        tenant_id: &str,
+        target_id: &str,
+    ) -> Result<(), StoreError> {
+        let client = self.client().await?;
+        let updated = client
+            .execute(
+                "UPDATE server_reports SET health='healthy', last_seen_at=now()
+                 WHERE tenant_id=$1 AND id=$2",
+                &[&tenant_id, &target_id],
+            )
+            .await
+            .map_err(database_error)?;
+        if updated == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
     async fn claim_operation_for_target(
         &self,
         tenant_id: &str,
@@ -1067,6 +1376,135 @@ impl Store for PgStore {
         self.transition_claimed_operation(operation_id, worker_id, next, result, error)
             .await
     }
+}
+
+fn materialize_memory_result(
+    data: &mut MemoryData,
+    operation: &Operation,
+) -> Result<(), StoreError> {
+    let points = recovery_points_from_result(operation, operation.result.as_ref())?;
+    for point in points {
+        data.recovery_points.retain(|(tenant, existing)| {
+            tenant != &operation.tenant_id
+                || existing.server_id != operation.target_id
+                || existing.id != point.id
+        });
+        data.recovery_points
+            .push((operation.tenant_id.clone(), point));
+    }
+    for line in log_lines_from_result(operation, operation.result.as_ref())? {
+        data.next_log_id += 1;
+        data.logs.push((
+            operation.tenant_id.clone(),
+            LogEntry {
+                id: data.next_log_id,
+                server_id: operation.target_id.clone(),
+                timestamp: Utc::now(),
+                level: "info".into(),
+                component: "cognia-server".into(),
+                message: line,
+            },
+        ));
+    }
+    if let Some(server) = data
+        .servers
+        .get_mut(&(operation.tenant_id.clone(), operation.target_id.clone()))
+    {
+        server.summary.health = ServerHealth::Healthy;
+        server.summary.last_seen_at = Some(Utc::now());
+        if let Some(release) = release_digest_from_result(operation, operation.result.as_ref()) {
+            server.summary.release_digest = Some(release);
+        }
+    }
+    Ok(())
+}
+
+fn log_lines_from_result(
+    operation: &Operation,
+    result: Option<&Value>,
+) -> Result<Vec<String>, StoreError> {
+    if operation.kind != OperationKind::CollectLogs {
+        return Ok(Vec::new());
+    }
+    let stdout = result
+        .and_then(|value| value.get("stdout"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| StoreError::Database("collect-logs result omitted stdout".into()))?;
+    Ok(stdout
+        .lines()
+        .take(1000)
+        .map(|line| {
+            let mut end = line.len().min(64 * 1024);
+            while !line.is_char_boundary(end) {
+                end -= 1;
+            }
+            line[..end].to_owned()
+        })
+        .collect())
+}
+
+fn recovery_points_from_result(
+    operation: &Operation,
+    result: Option<&Value>,
+) -> Result<Vec<RecoveryPoint>, StoreError> {
+    if operation.kind != OperationKind::Backup {
+        return Ok(Vec::new());
+    }
+    let report: AgentBackupResult = serde_json::from_value(
+        result
+            .cloned()
+            .ok_or_else(|| StoreError::Database("backup result is missing".into()))?,
+    )
+    .map_err(|error| StoreError::Database(format!("invalid backup result: {error}")))?;
+    if report.recovery_points.is_empty() {
+        return Err(StoreError::Database(
+            "backup result contains no recovery points".into(),
+        ));
+    }
+    report
+        .recovery_points
+        .into_iter()
+        .map(|point| {
+            if point.id.is_empty()
+                || point.id.len() > 128
+                || point.size_bytes < 0
+                || point.manifest_sha256.len() != 64
+                || !point
+                    .manifest_sha256
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err(StoreError::Database(
+                    "backup recovery point failed validation".into(),
+                ));
+            }
+            Ok(RecoveryPoint {
+                id: point.id,
+                server_id: operation.target_id.clone(),
+                created_at: point.created_at,
+                kind: point.kind,
+                manifest_sha256: point.manifest_sha256,
+                size_bytes: point.size_bytes,
+                verified: point.verified,
+            })
+        })
+        .collect()
+}
+
+fn release_digest_from_result(operation: &Operation, result: Option<&Value>) -> Option<String> {
+    if !matches!(
+        operation.kind,
+        OperationKind::Deploy | OperationKind::Upgrade | OperationKind::Rollback
+    ) {
+        return None;
+    }
+    result
+        .and_then(|value| value.get("release"))
+        .or_else(|| result.and_then(|value| value.get("restoredRelease")))
+        .and_then(|release| release.get("serverImage"))
+        .and_then(Value::as_str)
+        .filter(|image| image.contains("@sha256:"))
+        .map(str::to_owned)
 }
 
 fn hash_token(token: &str) -> String {
@@ -1129,6 +1567,46 @@ fn server_from_row(row: &Row) -> Result<ServerSummary, StoreError> {
     })
 }
 
+fn server_detail_from_row(row: &Row) -> Result<ServerDetail, StoreError> {
+    Ok(ServerDetail {
+        summary: server_from_row(row)?,
+        target_revision: row.get("revision"),
+        production_certified: row.get("production_certified"),
+        certification_issues: row.get("certification_issues"),
+        capabilities: ProviderCapabilities::default(),
+    })
+}
+
+fn topology_name(topology: DeploymentTopology) -> &'static str {
+    match topology {
+        DeploymentTopology::Compose => "compose",
+        DeploymentTopology::Kubernetes => "kubernetes",
+    }
+}
+
+fn target_detail(target: &DeploymentTarget, revision: i64) -> ServerDetail {
+    let certification_issues = target
+        .production_certification_issues()
+        .into_iter()
+        .map(|issue| format!("{issue:?}"))
+        .collect::<Vec<_>>();
+    ServerDetail {
+        summary: ServerSummary {
+            id: target.metadata.id.clone(),
+            label: target.metadata.label.clone(),
+            topology: topology_name(target.spec.topology).into(),
+            public_url: target.spec.public_url.to_string(),
+            health: ServerHealth::Unknown,
+            release_digest: Some(target.spec.images.server.clone()),
+            last_seen_at: None,
+        },
+        target_revision: revision,
+        production_certified: certification_issues.is_empty(),
+        certification_issues,
+        capabilities: ProviderCapabilities::default(),
+    }
+}
+
 fn recovery_point_from_row(row: &Row) -> Result<RecoveryPoint, StoreError> {
     let kind: String = row.get("kind");
     Ok(RecoveryPoint {
@@ -1154,4 +1632,133 @@ fn event_from_row(row: &Row) -> Result<OperationEvent, StoreError> {
         timestamp: row.get("created_at"),
         message: row.get("message"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn successful_backup_results_become_queryable_recovery_points() {
+        let store = InMemoryStore::default();
+        let operation = store
+            .create_operation(NewOperation {
+                tenant_id: "tenant-a".into(),
+                target_id: "staging".into(),
+                kind: OperationKind::Backup,
+                request: json!({}),
+                created_by: "operator".into(),
+                idempotency_key: "backup-1".into(),
+                admin_lease: None,
+            })
+            .await
+            .unwrap();
+        store
+            .claim_operation_for_target("tenant-a", "staging", "agent-1", 60)
+            .await
+            .unwrap()
+            .expect("claimed operation");
+        store
+            .transition_operation(
+                operation.id,
+                "agent-1",
+                OperationState::Preparing,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        store
+            .transition_operation(
+                operation.id,
+                "agent-1",
+                OperationState::Executing,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        store
+            .transition_operation(
+                operation.id,
+                "agent-1",
+                OperationState::Verifying,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        store
+            .transition_operation(
+                operation.id,
+                "agent-1",
+                OperationState::Succeeded,
+                Some(json!({
+                    "recoveryPoints": [{
+                        "id": "recovery-1",
+                        "kind": "object-store",
+                        "manifestSha256": "a".repeat(64),
+                        "sizeBytes": 4096,
+                        "verified": true,
+                        "createdAt": "2026-08-01T10:00:00Z"
+                    }]
+                })),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let points = store.list_backups("tenant-a", "staging").await.unwrap();
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].id, "recovery-1");
+        assert!(points[0].verified);
+        assert!(store
+            .list_backups("tenant-b", "staging")
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn malformed_backup_results_are_never_materialized() {
+        let operation = Operation {
+            id: Uuid::new_v4(),
+            tenant_id: "tenant".into(),
+            target_id: "staging".into(),
+            kind: OperationKind::Backup,
+            state: OperationState::Verifying,
+            request: json!({}),
+            result: None,
+            error: None,
+            created_by: "operator".into(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        assert!(recovery_points_from_result(&operation, Some(&json!({ "stdout": "ok" }))).is_err());
+    }
+
+    #[test]
+    fn collected_logs_are_bounded_and_materialized_for_the_target() {
+        let operation = Operation {
+            id: Uuid::new_v4(),
+            tenant_id: "tenant-a".into(),
+            target_id: "staging".into(),
+            kind: OperationKind::CollectLogs,
+            state: OperationState::Succeeded,
+            request: json!({ "limit": 200 }),
+            result: Some(json!({ "stdout": "first line\nsecond line\n" })),
+            error: None,
+            created_by: "operator".into(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let mut data = MemoryData::default();
+        materialize_memory_result(&mut data, &operation).unwrap();
+
+        assert_eq!(data.logs.len(), 2);
+        assert_eq!(data.logs[0].0, "tenant-a");
+        assert_eq!(data.logs[0].1.server_id, "staging");
+        assert_eq!(data.logs[1].1.message, "second line");
+    }
 }

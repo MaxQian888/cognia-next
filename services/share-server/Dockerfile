@@ -15,11 +15,16 @@ FROM debian:bookworm-slim
 # nor wget, so an exec-form HTTP healthcheck is otherwise impossible).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd --system --gid 10001 cognia \
+ && useradd --system --uid 10001 --gid cognia --home-dir /data --shell /usr/sbin/nologin cognia \
+ && mkdir -p /data \
+ && chown -R cognia:cognia /data
 COPY --from=builder /build/target/release/cognia-share-server /usr/local/bin/cognia-share-server
 # Persist the SQLite database on a mounted volume; restarts must not lose shares.
 ENV PORT=8787 \
     SHARE_DB_PATH=/data/shares.sqlite
 VOLUME ["/data"]
 EXPOSE 8787
+USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/cognia-share-server"]

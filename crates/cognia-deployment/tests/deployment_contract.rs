@@ -12,6 +12,11 @@ metadata:
   label: Staging
 spec:
   topology: kubernetes
+  kubernetes:
+    namespace: cognia-staging
+    ingressClassName: nginx
+    storageClassName: standard-rwo
+    runtimeClassName: gvisor
   publicUrl: https://server.example.com
   controller:
     url: https://ops.example.com
@@ -98,4 +103,25 @@ fn operation_state_machine_rejects_skipped_and_terminal_transitions() {
     assert!(OperationKind::Restore.requires_admin_lease());
     assert!(OperationKind::Rollback.requires_admin_lease());
     assert!(!OperationKind::Backup.requires_admin_lease());
+}
+
+#[test]
+fn topology_specific_platform_configuration_is_enforced_during_deserialization() {
+    let missing = valid_yaml().replace(
+        "  kubernetes:\n    namespace: cognia-staging\n    ingressClassName: nginx\n    storageClassName: standard-rwo\n    runtimeClassName: gvisor\n",
+        "",
+    );
+    let error = serde_yaml::from_str::<DeploymentTarget>(&missing).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("kubernetes configuration is required"));
+
+    let mixed = valid_yaml().replace(
+        "  kubernetes:",
+        "  compose:\n    projectName: cognia\n    deploymentRoot: /opt/cognia\n  kubernetes:",
+    );
+    let error = serde_yaml::from_str::<DeploymentTarget>(&mixed).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("compose configuration is not allowed"));
 }

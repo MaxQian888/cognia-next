@@ -77,7 +77,12 @@ const tlsSchema = z.discriminatedUnion("provider", [
 ])
 
 const secretSchema = z.discriminatedUnion("provider", [
-  z.object({ provider: z.literal("file"), rootRef: credentialRef }).strict(),
+  z
+    .object({
+      provider: z.literal("file"),
+      rootRef: z.string().min(1).max(1024).startsWith("/"),
+    })
+    .strict(),
   z.object({ provider: z.literal("kubernetes"), rootRef: credentialRef }).strict(),
   z.object({ provider: z.literal("vault"), rootRef: credentialRef }).strict(),
   z.object({ provider: z.literal("aws-secrets-manager"), rootRef: credentialRef }).strict(),
@@ -91,6 +96,81 @@ const imagesSchema = z
   })
   .strict()
 
+const kubernetesName = z
+  .string()
+  .min(1)
+  .max(253)
+  .regex(/^[a-z0-9](?:[-a-z0-9.]*[a-z0-9])?$/)
+
+const kubernetesSchema = z
+  .object({
+    namespace: kubernetesName,
+    ingressClassName: kubernetesName,
+    storageClassName: kubernetesName,
+    runtimeClassName: kubernetesName.optional(),
+  })
+  .strict()
+
+const composeSchema = z
+  .object({
+    projectName: z
+      .string()
+      .min(1)
+      .max(63)
+      .regex(/^[a-z0-9][a-z0-9_-]*$/),
+    deploymentRoot: z.string().min(1).max(1024).startsWith("/"),
+  })
+  .strict()
+
+const deploymentSpecSchema = z
+  .object({
+    topology: z.enum(["compose", "kubernetes"]),
+    publicUrl: url,
+    compose: composeSchema.optional(),
+    kubernetes: kubernetesSchema.optional(),
+    controller: controllerSchema,
+    identity: identitySchema,
+    objectStore: objectStoreSchema,
+    snapshots: snapshotSchema,
+    tls: tlsSchema,
+    secrets: secretSchema,
+    images: imagesSchema,
+  })
+  .strict()
+  .superRefine((spec, context) => {
+    if (spec.topology === "compose") {
+      if (!spec.compose) {
+        context.addIssue({
+          code: "custom",
+          path: ["compose"],
+          message: "compose configuration is required for compose topology",
+        })
+      }
+      if (spec.kubernetes) {
+        context.addIssue({
+          code: "custom",
+          path: ["kubernetes"],
+          message: "kubernetes configuration is not allowed for compose topology",
+        })
+      }
+    } else {
+      if (!spec.kubernetes) {
+        context.addIssue({
+          code: "custom",
+          path: ["kubernetes"],
+          message: "kubernetes configuration is required for kubernetes topology",
+        })
+      }
+      if (spec.compose) {
+        context.addIssue({
+          code: "custom",
+          path: ["compose"],
+          message: "compose configuration is not allowed for kubernetes topology",
+        })
+      }
+    }
+  })
+
 export const deploymentTargetSchema = z
   .object({
     apiVersion: z.literal(DEPLOYMENT_TARGET_API_VERSION),
@@ -101,19 +181,7 @@ export const deploymentTargetSchema = z
         label: z.string().min(1).max(128),
       })
       .strict(),
-    spec: z
-      .object({
-        topology: z.enum(["compose", "kubernetes"]),
-        publicUrl: url,
-        controller: controllerSchema,
-        identity: identitySchema,
-        objectStore: objectStoreSchema,
-        snapshots: snapshotSchema,
-        tls: tlsSchema,
-        secrets: secretSchema,
-        images: imagesSchema,
-      })
-      .strict(),
+    spec: deploymentSpecSchema,
   })
   .strict()
 

@@ -1,0 +1,9 @@
+{$COGNIA_DOMAIN} {
+    tls {$COGNIA_TLS_CERT_FILE} {$COGNIA_TLS_KEY_FILE}
+    encode zstd gzip
+    reverse_proxy cognia-server:27890 {
+        transport http {
+            tls_insecure_skip_verify
+        }
+    }
+}

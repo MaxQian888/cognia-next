@@ -55,9 +55,19 @@ pub enum PlatformConfig {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ComposeConfig {
     pub deployment_root: PathBuf,
+    pub runtime_override_file: PathBuf,
+    #[serde(default)]
+    pub snapshot_adapter: Option<ExternalSnapshotAdapterConfig>,
     pub public_url: Url,
     pub docker_binary: PathBuf,
     pub project_name: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExternalSnapshotAdapterConfig {
+    pub binary: PathBuf,
+    pub adapter_ref: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -67,4 +77,8 @@ pub struct KubernetesConfig {
     pub namespace: String,
     pub public_url: Url,
     pub maintenance_image: String,
+    pub data_pvc_name: String,
+    pub snapshot_class_name: String,
+    pub restore_storage_class_name: String,
+    pub restore_storage_size: String,
 }

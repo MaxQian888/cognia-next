@@ -208,7 +208,7 @@ async-trait = "0.1"
 parking_lot = "0.12"
 # ADR-0059 R13 — bollard (docker) and kube moved to
 # `crates/cognia-external-agent` (ADR-0067); the `container-exec` / `k8s-exec`
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.37", features = ["backup", "bundled"] }
 matrix-sdk-crypto = { version = "0.18.0", default-features = false }
 matrix-sdk-sqlite = { version = "0.18.0", default-features = false, features = ["crypto-store", "bundled"] }
 ruma = { version = "0.16.0", features = ["client-api-c", "events", "rand"] }

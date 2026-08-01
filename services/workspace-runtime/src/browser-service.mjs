@@ -51,6 +51,10 @@ export class RemoteChromiumService {
     networkPolicyFactory = () => new NetworkPolicy(),
     maxSessions = 3,
     maxPages = 8,
+    idleTimeoutMs = 30 * 60 * 1000,
+    maxLifetimeMs = 8 * 60 * 60 * 1000,
+    reaperIntervalMs = 60 * 1000,
+    now = () => Date.now(),
     viewport = { width: 1280, height: 720 },
   }) {
     this.chromium = chromium
@@ -62,6 +66,9 @@ export class RemoteChromiumService {
     this.networkPolicyFactory = networkPolicyFactory
     this.maxSessions = maxSessions
     this.maxPages = maxPages
+    this.idleTimeoutMs = idleTimeoutMs
+    this.maxLifetimeMs = maxLifetimeMs
+    this.now = now
     this.viewport = {
       width: Math.min(viewport.width, 1600),
       height: Math.min(viewport.height, 1200),
@@ -69,6 +76,8 @@ export class RemoteChromiumService {
     this.sessions = new Map()
     this.profileOwners = new Map()
     this.references = new Map()
+    this.reaper = setInterval(() => void this.reapExpired(), reaperIntervalMs)
+    this.reaper.unref?.()
   }
 
   async createSession({ id, profileId = null, grants = [] }) {
@@ -112,6 +121,7 @@ export class RemoteChromiumService {
       context = await browser.newContext(contextOptions)
     }
 
+    const createdAt = this.now()
     const session = {
       id,
       profileId,
@@ -128,6 +138,8 @@ export class RemoteChromiumService {
       lastBlockedError: null,
       screencast: null,
       humanKeyboardInputOccurred: false,
+      createdAt,
+      lastActivityAt: createdAt,
     }
     this.sessions.set(id, session)
     await context.addInitScript(this.overlayScript)
@@ -671,7 +683,20 @@ export class RemoteChromiumService {
   }
 
   async closeAll() {
+    clearInterval(this.reaper)
     for (const sessionId of [...this.sessions.keys()]) await this.closeSession(sessionId)
+  }
+
+  async reapExpired(at = this.now()) {
+    const expired = [...this.sessions.values()]
+      .filter(
+        (session) =>
+          at - session.lastActivityAt >= this.idleTimeoutMs ||
+          at - session.createdAt >= this.maxLifetimeMs
+      )
+      .map((session) => session.id)
+    await Promise.allSettled(expired.map((sessionId) => this.closeSession(sessionId)))
+    return expired
   }
 
   activeRecord(session) {
@@ -684,6 +709,7 @@ export class RemoteChromiumService {
   requireSession(sessionId) {
     const session = this.sessions.get(sessionId)
     if (!session) throw new RemoteBrowserError("browser_session_not_found", "Session not found")
+    session.lastActivityAt = this.now()
     return session
   }
 

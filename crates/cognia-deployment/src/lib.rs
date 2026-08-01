@@ -35,11 +35,15 @@ pub struct DeploymentMetadata {
     pub label: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DeploymentSpec {
     pub topology: DeploymentTopology,
     pub public_url: Url,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compose: Option<ComposePlatformConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kubernetes: Option<KubernetesPlatformConfig>,
     pub controller: ControllerConfig,
     pub identity: IdentityConfig,
     pub object_store: ObjectStoreConfig,
@@ -47,6 +51,89 @@ pub struct DeploymentSpec {
     pub tls: TlsConfig,
     pub secrets: SecretConfig,
     pub images: ImageConfig,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RawDeploymentSpec {
+    topology: DeploymentTopology,
+    public_url: Url,
+    compose: Option<ComposePlatformConfig>,
+    kubernetes: Option<KubernetesPlatformConfig>,
+    controller: ControllerConfig,
+    identity: IdentityConfig,
+    object_store: ObjectStoreConfig,
+    snapshots: SnapshotConfig,
+    tls: TlsConfig,
+    secrets: SecretConfig,
+    images: ImageConfig,
+}
+
+impl<'de> Deserialize<'de> for DeploymentSpec {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = RawDeploymentSpec::deserialize(deserializer)?;
+        match (
+            raw.topology,
+            raw.compose.is_some(),
+            raw.kubernetes.is_some(),
+        ) {
+            (DeploymentTopology::Compose, true, false)
+            | (DeploymentTopology::Kubernetes, false, true) => {}
+            (DeploymentTopology::Compose, false, _) => {
+                return Err(serde::de::Error::custom(
+                    "compose configuration is required for compose topology",
+                ));
+            }
+            (DeploymentTopology::Kubernetes, _, false) => {
+                return Err(serde::de::Error::custom(
+                    "kubernetes configuration is required for kubernetes topology",
+                ));
+            }
+            (DeploymentTopology::Compose, true, true) => {
+                return Err(serde::de::Error::custom(
+                    "kubernetes configuration is not allowed for compose topology",
+                ));
+            }
+            (DeploymentTopology::Kubernetes, true, true) => {
+                return Err(serde::de::Error::custom(
+                    "compose configuration is not allowed for kubernetes topology",
+                ));
+            }
+        }
+        Ok(Self {
+            topology: raw.topology,
+            public_url: raw.public_url,
+            compose: raw.compose,
+            kubernetes: raw.kubernetes,
+            controller: raw.controller,
+            identity: raw.identity,
+            object_store: raw.object_store,
+            snapshots: raw.snapshots,
+            tls: raw.tls,
+            secrets: raw.secrets,
+            images: raw.images,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ComposePlatformConfig {
+    pub project_name: String,
+    pub deployment_root: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct KubernetesPlatformConfig {
+    pub namespace: String,
+    pub ingress_class_name: String,
+    pub storage_class_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_class_name: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -190,6 +277,20 @@ impl DeploymentTarget {
             issues.push(ProductionCertificationIssue::SnapshotProviderMissing);
         }
         issues
+    }
+
+    pub fn snapshot_class_name(&self) -> Option<&str> {
+        match &self.spec.snapshots {
+            SnapshotConfig::KubernetesCsi { class_name } => Some(class_name),
+            _ => None,
+        }
+    }
+
+    pub fn snapshot_adapter_ref(&self) -> Option<&str> {
+        match &self.spec.snapshots {
+            SnapshotConfig::ExternalCommand { adapter_ref } => Some(adapter_ref),
+            _ => None,
+        }
     }
 }
 

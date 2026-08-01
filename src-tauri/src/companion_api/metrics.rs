@@ -2,7 +2,7 @@
 //!
 //! Same hand-rolled pattern as `services/{signaling,share}-server/src/
 //! metrics.rs` — no client-library dependency, atomics + a render function.
-//! Served at `GET /metrics` (public, like the services; the payload reveals
+//! Served at operator-gated `GET /metrics`; the payload reveals
 //! only aggregate counters). Counters are process-global (the usual
 //! `TLS_FINGERPRINT` idiom) so the RPC handler / middleware / WS paths can
 //! bump them without threading state.

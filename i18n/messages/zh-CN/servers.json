@@ -1,0 +1,203 @@
+{
+  "actions": {
+    "backup": "创建备份",
+    "deploy": "部署服务器",
+    "refresh": "刷新",
+    "restore": "恢复",
+    "rollback": "回滚",
+    "rotateKey": "轮换密钥"
+  },
+  "backups": {
+    "empty": "暂无可用恢复点。"
+  },
+  "certified": "已通过生产认证",
+  "confirm": {
+    "cancel": "取消",
+    "confirm": "申请管理员租约并继续",
+    "description": "此受保护操作需要短期、用户绑定的管理员租约，并会写入审计日志。",
+    "title": "确认受保护的服务器操作"
+  },
+  "connection": {
+    "accessToken": "OIDC 访问令牌",
+    "connect": "连接",
+    "connected": "已连接运维控制器",
+    "connecting": "正在连接…",
+    "controllerPlaceholder": "https://ops.example.com",
+    "controllerUrl": "控制器地址",
+    "description": "连接云中立运维控制器。凭据仅保留在内存中，此页面不会持久化凭据。",
+    "failed": "无法连接运维控制器",
+    "targetId": "默认目标 ID",
+    "title": "连接运维控制器",
+    "tokenNotice": "请使用包含 servers:read 的短期 OIDC 令牌。每次变更操作仍会重新校验 operate 与 admin 权限。",
+    "unlockAccount": "连接服务器目标前，请先解锁当前账号。"
+  },
+  "description": "在一个云中立工作区中部署、观测、备份、恢复并保护 Compose 或 Kubernetes 目标。",
+  "errors": {
+    "authenticationRequired": "OIDC 会话缺失或已过期，请重新登录后连接。",
+    "detail": "无法加载服务器详情",
+    "networkUnavailable": "运维控制器不可用，请检查地址、TLS 证书和网络路由。",
+    "operation": "无法将服务器操作加入队列",
+    "recovery": "请重试操作；若仍然失败，请使用运维身份检查控制器审计日志。",
+    "refresh": "无法刷新服务器列表"
+  },
+  "fields": {
+    "certification": "认证状态",
+    "id": "目标 ID",
+    "keyVersion": "已预配的密钥版本",
+    "lastSeen": "最后在线",
+    "release": "发布镜像摘要",
+    "revision": "配置修订版本",
+    "secretProviders": "密钥提供方",
+    "snapshotProviders": "快照提供方",
+    "topology": "部署拓扑"
+  },
+  "filters": {
+    "all": "全部服务器",
+    "description": "按最近一次上报的健康状态筛选服务器。",
+    "title": "筛选服务器"
+  },
+  "health": {
+    "degraded": "性能下降",
+    "healthy": "健康",
+    "unavailable": "不可用",
+    "unknown": "未知"
+  },
+  "healthSummary": "{label} 的健康摘要",
+  "instances": {
+    "title": "服务器实例"
+  },
+  "kpi": {
+    "certified": "已认证",
+    "healthy": "健康",
+    "operations": "活动操作",
+    "total": "部署目标"
+  },
+  "logs": {
+    "empty": "暂无服务器日志。"
+  },
+  "notAvailable": "不可用",
+  "notCertified": "未通过认证",
+  "offline": "离线缓存",
+  "operationKinds": {
+    "backup": "备份",
+    "collect-logs": "收集日志",
+    "collect-status": "收集状态",
+    "deploy": "部署",
+    "preflight": "部署前检查",
+    "restore": "恢复",
+    "rollback": "回滚",
+    "rotate-key": "轮换密钥",
+    "upgrade": "升级"
+  },
+  "operationStates": {
+    "cancelled": "已取消",
+    "executing": "正在执行",
+    "failed": "失败",
+    "preparing": "正在准备",
+    "queued": "已排队",
+    "rollback_failed": "回滚失败",
+    "rolled_back": "已回滚",
+    "succeeded": "成功",
+    "validating": "正在校验",
+    "verifying": "正在验证"
+  },
+  "operations": {
+    "ariaLabel": "服务器操作历史",
+    "queued": "操作已加入队列",
+    "title": "操作"
+  },
+  "options": {
+    "acme-dns01": "ACME DNS-01",
+    "acme-http01": "ACME HTTP-01",
+    "aws-secrets-manager": "AWS Secrets Manager",
+    "compose": "Docker Compose",
+    "existing": "已有证书",
+    "external-command": "外部快照适配器",
+    "file": "密钥文件",
+    "ingress": "Ingress TLS",
+    "kubernetes": "Kubernetes",
+    "kubernetes-csi": "Kubernetes CSI",
+    "vault": "Vault"
+  },
+  "overview": {
+    "health": "当前健康状态",
+    "issues": "认证问题",
+    "latestRecoveryPoint": "最新恢复点",
+    "production": "生产就绪状态"
+  },
+  "selectServer": "请选择一个服务器目标查看详情。",
+  "tabs": {
+    "backups": "备份",
+    "deployments": "部署",
+    "instances": "实例",
+    "logs": "日志",
+    "overview": "概览",
+    "security": "安全"
+  },
+  "title": "服务器",
+  "topology": {
+    "compose": "Docker Compose",
+    "kubernetes": "Kubernetes"
+  },
+  "wizard": {
+    "cancel": "取消",
+    "controllerUrl": "控制器地址",
+    "credentialsNotice": "配置仅保存凭据引用。云平台密钥、kubeconfig、SSH 密钥、对象存储密钥和 enrollment token 都不会进入此配置或浏览器缓存。",
+    "deploymentRoot": "部署根目录",
+    "description": "配置版本化 DeploymentTarget。所有云厂商预设最终都会转换为同一云中立协议。",
+    "identitySection": "OIDC 身份认证",
+    "imagesSection": "不可变镜像",
+    "ingressClass": "IngressClass",
+    "label": "显示名称",
+    "namespace": "命名空间",
+    "objectStoreBucket": "存储桶",
+    "objectStoreCredentialRef": "对象存储凭据引用",
+    "objectStoreEndpoint": "S3-compatible 地址",
+    "objectStoreRegion": "对象存储区域",
+    "oidcAudience": "OIDC audience",
+    "oidcIssuer": "OIDC issuer",
+    "platformSection": "平台设置",
+    "placeholders": {
+      "controllerUrl": "https://ops.example.com",
+      "keyVersion": "key-2026-08",
+      "label": "预发布环境",
+      "objectStoreBucket": "cognia-backups",
+      "objectStoreCredentialRef": "backups/staging",
+      "objectStoreEndpoint": "https://s3.example.com",
+      "objectStoreRegion": "auto",
+      "oidcAudience": "https://server.example.com/api",
+      "oidcIssuer": "https://auth.example.com/oidc",
+      "publicUrl": "https://server.example.com",
+      "runnerImage": "ghcr.io/owner/cognia-runner@sha256:…",
+      "secretRootRef": "cognia/staging",
+      "serverImage": "ghcr.io/owner/cognia-server@sha256:…",
+      "snapshotRef": "cognia-snapshots",
+      "targetId": "staging",
+      "tenantClaim": "organization_id",
+      "tlsRef": "cognia-server-tls",
+      "workspaceRuntimeImage": "ghcr.io/owner/cognia-workspace-runtime@sha256:…"
+    },
+    "projectName": "Compose 项目名称",
+    "publicUrl": "公网地址",
+    "runnerImage": "Runner 镜像摘要",
+    "runtimeClass": "RuntimeClass",
+    "secretProvider": "密钥提供方",
+    "secretRootRef": "密钥根引用",
+    "serverImage": "服务器镜像摘要",
+    "snapshotProvider": "快照提供方",
+    "snapshotRef": "快照类或适配器引用",
+    "storageClass": "StorageClass",
+    "storageSection": "备份、快照、密钥与 TLS",
+    "targetId": "目标 ID",
+    "targetSection": "部署目标",
+    "tenantClaim": "租户 claim",
+    "title": "部署服务器目标",
+    "tlsProvider": "TLS 提供方",
+    "tlsRef": "TLS Secret 或凭据引用",
+    "topology": "部署拓扑",
+    "validate": "登记并部署",
+    "valid": "部署目标已登记并进入队列",
+    "validating": "正在登记…",
+    "workspaceRuntimeImage": "Workspace Runtime 镜像摘要"
+  }
+}

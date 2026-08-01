@@ -118,19 +118,68 @@ pub async fn require_loopback_operator(request: Request, next: Next) -> Response
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .is_some_and(|peer| peer.0.ip().is_loopback());
-    if !is_loopback {
+    let operator_bearer = request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(str::to_owned);
+    if !is_loopback && !has_operator_bearer(operator_bearer.as_deref()).await {
         return (
             StatusCode::FORBIDDEN,
             Json(json!({
                 "error": {
-                    "code": "operator_loopback_required",
-                    "message": "this operator endpoint is only available from loopback"
+                    "code": "operator_identity_required",
+                    "message": "this operator endpoint requires loopback or an operator bearer token"
                 }
             })),
         )
             .into_response();
     }
     next.run(request).await
+}
+
+async fn has_operator_bearer(supplied: Option<&str>) -> bool {
+    let Ok(path) = std::env::var("COGNIA_METRICS_OPERATOR_TOKEN_FILE") else {
+        return false;
+    };
+    let Ok(expected) = tokio::fs::read(path).await else {
+        return false;
+    };
+    let expected = trim_ascii_whitespace(&expected);
+    if expected.is_empty() {
+        return false;
+    }
+    operator_bearer_matches(supplied, expected)
+}
+
+fn operator_bearer_matches(supplied: Option<&str>, expected: &[u8]) -> bool {
+    let Some(supplied) = supplied else {
+        return false;
+    };
+    constant_time_eq(supplied.as_bytes(), expected)
+}
+
+fn trim_ascii_whitespace(mut value: &[u8]) -> &[u8] {
+    while value.first().is_some_and(u8::is_ascii_whitespace) {
+        value = &value[1..];
+    }
+    while value.last().is_some_and(u8::is_ascii_whitespace) {
+        value = &value[..value.len() - 1];
+    }
+    value
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
 }
 
 /// Core companion-gateway auth, split out from [`require_device_jwt`] so the
@@ -421,6 +470,20 @@ mod tests {
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tower::ServiceExt as _;
+
+    #[test]
+    fn operator_bearer_tokens_are_exact_trimmed_and_constant_time_compared() {
+        assert!(operator_bearer_matches(
+            Some("metrics-operator-token"),
+            trim_ascii_whitespace(b"  metrics-operator-token\n")
+        ));
+        assert!(!operator_bearer_matches(
+            Some("metrics-operator-token"),
+            b"metrics-operator-other"
+        ));
+        assert!(!operator_bearer_matches(None, b"metrics-operator-token"));
+        assert!(!constant_time_eq(b"short", b"longer"));
+    }
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
     const ACCOUNT_ID: &str = "local_acct_a";

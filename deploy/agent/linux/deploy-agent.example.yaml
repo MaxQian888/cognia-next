@@ -1,0 +1,22 @@
+apiVersion: deploy.cognia.dev/agent-config/v1alpha1
+agentId: staging-agent
+targetId: staging
+controllerUrl: wss://ops.example.com/v1/agent/connect
+controllerSigningKey: REPLACE_FROM_ENROLLMENT_JSON
+controllerSigningKeyId: REPLACE_FROM_ENROLLMENT_JSON
+certificateExpiresAt: 0
+stateFile: /var/lib/cognia-agent/state/state.json
+tls:
+  certificateFile: /var/lib/cognia-agent/credentials/agent.crt.pem
+  privateKeyFile: /var/lib/cognia-agent/credentials/agent.key.pem
+  caFile: null # set only when the public controller uses a private server CA
+platform:
+  topology: compose
+  deploymentRoot: /opt/cognia/deploy/compose
+  runtimeOverrideFile: /var/lib/cognia-agent/state/compose-runtime.json
+  snapshotAdapter:
+    binary: /usr/local/libexec/cognia-snapshot-adapter
+    adapterRef: zfs-cognia
+  publicUrl: https://server.example.com
+  dockerBinary: /usr/bin/docker
+  projectName: cognia-staging

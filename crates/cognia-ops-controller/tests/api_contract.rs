@@ -156,6 +156,22 @@ async fn restore_requires_a_user_and_operation_bound_admin_lease() {
 }
 
 #[tokio::test]
+async fn rollback_rejects_client_selected_release_targets() {
+    let mut rollback = request(
+        "POST",
+        "/v1/servers/server-1/rollback",
+        "tenant-a:servers:operate,servers:admin",
+        json!({ "releaseDigest": "sha256:client-controlled" }),
+    );
+    rollback
+        .headers_mut()
+        .insert("idempotency-key", "rollback-1".parse().expect("header"));
+    let (status, body) = send(rollback).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "invalid_rollback_request");
+}
+
+#[tokio::test]
 async fn admin_lease_is_bound_to_user_target_operation_and_idempotent_replay() {
     let application = app();
     let lease_request = request(
@@ -275,6 +291,150 @@ async fn target_validation_rejects_unknown_fields() {
     let (status, body) = send(validate).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["code"], "invalid_deployment_target");
+}
+
+#[tokio::test]
+async fn target_registration_is_idempotent_and_immediately_queryable() {
+    let application = app();
+    let target = json!({
+        "apiVersion": "deploy.cognia.dev/v1alpha1",
+        "kind": "DeploymentTarget",
+        "metadata": { "id": "staging", "label": "Staging" },
+        "spec": {
+            "topology": "kubernetes",
+            "publicUrl": "https://server.example.com",
+            "kubernetes": {
+                "namespace": "cognia-staging",
+                "ingressClassName": "nginx",
+                "storageClassName": "standard-rwo",
+                "runtimeClassName": "gvisor"
+            },
+            "controller": {
+                "url": "https://ops.example.com",
+                "credentialRef": "ops-controller/staging"
+            },
+            "identity": {
+                "provider": "oidc",
+                "issuer": "https://auth.example.com/oidc",
+                "audience": "https://server.example.com/api",
+                "tenantClaim": "organization_id",
+                "scopes": {
+                    "read": "servers:read",
+                    "operate": "servers:operate",
+                    "admin": "servers:admin"
+                }
+            },
+            "objectStore": {
+                "provider": "s3-compatible",
+                "endpoint": "https://s3.example.com",
+                "region": "auto",
+                "bucket": "cognia-backups",
+                "pathStyle": false,
+                "credentialRef": "backups/staging"
+            },
+            "snapshots": { "provider": "kubernetes-csi", "className": "cognia-snapshots" },
+            "tls": { "provider": "ingress", "secretRef": "cognia-server-tls" },
+            "secrets": { "provider": "kubernetes", "rootRef": "cognia/staging" },
+            "images": {
+                "server": format!("server@sha256:{}", "a".repeat(64)),
+                "runner": format!("runner@sha256:{}", "b".repeat(64)),
+                "workspaceRuntime": format!("runtime@sha256:{}", "c".repeat(64))
+            }
+        }
+    });
+    let register = |body: Value| {
+        let mut request = request(
+            "POST",
+            "/v1/targets",
+            "tenant-a:servers:operate,servers:read",
+            body,
+        );
+        request.headers_mut().insert(
+            "idempotency-key",
+            "register-staging".parse().expect("header"),
+        );
+        request
+    };
+
+    let first = application
+        .clone()
+        .oneshot(register(target.clone()))
+        .await
+        .expect("register target");
+    assert_eq!(first.status(), StatusCode::CREATED);
+    let body: Value = serde_json::from_slice(
+        &to_bytes(first.into_body(), 1024 * 1024)
+            .await
+            .expect("target body"),
+    )
+    .expect("target json");
+    assert_eq!(body["id"], "staging");
+    assert_eq!(body["targetRevision"], 1);
+
+    let replay = application
+        .clone()
+        .oneshot(register(target.clone()))
+        .await
+        .expect("replay target");
+    assert_eq!(replay.status(), StatusCode::CREATED);
+
+    let mut changed = target;
+    changed["metadata"]["label"] = json!("Changed");
+    let conflict = application
+        .clone()
+        .oneshot(register(changed))
+        .await
+        .expect("conflicting target");
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+
+    let listed = application
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/v1/servers",
+            "tenant-a:servers:read",
+            json!({}),
+        ))
+        .await
+        .expect("list servers");
+    let body: Value = serde_json::from_slice(
+        &to_bytes(listed.into_body(), 1024 * 1024)
+            .await
+            .expect("list body"),
+    )
+    .expect("list json");
+    assert_eq!(body["items"][0]["id"], "staging");
+
+    let mut deploy = request(
+        "POST",
+        "/v1/servers/staging/deploy",
+        "tenant-a:servers:operate",
+        json!({
+            "targetRevision": 1,
+            "release": {
+                "serverImage": format!("server@sha256:{}", "a".repeat(64)),
+                "runnerImage": format!("runner@sha256:{}", "b".repeat(64)),
+                "workspaceRuntimeImage": format!("runtime@sha256:{}", "c".repeat(64)),
+                "configRevision": "1"
+            }
+        }),
+    );
+    deploy
+        .headers_mut()
+        .insert("idempotency-key", "deploy-staging".parse().expect("header"));
+    let deployed = application
+        .oneshot(deploy)
+        .await
+        .expect("queue target deployment");
+    assert_eq!(deployed.status(), StatusCode::ACCEPTED);
+    let operation: Value = serde_json::from_slice(
+        &to_bytes(deployed.into_body(), 1024 * 1024)
+            .await
+            .expect("operation body"),
+    )
+    .expect("operation json");
+    assert_eq!(operation["targetId"], "staging");
+    assert_eq!(operation["kind"], "deploy");
 }
 
 #[tokio::test]

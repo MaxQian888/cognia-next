@@ -11,6 +11,10 @@ spec:
     # cognia-server via a namespaced allow rule in the tenant overlay).
     - from:
         - podSelector: {}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              cognia.dev/ingress-access: "true"
   egress:
     # DNS + any external endpoint (agents call provider APIs); tighten per
     # tenant policy in the overlay if outbound should be restricted.

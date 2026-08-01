@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cognia-server
+  annotations:
+    cognia.dev/deployment-target-field: spec.tls
+spec:
+  ingressClassName: cognia-placeholder
+  tls:
+    - hosts: [server.invalid]
+      secretName: cognia-server-tls
+  rules:
+    - host: server.invalid
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cognia-server
+                port:
+                  number: 27890

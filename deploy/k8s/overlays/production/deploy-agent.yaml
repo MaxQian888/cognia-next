@@ -1,0 +1,22 @@
+apiVersion: deploy.cognia.dev/agent-config/v1alpha1
+agentId: production-agent
+targetId: production
+controllerUrl: wss://ops.invalid/v1/agent/connect
+controllerSigningKey: REPLACE_AFTER_ENROLLMENT
+controllerSigningKeyId: controller-primary
+certificateExpiresAt: 0
+stateFile: /var/lib/cognia-agent/state/state.json
+tls:
+  certificateFile: /var/lib/cognia-agent/credentials/agent.crt.pem
+  privateKeyFile: /var/lib/cognia-agent/credentials/agent.key.pem
+  caFile: null
+platform:
+  topology: kubernetes
+  kubectlBinary: /usr/local/bin/kubectl
+  namespace: cognia-production
+  publicUrl: https://server.invalid
+  maintenanceImage: ghcr.io/owner/cognia-server@sha256:0000000000000000000000000000000000000000000000000000000000000000
+  dataPvcName: data-cognia-server-0
+  snapshotClassName: REPLACE_FROM_DEPLOYMENT_TARGET
+  restoreStorageClassName: REPLACE_FROM_DEPLOYMENT_TARGET
+  restoreStorageSize: 10Gi

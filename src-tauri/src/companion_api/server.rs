@@ -32,11 +32,16 @@
 //! send `()` to drain and exit.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use super::{a2a, acp, healthz, rpc, tls::TlsMaterial, ws, ws_bridge, ws_terminal};
 use axum::{
+    extract::Request,
+    http::{Method, StatusCode},
+    middleware::Next,
     middleware::{from_fn, from_fn_with_state},
+    response::{IntoResponse, Response},
     routing::{any, delete, get, post},
     Router,
 };
@@ -57,6 +62,58 @@ const BODY_LIMIT_BYTES: usize = 64 * 1024;
 /// mixed/SOCKS defaults (see `proxy_config::detect::KNOWN_PORTS`), so binding
 /// there collides with FlClash/Clash Verge on developer machines.
 pub const DEFAULT_PORT: u16 = 27890;
+const MAX_DRAIN_DURATION: Duration = Duration::from_secs(300);
+static DRAINING: AtomicBool = AtomicBool::new(false);
+static WRITES_PAUSED: AtomicBool = AtomicBool::new(false);
+static ACTIVE_MUTATIONS: AtomicUsize = AtomicUsize::new(0);
+
+pub fn is_draining() -> bool {
+    DRAINING.load(Ordering::SeqCst)
+}
+
+pub fn begin_draining() {
+    DRAINING.store(true, Ordering::SeqCst);
+}
+
+pub fn is_accepting_writes() -> bool {
+    !DRAINING.load(Ordering::SeqCst) && !WRITES_PAUSED.load(Ordering::SeqCst)
+}
+
+pub struct WritePauseGuard;
+
+impl Drop for WritePauseGuard {
+    fn drop(&mut self) {
+        WRITES_PAUSED.store(false, Ordering::SeqCst);
+    }
+}
+
+struct ActiveMutationGuard;
+
+impl Drop for ActiveMutationGuard {
+    fn drop(&mut self) {
+        ACTIVE_MUTATIONS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+pub async fn pause_writes() -> Result<WritePauseGuard, String> {
+    WRITES_PAUSED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .map_err(|_| "server writes are already paused".to_string())?;
+    let guard = WritePauseGuard;
+    let deadline = tokio::time::Instant::now() + MAX_DRAIN_DURATION;
+    while ACTIVE_MUTATIONS.load(Ordering::SeqCst) != 0 {
+        if tokio::time::Instant::now() >= deadline {
+            return Err("timed out waiting for active mutations to drain".into());
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    Ok(guard)
+}
+
+#[cfg(test)]
+pub fn set_draining_for_test(value: bool) {
+    DRAINING.store(value, Ordering::SeqCst);
+}
 
 // ---------------------------------------------------------------------------
 // Public handle
@@ -73,6 +130,7 @@ pub struct ServerHandle {
     /// Read by tests and by `CompanionServerState::stop`.
     #[allow(dead_code)]
     pub shutdown: watch::Sender<()>,
+    pub terminated: watch::Receiver<bool>,
 }
 
 // ---------------------------------------------------------------------------
@@ -121,6 +179,7 @@ pub async fn spawn_server(
     tls: TlsMaterial,
     state: SharedState,
 ) -> Result<ServerHandle, CompanionServerError> {
+    DRAINING.store(false, Ordering::SeqCst);
     // rustls 0.23 needs an explicit crypto provider before building any TLS
     // config; install one idempotently in case the server is spawned from a
     // context that never ran `main.rs` (tests, headless entry points).
@@ -152,12 +211,14 @@ pub async fn spawn_server(
 
     let server_handle = axum_server::Handle::new();
     let (tx, mut rx) = watch::channel(());
+    let (terminated_tx, terminated_rx) = watch::channel(false);
 
     // Bridge the watch channel to axum-server's graceful_shutdown.
     let shutdown_target = server_handle.clone();
     tokio::spawn(async move {
         if rx.changed().await.is_ok() {
-            shutdown_target.graceful_shutdown(Some(Duration::from_secs(10)));
+            begin_draining();
+            shutdown_target.graceful_shutdown(Some(MAX_DRAIN_DURATION));
         }
     });
 
@@ -183,11 +244,13 @@ pub async fn spawn_server(
         if let Err(e) = result {
             log::warn!("companion-api server exited with error: {e}");
         }
+        let _ = terminated_tx.send(true);
     });
 
     Ok(ServerHandle {
         bound_port,
         shutdown: tx,
+        terminated: terminated_rx,
     })
 }
 
@@ -246,6 +309,8 @@ fn build_router_for_mode(state: SharedState, mode: super::deployment::Deployment
         // cert rotation and confirm they're talking to the right
         // desktop. See `healthz` module docs.
         .route("/api/v1/healthz", get(healthz::healthz_handler))
+        .route("/api/v1/livez", get(healthz::livez_handler))
+        .route("/api/v1/readyz", get(healthz::readyz_handler))
         // A2A Agent Card (a2a-protocol.org) — public discovery document. Read
         // only, discovery-safe fields only; the A2A endpoint itself (`/a2a`)
         // is device-JWT gated below.
@@ -256,6 +321,10 @@ fn build_router_for_mode(state: SharedState, mode: super::deployment::Deployment
 
     let operator_routes = Router::new()
         .route("/metrics", get(super::metrics::metrics_handler))
+        .route(
+            "/api/v1/maintenance/backups",
+            post(super::maintenance::backup_handler),
+        )
         .layer(from_fn(middleware::require_loopback_operator));
 
     // Authenticated routes — JWT verifier middleware applied.
@@ -413,7 +482,9 @@ fn build_router_for_mode(state: SharedState, mode: super::deployment::Deployment
     // Body-size limit applied to all routes (incl. the ingress — Lark/Slack
     // webhook bodies fit comfortably under 64 KiB). JWT payloads are tiny;
     // the generous limit leaves room for future multipart (M4.6 push-token).
-    let router = router.layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES));
+    let router = router
+        .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
+        .layer(from_fn(reject_mutations_while_draining));
     if crate::headless::headless_services().is_none() {
         return router;
     }
@@ -434,8 +505,41 @@ fn build_router_for_mode(state: SharedState, mode: super::deployment::Deployment
             state.clone(),
             middleware::require_device_jwt,
         ))
+        .layer(from_fn(reject_mutations_while_draining))
         .with_state(state);
     router.merge(content_router)
+}
+
+async fn reject_mutations_while_draining(request: Request, next: Next) -> Response {
+    let mutating = !matches!(
+        request.method(),
+        &Method::GET | &Method::HEAD | &Method::OPTIONS
+    );
+    let maintenance = request.uri().path() == "/api/v1/maintenance/backups";
+    if !mutating || maintenance {
+        return next.run(request).await;
+    }
+    if !is_accepting_writes() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [("retry-after", "300")],
+            "server is draining",
+        )
+            .into_response();
+    }
+    ACTIVE_MUTATIONS.fetch_add(1, Ordering::SeqCst);
+    let active = ActiveMutationGuard;
+    if !is_accepting_writes() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [("retry-after", "300")],
+            "server is draining",
+        )
+            .into_response();
+    }
+    let response = next.run(request).await;
+    drop(active);
+    response
 }
 
 // ---------------------------------------------------------------------------
@@ -843,6 +947,37 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status().as_u16(), 200, "agent card is public");
+    }
+
+    #[tokio::test]
+    async fn draining_rejects_new_mutations_but_keeps_probes_available() {
+        use tower::ServiceExt as _;
+        set_draining_for_test(true);
+        let router = build_router(test_state());
+        let mutation = router
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/pair/issue")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(mutation.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let live = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/v1/livez")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(live.status(), StatusCode::OK);
+        set_draining_for_test(false);
     }
 
     #[test]

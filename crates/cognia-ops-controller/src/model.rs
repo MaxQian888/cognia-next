@@ -82,6 +82,23 @@ pub struct RecoveryPoint {
     pub verified: bool,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentBackupResult {
+    pub recovery_points: Vec<AgentRecoveryPoint>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentRecoveryPoint {
+    pub id: String,
+    pub kind: RecoveryPointKind,
+    pub manifest_sha256: String,
+    pub size_bytes: i64,
+    pub verified: bool,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RecoveryPointKind {

@@ -1,0 +1,85 @@
+name: cognia-ops
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:?set a digest-pinned POSTGRES_IMAGE}
+    environment:
+      POSTGRES_DB: cognia_ops
+      POSTGRES_USER: cognia_ops
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U cognia_ops -d cognia_ops]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    pids_limit: 256
+    logging: &logging
+      driver: json-file
+      options: { max-size: 10m, max-file: "5", compress: "true" }
+
+  cognia-ops-controller:
+    image: ${COGNIA_OPS_CONTROLLER_IMAGE:?set a digest-pinned COGNIA_OPS_CONTROLLER_IMAGE}
+    command: [--listen, 0.0.0.0:8080]
+    environment:
+      DATABASE_URL_FILE: /run/cognia-controller-secrets/database-url
+      COGNIA_OPS_OIDC_ISSUER: ${COGNIA_OPS_OIDC_ISSUER:?set the OIDC issuer}
+      COGNIA_OPS_OIDC_AUDIENCE: ${COGNIA_OPS_OIDC_AUDIENCE:?set the OIDC audience}
+      COGNIA_OPS_OIDC_TENANT_CLAIM: ${COGNIA_OPS_OIDC_TENANT_CLAIM:-organization_id}
+      COGNIA_OPS_AGENT_CA_CERT: /run/cognia-controller-secrets/agent-ca.crt.pem
+      COGNIA_OPS_AGENT_CA_KEY: /run/cognia-controller-secrets/agent-ca.key.pem
+      COGNIA_OPS_SIGNING_KEY_FILE: /run/cognia-controller-secrets/operation-signing-key
+      COGNIA_OPS_AGENT_PROXY_TOKEN_FILE: /run/cognia-controller-secrets/agent-proxy-token
+    volumes:
+      - ${COGNIA_OPS_SECRET_ROOT:?set COGNIA_OPS_SECRET_ROOT}:/run/cognia-controller-secrets:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: [CMD, curl, -fsS, http://127.0.0.1:8080/readyz]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp:size=32m, noexec, nosuid, nodev]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 256
+    cpus: 2.0
+    mem_limit: 1g
+    logging: *logging
+
+  caddy:
+    image: ${CADDY_IMAGE:?set a digest-pinned CADDY_IMAGE}
+    environment:
+      COGNIA_OPS_DOMAIN: ${COGNIA_OPS_DOMAIN:?set COGNIA_OPS_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
+    ports: [80:80, 443:443, 443:443/udp]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${COGNIA_OPS_SECRET_ROOT:?set COGNIA_OPS_SECRET_ROOT}:/run/cognia-controller-secrets:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [cognia-ops-controller]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp:size=32m, noexec, nosuid, nodev]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    pids_limit: 128
+    logging: *logging
+
+secrets:
+  postgres_password:
+    file: ${POSTGRES_PASSWORD_FILE:?set POSTGRES_PASSWORD_FILE}
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

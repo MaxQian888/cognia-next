@@ -10,6 +10,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::{ClientConfig, RootCertStore};
 use std::fs::File;
 use std::io::BufReader;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio_tungstenite::tungstenite::Message;
@@ -19,11 +20,17 @@ use tracing::{info, warn};
 pub struct AgentRuntime {
     config: AgentConfig,
     executor: Arc<AgentExecutor>,
+    certificate_expires_at: AtomicI64,
 }
 
 impl AgentRuntime {
     pub fn new(config: AgentConfig, executor: Arc<AgentExecutor>) -> Self {
-        Self { config, executor }
+        let certificate_expires_at = AtomicI64::new(config.certificate_expires_at);
+        Self {
+            config,
+            executor,
+            certificate_expires_at,
+        }
     }
 
     pub async fn run(&self) -> anyhow::Result<()> {
@@ -55,7 +62,7 @@ impl AgentRuntime {
             target_id: self.config.target_id.clone(),
             topology: self.config.topology(),
             agent_version: env!("CARGO_PKG_VERSION").into(),
-            certificate_expires_at: self.config.certificate_expires_at,
+            certificate_expires_at: self.certificate_expires_at.load(Ordering::Acquire),
         });
         writer
             .send(Message::Text(serde_json::to_string(&hello)?.into()))
@@ -96,13 +103,47 @@ impl AgentRuntime {
                         ControllerToAgentMessage::Ping { nonce } => {
                             writer.send(Message::Text(serde_json::json!({ "type": "pong", "nonce": nonce }).to_string().into())).await?;
                         }
-                        ControllerToAgentMessage::RotateCertificate(_) => {
-                            anyhow::bail!("controller requested certificate rotation; reconnect through enrollment flow")
+                        ControllerToAgentMessage::RotateCertificate(request) => {
+                            let expires_at = self.rotate_certificate(request.enrollment_nonce).await?;
+                            self.certificate_expires_at.store(expires_at, Ordering::Release);
+                            anyhow::bail!("certificate rotated; reconnecting with the renewed identity")
                         }
                     }
                 }
             }
         }
+    }
+
+    async fn rotate_certificate(&self, token: String) -> anyhow::Result<i64> {
+        let mut controller_url = self.config.controller_url.clone();
+        let enrollment_scheme = match controller_url.scheme() {
+            "wss" => "https",
+            "ws" => "http",
+            scheme => scheme,
+        }
+        .to_owned();
+        controller_url
+            .set_scheme(&enrollment_scheme)
+            .map_err(|_| anyhow::anyhow!("controller URL has an unsupported scheme"))?;
+        let output_directory = self
+            .config
+            .tls
+            .certificate_file
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("certificate file has no parent directory"))?
+            .to_path_buf();
+        let result = crate::enroll::enroll(crate::enroll::EnrollmentOptions {
+            controller_url,
+            token,
+            agent_id: self.config.agent_id.clone(),
+            output_directory,
+            controller_ca_file: self.config.tls.ca_file.clone(),
+        })
+        .await?;
+        if result.target_id != self.config.target_id {
+            anyhow::bail!("renewed certificate was issued for a different target");
+        }
+        Ok(result.certificate_expires_at)
     }
 }
 

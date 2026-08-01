@@ -6,6 +6,12 @@ const validTarget = {
   metadata: { id: "staging", label: "Staging" },
   spec: {
     topology: "kubernetes",
+    kubernetes: {
+      namespace: "cognia-staging",
+      ingressClassName: "nginx",
+      storageClassName: "standard-rwo",
+      runtimeClassName: "gvisor",
+    },
     publicUrl: "https://server.example.com",
     controller: {
       url: "https://ops.example.com",
@@ -83,5 +89,24 @@ describe("DeploymentTarget contract", () => {
       "images.server must use an immutable sha256 digest",
       "snapshots.provider must be configured for production certification",
     ])
+  })
+
+  it("requires topology-specific infrastructure without accepting a mixed target", () => {
+    expect(() =>
+      parseDeploymentTarget({
+        ...validTarget,
+        spec: { ...validTarget.spec, kubernetes: undefined },
+      })
+    ).toThrow(/kubernetes/)
+
+    expect(() =>
+      parseDeploymentTarget({
+        ...validTarget,
+        spec: {
+          ...validTarget.spec,
+          compose: { projectName: "cognia", deploymentRoot: "/opt/cognia" },
+        },
+      })
+    ).toThrow(/compose/)
   })
 })

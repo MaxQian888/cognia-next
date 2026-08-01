@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1.7
+
+FROM registry.k8s.io/kubectl:v1.34.1 AS kubectl
+
+FROM rust:1.89-bookworm AS builder
+WORKDIR /src
+COPY . .
+RUN cargo build --locked --release -p cognia-deploy-agent
+
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 cognia-agent \
+    && useradd --uid 10001 --gid 10001 --home-dir /var/lib/cognia-agent --create-home cognia-agent \
+    && install -d -o 10001 -g 10001 /var/lib/cognia-agent/state /var/lib/cognia-agent/credentials
+COPY --from=builder /src/target/release/cognia-deploy-agent /usr/local/bin/cognia-deploy-agent
+COPY --from=kubectl /bin/kubectl /usr/local/bin/kubectl
+USER 10001:10001
+ENTRYPOINT ["/usr/local/bin/cognia-deploy-agent"]
+CMD ["--config", "/etc/cognia/deploy-agent.yaml", "run"]

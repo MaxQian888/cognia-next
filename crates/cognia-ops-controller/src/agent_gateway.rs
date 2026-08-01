@@ -6,9 +6,10 @@ use axum::response::{IntoResponse, Response};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use cognia_deployment::agent_protocol::{
-    AgentOperation, AgentToControllerMessage, BackupParameters, CollectLogsParameters,
-    CollectStatusParameters, ControllerToAgentMessage, PreflightParameters, ReleaseParameters,
-    RestoreParameters, RotateKeyParameters, SignedOperation, AGENT_PROTOCOL_VERSION,
+    AgentOperation, AgentRelease, AgentToControllerMessage, BackupParameters,
+    CertificateRotationRequest, CollectLogsParameters, CollectStatusParameters,
+    ControllerToAgentMessage, PreflightParameters, ReleaseParameters, RestoreParameters,
+    RollbackParameters, RotateKeyParameters, SignedOperation, AGENT_PROTOCOL_VERSION,
 };
 use cognia_deployment::{OperationKind, OperationState};
 use ed25519_dalek::{Signer, SigningKey};
@@ -19,6 +20,12 @@ use tokio::time::timeout;
 use uuid::Uuid;
 
 const AGENT_LEASE_SECONDS: i64 = 60;
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RestoreApiRequest {
+    recovery_point_id: String,
+}
 
 pub struct OperationSigner {
     key_id: String,
@@ -75,6 +82,19 @@ pub async fn connect(
     let Some(signer) = state.operation_signer.clone() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "agent gateway unavailable").into_response();
     };
+    let Some(expected_proxy_token) = state.agent_proxy_token.as_deref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "agent proxy trust is not configured",
+        )
+            .into_response();
+    };
+    let supplied_proxy_token = headers
+        .get("x-cognia-proxy-authorization")
+        .map(|value| value.as_bytes());
+    if !supplied_proxy_token.is_some_and(|token| constant_time_eq(token, expected_proxy_token)) {
+        return (StatusCode::UNAUTHORIZED, "trusted agent proxy is required").into_response();
+    }
     if headers
         .get("x-cognia-mtls-verified")
         .and_then(|value| value.to_str().ok())
@@ -94,6 +114,18 @@ pub async fn connect(
             .into_response();
     };
     upgrade.on_upgrade(move |socket| run_socket(socket, state, signer, fingerprint))
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
 }
 
 async fn run_socket(
@@ -121,6 +153,35 @@ async fn run_socket(
         Ok(Some(identity)) => identity,
         _ => return,
     };
+    if state
+        .store
+        .record_agent_heartbeat(&identity.tenant_id, &identity.target_id)
+        .await
+        .is_err()
+    {
+        return;
+    }
+    if hello.certificate_expires_at <= now_unix_seconds() + 6 * 60 * 60 {
+        let rotation = state
+            .store
+            .create_enrollment_token(
+                &identity.tenant_id,
+                &identity.target_id,
+                &format!("certificate-rotation:{}", identity.agent_id),
+                chrono::Duration::minutes(5),
+            )
+            .await;
+        let Ok(rotation) = rotation else { return };
+        let message = ControllerToAgentMessage::RotateCertificate(CertificateRotationRequest {
+            enrollment_nonce: rotation.token,
+        });
+        let Ok(message) = serde_json::to_string(&message) else {
+            return;
+        };
+        if writer.send(Message::Text(message.into())).await.is_err() {
+            return;
+        }
+    }
     let worker_id = format!("{}:{}", identity.agent_id, Uuid::new_v4());
     let mut active_operation: Option<Uuid> = None;
     let mut poll = tokio::time::interval(Duration::from_secs(1));
@@ -173,6 +234,10 @@ async fn run_socket(
                 let Ok(message) = serde_json::from_str::<AgentToControllerMessage>(&text) else { continue };
                 match message {
                     AgentToControllerMessage::Heartbeat(heartbeat) => {
+                        let _ = state.store.record_agent_heartbeat(
+                            &identity.tenant_id,
+                            &identity.target_id,
+                        ).await;
                         if let Some(operation_id) = heartbeat.operation_id.and_then(|id| Uuid::parse_str(&id).ok()) {
                             let _ = state.store.heartbeat_operation(operation_id, &worker_id, AGENT_LEASE_SECONDS).await;
                         }
@@ -221,7 +286,26 @@ async fn prepare_operation(
     operation: Operation,
     signer: &OperationSigner,
 ) -> anyhow::Result<SignedOperation> {
-    let payload = operation_payload(&operation)?;
+    let release_context = if matches!(
+        operation.kind,
+        OperationKind::Deploy | OperationKind::Upgrade
+    ) {
+        let target = state
+            .store
+            .get_deployment_target(&operation.tenant_id, &operation.target_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("deployment target is missing"))?;
+        let revision = state
+            .store
+            .get_server(&operation.tenant_id, &operation.target_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("server target is missing"))?
+            .target_revision;
+        Some((target, revision))
+    } else {
+        None
+    };
+    let payload = operation_payload(&operation, release_context)?;
     state
         .store
         .transition_operation(
@@ -250,19 +334,43 @@ async fn prepare_operation(
     )
 }
 
-fn operation_payload(operation: &Operation) -> anyhow::Result<AgentOperation> {
+fn operation_payload(
+    operation: &Operation,
+    release_context: Option<(cognia_deployment::DeploymentTarget, i64)>,
+) -> anyhow::Result<AgentOperation> {
     Ok(match operation.kind {
         OperationKind::Preflight => AgentOperation::Preflight(serde_json::from_value::<
             PreflightParameters,
         >(operation.request.clone())?),
-        OperationKind::Deploy => AgentOperation::Deploy(
-            serde_json::from_value::<ReleaseParameters>(operation.request.clone())?,
-        ),
-        OperationKind::Upgrade => AgentOperation::Upgrade(serde_json::from_value::<
-            ReleaseParameters,
-        >(operation.request.clone())?),
+        OperationKind::Deploy | OperationKind::Upgrade => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase", deny_unknown_fields)]
+            struct ReleaseRequest {
+                target_revision: i64,
+                release: AgentRelease,
+            }
+            let request: ReleaseRequest = serde_json::from_value(operation.request.clone())?;
+            let (target, current_revision) =
+                release_context.ok_or_else(|| anyhow::anyhow!("deployment target is missing"))?;
+            anyhow::ensure!(
+                request.target_revision == current_revision,
+                "deployment target revision changed: requested {}, current {}",
+                request.target_revision,
+                current_revision
+            );
+            let parameters = ReleaseParameters {
+                target_revision: request.target_revision,
+                target,
+                release: request.release,
+            };
+            if operation.kind == OperationKind::Deploy {
+                AgentOperation::Deploy(parameters)
+            } else {
+                AgentOperation::Upgrade(parameters)
+            }
+        }
         OperationKind::Rollback => AgentOperation::Rollback(serde_json::from_value::<
-            ReleaseParameters,
+            RollbackParameters,
         >(operation.request.clone())?),
         OperationKind::Backup => {
             let parameters = if operation
@@ -278,9 +386,13 @@ fn operation_payload(operation: &Operation) -> anyhow::Result<AgentOperation> {
             };
             AgentOperation::Backup(parameters)
         }
-        OperationKind::Restore => AgentOperation::Restore(serde_json::from_value::<
-            RestoreParameters,
-        >(operation.request.clone())?),
+        OperationKind::Restore => {
+            let request: RestoreApiRequest = serde_json::from_value(operation.request.clone())?;
+            AgentOperation::Restore(RestoreParameters {
+                recovery_point_id: request.recovery_point_id,
+                destination_volume_id: format!("restore-{}", operation.id),
+            })
+        }
         OperationKind::RotateKey => AgentOperation::RotateKey(serde_json::from_value::<
             RotateKeyParameters,
         >(operation.request.clone())?),
@@ -331,6 +443,13 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn proxy_authentication_is_exact_and_constant_time() {
+        assert!(constant_time_eq(b"proxy-token", b"proxy-token"));
+        assert!(!constant_time_eq(b"proxy-token", b"proxy-other"));
+        assert!(!constant_time_eq(b"short", b"longer"));
+    }
+
+    #[test]
     fn signer_produces_an_agent_verifiable_envelope() {
         let signer = OperationSigner::from_base64("key-1".into(), &BASE64.encode([3_u8; 32]))
             .expect("signer");
@@ -370,7 +489,7 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        assert!(operation_payload(&operation).is_err());
+        assert!(operation_payload(&operation, None).is_err());
 
         let _ = AgentRelease {
             server_image: String::new(),
@@ -378,5 +497,125 @@ mod tests {
             workspace_runtime_image: String::new(),
             config_revision: String::new(),
         };
+    }
+
+    #[test]
+    fn release_payload_rejects_a_stale_target_revision() {
+        let operation = Operation {
+            id: Uuid::new_v4(),
+            tenant_id: "tenant".into(),
+            target_id: "staging".into(),
+            kind: OperationKind::Upgrade,
+            state: OperationState::Queued,
+            request: json!({
+                "targetRevision": 3,
+                "release": {
+                    "serverImage": "ghcr.io/cognia/server@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "runnerImage": "ghcr.io/cognia/runner@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "workspaceRuntimeImage": "ghcr.io/cognia/runtime@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                    "configRevision": "release-3"
+                }
+            }),
+            result: None,
+            error: None,
+            created_by: "user".into(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let target: cognia_deployment::DeploymentTarget = serde_json::from_value(json!({
+            "apiVersion": "deploy.cognia.dev/v1alpha1",
+            "kind": "DeploymentTarget",
+            "metadata": { "id": "staging", "label": "Staging" },
+            "spec": {
+                "topology": "compose",
+                "publicUrl": "https://server.example.com",
+                "compose": { "projectName": "cognia", "deploymentRoot": "/opt/cognia" },
+                "controller": { "url": "https://ops.example.com", "credentialRef": "ops/staging" },
+                "identity": {
+                    "provider": "oidc", "issuer": "https://auth.example.com/oidc",
+                    "audience": "https://server.example.com/api", "tenantClaim": "organization_id",
+                    "scopes": { "read": "servers:read", "operate": "servers:operate", "admin": "servers:admin" }
+                },
+                "objectStore": {
+                    "provider": "s3-compatible", "endpoint": "https://s3.example.com",
+                    "region": "auto", "bucket": "backups", "pathStyle": false,
+                    "credentialRef": "backups/staging"
+                },
+                "snapshots": { "provider": "external-command", "adapterRef": "zfs-cognia" },
+                "tls": { "provider": "existing", "secretRef": "cognia-tls" },
+                "secrets": { "provider": "file", "rootRef": "cognia/staging" },
+                "images": {
+                    "server": format!("server@sha256:{}", "a".repeat(64)),
+                    "runner": format!("runner@sha256:{}", "b".repeat(64)),
+                    "workspaceRuntime": format!("runtime@sha256:{}", "c".repeat(64))
+                }
+            }
+        }))
+        .expect("target");
+
+        let error = operation_payload(&operation, Some((target.clone(), 4))).unwrap_err();
+        assert!(error.to_string().contains("revision changed"));
+        assert!(matches!(
+            operation_payload(&operation, Some((target, 3))).unwrap(),
+            AgentOperation::Upgrade(_)
+        ));
+    }
+
+    #[test]
+    fn restore_destination_is_controller_generated_and_never_client_supplied() {
+        let operation = Operation {
+            id: Uuid::parse_str("12345678-1234-1234-1234-123456789abc").unwrap(),
+            tenant_id: "tenant".into(),
+            target_id: "staging".into(),
+            kind: OperationKind::Restore,
+            state: OperationState::Queued,
+            request: json!({ "recoveryPointId": "backup-1" }),
+            result: None,
+            error: None,
+            created_by: "user".into(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let AgentOperation::Restore(parameters) = operation_payload(&operation, None).unwrap()
+        else {
+            panic!("restore payload")
+        };
+        assert_eq!(parameters.recovery_point_id, "backup-1");
+        assert_eq!(
+            parameters.destination_volume_id,
+            "restore-12345678-1234-1234-1234-123456789abc"
+        );
+
+        let mut injected = operation;
+        injected.request = json!({
+            "recoveryPointId": "backup-1",
+            "destinationVolumeId": "/host/path"
+        });
+        assert!(operation_payload(&injected, None).is_err());
+    }
+
+    #[test]
+    fn rollback_uses_only_the_agents_persisted_previous_release() {
+        let operation = Operation {
+            id: Uuid::new_v4(),
+            tenant_id: "tenant".into(),
+            target_id: "staging".into(),
+            kind: OperationKind::Rollback,
+            state: OperationState::Queued,
+            request: json!({}),
+            result: None,
+            error: None,
+            created_by: "user".into(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        assert!(matches!(
+            operation_payload(&operation, None).unwrap(),
+            AgentOperation::Rollback(_)
+        ));
+
+        let mut injected = operation;
+        injected.request = json!({ "releaseDigest": "client-controlled" });
+        assert!(operation_payload(&injected, None).is_err());
     }
 }

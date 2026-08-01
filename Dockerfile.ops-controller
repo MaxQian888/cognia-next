@@ -1,0 +1,15 @@
+FROM rust:1.89-bookworm AS builder
+WORKDIR /src
+COPY . .
+RUN cargo build --locked --release -p cognia-ops-controller
+
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/* \
+  && groupadd --gid 10001 cognia \
+  && useradd --uid 10001 --gid cognia --home-dir /nonexistent --shell /usr/sbin/nologin cognia
+COPY --from=builder /src/target/release/cognia-ops-controller /usr/local/bin/cognia-ops-controller
+USER 10001:10001
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/cognia-ops-controller"]

@@ -25,7 +25,7 @@
 
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -33,6 +33,74 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use super::{advertised_port, tls_fingerprint, SharedState};
+
+pub async fn livez_handler() -> Response {
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "live",
+            "version": env!("CARGO_PKG_VERSION"),
+        })),
+    )
+        .into_response()
+}
+
+const EXPECTED_CONFIG_REVISION_HEADER: &str = "x-cognia-expected-config-revision";
+
+pub async fn readyz_handler(State(_state): State<SharedState>, headers: HeaderMap) -> Response {
+    let accepting_writes = super::server::is_accepting_writes();
+    let actual_revision = std::env::var("COGNIA_CONFIG_REVISION").ok();
+    let expected_revision = headers
+        .get(EXPECTED_CONFIG_REVISION_HEADER)
+        .and_then(|value| value.to_str().ok());
+    let revision_ready = config_revision_matches(expected_revision, actual_revision.as_deref());
+    let mut checks = json!({
+        "draining": accepting_writes,
+        "storage": true,
+        "brain": true,
+        "sidecar": true,
+        "gateway": true,
+        "configRevision": revision_ready,
+    });
+    let mut ready = accepting_writes && revision_ready;
+    if let Some(services) = crate::headless::headless_services() {
+        let storage_ready = super::data_plane::headless_store().is_some();
+        let brain_required = std::env::var_os(crate::headless::brain::BRAIN_ENTRY_ENV).is_some();
+        let brain_ready = !brain_required
+            || crate::headless::brain::brain_status().is_some_and(|status| status.ready);
+        let sidecar_ready = services.sidecar.is_ready().await;
+        let gateway_required = services.gateway.config().enabled
+            || std::env::var("COGNIA_GATEWAY").is_ok_and(|value| value == "1" || value == "true");
+        let gateway_ready = !gateway_required || services.gateway.status().running;
+        ready &= storage_ready && brain_ready && sidecar_ready && gateway_ready;
+        checks = json!({
+            "draining": accepting_writes,
+            "storage": storage_ready,
+            "brain": brain_ready,
+            "sidecar": sidecar_ready,
+            "gateway": gateway_ready,
+            "configRevision": revision_ready,
+        });
+    }
+    let status = if ready {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (
+        status,
+        Json(json!({
+            "status": if ready { "ready" } else { "not_ready" },
+            "configRevision": actual_revision,
+            "checks": checks,
+        })),
+    )
+        .into_response()
+}
+
+fn config_revision_matches(expected: Option<&str>, actual: Option<&str>) -> bool {
+    expected.is_none_or(|expected| actual == Some(expected))
+}
 
 /// `GET /api/v1/healthz` handler.
 ///
@@ -142,6 +210,8 @@ mod tests {
     fn build_router(state: SharedState) -> Router {
         Router::new()
             .route("/api/v1/healthz", get(healthz_handler))
+            .route("/api/v1/livez", get(livez_handler))
+            .route("/api/v1/readyz", get(readyz_handler))
             .with_state(state)
     }
 
@@ -176,6 +246,20 @@ mod tests {
         let id = derive_server_id(SECRET);
         let hex_secret = hex::encode(SECRET);
         assert!(!hex_secret.contains(&id));
+    }
+
+    #[test]
+    fn strict_readiness_requires_the_expected_config_revision() {
+        assert!(config_revision_matches(None, None));
+        assert!(config_revision_matches(
+            Some("revision-7"),
+            Some("revision-7")
+        ));
+        assert!(!config_revision_matches(Some("revision-7"), None));
+        assert!(!config_revision_matches(
+            Some("revision-7"),
+            Some("revision-6")
+        ));
     }
 
     #[tokio::test]
@@ -256,5 +340,35 @@ mod tests {
             .unwrap();
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 200);
+    }
+
+    #[tokio::test]
+    async fn livez_and_readyz_are_distinct_probe_contracts() {
+        let router = build_router(test_state());
+        let live = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/livez")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(live.status(), StatusCode::OK);
+        assert_eq!(body_json(live).await["status"], "live");
+
+        crate::companion_api::server::set_draining_for_test(false);
+        let ready = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/readyz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ready.status(), StatusCode::OK);
+        assert_eq!(body_json(ready).await["status"], "ready");
     }
 }

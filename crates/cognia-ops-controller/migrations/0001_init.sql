@@ -11,6 +11,15 @@ CREATE TABLE IF NOT EXISTS deployment_targets (
     PRIMARY KEY (tenant_id, id)
 );
 
+CREATE TABLE IF NOT EXISTS target_registrations (
+    tenant_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, idempotency_key)
+);
+
 CREATE TABLE IF NOT EXISTS operations (
     id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL,

@@ -181,6 +181,10 @@ RUN apt-get update \
        libgtk-3-0 libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 \
        libsoup-3.0-0 libayatana-appindicator3-1 librsvg2-2 \
     && rm -rf /var/lib/apt/lists/*
+RUN groupadd --system --gid 10001 cognia \
+    && useradd --system --uid 10001 --gid cognia --home-dir /data --shell /usr/sbin/nologin cognia \
+    && mkdir -p /data \
+    && chown -R cognia:cognia /data
 
 COPY --from=builder /work/target/release/cognia-server /usr/local/bin/cognia-server
 COPY --from=brain-builder /work/cli/dist/bin/cognia-agent-layout /app/brain
@@ -204,12 +208,15 @@ VOLUME /data
 # mixed/SOCKS defaults and collide with a proxy on most dev hosts.
 EXPOSE 27890
 
+USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/cognia-server"]
 CMD ["serve", "--port", "27890"]
 
 # ── Runtime: full (external agent CLIs preinstalled + git) ──────────────────
 FROM runtime-slim AS runtime-full
+USER root
 COPY deploy/runner/install-agents.sh /tmp/install-agents.sh
 RUN bash /tmp/install-agents.sh \
     && rm -f /tmp/install-agents.sh \
     && rm -rf /var/lib/apt/lists/*
+USER 10001:10001

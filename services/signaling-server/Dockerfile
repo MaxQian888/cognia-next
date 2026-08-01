@@ -13,8 +13,11 @@ FROM debian:bookworm-slim
 # nor wget, so an exec-form HTTP healthcheck is otherwise impossible).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd --system --gid 10001 cognia \
+ && useradd --system --uid 10001 --gid cognia --home-dir /nonexistent --shell /usr/sbin/nologin cognia
 COPY --from=builder /build/target/release/cognia-signaling-server /usr/local/bin/cognia-signaling-server
 ENV PORT=7892
 EXPOSE 7892
+USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/cognia-signaling-server"]

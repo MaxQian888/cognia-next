@@ -1,6 +1,6 @@
 use crate::{Driver, DriverError};
 use cognia_deployment::agent_protocol::{AgentOperation, AgentRelease, SignedOperation};
-use cognia_deployment::OperationState;
+use cognia_deployment::{DeploymentTarget, OperationState};
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -47,10 +47,12 @@ pub struct CompletedOperation {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExecutionState {
     pub current_release: Option<AgentRelease>,
     pub previous_release: Option<AgentRelease>,
+    pub current_target: Option<DeploymentTarget>,
+    pub previous_target: Option<DeploymentTarget>,
     pub completed_operations: Vec<CompletedOperation>,
 }
 
@@ -146,12 +148,11 @@ impl AgentExecutor {
                 .await
                 .map(ExecutionOutcome::succeeded)
                 .unwrap_or_else(driver_failure),
-            AgentOperation::Deploy(parameters)
-            | AgentOperation::Upgrade(parameters)
-            | AgentOperation::Rollback(parameters) => {
-                self.activate_with_rollback(&mut state, &parameters.release)
+            AgentOperation::Deploy(parameters) | AgentOperation::Upgrade(parameters) => {
+                self.activate_with_rollback(&mut state, &parameters.release, &parameters.target)
                     .await
             }
+            AgentOperation::Rollback(_) => self.rollback_to_previous(&mut state).await,
             AgentOperation::Backup(parameters) => self
                 .driver
                 .backup(&parameters.backup_id)
@@ -205,6 +206,7 @@ impl AgentExecutor {
         &self,
         state: &mut ExecutionState,
         release: &AgentRelease,
+        target: &DeploymentTarget,
     ) -> ExecutionOutcome {
         if !release.has_immutable_images() {
             return ExecutionOutcome::failed(
@@ -212,20 +214,29 @@ impl AgentExecutor {
                 "production operations require sha256 image digests",
             );
         }
+        if target.metadata.id != self.target_id {
+            return ExecutionOutcome::failed(
+                "deployment_target_mismatch",
+                "operation DeploymentTarget does not match the enrolled target",
+            );
+        }
         let previous = state.current_release.clone();
+        let previous_target = state.current_target.clone();
         state.previous_release = previous.clone();
+        state.previous_target = previous_target.clone();
         if let Err(error) = self.store.save(state).await {
             return ExecutionOutcome::failed("state_save_failed", error.to_string());
         }
 
         let activation = async {
-            self.driver.activate_release(release).await?;
+            self.driver.activate_release(release, target).await?;
             self.driver.strict_smoke(release).await
         }
         .await;
         match activation {
             Ok(smoke) => {
                 state.current_release = Some(release.clone());
+                state.current_target = Some(target.clone());
                 ExecutionOutcome::succeeded(json!({
                     "release": release,
                     "strictSmoke": smoke,
@@ -234,16 +245,28 @@ impl AgentExecutor {
             Err(primary_error) => {
                 let Some(previous) = previous else {
                     state.current_release = Some(release.clone());
+                    state.current_target = Some(target.clone());
                     return driver_failure(primary_error);
                 };
+                let Some(previous_target) = previous_target else {
+                    state.current_release = Some(release.clone());
+                    state.current_target = Some(target.clone());
+                    return ExecutionOutcome::failed(
+                        "previous_target_unavailable",
+                        "previous release has no persisted DeploymentTarget",
+                    );
+                };
                 let rollback = async {
-                    self.driver.activate_release(&previous).await?;
+                    self.driver
+                        .activate_release(&previous, &previous_target)
+                        .await?;
                     self.driver.strict_smoke(&previous).await
                 }
                 .await;
                 match rollback {
                     Ok(smoke) => {
                         state.current_release = Some(previous.clone());
+                        state.current_target = Some(previous_target.clone());
                         ExecutionOutcome {
                             state: OperationState::RolledBack,
                             result: Some(json!({
@@ -256,6 +279,7 @@ impl AgentExecutor {
                     }
                     Err(rollback_error) => {
                         state.current_release = Some(release.clone());
+                        state.current_target = Some(target.clone());
                         ExecutionOutcome {
                             state: OperationState::RollbackFailed,
                             result: None,
@@ -265,6 +289,85 @@ impl AgentExecutor {
                             )),
                         }
                     }
+                }
+            }
+        }
+    }
+
+    async fn rollback_to_previous(&self, state: &mut ExecutionState) -> ExecutionOutcome {
+        let Some(target) = state.previous_release.clone() else {
+            return ExecutionOutcome::failed(
+                "previous_release_unavailable",
+                "no persisted previous release is available for rollback",
+            );
+        };
+        let Some(target_config) = state.previous_target.clone() else {
+            return ExecutionOutcome::failed(
+                "previous_target_unavailable",
+                "no persisted previous DeploymentTarget is available for rollback",
+            );
+        };
+        if !target.has_immutable_images() {
+            return ExecutionOutcome::failed(
+                "mutable_release_image",
+                "the persisted rollback release is not digest-pinned",
+            );
+        }
+        let current = state.current_release.clone();
+        let current_target = state.current_target.clone();
+        let activation = async {
+            self.driver
+                .activate_release(&target, &target_config)
+                .await?;
+            self.driver.strict_smoke(&target).await
+        }
+        .await;
+        match activation {
+            Ok(smoke) => {
+                state.current_release = Some(target.clone());
+                state.current_target = Some(target_config.clone());
+                state.previous_release = current;
+                state.previous_target = current_target;
+                ExecutionOutcome::succeeded(json!({
+                    "release": target,
+                    "strictSmoke": smoke,
+                }))
+            }
+            Err(primary_error) => {
+                let recovery = async {
+                    let current = current.as_ref().ok_or_else(|| {
+                        DriverError::Readiness(
+                            "current release is unavailable for rollback recovery".into(),
+                        )
+                    })?;
+                    let current_target = current_target.as_ref().ok_or_else(|| {
+                        DriverError::Readiness(
+                            "current DeploymentTarget is unavailable for rollback recovery".into(),
+                        )
+                    })?;
+                    self.driver
+                        .activate_release(current, current_target)
+                        .await?;
+                    self.driver.strict_smoke(current).await
+                }
+                .await;
+                match recovery {
+                    Ok(_) => ExecutionOutcome {
+                        state: OperationState::RollbackFailed,
+                        result: None,
+                        error_code: Some("manual_rollback_failed".into()),
+                        error_message: Some(format!(
+                            "rollback target failed verification and the current release was restored: {primary_error}"
+                        )),
+                    },
+                    Err(recovery_error) => ExecutionOutcome {
+                        state: OperationState::RollbackFailed,
+                        result: None,
+                        error_code: Some("manual_rollback_recovery_failed".into()),
+                        error_message: Some(format!(
+                            "rollback failed: {primary_error}; restoring the current release failed: {recovery_error}"
+                        )),
+                    },
                 }
             }
         }

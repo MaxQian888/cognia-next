@@ -199,6 +199,14 @@ export const SURFACE_CONTRACTS = [
     offline: "cached-read",
   },
   {
+    id: "servers",
+    route: "/servers",
+    navigation: true,
+    standalone: "full",
+    companion: "full",
+    offline: "cached-read",
+  },
+  {
     id: "eval",
     route: "/eval",
     navigation: true,

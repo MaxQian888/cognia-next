@@ -15,8 +15,10 @@ use tracing_subscriber::EnvFilter;
 struct Args {
     #[arg(long, env = "COGNIA_OPS_LISTEN", default_value = "0.0.0.0:8080")]
     listen: SocketAddr,
-    #[arg(long, env = "DATABASE_URL")]
-    database_url: String,
+    #[arg(long, env = "DATABASE_URL", conflicts_with = "database_url_file")]
+    database_url: Option<String>,
+    #[arg(long, env = "DATABASE_URL_FILE", conflicts_with = "database_url")]
+    database_url_file: Option<PathBuf>,
     #[arg(long, env = "COGNIA_OPS_OIDC_ISSUER")]
     oidc_issuer: String,
     #[arg(long, env = "COGNIA_OPS_OIDC_AUDIENCE")]
@@ -33,8 +35,10 @@ struct Args {
     agent_ca_certificate: PathBuf,
     #[arg(long, env = "COGNIA_OPS_AGENT_CA_KEY")]
     agent_ca_private_key: PathBuf,
-    #[arg(long, env = "COGNIA_OPS_SIGNING_KEY")]
-    operation_signing_key: String,
+    #[arg(long, env = "COGNIA_OPS_SIGNING_KEY_FILE")]
+    operation_signing_key_file: PathBuf,
+    #[arg(long, env = "COGNIA_OPS_AGENT_PROXY_TOKEN_FILE")]
+    agent_proxy_token_file: PathBuf,
     #[arg(
         long,
         env = "COGNIA_OPS_SIGNING_KEY_ID",
@@ -49,7 +53,9 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
     let args = Args::parse();
-    let store = Arc::new(PgStore::connect(&args.database_url, args.database_connections).await?);
+    let database_url =
+        read_value(args.database_url, args.database_url_file, "database URL").await?;
+    let store = Arc::new(PgStore::connect(&database_url, args.database_connections).await?);
     let auth = Arc::new(OidcAuthenticator::new(OidcConfig {
         issuer: args.oidc_issuer,
         audience: args.oidc_audience,
@@ -63,17 +69,51 @@ async fn main() -> anyhow::Result<()> {
         &ca_private_key_pem,
         chrono::Duration::hours(24),
     )?;
+    let operation_signing_key = tokio::fs::read_to_string(args.operation_signing_key_file).await?;
     let operation_signer =
-        OperationSigner::from_base64(args.operation_signing_key_id, &args.operation_signing_key)?;
+        OperationSigner::from_base64(args.operation_signing_key_id, operation_signing_key.trim())?;
+    let agent_proxy_token = tokio::fs::read(args.agent_proxy_token_file).await?;
+    let agent_proxy_token = trim_ascii_whitespace(&agent_proxy_token);
+    if agent_proxy_token.is_empty() {
+        anyhow::bail!("agent proxy authentication token is empty");
+    }
     let listener = TcpListener::bind(args.listen).await?;
     info!(address = %listener.local_addr()?, "cognia ops controller listening");
     let state = AppState::new(store, auth)
         .with_certificate_issuer(certificate_issuer)
-        .with_operation_signer(operation_signer);
+        .with_operation_signer(operation_signer)
+        .with_agent_proxy_token(agent_proxy_token.to_vec());
     axum::serve(listener, router(state))
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     Ok(())
+}
+
+async fn read_value(
+    inline: Option<String>,
+    file: Option<PathBuf>,
+    label: &str,
+) -> anyhow::Result<String> {
+    let value = match (inline, file) {
+        (Some(value), None) => value,
+        (None, Some(path)) => tokio::fs::read_to_string(path).await?,
+        _ => anyhow::bail!("exactly one {label} source must be configured"),
+    };
+    let value = value.trim().to_owned();
+    if value.is_empty() {
+        anyhow::bail!("{label} is empty");
+    }
+    Ok(value)
+}
+
+fn trim_ascii_whitespace(mut value: &[u8]) -> &[u8] {
+    while value.first().is_some_and(u8::is_ascii_whitespace) {
+        value = &value[1..];
+    }
+    while value.last().is_some_and(u8::is_ascii_whitespace) {
+        value = &value[..value.len() - 1];
+    }
+    value
 }
 
 async fn shutdown_signal() {

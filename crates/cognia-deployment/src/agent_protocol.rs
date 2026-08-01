@@ -1,6 +1,6 @@
 //! Signed, typed controller-to-agent protocol.
 
-use crate::{DeploymentTopology, OperationKind, OperationState};
+use crate::{DeploymentTarget, DeploymentTopology, OperationKind, OperationState};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -82,7 +82,7 @@ pub enum AgentOperation {
     Preflight(PreflightParameters),
     Deploy(ReleaseParameters),
     Upgrade(ReleaseParameters),
-    Rollback(ReleaseParameters),
+    Rollback(RollbackParameters),
     Backup(BackupParameters),
     Restore(RestoreParameters),
     RotateKey(RotateKeyParameters),
@@ -117,8 +117,13 @@ pub struct PreflightParameters {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReleaseParameters {
     pub target_revision: i64,
+    pub target: DeploymentTarget,
     pub release: AgentRelease,
 }
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RollbackParameters {}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

@@ -14,6 +14,12 @@ pub struct EnrollmentOptions {
     pub controller_ca_file: Option<PathBuf>,
 }
 
+pub struct EnrollmentResult {
+    pub bundle_file: PathBuf,
+    pub target_id: String,
+    pub certificate_expires_at: i64,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EnrollmentRequest {
@@ -45,12 +51,12 @@ struct EnrollmentBundle {
     controller_signing_key: String,
     certificate_file: PathBuf,
     private_key_file: PathBuf,
-    ca_file: PathBuf,
+    ca_file: Option<PathBuf>,
     certificate_fingerprint: String,
     certificate_expires_at: i64,
 }
 
-pub async fn enroll(options: EnrollmentOptions) -> anyhow::Result<PathBuf> {
+pub async fn enroll(options: EnrollmentOptions) -> anyhow::Result<EnrollmentResult> {
     validate_agent_id(&options.agent_id)?;
     let key = KeyPair::generate()?;
     let mut params = CertificateParams::new(Vec::<String>::new())?;
@@ -86,28 +92,32 @@ pub async fn enroll(options: EnrollmentOptions) -> anyhow::Result<PathBuf> {
     tokio::fs::create_dir_all(&options.output_directory).await?;
     let certificate_file = options.output_directory.join("agent.crt.pem");
     let private_key_file = options.output_directory.join("agent.key.pem");
-    let ca_file = options.output_directory.join("controller-ca.crt.pem");
+    let agent_ca_file = options.output_directory.join("agent-ca.crt.pem");
     tokio::fs::write(&certificate_file, response.certificate_pem).await?;
     tokio::fs::write(&private_key_file, key.serialize_pem()).await?;
     restrict_private_key(&private_key_file).await?;
-    tokio::fs::write(&ca_file, response.ca_certificate_pem).await?;
+    tokio::fs::write(&agent_ca_file, response.ca_certificate_pem).await?;
 
     let bundle_file = options.output_directory.join("enrollment.json");
     let bundle = EnrollmentBundle {
         api_version: "deploy.cognia.dev/agent-enrollment/v1alpha1",
         agent_id: options.agent_id,
-        target_id: response.target_id,
+        target_id: response.target_id.clone(),
         controller_url: options.controller_url,
         controller_signing_key_id: response.controller_signing_key_id,
         controller_signing_key: response.controller_signing_key,
         certificate_file,
         private_key_file,
-        ca_file,
+        ca_file: options.controller_ca_file,
         certificate_fingerprint: response.certificate_fingerprint,
         certificate_expires_at: response.expires_at.timestamp(),
     };
     tokio::fs::write(&bundle_file, serde_json::to_vec_pretty(&bundle)?).await?;
-    Ok(bundle_file)
+    Ok(EnrollmentResult {
+        bundle_file,
+        target_id: response.target_id,
+        certificate_expires_at: response.expires_at.timestamp(),
+    })
 }
 
 async fn restrict_private_key(path: &std::path::Path) -> std::io::Result<()> {

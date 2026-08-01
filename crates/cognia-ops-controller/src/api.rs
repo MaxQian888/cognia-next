@@ -26,6 +26,7 @@ pub struct AppState {
     pub auth: Arc<dyn Authenticator>,
     pub certificate_issuer: Option<Arc<dyn CertificateIssuer>>,
     pub operation_signer: Option<Arc<OperationSigner>>,
+    pub agent_proxy_token: Option<Arc<[u8]>>,
 }
 
 impl AppState {
@@ -35,6 +36,7 @@ impl AppState {
             auth,
             certificate_issuer: None,
             operation_signer: None,
+            agent_proxy_token: None,
         }
     }
 
@@ -47,6 +49,11 @@ impl AppState {
         self.operation_signer = Some(signer);
         self
     }
+
+    pub fn with_agent_proxy_token(mut self, token: Vec<u8>) -> Self {
+        self.agent_proxy_token = Some(token.into());
+        self
+    }
 }
 
 pub fn router(state: AppState) -> Router {
@@ -55,6 +62,7 @@ pub fn router(state: AppState) -> Router {
         .route("/readyz", get(readyz))
         .route("/v1/providers/capabilities", get(capabilities))
         .route("/v1/targets/validate", post(validate_target))
+        .route("/v1/targets", post(register_target))
         .route("/v1/servers", get(list_servers))
         .route("/v1/servers/{id}", get(get_server))
         .route("/v1/servers/{id}/logs", get(list_logs))
@@ -62,6 +70,7 @@ pub fn router(state: AppState) -> Router {
             "/v1/servers/{id}/backups",
             get(list_backups).post(create_backup),
         )
+        .route("/v1/servers/{id}/deploy", post(create_deploy))
         .route("/v1/servers/{id}/restore", post(create_restore))
         .route("/v1/servers/{id}/upgrade", post(create_upgrade))
         .route("/v1/servers/{id}/rollback", post(create_rollback))
@@ -133,6 +142,38 @@ async fn validate_target(
             "DeploymentTarget does not match deploy.cognia.dev/v1alpha1",
             Some(json!({ "validation": error.to_string() })),
         ),
+    }
+}
+
+async fn register_target(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(value): Json<Value>,
+) -> Response {
+    let claims = match authorize_mutation(&state, &headers, "servers:operate").await {
+        Ok(claims) => claims,
+        Err(response) => return response,
+    };
+    let target = match serde_json::from_value::<DeploymentTarget>(value) {
+        Ok(target) => target,
+        Err(error) => {
+            return api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_deployment_target",
+                "DeploymentTarget does not match deploy.cognia.dev/v1alpha1",
+                Some(json!({ "validation": error.to_string() })),
+            )
+        }
+    };
+    let idempotency_key = header_value(&headers, "idempotency-key")
+        .expect("authorize_mutation checked idempotency key");
+    match state
+        .store
+        .register_target(&claims.tenant_id, target, idempotency_key)
+        .await
+    {
+        Ok(detail) => (StatusCode::CREATED, Json(detail)).into_response(),
+        Err(error) => store_error(error),
     }
 }
 
@@ -217,6 +258,15 @@ async fn create_backup(
     create_operation(state, headers, id, OperationKind::Backup, body).await
 }
 
+async fn create_deploy(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    body: Option<Json<Value>>,
+) -> Response {
+    create_operation(state, headers, id, OperationKind::Deploy, body).await
+}
+
 async fn create_restore(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -241,7 +291,25 @@ async fn create_rollback(
     headers: HeaderMap,
     body: Option<Json<Value>>,
 ) -> Response {
-    create_operation(state, headers, id, OperationKind::Rollback, body).await
+    if body
+        .as_ref()
+        .is_some_and(|Json(value)| !value.as_object().is_some_and(serde_json::Map::is_empty))
+    {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_rollback_request",
+            "Rollback selects the agent's persisted previous release and accepts no client-supplied target",
+            None,
+        );
+    }
+    create_operation(
+        state,
+        headers,
+        id,
+        OperationKind::Rollback,
+        Some(Json(json!({}))),
+    )
+    .await
 }
 
 async fn create_rotate_key(

@@ -43,7 +43,9 @@ services:
     environment:
       PORT: "8787"
       SHARE_DB_PATH: /data/shares.sqlite
-      SHARE_UPLOAD_SECRET: ${SHARE_UPLOAD_SECRET:?set SHARE_UPLOAD_SECRET in .env}
+      # Production replaces this with a Docker secret file. Keep interpolation
+      # optional so Compose can merge the production override first.
+      SHARE_UPLOAD_SECRET: ${SHARE_UPLOAD_SECRET:-}
     volumes:
       - share_data:/data
     ports:
@@ -147,7 +149,7 @@ services:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${LOGTO_DB_PASSWORD:?set LOGTO_DB_PASSWORD in .env for the logto profile}
+      POSTGRES_PASSWORD: ${LOGTO_DB_PASSWORD:-}
       POSTGRES_DB: logto
     volumes:
       - logto_pg:/var/lib/postgresql/data
@@ -183,7 +185,7 @@ services:
     entrypoint: ["sh", "-c", "npm run cli db seed -- --swe && npm start"]
     environment:
       TRUST_PROXY_HEADER: "1"
-      DB_URL: postgres://postgres:${LOGTO_DB_PASSWORD:?set LOGTO_DB_PASSWORD in .env for the logto profile}@logto-postgres:5432/logto
+      DB_URL: postgres://postgres:${LOGTO_DB_PASSWORD:-}@logto-postgres:5432/logto
       REDIS_URL: redis://logto-redis:6379
       # Public base URLs. The OIDC issuer is `${ENDPOINT}/oidc` — this MUST be
       # the value used for COGNIA_LOGTO_ISSUER and be reachable from every

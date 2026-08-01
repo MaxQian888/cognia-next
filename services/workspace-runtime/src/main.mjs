@@ -19,6 +19,15 @@ const secret = process.env.COGNIA_WORKSPACE_RUNTIME_SECRET ?? ""
 const port = Number(process.env.COGNIA_WORKSPACE_RUNTIME_PORT ?? 27910)
 const host = process.env.COGNIA_WORKSPACE_RUNTIME_HOST ?? "0.0.0.0"
 
+function positiveInteger(name, fallback) {
+  const raw = process.env[name]
+  if (raw == null || raw === "") return fallback
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value) || value <= 0)
+    throw new Error(`${name} must be a positive integer`)
+  return value
+}
+
 if (secret.length < 32) throw new Error("COGNIA_WORKSPACE_RUNTIME_SECRET must be at least 32 chars")
 
 const overlayScript = await fs.readFile(overlayPath, "utf8")
@@ -29,6 +38,10 @@ const browserService = new RemoteChromiumService({
   workspaceRoot,
   profilesRoot,
   fileBridge,
+  maxSessions: positiveInteger("COGNIA_BROWSER_MAX_SESSIONS", 3),
+  maxPages: positiveInteger("COGNIA_BROWSER_MAX_PAGES", 8),
+  idleTimeoutMs: positiveInteger("COGNIA_BROWSER_IDLE_TIMEOUT_MS", 30 * 60 * 1000),
+  maxLifetimeMs: positiveInteger("COGNIA_BROWSER_MAX_LIFETIME_MS", 8 * 60 * 60 * 1000),
 })
 const eventJournal = new RuntimeEventJournal()
 const supervisor = new AgentSupervisor({
