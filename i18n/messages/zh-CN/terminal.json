@@ -29,7 +29,14 @@
     "detachError": "无法断开终端：{message}",
     "spawnDenied": "终端被插件拦截",
     "spawnError": "无法打开终端：{message}",
-    "splitRight": "向右分屏（Ctrl+\\）"
+    "splitRight": "向右分屏（Ctrl+\\）",
+    "dragToMove": "拖动以移动终端 dock",
+    "dropZoneBottom": "拖放到此处可将终端停靠在底部",
+    "dropZoneRight": "拖放到此处可将终端停靠在右侧",
+    "moveToBottom": "将终端停靠到底部",
+    "moveToRight": "将终端停靠到右侧",
+    "overflowTabs": "更多终端标签页",
+    "resizeVertical": "拖动以调整终端面板宽度（也可使用方向键）"
   },
   "emptyState": {
     "desktop": {
@@ -38,8 +45,14 @@
       "title": "暂无终端"
     },
     "mobile": {
+      "action": "+ 新建终端",
       "body": "在本设备和桌面服务器之间完成配对，即可通过 LAN 连接桌面终端。",
       "title": "尚未配置远程终端"
+    },
+    "remote": {
+      "action": "+ 新建远程终端",
+      "body": "新建的终端将在已连接的 Cognia 主机上启动。点击下方按钮创建，或按 Ctrl+` 在任意页面切换面板。",
+      "title": "远程主机上暂无终端"
     },
     "unsupported": {
       "body": "集成终端需要桌面或移动 shell，在纯浏览器预览中不可用。",
@@ -110,9 +123,15 @@
     "previous": "上一个匹配"
   },
   "sessionState": {
+    "chipDetails": "终端会话状态",
+    "chipLabel": "终端状态：{state}",
     "fullHost": "完整主机权限",
     "integrationDegraded": "Shell 集成不可用",
+    "outputThrottled": "输出受限 — 已暂停进程以等待处理",
+    "outputThrottledBuffered": "输出受限 — 正在本窗口缓冲",
     "readOnly": "只读",
+    "releaseConfirm": "要释放此会话的控制权吗？释放后其他客户端可以接管。",
+    "releaseControl": "释放控制权",
     "replayGap": "序列 {firstAvailable} 之前的输出已不可用。",
     "replayGapMarker": "由于回放缓冲区已截断，更早的终端输出不可用。",
     "sandboxed": "已沙箱化",

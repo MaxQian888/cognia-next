@@ -25,7 +25,12 @@ jest.mock("@tauri-apps/api/core", () => ({
   },
 }))
 
-import { TerminalSession, listAllTerminals, listTerminalsForProject } from "./session"
+import {
+  FLOW_PAUSE_RENEW_MS,
+  TerminalSession,
+  listAllTerminals,
+  listTerminalsForProject,
+} from "./session"
 import type { SessionInfo, TerminalEvent } from "./types"
 
 const baseInfo: SessionInfo = {
@@ -299,5 +304,93 @@ describe("list helpers", () => {
     const got = await listAllTerminals()
     expect(got).toEqual([baseInfo])
     expect(mockInvoke).toHaveBeenCalledWith("terminal_list_all")
+  })
+})
+
+describe("TerminalSession flow control", () => {
+  async function spawnSession() {
+    mockInvoke.mockResolvedValueOnce({ session: baseInfo })
+    return TerminalSession.spawn({ shell: "/bin/bash", rows: 24, cols: 80 })
+  }
+
+  it("invokes terminal_set_flow_control with the session id and desired state", async () => {
+    const session = await spawnSession()
+    mockInvoke.mockResolvedValue(undefined)
+
+    await expect(session.setFlowControl(true)).resolves.toBe(true)
+    expect(mockInvoke).toHaveBeenLastCalledWith("terminal_set_flow_control", {
+      id: "sess-1",
+      paused: true,
+    })
+
+    await expect(session.setFlowControl(false)).resolves.toBe(true)
+    expect(mockInvoke).toHaveBeenLastCalledWith("terminal_set_flow_control", {
+      id: "sess-1",
+      paused: false,
+    })
+  })
+
+  it("latches the capability off after an older host refuses, instead of retrying per frame", async () => {
+    // The watermark path can cross back and forth many times a second; an
+    // unlatched failure would mean an IPC round trip on every crossing.
+    const session = await spawnSession()
+    expect(session.supportsFlowControl).toBe(true)
+
+    mockInvoke.mockRejectedValueOnce(new Error("unknown command"))
+    await expect(session.setFlowControl(true)).resolves.toBe(false)
+    expect(session.supportsFlowControl).toBe(false)
+
+    const callsAfterFailure = mockInvoke.mock.calls.length
+    await expect(session.setFlowControl(true)).resolves.toBe(false)
+    expect(mockInvoke.mock.calls.length).toBe(callsAfterFailure)
+  })
+
+  describe("pause lease renewal", () => {
+    beforeEach(() => jest.useFakeTimers())
+    afterEach(() => jest.useRealTimers())
+
+    function flowCalls(): unknown[][] {
+      return mockInvoke.mock.calls.filter((call) => call[0] === "terminal_set_flow_control")
+    }
+
+    it("re-asserts an outstanding pause so the host's 30s reaper cannot resume a still-throttled client", async () => {
+      // The renderer reports only the false→true watermark crossing, so a pause
+      // that is never renewed is silently dropped mid-flood by
+      // `TerminalHost::reap_flow_pauses` and never re-sent.
+      const session = await spawnSession()
+      mockInvoke.mockResolvedValue(undefined)
+
+      await session.setFlowControl(true)
+      expect(flowCalls()).toHaveLength(1)
+
+      jest.advanceTimersByTime(FLOW_PAUSE_RENEW_MS * 3)
+      expect(flowCalls()).toHaveLength(4)
+      expect(flowCalls().every((call) => (call[1] as { paused: boolean }).paused)).toBe(true)
+      expect(FLOW_PAUSE_RENEW_MS).toBeLessThan(30_000)
+    })
+
+    it("stops renewing once the pause is released", async () => {
+      const session = await spawnSession()
+      mockInvoke.mockResolvedValue(undefined)
+
+      await session.setFlowControl(true)
+      await session.setFlowControl(false)
+      const settled = flowCalls().length
+
+      jest.advanceTimersByTime(FLOW_PAUSE_RENEW_MS * 3)
+      expect(flowCalls()).toHaveLength(settled)
+    })
+
+    it("stops renewing when the session exits", async () => {
+      const session = await spawnSession()
+      mockInvoke.mockResolvedValue(undefined)
+
+      await session.setFlowControl(true)
+      const settled = flowCalls().length
+      fire({ kind: "exit", code: 0 })
+
+      jest.advanceTimersByTime(FLOW_PAUSE_RENEW_MS * 3)
+      expect(flowCalls()).toHaveLength(settled)
+    })
   })
 })

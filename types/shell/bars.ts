@@ -123,6 +123,23 @@ export const STATUS_BAR_ITEMS: readonly BarItemMeta[] = [
   { id: "connectivity", bar: "status", zone: "start", i18nKey: "connectivity" },
   { id: "branch", bar: "status", zone: "start", i18nKey: "branch" },
   { id: "sync", bar: "status", zone: "start", i18nKey: "sync", desktopOnly: true },
+  // Workbench state, so it sits beside connectivity / branch rather than in the
+  // end cluster. Desktop-only: the plain browser has no terminal transport, and
+  // a permanently empty segment would just charge the bar rent.
+  //
+  // `defaultHidden` like `perf`: the dock already has three entry points
+  // (Ctrl+`, the title bar's Terminal menu, and the dock's own toolbar), so a
+  // fourth *permanent* bottom-bar control has not earned its slot against
+  // `CHROME_BUDGET.statusBar`. Users who want the running-command readout can
+  // pin it from the bar's customizer.
+  {
+    id: "terminal",
+    bar: "status",
+    zone: "start",
+    i18nKey: "terminal",
+    desktopOnly: true,
+    defaultHidden: true,
+  },
   { id: "notifications", bar: "status", zone: "end", i18nKey: "notifications" },
   { id: "attention", bar: "status", zone: "end", i18nKey: "attention" },
   { id: "jobs", bar: "status", zone: "end", i18nKey: "jobs" },

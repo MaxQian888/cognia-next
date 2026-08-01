@@ -52,7 +52,7 @@ describe("bar item catalogs", () => {
 
   it("marks only the natively-backed status segments desktop-only", () => {
     const desktopOnly = STATUS_BAR_ITEMS.filter((m) => m.desktopOnly).map((m) => m.id)
-    expect(desktopOnly.sort()).toEqual(["perf", "sync", "usage"])
+    expect(desktopOnly.sort()).toEqual(["perf", "sync", "terminal", "usage"])
   })
 
   it("has no desktop-only title-bar items", () => {
@@ -87,7 +87,9 @@ describe("default bar layouts", () => {
 
   it("ships quick actions hidden and the perf monitor opt-in", () => {
     expect([...DEFAULT_TITLE_BAR_LAYOUT.hidden].sort()).toEqual(["accountTop", "quickActions"])
-    expect(DEFAULT_STATUS_BAR_LAYOUT.hidden).toEqual(["perf"])
+    // `terminal` is opt-in too: the dock already has three entry points, so a
+    // fourth permanent bottom-bar control would spend chrome budget for nothing.
+    expect([...DEFAULT_STATUS_BAR_LAYOUT.hidden].sort()).toEqual(["perf", "terminal"])
   })
 
   it("only hides ids that exist in the catalog", () => {

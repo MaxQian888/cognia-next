@@ -1,14 +1,18 @@
 "use client"
 
 /**
- * Empty-state body for the terminal dock. Two variants:
+ * Empty-state body for the terminal dock. Four variants:
  *
- *   * `desktop` — Tauri shell with no live sessions yet. Shows a "+ New
- *     terminal" call-to-action that the dock wires up to spawnFromDock.
- *   * `mobile` — Capacitor shell. The LAN-only remote bridge (task #14)
- *     is currently a placeholder; we surface a message instead of
- *     pretending to spawn.
+ *   * `desktop` — Tauri shell with its in-process PTY.
+ *   * `remote`  — a desktop driving a remote Cognia host; new terminals open
+ *     on that host, over the same `ws` frames the mobile screen uses.
+ *   * `mobile`  — Capacitor shell talking to a paired desktop over LAN/WAN.
  *   * `unsupported` — plain browser. No terminal possible.
+ *
+ * The action button is gated on `onNew` being supplied, not on the variant.
+ * That is deliberate: the dock passes `onNew` only when a spawn is actually
+ * possible (`canSpawn`), so `unsupported` ends up action-less by construction
+ * rather than by a hard-coded variant check that then has to be kept in sync.
  */
 
 import { useTranslations } from "next-intl"
@@ -16,8 +20,10 @@ import { PlusIcon, TerminalIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 
+export type TerminalEmptyStateVariant = "desktop" | "remote" | "mobile" | "unsupported"
+
 export interface TerminalEmptyStateProps {
-  variant: "desktop" | "mobile" | "unsupported"
+  variant: TerminalEmptyStateVariant
   onNew?: () => void
 }
 
@@ -35,10 +41,10 @@ export function TerminalEmptyState({ variant, onNew }: TerminalEmptyStateProps) 
         <p className="text-sm font-medium">{t(`${variant}.title`)}</p>
         <p className="max-w-md text-xs text-muted-foreground">{t(`${variant}.body`)}</p>
       </div>
-      {variant === "desktop" && onNew ? (
+      {onNew ? (
         <Button size="sm" onClick={onNew} data-testid="terminal-empty-state-new">
           <PlusIcon className="mr-1 h-3 w-3" />
-          {t("desktop.action")}
+          {t(`${variant}.action`)}
         </Button>
       ) : null}
     </div>

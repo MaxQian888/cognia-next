@@ -828,6 +828,7 @@ pub fn run() {
             terminal_host_bridge::terminal_detach,
             terminal_host_bridge::terminal_take_control,
             terminal_host_bridge::terminal_release_control,
+            terminal_host_bridge::terminal_set_flow_control,
             terminal_host_bridge::terminal_kill,
             terminal_host_bridge::terminal_host_service,
             terminal_host_bridge::ssh_terminal_spawn,

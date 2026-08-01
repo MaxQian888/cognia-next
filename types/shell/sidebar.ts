@@ -55,6 +55,7 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
   { id: "agent-runs", route: "/agent-runs", i18nKey: "agentRuns", group: "auxiliary" },
   { id: "memory", route: "/memory", i18nKey: "memory", group: "auxiliary" },
   { id: "observability", route: "/observability", i18nKey: "observability", group: "auxiliary" },
+  { id: "servers", route: "/servers", i18nKey: "servers", group: "auxiliary" },
   { id: "eval", route: "/eval", i18nKey: "eval", group: "auxiliary" },
   {
     id: "performance",

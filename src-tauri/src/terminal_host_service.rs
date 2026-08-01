@@ -677,7 +677,9 @@ pub async fn run_terminal_host(endpoint: String) -> Result<(), String> {
         let settings = load_terminal_host_settings()?;
         let diagnostics = settings.diagnostics;
         let config = settings.host_config()?;
-        let host = TerminalHost::new(host_id, config).map_err(|error| error.to_string())?;
+        let host =
+            TerminalHost::with_path_injection(host_id, config, host_baseline_path_injection())
+                .map_err(|error| error.to_string())?;
         install_default_terminal_profile(&host)?;
         Ok::<_, String>((host, terminal_script_dir(), known_hosts_path, diagnostics))
     })
@@ -688,21 +690,40 @@ pub async fn run_terminal_host(endpoint: String) -> Result<(), String> {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         loop {
             interval.tick().await;
-            maintenance_host.reap_controller_leases(Instant::now());
+            let now = Instant::now();
+            maintenance_host.reap_controller_leases(now);
+            // Backstop for a client that paused output and then stopped running
+            // (backgrounded phone, hung JS main thread) — without this its PTY
+            // would stay parked forever.
+            maintenance_host.reap_flow_pauses(now);
         }
     });
     if diagnostics {
         log::info!("terminal host diagnostics enabled for endpoint {endpoint}");
     }
-    run_platform_listener(
-        endpoint,
-        host,
-        script_dir,
-        PathInjection::default(),
-        known_hosts_path,
-        diagnostics,
-    )
-    .await
+    run_platform_listener(endpoint, host, script_dir, known_hosts_path, diagnostics).await
+}
+
+/// PATH the host weaves into shells it spawns before any desktop client has
+/// said hello — a start-at-login host serving a paired phone, for instance.
+///
+/// Deliberately narrower than the app's `build_cli_path_injection`: the
+/// app-managed CLI registry is an in-process static the host cannot read, so it
+/// covers only what the host can see for itself. A desktop client replaces this
+/// wholesale on connect via the hello frame's `pathInjection`.
+fn host_baseline_path_injection() -> PathInjection {
+    let mut prepend = Vec::new();
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.join("cli")))
+        .filter(|dir| dir.is_dir())
+    {
+        prepend.push(dir);
+    }
+    let append = dirs::home_dir()
+        .map(|home| vec![home.join(".cargo").join("bin")])
+        .unwrap_or_default();
+    PathInjection { prepend, append }
 }
 
 #[cfg(unix)]
@@ -710,7 +731,6 @@ async fn run_platform_listener(
     endpoint: String,
     host: TerminalHost,
     script_dir: PathBuf,
-    path: PathInjection,
     known_hosts_path: PathBuf,
     diagnostics: bool,
 ) -> Result<(), String> {
@@ -749,7 +769,6 @@ async fn run_platform_listener(
         verify_unix_peer(&stream)?;
         let host = host.clone();
         let script_dir = script_dir.clone();
-        let path = path.clone();
         let known_hosts_path = known_hosts_path.clone();
         tokio::spawn(async move {
             let identity = match authenticate_server(&mut stream).await {
@@ -763,7 +782,7 @@ async fn run_platform_listener(
                 log::info!("terminal host authenticated client {}", identity.client_id);
             }
             if let Err(error) =
-                serve_host_stream(stream, host, identity, script_dir, path, known_hosts_path).await
+                serve_host_stream(stream, host, identity, script_dir, known_hosts_path).await
             {
                 log::warn!("terminal host connection closed: {error}");
             }
@@ -788,7 +807,6 @@ async fn run_platform_listener(
     endpoint: String,
     host: TerminalHost,
     script_dir: PathBuf,
-    path: PathInjection,
     known_hosts_path: PathBuf,
     diagnostics: bool,
 ) -> Result<(), String> {
@@ -807,7 +825,6 @@ async fn run_platform_listener(
             .map_err(|error| format!("terminal host named pipe connect failed: {error}"))?;
         let host = host.clone();
         let script_dir = script_dir.clone();
-        let path = path.clone();
         let known_hosts_path = known_hosts_path.clone();
         tokio::spawn(async move {
             let mut server = server;
@@ -822,7 +839,7 @@ async fn run_platform_listener(
                 log::info!("terminal host authenticated client {}", identity.client_id);
             }
             if let Err(error) =
-                serve_host_stream(server, host, identity, script_dir, path, known_hosts_path).await
+                serve_host_stream(server, host, identity, script_dir, known_hosts_path).await
             {
                 log::warn!("terminal host connection closed: {error}");
             }
@@ -884,6 +901,21 @@ fn set_owner_only_dir(_path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The baseline is what a start-at-login host applies before any desktop
+    /// client has said hello — a phone spawning against a machine whose app has
+    /// never run. It cannot see the app's managed-CLI registry, but
+    /// `~/.cargo/bin` it can always work out for itself.
+    #[test]
+    fn host_baseline_path_injection_appends_cargo_bin() {
+        let injection = host_baseline_path_injection();
+        match dirs::home_dir() {
+            Some(home) => assert_eq!(injection.append, vec![home.join(".cargo").join("bin")]),
+            // Headless CI without a resolvable HOME: an empty append is the
+            // honest answer, not a panic.
+            None => assert!(injection.append.is_empty()),
+        }
+    }
 
     #[test]
     fn bootstrap_secret_validation_is_strict() {

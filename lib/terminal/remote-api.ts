@@ -17,8 +17,6 @@
 
 import { transport } from "@/lib/tauri"
 
-import type { SessionInfo } from "./types"
-
 /** One-shot command capture — mirrors Rust `terminal::exec::ExecResult`. */
 export interface RemoteExecResult {
   stdout: string
@@ -55,20 +53,17 @@ export interface RemoteExecRequest {
   shell?: boolean
 }
 
-/** List every live terminal session on the host. */
-export async function listTerminalSessions(): Promise<SessionInfo[]> {
-  return transport.call<SessionInfo[]>("terminal_list_all")
-}
-
-/** List the host's live terminal sessions for one project. */
-export async function listTerminalSessionsForProject(projectId: string): Promise<SessionInfo[]> {
-  return transport.call<SessionInfo[]>("terminal_list_for_project", { projectId })
-}
-
-/** Kill a live terminal session by id (idempotent on the host). */
-export async function killTerminalSession(id: string): Promise<void> {
-  await transport.call("terminal_kill", { id })
-}
+// Listing and killing are deliberately NOT re-exported here.
+//
+// Every production path already resolves without them: `lib/terminal/rehydrate.ts`
+// dispatches on `selectTerminalTransportChain()` to `listAllTerminals()` or
+// `RemoteTerminalSession.listLan/listWan()` (which resolve through
+// `getActiveRemoteEndpoint()`, so "desktop driving a remote host" is covered
+// over the WS frames), and killing goes through `killFromDock` → `session.kill()`.
+// The transport-routed twins that used to live here had no callers, no type-level
+// dormancy note, and no pinning test — three-of-three missing is dead code, not
+// intentional dormancy. The Rust arms in `companion_api/rpc.rs` remain, so
+// restoring one is a single export away.
 
 /**
  * Run a one-shot command to completion on the host and capture its output.

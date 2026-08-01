@@ -44,17 +44,22 @@ function withGate(value: boolean): void {
 
 function withSession(
   tabId: string,
-  lastCommands: Array<{ cmd: string; exitCode: number | null; endedAt: number }> = []
+  lastCommands: Array<{ cmd: string; exitCode: number | null; endedAt: number }> = [],
+  /** Chat session that spawned the tab. `null` = user-owned. */
+  agentSpawner: string | null = "c"
 ) {
+  const row = {
+    id: tabId,
+    title: "tab title",
+    customTitle: null,
+    agentSpawner,
+    lastCommands,
+  }
   mockedTerminalStore.getState.mockReturnValue({
-    sessions: {
-      [tabId]: {
-        id: tabId,
-        title: "tab title",
-        customTitle: null,
-        lastCommands,
-      },
-    },
+    sessions: { [tabId]: row },
+    // `read_recent` scopes by spawner so an agent cannot read the user's tabs
+    // (or another chat's) — it has no consent prompt of its own.
+    sessionsForAgent: (agentId: string) => (row.agentSpawner === agentId ? [row] : []),
   } as never)
 }
 
@@ -242,6 +247,27 @@ describe("runTerminalDockAction — read_recent", () => {
       chatSessionId: "c",
     })
     expect(unknown).toEqual({ ok: false, reason: "unknown session: missing" })
+  })
+
+  it("refuses to read a tab this chat session did not spawn", async () => {
+    // Regression: this path used to look the row up by raw id, so an agent
+    // could read the command ring of a user-owned tab, or of another chat's.
+    withGate(true)
+    withSession("tab-A", [{ cmd: "ls", exitCode: 0, endedAt: 1 }], null)
+    const result = await runTerminalDockAction({
+      action: "read_recent",
+      args: { tabId: "tab-A" },
+      chatSessionId: "c",
+    })
+    expect(result).toEqual({ ok: false, reason: "unknown session: tab-A" })
+
+    withSession("tab-A", [{ cmd: "ls", exitCode: 0, endedAt: 1 }], "other-chat")
+    const foreign = await runTerminalDockAction({
+      action: "read_recent",
+      args: { tabId: "tab-A" },
+      chatSessionId: "c",
+    })
+    expect(foreign).toEqual({ ok: false, reason: "unknown session: tab-A" })
   })
 
   it("clamps lineLimit to the 1..50 range with default 10", async () => {

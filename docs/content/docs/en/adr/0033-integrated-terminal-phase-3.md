@@ -71,8 +71,45 @@ Per-file co-located tests (CLAUDE.md rule #3): `terminal-store.test.ts` (split m
 
 ## Follow-ups explicitly scoped out
 
-1. **WebRTC WAN terminal transport** — ADR-0031 follow-up #1, still deferred.
+1. ~~**WebRTC WAN terminal transport**~~ — **shipped**; see ADR-0031 follow-up #1.
 2. **Mobile OSC 633 delivery** — ADR-0031 follow-up #2, still deferred.
 3. **Server-side workflow execution + consent bridge** — ADR-0031 follow-up #3.
-4. **AI command assistance** in the dock (explain error / suggest fix) — designed, not built.
-5. **Message-level locate-in-conversation** — needs a chat scroll-to-message anchor.
+4. ~~**AI command assistance** in the dock~~ — superseded by ADR-0039 (terminal autocomplete), which shipped.
+5. ~~**Message-level locate-in-conversation**~~ — **shipped**: rows carry `agentSpawnerMessageId` and the dock routes through `messagePermalinkQuery` (ADR-0094 provided the scroll-to-message seam).
+
+## Phase 4 — dock usability (this change)
+
+Layered on top of the durable out-of-process host, which arrived after this ADR was written.
+
+- **Host owns `PathInjection`.** The app's managed-CLI registry is an in-process
+  static (`cli_bridge::detect`), so the separate host process cannot derive it.
+  It now travels over the `Hello` frame and is stored on the host — not per
+  connection, because remote spawns (Companion WS, WebRTC) arrive on connections
+  that never send one, and sessions are host-owned anyway. Only a *local*
+  identity may write it. Re-pushed when the in-app CLI download registers a new
+  directory; already-running shells keep their old PATH (a PTY's environment is
+  fixed at `execve`).
+- **Frame kinds 21–23** — `FlowControl`, `HistoryQuery`, `HistorySnapshot`.
+  `TransportState` (18), previously never constructed, now reports flow-control
+  transitions. **Compatibility invariant: the host never volunteers a frame kind
+  the client did not solicit**, because clients reject unknown discriminants
+  outright. A new *pushed* kind must first be negotiated through the `Hello`
+  ack's `protocolFeatures`.
+- **Capability negotiation.** The bridge reuses an already-running host, which
+  may be an older binary installed as a login service, so post-release commands
+  gate on the advertised feature list and degrade with a clear error.
+- **End-to-end flow control.** `FlowGate` (std `Mutex` + `Condvar`) parks the
+  PTY reader thread, so unread bytes stay in the kernel buffer and the child
+  blocks on write. Pauses are reference-counted across attachments
+  (slowest-consumer-wins) and released on five independent paths — detach,
+  disconnect, attachment overflow, kill, and a 30 s reaper for a client that
+  paused and then stopped running. Before this, a flood overran the host's
+  bounded per-client queue and the attachment was *dropped*: the tab went dead,
+  not slow.
+
+### Known next step
+
+`Channel<HostSeqEvent>` serialises `bytes: Vec<u8>` as a JSON array of decimal
+numbers — roughly 4× expansion plus a JSON parse per chunk, and the largest
+constant factor in the flood path. Flow control makes the system correct; it
+does not make it fast. Moving to a binary channel body is the follow-up.

@@ -179,15 +179,32 @@ async function runWrite(input: RunTerminalDockActionInput): Promise<DockActionRe
   return mapRunInDockOutcome(outcome)
 }
 
+/**
+ * Read an agent-owned tab's recent command ring.
+ *
+ * Scoped to tabs this chat session spawned. Unlike `write` and
+ * `wait_for_exit`, this path has no consent prompt of its own — it used to look
+ * the row up by raw id, so an agent could read the command history of the
+ * user's own tabs, or of another chat's. `sessionsForAgent` is the store
+ * selector that has always documented this scoping; this is its first caller.
+ *
+ * The two consented actions deliberately stay id-addressed: an explicit
+ * per-(chat, tab) grant through `requestAgentTrust` is the right authorization
+ * for driving a tab the user owns, and narrowing them by `agentSpawner` would
+ * break that supported flow.
+ */
 function runReadRecent(input: RunTerminalDockActionInput): DockActionResult {
-  const { args } = input
+  const { args, chatSessionId } = input
   const tabId = typeof args.tabId === "string" ? args.tabId : null
   if (!tabId) return { ok: false, reason: "missing tabId" }
   const lineLimit =
     typeof args.lineLimit === "number" && args.lineLimit >= 1 && args.lineLimit <= 50
       ? Math.floor(args.lineLimit)
       : 10
-  const row = useTerminalStore.getState().sessions[tabId]
+  const row = useTerminalStore
+    .getState()
+    .sessionsForAgent(chatSessionId)
+    .find((candidate) => candidate.id === tabId)
   if (!row) return { ok: false, reason: `unknown session: ${tabId}` }
   const records = row.lastCommands.slice(-lineLimit).map((c) => ({
     cmd: c.cmd,

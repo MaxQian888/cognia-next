@@ -233,7 +233,32 @@ pub enum HostEvent {
         message: String,
         session_id: Option<String>,
     },
+    /// Transport health for one session. Currently reports flow-control
+    /// transitions so *other* attached clients learn why output stalled
+    /// instead of assuming the session hung.
+    TransportState {
+        session_id: String,
+        state: HostTransportState,
+        message: Option<String>,
+    },
 }
+
+/// Coarse transport health, carried by [`HostEvent::TransportState`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum HostTransportState {
+    Online,
+    FlowPaused,
+    Reconnecting,
+    Offline,
+}
+
+/// How long a flow pause may stand before the host releases it on its own.
+///
+/// The backstop for "connected but wedged" — a backgrounded phone, a hung JS
+/// main thread. Without it a client that pauses and then stops running would
+/// park someone's PTY indefinitely.
+pub const FLOW_PAUSE_MAX: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -306,6 +331,10 @@ pub trait HostedTerminalProcess: Send + Sync {
     fn kill(&self) -> Result<(), String>;
     fn is_alive(&self) -> bool;
     fn replay(&self) -> Arc<ReplayBuffer>;
+    /// Park or resume the producer. Implementations that cannot actually stop
+    /// their source say so by returning `Err`, which the host surfaces rather
+    /// than pretending the pause took.
+    fn set_flow_paused(&self, paused: bool) -> Result<(), String>;
 }
 
 impl HostedTerminalProcess for PtySession {
@@ -319,6 +348,11 @@ impl HostedTerminalProcess for PtySession {
 
     fn kill(&self) -> Result<(), String> {
         self.kill().map_err(|error| error.to_string())
+    }
+
+    fn set_flow_paused(&self, paused: bool) -> Result<(), String> {
+        PtySession::set_flow_paused(self, paused);
+        Ok(())
     }
 
     fn is_alive(&self) -> bool {
@@ -359,6 +393,12 @@ struct HostedSession {
     controller: Option<ControllerLease>,
     recent_commands: VecDeque<String>,
     capture: CommandCapture,
+    /// Connections currently asking for this session to be paused, and when
+    /// they asked. Slowest-consumer-wins: the PTY stays parked while ANY
+    /// attachment has an outstanding pause. The timestamps back
+    /// [`TerminalHost::reap_flow_pauses`], the backstop against a client that
+    /// paused and then died without detaching.
+    flow_paused_by: HashMap<Uuid, Instant>,
 }
 
 #[derive(Default)]
@@ -405,6 +445,15 @@ struct HostState {
 struct TerminalHostInner {
     host_id: String,
     config: Mutex<TerminalHostConfig>,
+    /// PATH woven into every local PTY this host spawns.
+    ///
+    /// Host-owned rather than connection-owned on purpose. Remote spawns
+    /// (Companion WebSocket, WebRTC) arrive on connections that never send a
+    /// `pathInjection` hello, so per-connection state would leave exactly the
+    /// transports the durable host exists to serve with an empty PATH. Sessions
+    /// belong to the host, so their PATH does too. Only a *local* client may
+    /// write it; see [`TerminalHost::set_path_injection`].
+    path: Mutex<PathInjection>,
     attachment_queue: usize,
     state: Mutex<HostState>,
 }
@@ -431,10 +480,23 @@ impl Drop for HostClient {
 
 impl TerminalHost {
     pub fn new(host_id: impl Into<String>, config: TerminalHostConfig) -> Result<Self, HostError> {
+        Self::with_path_injection(host_id, config, PathInjection::default())
+    }
+
+    /// Same as [`TerminalHost::new`] but seeds the PATH injection the host
+    /// applies before any client has said hello. The service uses this so a
+    /// start-at-login host serving a paired phone still resolves the bundled
+    /// CLI, even when the desktop app has never run.
+    pub fn with_path_injection(
+        host_id: impl Into<String>,
+        config: TerminalHostConfig,
+        path: PathInjection,
+    ) -> Result<Self, HostError> {
         config.validate()?;
         Ok(Self::with_attachment_queue(
             host_id,
             config,
+            path,
             DEFAULT_ATTACHMENT_QUEUE,
         ))
     }
@@ -442,12 +504,14 @@ impl TerminalHost {
     fn with_attachment_queue(
         host_id: impl Into<String>,
         config: TerminalHostConfig,
+        path: PathInjection,
         attachment_queue: usize,
     ) -> Self {
         Self {
             inner: Arc::new(TerminalHostInner {
                 host_id: host_id.into(),
                 config: Mutex::new(config),
+                path: Mutex::new(path),
                 attachment_queue: attachment_queue.max(1),
                 state: Mutex::new(HostState {
                     clients: HashMap::new(),
@@ -477,6 +541,33 @@ impl TerminalHost {
         *self.inner.config.lock() = config;
         enforce_global_replay_budget(&self.inner);
         Ok(())
+    }
+
+    /// Replace the PATH woven into subsequently spawned local PTYs.
+    ///
+    /// Local clients only: the directories come from the desktop app's managed
+    /// CLI registry, and letting a paired phone rewrite the host's PATH would
+    /// let it decide which binaries the desktop user's shells resolve.
+    ///
+    /// Already-running shells keep their old PATH — a PTY's environment is
+    /// fixed at `execve` and rewriting it would mean injecting `export PATH=`
+    /// into the user's live shell.
+    pub fn set_path_injection(
+        &self,
+        connection_id: &str,
+        path: PathInjection,
+    ) -> Result<(), HostError> {
+        let connection = parse_connection_id(connection_id)?;
+        if !self.identity(connection)?.local {
+            return Err(HostError::PermissionDenied);
+        }
+        *self.inner.path.lock() = path;
+        Ok(())
+    }
+
+    /// The PATH injection currently applied to new local PTYs.
+    pub fn path_injection(&self) -> PathInjection {
+        self.inner.path.lock().clone()
     }
 
     pub fn connect(&self, identity: ClientIdentity) -> Result<HostClient, HostError> {
@@ -511,7 +602,6 @@ impl TerminalHost {
         profile_id: String,
         request: SpawnRequest,
         script_dir: &Path,
-        path: &PathInjection,
     ) -> Result<HostSessionInfo, HostError> {
         let connection = parse_connection_id(connection_id)?;
         let identity = self.identity(connection)?;
@@ -522,7 +612,7 @@ impl TerminalHost {
             return Err(HostError::InvalidRequest("profileId is required".into()));
         }
         self.sync_profile(connection_id, profile_id.clone(), request.clone())?;
-        self.spawn_request(connection, identity, profile_id, request, script_dir, path)
+        self.spawn_request(connection, identity, profile_id, request, script_dir)
     }
 
     pub fn sync_profile(
@@ -618,7 +708,6 @@ impl TerminalHost {
         connection_id: &str,
         profile_id: String,
         script_dir: &Path,
-        path: &PathInjection,
         known_hosts_path: &Path,
     ) -> Result<HostSessionInfo, HostError> {
         let connection = parse_connection_id(connection_id)?;
@@ -631,7 +720,7 @@ impl TerminalHost {
             .get(&profile_id)
             .cloned();
         let Some(mut request) = ssh_request else {
-            return self.spawn_profile(connection_id, profile_id, script_dir, path);
+            return self.spawn_profile(connection_id, profile_id, script_dir);
         };
         self.check_spawn_limit(&identity)?;
         if !identity.local {
@@ -690,7 +779,6 @@ impl TerminalHost {
         connection_id: &str,
         profile_id: String,
         script_dir: &Path,
-        path: &PathInjection,
     ) -> Result<HostSessionInfo, HostError> {
         let connection = parse_connection_id(connection_id)?;
         let identity = self.identity(connection)?;
@@ -705,7 +793,7 @@ impl TerminalHost {
         if !identity.local {
             request.origin = SessionOrigin::Remote;
         }
-        self.spawn_request(connection, identity, profile_id, request, script_dir, path)
+        self.spawn_request(connection, identity, profile_id, request, script_dir)
     }
 
     fn spawn_request(
@@ -715,10 +803,12 @@ impl TerminalHost {
         profile_id: String,
         request: SpawnRequest,
         script_dir: &Path,
-        path: &PathInjection,
     ) -> Result<HostSessionInfo, HostError> {
         self.check_spawn_limit(&identity)?;
 
+        // Clone the injection out and release the guard before the (blocking)
+        // spawn below — never hold a parking_lot lock across process creation.
+        let path = self.inner.path.lock().clone();
         let session_id = Uuid::new_v4().to_string();
         let replay_bytes_per_session = self.inner.config.lock().replay_bytes_per_session;
         let replay = Arc::new(ReplayBuffer::durable(replay_bytes_per_session));
@@ -737,7 +827,7 @@ impl TerminalHost {
         let process = spawn_session_with_identity(
             request,
             script_dir,
-            path,
+            &path,
             session_id.clone(),
             replay,
             sink,
@@ -809,6 +899,7 @@ impl TerminalHost {
                 }),
                 recent_commands: VecDeque::new(),
                 capture: CommandCapture::default(),
+                flow_paused_by: HashMap::new(),
             },
         );
         push_audit(
@@ -956,6 +1047,8 @@ impl TerminalHost {
             .get_mut(session_id)
             .ok_or(HostError::SessionNotFound)?;
         session.attachments.remove(&connection);
+        // A detaching client's pause must not outlive its attachment.
+        let flow_release = release_flow_for(session, connection);
         let released = session
             .controller
             .as_ref()
@@ -980,6 +1073,9 @@ impl TerminalHost {
         drop(state);
         if released {
             broadcast_controller(&self.inner, session_id, None);
+        }
+        if let Some(process) = flow_release {
+            let _ = apply_flow_state(&self.inner, session_id, &process, false);
         }
         Ok(())
     }
@@ -1102,6 +1198,15 @@ impl TerminalHost {
             );
             (process, identity)
         };
+        {
+            // Clear every claim and resume before signalling: a parked reader
+            // would never see the child's final output nor reach EOF.
+            let mut state = self.inner.state.lock();
+            if let Some(session) = state.sessions.get_mut(session_id) {
+                session.flow_paused_by.clear();
+            }
+        }
+        let _ = process.set_flow_paused(false);
         process.kill().map_err(HostError::Process)?;
         let mut state = self.inner.state.lock();
         push_audit(
@@ -1175,6 +1280,70 @@ impl TerminalHost {
         }
     }
 
+    /// Ask the host to park (or release) a session's producer on this
+    /// connection's behalf.
+    ///
+    /// Reference-counted, slowest-consumer-wins: the process stays parked while
+    /// any attachment has an outstanding pause and resumes only when the last
+    /// one clears. Deliberately NOT controller-gated — a viewer that cannot
+    /// keep up is exactly who needs to pause, and a read-only client asking the
+    /// producer to slow down cannot affect anyone's session contents.
+    pub fn set_flow_control(
+        &self,
+        connection_id: &str,
+        session_id: &str,
+        paused: bool,
+    ) -> Result<(), HostError> {
+        let connection = parse_connection_id(connection_id)?;
+        self.identity(connection)?;
+        let mut state = self.inner.state.lock();
+        let session = state
+            .sessions
+            .get_mut(session_id)
+            .ok_or(HostError::SessionNotFound)?;
+        if !session.attachments.contains(&connection) {
+            return Err(HostError::PermissionDenied);
+        }
+        let was_paused = !session.flow_paused_by.is_empty();
+        if paused {
+            session.flow_paused_by.insert(connection, Instant::now());
+        } else {
+            session.flow_paused_by.remove(&connection);
+        }
+        let now_paused = !session.flow_paused_by.is_empty();
+        let process = Arc::clone(&session.process);
+        // Compute the transition under the lock, then release it before
+        // touching the process or broadcasting — same discipline as
+        // `broadcast_controller`.
+        drop(state);
+        if was_paused != now_paused {
+            apply_flow_state(&self.inner, session_id, &process, now_paused)?;
+        }
+        Ok(())
+    }
+
+    /// Release flow pauses older than [`FLOW_PAUSE_MAX`]. Runs on the host's
+    /// 1 Hz maintenance tick alongside the controller-lease reaper.
+    pub fn reap_flow_pauses(&self, now: Instant) {
+        let mut resumed = Vec::new();
+        let mut state = self.inner.state.lock();
+        for (session_id, session) in &mut state.sessions {
+            if session.flow_paused_by.is_empty() {
+                continue;
+            }
+            session
+                .flow_paused_by
+                .retain(|_, at| now.saturating_duration_since(*at) < FLOW_PAUSE_MAX);
+            if session.flow_paused_by.is_empty() {
+                resumed.push((session_id.clone(), Arc::clone(&session.process)));
+            }
+        }
+        drop(state);
+        for (session_id, process) in resumed {
+            let _ = apply_flow_state(&self.inner, &session_id, &process, false);
+        }
+    }
+
     pub fn audit_events(&self) -> Vec<HostAuditEvent> {
         self.inner.state.lock().audit.iter().cloned().collect()
     }
@@ -1224,8 +1393,12 @@ impl TerminalHost {
         identity: &ClientIdentity,
     ) {
         let mut state = self.inner.state.lock();
+        let mut flow_release = None;
         if let Some(session) = state.sessions.get_mut(session_id) {
             session.attachments.remove(&connection_id);
+            // The dropped client's pause goes with it — otherwise an overflow
+            // would leave the PTY parked with nobody left to unpark it.
+            flow_release = release_flow_for(session, connection_id);
             if let Some(controller) = session.controller.as_mut() {
                 if controller.connection_id == connection_id {
                     controller.disconnected_at = Some(Instant::now());
@@ -1238,6 +1411,10 @@ impl TerminalHost {
             Some(identity),
             AuditKind::AttachmentOverflow,
         );
+        drop(state);
+        if let Some(process) = flow_release {
+            let _ = apply_flow_state(&self.inner, session_id, &process, false);
+        }
     }
 
     #[cfg(test)]
@@ -1421,6 +1598,39 @@ fn enforce_global_replay_budget(inner: &TerminalHostInner) {
     }
 }
 
+/// Tell a session's attachments that its transport state changed.
+///
+/// Best-effort by design: this rides the same bounded per-connection queue as
+/// output, and a client too far behind to accept a status frame is already
+/// being handled by the overflow path.
+fn broadcast_transport_state(
+    inner: &TerminalHostInner,
+    session_id: &str,
+    state_kind: HostTransportState,
+) {
+    let recipients = {
+        let state = inner.state.lock();
+        state
+            .sessions
+            .get(session_id)
+            .map(|session| {
+                session
+                    .attachments
+                    .iter()
+                    .filter_map(|id| state.clients.get(id).map(|client| client.sender.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    };
+    for sender in recipients {
+        let _ = sender.try_send(HostEvent::TransportState {
+            session_id: session_id.into(),
+            state: state_kind,
+            message: None,
+        });
+    }
+}
+
 fn broadcast_controller(inner: &TerminalHostInner, session_id: &str, controller: Option<String>) {
     let recipients = {
         let state = inner.state.lock();
@@ -1447,14 +1657,62 @@ fn broadcast_controller(inner: &TerminalHostInner, session_id: &str, controller:
 fn disconnect_inner(inner: &Arc<TerminalHostInner>, connection_id: Uuid, now: Instant) {
     let mut state = inner.state.lock();
     state.clients.remove(&connection_id);
-    for session in state.sessions.values_mut() {
+    // Fires from `Drop for HostClient`, so this one path covers a closed
+    // socket, a crashed renderer, and a revoked device.
+    let mut resumed = Vec::new();
+    for (session_id, session) in &mut state.sessions {
         session.attachments.remove(&connection_id);
+        if let Some(process) = release_flow_for(session, connection_id) {
+            resumed.push((session_id.clone(), process));
+        }
         if let Some(controller) = session.controller.as_mut() {
             if controller.connection_id == connection_id {
                 controller.disconnected_at = Some(now);
             }
         }
     }
+    drop(state);
+    for (session_id, process) in resumed {
+        let _ = apply_flow_state(inner, &session_id, &process, false);
+    }
+}
+
+/// Drop `connection`'s pause claim. Returns the session's process when that was
+/// the last claim (i.e. the producer should resume), else `None`.
+fn release_flow_for(
+    session: &mut HostedSession,
+    connection: Uuid,
+) -> Option<Arc<dyn HostedTerminalProcess>> {
+    if session.flow_paused_by.remove(&connection).is_none() {
+        return None;
+    }
+    if session.flow_paused_by.is_empty() {
+        Some(Arc::clone(&session.process))
+    } else {
+        None
+    }
+}
+
+/// Apply an aggregate pause transition and tell the session's attachments why
+/// their output stopped (or resumed). Must be called with the state lock
+/// released.
+fn apply_flow_state(
+    inner: &Arc<TerminalHostInner>,
+    session_id: &str,
+    process: &Arc<dyn HostedTerminalProcess>,
+    paused: bool,
+) -> Result<(), HostError> {
+    process.set_flow_paused(paused).map_err(HostError::Process)?;
+    broadcast_transport_state(
+        inner,
+        session_id,
+        if paused {
+            HostTransportState::FlowPaused
+        } else {
+            HostTransportState::Online
+        },
+    );
+    Ok(())
 }
 
 fn push_audit(
@@ -1487,12 +1745,16 @@ fn push_audit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     struct FakeProcess {
         alive: AtomicBool,
         replay: Arc<ReplayBuffer>,
         writes: Mutex<Vec<Vec<u8>>>,
+        /// Aggregate pause transitions applied to this process. Reference
+        /// counting is asserted through this, not through call counts.
+        flow_transitions: Mutex<Vec<bool>>,
     }
 
     impl FakeProcess {
@@ -1501,6 +1763,7 @@ mod tests {
                 alive: AtomicBool::new(true),
                 replay: Arc::new(ReplayBuffer::durable(capacity)),
                 writes: Mutex::new(Vec::new()),
+                flow_transitions: Mutex::new(Vec::new()),
             })
         }
     }
@@ -1526,6 +1789,11 @@ mod tests {
 
         fn replay(&self) -> Arc<ReplayBuffer> {
             Arc::clone(&self.replay)
+        }
+
+        fn set_flow_paused(&self, paused: bool) -> Result<(), String> {
+            self.flow_transitions.lock().push(paused);
+            Ok(())
         }
     }
 
@@ -1580,6 +1848,152 @@ mod tests {
         host.register_test_process(&client.connection_id, &session_id, process.clone())
             .unwrap();
         (host, client, process, session_id)
+    }
+
+    /// The PATH woven into spawned shells comes from the desktop app's managed
+    /// CLI registry. A paired phone must not be able to rewrite it — that would
+    /// let it choose which binaries the desktop user's shells resolve.
+    #[test]
+    fn path_injection_is_local_only_and_reaches_spawns() {
+        let host = TerminalHost::new("host-a", test_config()).unwrap();
+        let local = host.connect(ClientIdentity::local("desktop")).unwrap();
+        let remote = host
+            .connect(ClientIdentity::remote("phone", "device-a", true))
+            .unwrap();
+
+        assert_eq!(host.path_injection().prepend, Vec::<PathBuf>::new());
+
+        let hostile = PathInjection {
+            prepend: vec![PathBuf::from("/tmp/evil")],
+            append: Vec::new(),
+        };
+        assert_eq!(
+            host.set_path_injection(&remote.connection_id, hostile),
+            Err(HostError::PermissionDenied)
+        );
+        assert_eq!(host.path_injection().prepend, Vec::<PathBuf>::new());
+
+        let trusted = PathInjection {
+            prepend: vec![PathBuf::from("/opt/cognia/bin")],
+            append: vec![PathBuf::from("/home/dev/.cargo/bin")],
+        };
+        host.set_path_injection(&local.connection_id, trusted)
+            .unwrap();
+        let applied = host.path_injection();
+        assert_eq!(applied.prepend, vec![PathBuf::from("/opt/cognia/bin")]);
+        assert_eq!(applied.append, vec![PathBuf::from("/home/dev/.cargo/bin")]);
+    }
+
+    /// A host seeded before any client connects still resolves the bundled CLI
+    /// — the start-at-login case where a phone spawns first.
+    #[test]
+    fn path_injection_can_be_seeded_at_construction() {
+        let host = TerminalHost::with_path_injection(
+            "host-a",
+            test_config(),
+            PathInjection {
+                prepend: vec![PathBuf::from("/app/cli")],
+                append: Vec::new(),
+            },
+        )
+        .unwrap();
+        assert_eq!(host.path_injection().prepend, vec![PathBuf::from("/app/cli")]);
+    }
+
+    /// Slowest-consumer-wins: the PTY stays parked while ANY attachment has an
+    /// outstanding pause, and resumes only when the last one clears.
+    #[test]
+    fn flow_pause_is_reference_counted_across_attachments() {
+        let (host, first, process, session_id) = local_host();
+        let second = host.connect(ClientIdentity::local("desktop-2")).unwrap();
+        host.attach(&second.connection_id, &session_id, 0).unwrap();
+
+        host.set_flow_control(&first.connection_id, &session_id, true)
+            .unwrap();
+        host.set_flow_control(&second.connection_id, &session_id, true)
+            .unwrap();
+        // Only the first (empty → non-empty) transition reaches the process.
+        assert_eq!(process.flow_transitions.lock().clone(), vec![true]);
+
+        host.set_flow_control(&first.connection_id, &session_id, false)
+            .unwrap();
+        assert_eq!(process.flow_transitions.lock().clone(), vec![true]);
+
+        host.set_flow_control(&second.connection_id, &session_id, false)
+            .unwrap();
+        assert_eq!(process.flow_transitions.lock().clone(), vec![true, false]);
+    }
+
+    /// A viewer that cannot keep up is exactly who needs to pause, so the check
+    /// is "are you attached", not "are you the controller".
+    #[test]
+    fn flow_control_requires_an_attachment_but_not_the_controller_lease() {
+        let (host, controller, _process, session_id) = local_host();
+        let viewer = host.connect(ClientIdentity::local("viewer")).unwrap();
+        let stranger = host.connect(ClientIdentity::local("stranger")).unwrap();
+        host.attach(&viewer.connection_id, &session_id, 0).unwrap();
+
+        assert_eq!(
+            host.set_flow_control(&stranger.connection_id, &session_id, true),
+            Err(HostError::PermissionDenied)
+        );
+        // The viewer is not the controller and may still pause.
+        assert!(host
+            .set_flow_control(&viewer.connection_id, &session_id, true)
+            .is_ok());
+        assert!(host
+            .set_flow_control(&controller.connection_id, &session_id, false)
+            .is_ok());
+    }
+
+    /// Detaching and disconnecting are two of the five paths that must clear a
+    /// pause; missing either wedges the PTY for everyone.
+    #[test]
+    fn detach_and_disconnect_release_a_flow_pause() {
+        let (host, client, process, session_id) = local_host();
+        host.set_flow_control(&client.connection_id, &session_id, true)
+            .unwrap();
+        assert_eq!(process.flow_transitions.lock().clone(), vec![true]);
+        host.detach(&client.connection_id, &session_id).unwrap();
+        assert_eq!(process.flow_transitions.lock().clone(), vec![true, false]);
+
+        let second = host.connect(ClientIdentity::local("desktop-2")).unwrap();
+        host.attach(&second.connection_id, &session_id, 0).unwrap();
+        host.set_flow_control(&second.connection_id, &session_id, true)
+            .unwrap();
+        // Dropping the client fires `disconnect_inner` — the path that covers a
+        // closed socket and a crashed renderer.
+        drop(second);
+        assert_eq!(
+            process.flow_transitions.lock().clone(),
+            vec![true, false, true, false]
+        );
+    }
+
+    /// The 30 s backstop: a client that paused and then stopped running must
+    /// not park someone's PTY indefinitely.
+    #[test]
+    fn stale_flow_pause_auto_resumes_after_the_maximum() {
+        let (host, client, process, session_id) = local_host();
+        host.set_flow_control(&client.connection_id, &session_id, true)
+            .unwrap();
+
+        host.reap_flow_pauses(Instant::now());
+        assert_eq!(process.flow_transitions.lock().clone(), vec![true]);
+
+        host.reap_flow_pauses(Instant::now() + FLOW_PAUSE_MAX + Duration::from_secs(1));
+        assert_eq!(process.flow_transitions.lock().clone(), vec![true, false]);
+    }
+
+    /// A parked reader would never see the child's final output nor reach EOF.
+    #[test]
+    fn killing_a_paused_session_resumes_it_first() {
+        let (host, client, process, session_id) = local_host();
+        host.set_flow_control(&client.connection_id, &session_id, true)
+            .unwrap();
+        host.kill(&client.connection_id, &session_id).unwrap();
+        assert_eq!(process.flow_transitions.lock().last().copied(), Some(false));
+        assert!(!process.is_alive());
     }
 
     #[test]

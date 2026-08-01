@@ -101,6 +101,13 @@ export interface TerminalSessionRow {
   historyOpen: boolean
 }
 
+/**
+ * Which edge the dock occupies. `"bottom"` is the classic panel; `"right"`
+ * turns it into a side column, which is what a wide display wants when the
+ * terminal is a companion to the editor rather than the focus.
+ */
+export type TerminalPanelPosition = "bottom" | "right"
+
 /** UI metadata that can be safely reapplied after Rust PTYs reattach. */
 export interface TerminalReloadLayout {
   splitPanes: Record<string, string[]>
@@ -110,22 +117,86 @@ export interface TerminalReloadLayout {
   customTitles: Record<string, string>
   stableHostSessionIds: string[]
   controllerBySession: Record<string, string>
+  /**
+   * User tab order per project key. Rides the reload channel rather than
+   * `partialize` because it is keyed by session ids that die with the PTY —
+   * persisting it directly would accumulate garbage forever.
+   */
+  tabOrder: Record<string, string[]>
 }
 
 interface TerminalPersistedState {
   panelHeightPct: number
+  panelWidthPct: number
+  panelPosition: TerminalPanelPosition
   pendingReloadLayout: TerminalReloadLayout | null
 }
 
 export const TERMINAL_LAYOUT_DEFAULTS = {
   panelOpen: false,
   panelHeightPct: 32,
+  panelPosition: "bottom" as TerminalPanelPosition,
+  panelWidthPct: 36,
 } as const
 
 export const TERMINAL_LAYOUT_BOUNDS = {
   panelMinPct: 15,
   panelMaxPct: 85,
+  /** A right-docked terminal wider than this leaves no usable editor column. */
+  panelMinWidthPct: 15,
+  panelMaxWidthPct: 70,
 } as const
+
+/** Sizes a drag settles onto when it lands within {@link TERMINAL_SNAP_TOLERANCE_PCT}. */
+export const TERMINAL_LAYOUT_SNAP_PCTS: readonly number[] = [25, 33, 50, 66, 75]
+export const TERMINAL_SNAP_TOLERANCE_PCT = 1.5
+
+/**
+ * Settle `value` onto a nearby snap point. Applied inside `setPanelSize` so a
+ * pointer drag and an arrow-key nudge land on the same halves and thirds.
+ */
+export function snapPanelPct(
+  value: number,
+  snaps: readonly number[] = TERMINAL_LAYOUT_SNAP_PCTS,
+  tolerance: number = TERMINAL_SNAP_TOLERANCE_PCT
+): number {
+  if (!Number.isFinite(value)) return value
+  let best: number | null = null
+  let bestDistance = Number.POSITIVE_INFINITY
+  for (const snap of snaps) {
+    const distance = Math.abs(snap - value)
+    if (distance <= tolerance && distance < bestDistance) {
+      best = snap
+      bestDistance = distance
+    }
+  }
+  return best ?? value
+}
+
+/**
+ * Apply a user-defined tab order, appending anything the order doesn't mention
+ * (a tab spawned after the last drag) in creation order.
+ *
+ * Exported so the dock's memo and `tabsForProject()` cannot disagree about the
+ * order shown versus the order acted on.
+ */
+export function orderTabRows(
+  rows: TerminalSessionRow[],
+  order: string[] | undefined
+): TerminalSessionRow[] {
+  const byCreation = [...rows].sort((a, b) => a.createdAt - b.createdAt)
+  if (!order || order.length === 0) return byCreation
+  const rank = new Map(order.map((id, index) => [id, index]))
+  return byCreation.sort((a, b) => {
+    const ra = rank.get(a.id)
+    const rb = rank.get(b.id)
+    // Unranked rows keep their creation order and sit after every ranked one.
+    if (ra === undefined && rb === undefined) return a.createdAt - b.createdAt
+    if (ra === undefined) return 1
+    if (rb === undefined) return -1
+    return ra - rb
+  })
+}
 
 export const TERMINAL_LAYOUT_PERSIST_DEBOUNCE_MS = 150
 
@@ -135,6 +206,16 @@ export const TERMINAL_HISTORY_RING_SIZE = 50
 export const TERMINAL_PROMPT_RING_SIZE = 32
 
 let pendingFlush: ReturnType<typeof setTimeout> | null = null
+
+/** Min/max for the axis the dock currently resizes along. */
+function axisBounds(position: TerminalPanelPosition): { min: number; max: number } {
+  return position === "right"
+    ? {
+        min: TERMINAL_LAYOUT_BOUNDS.panelMinWidthPct,
+        max: TERMINAL_LAYOUT_BOUNDS.panelMaxWidthPct,
+      }
+    : { min: TERMINAL_LAYOUT_BOUNDS.panelMinPct, max: TERMINAL_LAYOUT_BOUNDS.panelMaxPct }
+}
 
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min
@@ -147,6 +228,10 @@ export interface TerminalStoreState {
   // Persisted UI shell
   panelOpen: boolean
   panelHeightPct: number
+  /** Which edge the dock occupies. Persisted — a chosen layout should stick. */
+  panelPosition: TerminalPanelPosition
+  /** Dock width as a % of the shell row, used when `panelPosition === "right"`. */
+  panelWidthPct: number
 
   // Transient durable-host health. The authoritative value comes from the
   // live connection and must not survive an app restart.
@@ -158,10 +243,25 @@ export interface TerminalStoreState {
   // user last dragged to). A manual drag-resize exits maximize.
   maximized: boolean
   preMaxHeightPct: number
+  /** Right-dock twin of `preMaxHeightPct`. */
+  preMaxWidthPct: number
 
   // In-memory tab state
   sessions: Record<string, TerminalSessionRow>
   activeSessionIdByProject: Record<string, string | null>
+
+  /**
+   * User tab order per project key (`""` for "no project"). Absent or partial
+   * entries fall back to creation order — see {@link orderTabRows}.
+   */
+  tabOrder: Record<string, string[]>
+
+  /**
+   * Sessions whose output the renderer is currently holding back (xterm
+   * backpressure). Surfaced on the tab and the session chip so a throttled
+   * background tab is legible without switching to it.
+   */
+  outputThrottled: Record<string, boolean>
 
   // Split panes (1A) — VS Code-style flat pane groups. A session is a tab
   // (group "anchor") unless it appears as a non-anchor member of some group
@@ -184,10 +284,25 @@ export interface TerminalStoreState {
   // Mutations
   setPanelOpen: (open: boolean) => void
   togglePanel: () => void
+  /** Bottom-dock alias for {@link TerminalStoreState.setPanelSize}. */
   setPanelHeight: (pct: number) => void
+  /**
+   * Resize along the dock's own axis — height when docked bottom, width when
+   * docked right. Clamps to the axis bounds, applies {@link snapPanelPct}, and
+   * exits `maximized` (a manual resize means the user wants that size).
+   */
+  setPanelSize: (pct: number) => void
+  /** Current size along the dock's own axis. */
+  panelSizePct: () => number
+  /** Move the dock to another edge. */
+  setPanelPosition: (position: TerminalPanelPosition) => void
   setHostState: (state: TerminalHostState, message?: string | null) => void
-  /** Snap to full height (or restore the pre-maximize height). No-op semantics live in the impl. */
+  /** Snap to full size (or restore the pre-maximize size). No-op semantics live in the impl. */
   toggleMaximized: () => void
+  /** Record a user-defined tab order for a project. Foreign/unknown ids are dropped. */
+  setTabOrder: (projectId: string | null, orderedIds: string[]) => void
+  /** Flag/clear renderer backpressure for a session. */
+  setOutputThrottled: (sessionId: string, throttled: boolean) => void
 
   registerSession: (
     info: SessionInfo,
@@ -278,6 +393,7 @@ function captureReloadLayout(
     | "focusedPaneByAnchor"
     | "splitDirection"
     | "activeSessionIdByProject"
+    | "tabOrder"
   >
 ): TerminalReloadLayout {
   const customTitles: Record<string, string> = {}
@@ -298,7 +414,22 @@ function captureReloadLayout(
       .filter((row) => !!row.hostId)
       .map((row) => row.id),
     controllerBySession,
+    tabOrder: Object.fromEntries(
+      Object.entries(state.tabOrder).map(([projectKey, ids]) => [projectKey, [...ids]])
+    ),
   }
+}
+
+/** Shared shape validator for `Record<string, string[]>` off the storage boundary. */
+function normalizeStringArrayMap(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  const result: Record<string, string[]> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (Array.isArray(entry)) {
+      result[key] = entry.filter((item): item is string => typeof item === "string")
+    }
+  }
+  return result
 }
 
 function normalizeStringMap(value: unknown): Record<string, string> {
@@ -314,17 +445,7 @@ function normalizeStringMap(value: unknown): Record<string, string> {
 function normalizeReloadLayout(value: unknown): TerminalReloadLayout | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const raw = value as Record<string, unknown>
-  const rawSplit = raw.splitPanes
-  const splitPanes: Record<string, string[]> = {}
-  if (rawSplit && typeof rawSplit === "object" && !Array.isArray(rawSplit)) {
-    for (const [anchor, members] of Object.entries(rawSplit)) {
-      if (Array.isArray(members)) {
-        splitPanes[anchor] = members.filter(
-          (member): member is string => typeof member === "string"
-        )
-      }
-    }
-  }
+  const splitPanes = normalizeStringArrayMap(raw.splitPanes)
 
   const rawDirections = normalizeStringMap(raw.splitDirection)
   const splitDirection: Record<string, "row" | "col"> = {}
@@ -352,6 +473,7 @@ function normalizeReloadLayout(value: unknown): TerminalReloadLayout | null {
       ? raw.stableHostSessionIds.filter((id): id is string => typeof id === "string")
       : [],
     controllerBySession: normalizeStringMap(raw.controllerBySession),
+    tabOrder: normalizeStringArrayMap(raw.tabOrder),
   }
 }
 
@@ -363,11 +485,14 @@ export const useTerminalStore = create<TerminalStoreState>()(
       hostStateMessage: null,
       maximized: false,
       preMaxHeightPct: TERMINAL_LAYOUT_DEFAULTS.panelHeightPct,
+      preMaxWidthPct: TERMINAL_LAYOUT_DEFAULTS.panelWidthPct,
       sessions: {},
       activeSessionIdByProject: {},
       splitPanes: {},
       focusedPaneByAnchor: {},
       splitDirection: {},
+      tabOrder: {},
+      outputThrottled: {},
       pendingReloadLayout: null,
 
       setPanelOpen: (open) => set({ panelOpen: open }),
@@ -376,29 +501,100 @@ export const useTerminalStore = create<TerminalStoreState>()(
 
       setHostState: (hostState, hostStateMessage = null) => set({ hostState, hostStateMessage }),
 
-      setPanelHeight: (pct) => {
-        const { panelMinPct, panelMaxPct } = TERMINAL_LAYOUT_BOUNDS
-        const clamped = clamp(pct, panelMinPct, panelMaxPct)
+      setPanelPosition: (panelPosition) => {
+        // Leaving `maximized` set across a move would apply the *other* axis's
+        // max, so the dock would jump to a size the user never chose.
+        set((s) => (s.panelPosition === panelPosition ? s : { panelPosition, maximized: false }))
+      },
+
+      panelSizePct: () => {
+        const s = get()
+        return s.panelPosition === "right" ? s.panelWidthPct : s.panelHeightPct
+      },
+
+      setPanelSize: (pct) => {
+        const bounds = axisBounds(get().panelPosition)
+        const clamped = clamp(snapPanelPct(pct), bounds.min, bounds.max)
+        const key = get().panelPosition === "right" ? "panelWidthPct" : "panelHeightPct"
         // A manual resize (drag / arrow keys) exits the maximized state so the
         // toggle button reads "maximize" again and won't clobber the new size.
-        set({ panelHeightPct: clamped, maximized: false })
+        set({ [key]: clamped, maximized: false } as Partial<TerminalStoreState>)
         if (pendingFlush) clearTimeout(pendingFlush)
         pendingFlush = setTimeout(() => {
           pendingFlush = null
-          set({ panelHeightPct: get().panelHeightPct })
+          // Touch the value again so `persist` sees a write after the drag
+          // settles rather than once per pointermove.
+          set({ [key]: get()[key] } as Partial<TerminalStoreState>)
         }, TERMINAL_LAYOUT_PERSIST_DEBOUNCE_MS)
       },
 
-      toggleMaximized: () => {
-        const { panelMaxPct } = TERMINAL_LAYOUT_BOUNDS
-        const s = get()
-        if (s.maximized) {
-          // Restore the height the user last dragged to (clamped defensively).
-          const restore = clamp(s.preMaxHeightPct, TERMINAL_LAYOUT_BOUNDS.panelMinPct, panelMaxPct)
-          set({ panelHeightPct: restore, maximized: false })
-        } else {
-          set({ preMaxHeightPct: s.panelHeightPct, panelHeightPct: panelMaxPct, maximized: true })
+      setPanelHeight: (pct) => {
+        // Kept as the bottom-dock alias so existing callers (and the menu
+        // actions) keep working; the axis routing lives in `setPanelSize`.
+        if (get().panelPosition === "bottom") {
+          get().setPanelSize(pct)
+          return
         }
+        const { panelMinPct, panelMaxPct } = TERMINAL_LAYOUT_BOUNDS
+        set({ panelHeightPct: clamp(snapPanelPct(pct), panelMinPct, panelMaxPct) })
+      },
+
+      toggleMaximized: () => {
+        const s = get()
+        const bounds = axisBounds(s.panelPosition)
+        const right = s.panelPosition === "right"
+        if (s.maximized) {
+          // Restore the size the user last dragged to (clamped defensively).
+          const previous = right ? s.preMaxWidthPct : s.preMaxHeightPct
+          const restore = clamp(previous, bounds.min, bounds.max)
+          set(
+            (right
+              ? { panelWidthPct: restore, maximized: false }
+              : { panelHeightPct: restore, maximized: false }) as Partial<TerminalStoreState>
+          )
+        } else {
+          set(
+            (right
+              ? { preMaxWidthPct: s.panelWidthPct, panelWidthPct: bounds.max, maximized: true }
+              : {
+                  preMaxHeightPct: s.panelHeightPct,
+                  panelHeightPct: bounds.max,
+                  maximized: true,
+                }) as Partial<TerminalStoreState>
+          )
+        }
+      },
+
+      setTabOrder: (projectId, orderedIds) => {
+        set((s) => {
+          const key = projectId ?? ""
+          // The order arrives from a drag interaction — treat it as untrusted:
+          // keep only ids that exist and belong to this project, de-duplicated.
+          const seen = new Set<string>()
+          const filtered: string[] = []
+          for (const id of orderedIds) {
+            const row = s.sessions[id]
+            if (!row || (row.projectId ?? "") !== key || seen.has(id)) continue
+            seen.add(id)
+            filtered.push(id)
+          }
+          // Anything in this project the drag didn't mention keeps its place at
+          // the end rather than silently vanishing from the order.
+          for (const row of Object.values(s.sessions)) {
+            if ((row.projectId ?? "") === key && !seen.has(row.id)) filtered.push(row.id)
+          }
+          return { tabOrder: { ...s.tabOrder, [key]: filtered } }
+        })
+      },
+
+      setOutputThrottled: (sessionId, throttled) => {
+        set((s) => {
+          if ((s.outputThrottled[sessionId] ?? false) === throttled) return s
+          const next = { ...s.outputThrottled }
+          if (throttled) next[sessionId] = true
+          else delete next[sessionId]
+          return { outputThrottled: next }
+        })
       },
 
       registerSession: (info, opts = {}) => {
@@ -483,22 +679,35 @@ export const useTerminalStore = create<TerminalStoreState>()(
               if (anchorRemap) {
                 nextActive[projectId] = anchorRemap.to
               } else {
-                const remaining = Object.values(next)
-                  .filter((r) => (r.projectId ?? "") === projectId)
-                  .filter((r) => !isGroupMember(r.id, splitPanes))
-                  .sort((a, b) => a.createdAt - b.createdAt)
+                const remaining = orderTabRows(
+                  Object.values(next)
+                    .filter((r) => (r.projectId ?? "") === projectId)
+                    .filter((r) => !isGroupMember(r.id, splitPanes)),
+                  s.tabOrder[projectId]
+                )
                 nextActive[projectId] = remaining[remaining.length - 1]?.id ?? null
               }
             } else if (anchorRemap && activeId === anchorRemap.from) {
               nextActive[projectId] = anchorRemap.to
             }
           }
+          // Drop the dead id from the order + throttle maps so neither grows
+          // without bound across a long session.
+          const tabOrder: Record<string, string[]> = {}
+          for (const [projectKey, ids] of Object.entries(s.tabOrder)) {
+            tabOrder[projectKey] = ids.filter((entry) => entry !== id)
+          }
+          const outputThrottled = { ...s.outputThrottled }
+          delete outputThrottled[id]
+
           return {
             sessions: next,
             activeSessionIdByProject: nextActive,
             splitPanes,
             focusedPaneByAnchor,
             splitDirection,
+            tabOrder,
+            outputThrottled,
           }
         })
       },
@@ -678,11 +887,13 @@ export const useTerminalStore = create<TerminalStoreState>()(
 
       tabsForProject: (projectId) => {
         const target = projectId ?? ""
-        const sp = get().splitPanes
-        return Object.values(get().sessions)
-          .filter((row) => (row.projectId ?? "") === target)
-          .filter((row) => !isGroupMember(row.id, sp))
-          .sort((a, b) => a.createdAt - b.createdAt)
+        const s = get()
+        return orderTabRows(
+          Object.values(s.sessions)
+            .filter((row) => (row.projectId ?? "") === target)
+            .filter((row) => !isGroupMember(row.id, s.splitPanes)),
+          s.tabOrder[target]
+        )
       },
 
       restorePersistedLayout: () => {
@@ -768,12 +979,25 @@ export const useTerminalStore = create<TerminalStoreState>()(
             activeSessionIdByProject[projectId] = fallback?.id ?? null
           }
 
+          // Reapply the saved tab order, keeping only ids that re-registered
+          // under the same project. A stale id would otherwise pin a phantom
+          // slot at the front of the strip forever.
+          const tabOrder: Record<string, string[]> = {}
+          for (const [projectKey, ids] of Object.entries(saved.tabOrder)) {
+            const kept = ids.filter((id) => {
+              const row = sessions[id]
+              return !!row && (row.projectId ?? "") === projectKey
+            })
+            if (kept.length > 0) tabOrder[projectKey] = kept
+          }
+
           return {
             sessions,
             splitPanes,
             focusedPaneByAnchor,
             splitDirection,
             activeSessionIdByProject,
+            tabOrder,
             pendingReloadLayout: null,
           }
         })
@@ -788,23 +1012,34 @@ export const useTerminalStore = create<TerminalStoreState>()(
           hostStateMessage: null,
           maximized: false,
           preMaxHeightPct: TERMINAL_LAYOUT_DEFAULTS.panelHeightPct,
+          preMaxWidthPct: TERMINAL_LAYOUT_DEFAULTS.panelWidthPct,
           sessions: {},
           activeSessionIdByProject: {},
           splitPanes: {},
           focusedPaneByAnchor: {},
           splitDirection: {},
+          tabOrder: {},
+          outputThrottled: {},
           pendingReloadLayout: null,
         })
       },
     }),
     {
       name: "cognia-terminal-layout",
-      // v4 records stable host-session/controller layout metadata. Live host
-      // snapshots remain authoritative; this only bridges the reload window.
-      version: 4,
+      // v5 adds the dock edge + its width. v4 recorded stable
+      // host-session/controller layout metadata. Live host snapshots remain
+      // authoritative; this only bridges the reload window.
+      version: 5,
       migrate: (oldState: unknown, oldVersion: number) => {
         const prev = oldState as
-          { panelHeightPct?: unknown; pendingReloadLayout?: unknown } | null | undefined
+          | {
+              panelHeightPct?: unknown
+              panelWidthPct?: unknown
+              panelPosition?: unknown
+              pendingReloadLayout?: unknown
+            }
+          | null
+          | undefined
         return {
           panelHeightPct:
             typeof prev?.panelHeightPct === "number"
@@ -814,14 +1049,31 @@ export const useTerminalStore = create<TerminalStoreState>()(
                   TERMINAL_LAYOUT_BOUNDS.panelMaxPct
                 )
               : TERMINAL_LAYOUT_DEFAULTS.panelHeightPct,
+          // Absent on v4 and below; anything else on disk is untrusted.
+          panelWidthPct:
+            typeof prev?.panelWidthPct === "number"
+              ? clamp(
+                  prev.panelWidthPct,
+                  TERMINAL_LAYOUT_BOUNDS.panelMinWidthPct,
+                  TERMINAL_LAYOUT_BOUNDS.panelMaxWidthPct
+                )
+              : TERMINAL_LAYOUT_DEFAULTS.panelWidthPct,
+          panelPosition:
+            prev?.panelPosition === "right" || prev?.panelPosition === "bottom"
+              ? prev.panelPosition
+              : TERMINAL_LAYOUT_DEFAULTS.panelPosition,
           pendingReloadLayout:
             oldVersion >= 3 ? normalizeReloadLayout(prev?.pendingReloadLayout) : null,
         }
       },
       // `panelOpen` intentionally resets to closed. While reattaching, retain
       // the complete pending snapshot; otherwise capture the current live layout.
+      // `tabOrder` rides `pendingReloadLayout`, not this — it is keyed by
+      // session ids that die with the PTY.
       partialize: (state) => ({
         panelHeightPct: state.panelHeightPct,
+        panelWidthPct: state.panelWidthPct,
+        panelPosition: state.panelPosition,
         pendingReloadLayout: state.pendingReloadLayout ?? captureReloadLayout(state),
       }),
     }

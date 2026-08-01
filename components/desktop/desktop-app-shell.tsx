@@ -24,9 +24,6 @@
 
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
-import { AnimatePresence, motion } from "motion/react"
-
-import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { CommandPalette } from "@/components/desktop/command-palette"
 import { GuildRail } from "@/components/shell/guild-rail"
 import { StatusBar } from "@/components/desktop/status-bar"
@@ -37,9 +34,9 @@ import { WindowFocusTracker } from "@/components/desktop/window-focus-tracker"
 import { WindowResizeEdges } from "@/components/desktop/window-resize-edges"
 import { ZoomShortcuts } from "@/components/desktop/zoom-shortcuts"
 import { VscodeExtensionHostBar } from "@/components/extensions/vscode-extension-host-bar"
-import { TerminalDock } from "@/components/terminal/terminal-dock"
+import { TerminalDockMoveProvider } from "@/components/terminal/terminal-dock-move-provider"
+import { TerminalDockRegion } from "@/components/terminal/terminal-dock-region"
 import { TerminalToggleShortcut } from "@/components/terminal/terminal-toggle-shortcut"
-import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useWorkbenchActivityShortcuts } from "@/hooks/context-workbench/use-workbench-activity-shortcuts"
 import { useMenuEventRouter } from "@/hooks/desktop/use-menu-event-router"
 import { usePlatform } from "@/hooks/use-platform"
@@ -90,16 +87,11 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   // or font change would re-render the entire app shell for nothing.
   const sidebarSide = useSettingsStore((s) => s.settings?.sidebarSide ?? DEFAULT_SIDEBAR_SIDE)
 
-  // Terminal dock (plan: vscode-vivid-wilkinson) — height drives the
-  // dock's slice of the shell's vertical column. Hidden when closed.
-  const terminalPanelOpen = useTerminalStore((s) => s.panelOpen)
-  const terminalPanelHeightPct = useTerminalStore((s) => s.panelHeightPct)
-  const terminalMaximized = useTerminalStore((s) => s.maximized)
-  // Slide the dock up from the bottom edge on open (and back down on close)
-  // instead of popping. Only the wrapper's transform animates — the height is
-  // reserved instantly so the editor above settles once and xterm fits once,
-  // never per-frame. Collapses to an instant show/hide under reduced motion.
-  const { reduce: motionReduce, durationScale: motionDurationScale } = useFlowMotion()
+  // Terminal dock. Both slots stay mounted; each renders only when it owns the
+  // store's current `panelPosition`, so the dock can slide between the bottom
+  // edge and the right column. All of its state lives in `TerminalDockRegion`
+  // rather than here — this shell wraps every desktop route, so a selector added
+  // at this level re-renders the whole app on every dock resize.
 
   // Bridge native-menu `menu://<id>` events into renderer actions. Must run
   // even when the in-app Menubar would render in its hamburger form so the
@@ -168,42 +160,31 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
       <ZoomShortcuts />
       <TerminalToggleShortcut />
       <TitleBar />
-      <div className="flex flex-1 overflow-hidden">
-        {sidebarSide === "left" ? guildRail : null}
-        <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div data-find-scope className="flex min-h-0 flex-1 overflow-hidden">
-            {children}
+      {/* Owns the dock's drag-to-move context. Renders no DOM of its own; the
+          edge drop zones it paints during a drag are `fixed`, so the row's
+          child order (which the rail-placement tests pin) is unchanged. */}
+      <TerminalDockMoveProvider>
+        <div className="flex flex-1 overflow-hidden">
+          {sidebarSide === "left" ? guildRail : null}
+          <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+            <div data-find-scope className="flex min-h-0 flex-1 overflow-hidden">
+              {children}
+            </div>
+            <TerminalDockRegion slot="bottom" />
           </div>
-          <AnimatePresence initial={false}>
-            {terminalPanelOpen ? (
-              <motion.div
-                key="terminal-dock-region"
-                data-testid="terminal-dock-region"
-                className={terminalMaximized ? "absolute inset-0 z-40 min-h-0" : "min-h-0 shrink-0"}
-                style={{ height: terminalMaximized ? "100%" : `${terminalPanelHeightPct}%` }}
-                data-maximized={terminalMaximized ? "true" : "false"}
-                initial={motionReduce ? false : { y: "100%" }}
-                animate={{ y: 0 }}
-                exit={{ y: motionReduce ? 0 : "100%", opacity: motionReduce ? 0 : 1 }}
-                transition={{
-                  duration: motionReduce ? 0 : 0.2 * motionDurationScale,
-                  ease: [0.32, 0.72, 0, 1],
-                }}
-              >
-                <TerminalDock />
-              </motion.div>
-            ) : null}
-          </AnimatePresence>
+          {/* Right-docked terminal. Sits inboard of the extension host bar and
+              the rail so those stay pinned to the window edge. */}
+          <TerminalDockRegion slot="right" />
+          {/*
+           * VS Code extension host bar — hosts webviews + terminals from
+           * any activated extension. Returns `null` until an extension
+           * registers a surface, so the layout is unchanged in the
+           * default case. Phase A4 of the LSP reuse work.
+           */}
+          <VscodeExtensionHostBar className="hidden w-72 shrink-0 border-l lg:flex" />
+          {sidebarSide === "right" ? guildRail : null}
         </div>
-        {/*
-         * VS Code extension host bar — hosts webviews + terminals from
-         * any activated extension. Returns `null` until an extension
-         * registers a surface, so the layout is unchanged in the
-         * default case. Phase A4 of the LSP reuse work.
-         */}
-        <VscodeExtensionHostBar className="hidden w-72 shrink-0 border-l lg:flex" />
-        {sidebarSide === "right" ? guildRail : null}
-      </div>
+      </TerminalDockMoveProvider>
       {mounted && <CommandPalette onOpenSettings={handleOpenSettings} />}
       <FindBar />
       <ShellLayoutNotice />

@@ -18,6 +18,7 @@ import { StatusBarConnectivity } from "@/components/desktop/status-bar-connectiv
 import { StatusBarPerf } from "@/components/desktop/status-bar-perf"
 import { StatusBarRunState } from "@/components/desktop/status-bar-run-state"
 import { StatusBarSync } from "@/components/desktop/status-bar-sync"
+import { StatusBarTerminal } from "@/components/desktop/status-bar-terminal"
 import { StatusBarUsage } from "@/components/desktop/status-bar-usage"
 import { NotificationBell } from "@/components/notifications/notification-bell"
 import { StatusBarBranch } from "@/components/source-control/status-bar-branch"
@@ -45,6 +46,8 @@ function StatusBarSegment({ id }: { id: string }) {
       return <StatusBarBranch />
     case "sync":
       return <StatusBarSync />
+    case "terminal":
+      return <StatusBarTerminal />
     case "notifications":
       return <NotificationBell />
     case "attention":
