@@ -42,6 +42,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import type { EditorTabMode } from "@/lib/editor-workbench/editor-tab-model"
 import type { WorkspaceEntry } from "@/lib/files/types"
 import type {
   listWorkspaceDir,
@@ -64,7 +65,8 @@ interface Props {
   /** Bump to force a reload of every expanded directory (external change). */
   refreshToken?: number
   activePath: string | null
-  onOpenFile: (relPath: string) => void
+  /** Opens a file. A plain tree click asks for a preview tab; a double-click pins it. */
+  onOpenFile: (relPath: string, options?: { mode?: EditorTabMode }) => void
   deps: ProjectFileTreeDeps
   density?: "compact" | "touch"
   onRenamed?: (from: string, to: string) => void | Promise<void>
@@ -209,7 +211,7 @@ export function ProjectFileTree({
           delete: t("delete"),
         }}
         onToggle={() => toggle(entry.relPath)}
-        onOpen={() => onOpenFile(entry.relPath)}
+        onOpen={(mode) => onOpenFile(entry.relPath, { mode })}
         onNewFile={() => {
           setExpanded((p) => new Set(p).add(entry.relPath))
           setPendingCreate({ parent: entry.relPath, kind: "file" })
@@ -329,7 +331,7 @@ interface TreeRowProps {
   onRenameCancel: () => void
   labels: { newFile: string; newFolder: string; rename: string; delete: string }
   onToggle: () => void
-  onOpen: () => void
+  onOpen: (mode: EditorTabMode) => void
   onNewFile: () => void
   onNewFolder: () => void
   onRename: () => void
@@ -374,7 +376,10 @@ function TreeRow({
             )}
             style={{ paddingLeft: `${depth * 12 + 6}px` }}
             data-testid={`tree-row-${entry.relPath}`}
-            onClick={() => (entry.isDir ? onToggle() : onOpen())}
+            onClick={() => (entry.isDir ? onToggle() : onOpen("preview"))}
+            onDoubleClick={() => {
+              if (!entry.isDir) onOpen("pinned")
+            }}
           >
             {entry.isDir ? (
               expanded ? (

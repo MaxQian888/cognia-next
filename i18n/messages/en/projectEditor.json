@@ -16,6 +16,8 @@
   "filesTab": "Files",
   "newFile": "New File",
   "newFolder": "New Folder",
+  "pinTab": "Keep {name} open",
+  "previewTab": "{name} — preview tab, double-click to keep it open",
   "proIde": {
     "cancelDownload": "Cancel",
     "checkingTooltip": "Checking whether Pro IDE is available…",
