@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+pub mod agent_protocol;
+
 const IMMUTABLE_DIGEST_LEN: usize = 64;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -47,7 +49,7 @@ pub struct DeploymentSpec {
     pub images: ImageConfig,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DeploymentTopology {
     Compose,

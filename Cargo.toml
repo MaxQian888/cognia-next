@@ -63,6 +63,7 @@ members = [
   "crates/cognia-jobs",
   "crates/cognia-deployment",
   "crates/cognia-ops-controller",
+  "crates/cognia-deploy-agent",
 ]
 exclude = [
   "services/signaling-server",
