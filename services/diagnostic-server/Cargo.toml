@@ -1,0 +1,47 @@
+[package]
+name = "cognia-diagnostic-server"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_diagnostic_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cognia-diagnostic-server"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+axum = { version = "0.8", features = ["macros", "multipart"] }
+base64 = "0.22"
+bytes = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+ed25519-dalek = "2"
+hex = "0.4"
+hmac = "0.12"
+jsonwebtoken = "9"
+object_store = { version = "0.12", features = ["aws"] }
+rand = "0.8"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate"] }
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync", "time"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "limit", "request-id"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
+[workspace]
+resolver = "2"

@@ -1,0 +1,176 @@
+openapi: 3.1.0
+info:
+  title: Cognia Diagnostic Service
+  version: 1.0.0
+  description: Tenant-scoped control plane for consented, resumable diagnostic uploads.
+servers:
+  - url: /v1
+security:
+  - uploadGrant: []
+paths:
+  /grants/oidc:
+    post:
+      security: []
+      operationId: exchangeOidcSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OidcGrantRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/Grant'}
+        '401': {$ref: '#/components/responses/Error'}
+  /grants/anonymous:
+    post:
+      security: []
+      operationId: exchangeInstallationProof
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AnonymousGrantRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/Grant'}
+        '401': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /incidents:
+    post:
+      operationId: createIncident
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateIncidentRequest'}
+      responses:
+        '201': {description: Idempotently created incident and one-time deletion credential}
+        '413': {$ref: '#/components/responses/Error'}
+  /incidents/{incidentId}:
+    parameters:
+      - {$ref: '#/components/parameters/IncidentId'}
+    get:
+      operationId: getReceipt
+      responses:
+        '200': {description: Receipt and processing state}
+    delete:
+      operationId: deleteIncident
+      responses:
+        '204': {description: Artifacts deleted and metadata tombstoned}
+  /incidents/{incidentId}/parts:
+    parameters:
+      - {$ref: '#/components/parameters/IncidentId'}
+    get:
+      operationId: inspectUploadProgress
+      responses:
+        '200': {description: Checked part inventory and uploaded byte count}
+  /incidents/{incidentId}/parts/{partNumber}:
+    parameters:
+      - {$ref: '#/components/parameters/IncidentId'}
+      - name: partNumber
+        in: path
+        required: true
+        schema: {type: integer, minimum: 1, maximum: 10000}
+    put:
+      operationId: uploadCheckedPart
+      parameters:
+        - name: x-part-sha256
+          in: header
+          required: true
+          schema: {type: string, pattern: '^[a-fA-F0-9]{64}$'}
+        - name: x-artifact-kind
+          in: header
+          schema: {type: string, enum: [attachment, minidump]}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream: {schema: {type: string, format: binary}}
+      responses:
+        '201': {description: Privacy-scanned durable part}
+        '422': {$ref: '#/components/responses/Error'}
+  /incidents/{incidentId}/complete:
+    post:
+      operationId: completeUpload
+      parameters:
+        - {$ref: '#/components/parameters/IncidentId'}
+      responses:
+        '200': {description: Processing receipt}
+        '409': {$ref: '#/components/responses/Error'}
+  /incidents/{incidentId}/cancel:
+    post:
+      operationId: cancelUpload
+      parameters:
+        - {$ref: '#/components/parameters/IncidentId'}
+      responses:
+        '204': {description: Upload cancelled and parts removed}
+  /incidents/{incidentId}/withdraw:
+    post:
+      operationId: withdrawConsent
+      parameters:
+        - {$ref: '#/components/parameters/IncidentId'}
+      responses:
+        '204': {description: Processing blocked and deletion scheduled immediately}
+components:
+  securitySchemes:
+    uploadGrant:
+      type: http
+      scheme: bearer
+  parameters:
+    IncidentId:
+      name: incidentId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+  responses:
+    Grant:
+      description: Short-lived tenant/project-scoped grant
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [grant, expiresInSeconds]
+            properties:
+              grant: {type: string}
+              expiresInSeconds: {type: integer}
+    Error:
+      description: Stable machine-readable error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code: {type: string}
+  schemas:
+    OidcGrantRequest:
+      type: object
+      required: [sessionToken, installationId]
+      properties:
+        sessionToken: {type: string}
+        installationId: {type: string}
+    AnonymousGrantRequest:
+      type: object
+      required: [tenantId, projectId, installationId, publicKey, signature, nonce, timestamp]
+      properties:
+        tenantId: {type: string, format: uuid}
+        projectId: {type: string, format: uuid}
+        installationId: {type: string}
+        publicKey: {type: string, contentEncoding: base64}
+        signature: {type: string, contentEncoding: base64}
+        nonce: {type: string}
+        timestamp: {type: integer, format: int64}
+    CreateIncidentRequest:
+      type: object
+      required: [artifactHash, buildId, platform, module, exception, attachmentCount, eventCount, totalBytes, largestAttachmentBytes, largestMinidumpBytes, consent]
+      properties:
+        artifactHash: {type: string, pattern: '^[a-fA-F0-9]{64}$'}
+        buildId: {type: string}
+        platform: {type: string}
+        module: {type: string}
+        exception: {type: string}
+        attachmentCount: {type: integer, maximum: 20}
+        eventCount: {type: integer, maximum: 50000}
+        totalBytes: {type: integer, maximum: 1073741824}
+        largestAttachmentBytes: {type: integer, maximum: 104857600}
+        largestMinidumpBytes: {type: integer, maximum: 536870912}
+        consent: {type: boolean, const: true}
