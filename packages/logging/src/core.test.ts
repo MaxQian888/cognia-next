@@ -346,7 +346,7 @@ describe("span / call-context fields", () => {
     })
     const outer = mem.entries.find((e) => e.message === "outer")!
     const inner = mem.entries.find((e) => e.message === "inner")!
-    expect(outer.spanId).toMatch(/^[a-f0-9]{32}$/)
+    expect(outer.spanId).toMatch(/^[a-f0-9]{16}$/)
     expect(outer.parentSpanId).toBeUndefined()
     expect(inner.parentSpanId).toBe(outer.spanId)
     expect(inner.spanId).not.toBe(outer.spanId)
@@ -370,14 +370,14 @@ describe("span / call-context fields", () => {
     const mem = makeMemoryTransport()
     core.initLogger({ minLevel: "trace", enableConsole: false }, [mem])
     const logger = core.createLogger("svc")
-    const result = logger.span("do-work", () => {
-      logger.info("step")
+    const result = logger.span("do-work", (scoped) => {
+      scoped.info("step")
       return 42
     })
     expect(result).toBe(42)
     const step = mem.entries.find((e) => e.message === "step")!
     const end = mem.entries.find((e) => e.message === "do-work")!
-    expect(step.spanId).toMatch(/^[a-f0-9]{32}$/)
+    expect(step.spanId).toMatch(/^[a-f0-9]{16}$/)
     expect(end.spanId).toBe(step.spanId)
     expect(end.phase).toBe("end")
     expect(typeof end.durationMs).toBe("number")
@@ -388,8 +388,8 @@ describe("span / call-context fields", () => {
     const mem = makeMemoryTransport()
     core.initLogger({ minLevel: "trace", enableConsole: false }, [mem])
     const logger = core.createLogger("svc")
-    const result = await logger.spanAsync("async-work", async () => {
-      logger.info("astep")
+    const result = await logger.spanAsync("async-work", async (scoped) => {
+      scoped.info("astep")
       return "ok"
     })
     expect(result).toBe("ok")
@@ -398,6 +398,38 @@ describe("span / call-context fields", () => {
     expect(end.spanId).toBe(step.spanId)
     expect(end.phase).toBe("end")
     expect(typeof end.durationMs).toBe("number")
+  })
+
+  it("keeps concurrent async spans isolated through scoped loggers", async () => {
+    const core = await import("./core")
+    const mem = makeMemoryTransport()
+    core.initLogger({ minLevel: "trace", enableConsole: false }, [mem])
+    const logger = core.createLogger("svc")
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+
+    const first = logger.spanAsync("first-work", async (scoped) => {
+      await firstGate
+      scoped.info("first-step")
+    })
+    const second = logger.spanAsync("second-work", async (scoped) => {
+      scoped.info("second-step")
+      releaseFirst()
+    })
+
+    await Promise.all([first, second])
+
+    const firstStep = mem.entries.find((entry) => entry.message === "first-step")!
+    const firstEnd = mem.entries.find((entry) => entry.message === "first-work")!
+    const secondStep = mem.entries.find((entry) => entry.message === "second-step")!
+    const secondEnd = mem.entries.find((entry) => entry.message === "second-work")!
+    expect(firstStep.spanId).toBe(firstEnd.spanId)
+    expect(secondStep.spanId).toBe(secondEnd.spanId)
+    expect(firstStep.spanId).not.toBe(secondStep.spanId)
+    expect(firstStep.parentSpanId).toBeUndefined()
+    expect(secondStep.parentSpanId).toBeUndefined()
   })
 })
 

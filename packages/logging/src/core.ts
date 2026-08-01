@@ -406,41 +406,69 @@ function trimDiagnosticCooldown(nowMs: number): void {
 class CoreLogger implements Logger {
   private readonly module: string
   private readonly additionalContext: Record<string, unknown>
+  private readonly operationContext: {
+    traceId?: string
+    spanId?: string
+    parentSpanId?: string
+  }
   private currentTraceId?: string
 
-  constructor(module: string, additionalContext?: Record<string, unknown>) {
+  constructor(
+    module: string,
+    additionalContext?: Record<string, unknown>,
+    operationContext?: { traceId?: string; spanId?: string; parentSpanId?: string }
+  ) {
     this.module = module
     this.additionalContext = additionalContext ? { ...additionalContext } : {}
+    this.operationContext = operationContext ? { ...operationContext } : {}
     registerModule(module)
   }
 
   child(subModule: string): Logger {
-    return new CoreLogger(`${this.module}:${subModule}`, this.additionalContext)
+    return new CoreLogger(
+      `${this.module}:${subModule}`,
+      this.additionalContext,
+      this.operationContext
+    )
   }
 
-  span<T>(name: string, fn: () => T): T {
+  span<T>(name: string, fn: (logger: Logger) => T): T {
     const start = nowMs()
-    return logContext.withSpan(() => {
-      const result = fn()
-      this.debug(name, { phase: "end", durationMs: nowMs() - start })
+    return logContext.withSpan((spanId) => {
+      const scoped = new CoreLogger(this.module, this.additionalContext, {
+        traceId: this.operationContext.traceId ?? this.currentTraceId ?? logContext.traceId,
+        spanId,
+        parentSpanId: this.operationContext.spanId,
+      })
+      const result = fn(scoped)
+      scoped.debug(name, { phase: "end", durationMs: nowMs() - start })
       return result
     })
   }
 
-  async spanAsync<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  async spanAsync<T>(name: string, fn: (logger: Logger) => Promise<T>): Promise<T> {
     const start = nowMs()
-    return logContext.withSpanAsync(async () => {
-      const result = await fn()
-      this.debug(name, { phase: "end", durationMs: nowMs() - start })
+    return logContext.withSpanAsync(async (spanId) => {
+      const scoped = new CoreLogger(this.module, this.additionalContext, {
+        traceId: this.operationContext.traceId ?? this.currentTraceId ?? logContext.traceId,
+        spanId,
+        parentSpanId: this.operationContext.spanId,
+      })
+      const result = await fn(scoped)
+      scoped.debug(name, { phase: "end", durationMs: nowMs() - start })
       return result
     })
   }
 
   withContext(context: Record<string, unknown>): Logger {
-    return new CoreLogger(this.module, {
-      ...this.additionalContext,
-      ...context,
-    })
+    return new CoreLogger(
+      this.module,
+      {
+        ...this.additionalContext,
+        ...context,
+      },
+      this.operationContext
+    )
   }
 
   setTraceId(traceId: string): void {
@@ -483,7 +511,11 @@ class CoreLogger implements Logger {
       level,
       message,
       module: this.module,
-      traceId: structuredMetadata.traceId || this.currentTraceId || logContext.traceId,
+      traceId:
+        structuredMetadata.traceId ||
+        this.operationContext.traceId ||
+        this.currentTraceId ||
+        logContext.traceId,
       requestId: structuredMetadata.requestId,
       executionId: structuredMetadata.executionId,
       workflowId: structuredMetadata.workflowId,
@@ -493,8 +525,11 @@ class CoreLogger implements Logger {
       runtime: structuredMetadata.runtime,
       origin: structuredMetadata.origin,
       sessionId: structuredMetadata.sessionId || logContext.sessionId,
-      spanId: logContext.spanId,
-      parentSpanId: logContext.parentSpanId,
+      spanId: this.operationContext.spanId ?? logContext.spanId,
+      parentSpanId:
+        this.operationContext.spanId !== undefined
+          ? this.operationContext.parentSpanId
+          : logContext.parentSpanId,
       phase: structuredMetadata.phase,
       attempt: structuredMetadata.attempt,
       durationMs: structuredMetadata.durationMs,

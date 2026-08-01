@@ -66,6 +66,7 @@
     "0092-official-website-workspace",
     "0094-conversation-anchors-and-jump",
     "0098-persistent-workbench-rail",
+    "0102-unified-observability-crash-diagnostics",
     "---仅提供英文版---",
     "[ADR 0021 — WebRTC DataChannel WAN transport](/en/docs/adr/0021-webrtc-datachannel-wan-transport)",
     "[ADR 0022 — Agent Team runtime hardening](/en/docs/adr/0022-agent-team-runtime-hardening)",

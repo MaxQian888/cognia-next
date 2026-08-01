@@ -51,6 +51,21 @@ export {
 } from "./core"
 export { clearRecentErrorLogs, getRecentErrorLogs, subscribeRecentErrorLogs } from "./recent-errors"
 
+export {
+  OBSERVABILITY_EVENT_V1_SCHEMA,
+  observabilityEventToStructuredLogEntry,
+  structuredLogEntryToObservabilityEvent,
+  type ObservabilityCorrelation,
+  type ObservabilityDelivery,
+  type ObservabilityEventKind,
+  type ObservabilityEventScope,
+  type ObservabilityEventV1,
+  type ObservabilityPayload,
+  type ObservabilityPrivacy,
+  type ObservabilityRuntime,
+  type StructuredLogAdapterContext,
+} from "./observability-event"
+
 // Context exports
 export { logContext, generateTraceId, traced } from "./context"
 

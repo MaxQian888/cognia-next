@@ -9,14 +9,24 @@
  * generator from the agent-trace module, but cognia-next has no agent-trace
  * subsystem, so we generate locally with the same shape (UUIDv4 minus hyphens).
  */
-function generateId(): string {
+function generateHexId(byteLength: number): string {
   if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
-    const bytes = new Uint8Array(16)
+    const bytes = new Uint8Array(byteLength)
     crypto.getRandomValues(bytes)
     return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
   }
 
-  return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("")
+  return Array.from({ length: byteLength * 2 }, () =>
+    Math.floor(Math.random() * 16).toString(16)
+  ).join("")
+}
+
+function generateId(): string {
+  return generateHexId(16)
+}
+
+export function generateSpanId(): string {
+  return generateHexId(8)
 }
 
 /**
@@ -127,7 +137,7 @@ class LoggerContext {
    * even if `fn` throws. The generated span ID is passed to `fn`.
    */
   withSpan<T>(fn: (spanId: string) => T): T {
-    const spanId = generateId()
+    const spanId = generateSpanId()
     this._spanStack.push(spanId)
     try {
       return fn(spanId)
@@ -140,7 +150,7 @@ class LoggerContext {
    * Async variant of {@link withSpan}.
    */
   async withSpanAsync<T>(fn: (spanId: string) => Promise<T>): Promise<T> {
-    const spanId = generateId()
+    const spanId = generateSpanId()
     this._spanStack.push(spanId)
     try {
       return await fn(spanId)
