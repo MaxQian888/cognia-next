@@ -98,6 +98,19 @@ describe("DiffPane", () => {
     expect(actions.stage).toHaveBeenCalledWith([], "PATCH")
   })
 
+  it("keeps the diff cached when a hunk mutation fails", async () => {
+    const actions = makeActions()
+    actions.stage.mockResolvedValue({ kind: "commandFailed", detail: "patch no longer applies" })
+    render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={actions} />)
+    await screen.findByTestId("stub-hunk-stage")
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("stub-hunk-stage"))
+    })
+
+    expect(useGitStore.getState().getCachedDiff("w:a.ts")).not.toBeNull()
+  })
+
   it("shows an unstage action for staged diffs", async () => {
     const actions = makeActions()
     render(<DiffPane rootDir="/r" path="a.ts" staged actions={actions} />)

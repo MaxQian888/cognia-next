@@ -56,14 +56,16 @@ export function TagPanel({ open, onOpenChange, rootDir, actions }: TagPanelProps
   const doCreate = async () => {
     const n = name.trim()
     if (!n) return
-    await actions.createTag(n, message.trim() || undefined)
+    const failure = await actions.createTag(n, message.trim() || undefined)
+    if (failure) return
     setName("")
     setMessage("")
     await reload()
   }
 
   const doDelete = async (tagName: string) => {
-    await actions.deleteTag(tagName)
+    const failure = await actions.deleteTag(tagName)
+    if (failure) return
     await reload()
   }
 

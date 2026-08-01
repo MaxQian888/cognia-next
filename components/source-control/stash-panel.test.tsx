@@ -32,6 +32,19 @@ describe("StashPanel", () => {
     })
   })
 
+  it("keeps the stash message when the backend rejects the push", async () => {
+    const actions = makeActions()
+    actions.stashPush.mockResolvedValue({ kind: "commandFailed", detail: "nothing to stash" })
+    render(<StashPanel open onOpenChange={() => {}} stashes={[]} actions={actions} />)
+    fireEvent.change(screen.getByTestId("stash-message"), { target: { value: "keep this" } })
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("stash-push"))
+    })
+
+    expect(screen.getByTestId("stash-message")).toHaveValue("keep this")
+  })
+
   it("renders stash entries with pop/apply/drop", () => {
     const actions = makeActions()
     render(<StashPanel open onOpenChange={() => {}} stashes={stashes} actions={actions} />)

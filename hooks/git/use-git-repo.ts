@@ -40,7 +40,7 @@ export function useGitRepo(): UseGitRepoResult {
   // Initial load when the bound repo changes (idempotent with the controller).
   useEffect(() => {
     if (!available || !rootDir) return
-    void loadGitRepo(rootDir)
+    void loadGitRepo(rootDir).catch(() => undefined)
   }, [available, rootDir])
 
   return { available, rootDir, refresh, openFolder }

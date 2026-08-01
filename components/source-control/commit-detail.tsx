@@ -124,6 +124,15 @@ export function CommitDetail({
     }
   }, [rootDir, commit.hash, selected, selectedKey, cacheDiff, getCachedDiff])
 
+  const createBranchFromCommit = async () => {
+    const name = branchName.trim()
+    if (!name || !actions?.createBranch) return
+    const failure = await actions.createBranch(name, true, commit.hash)
+    if (failure) return
+    setBranchDialogOpen(false)
+    setBranchName("")
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="commit-detail">
       <header className="shrink-0 border-b p-3">
@@ -254,9 +263,7 @@ export function CommitDetail({
             onKeyDown={(e) => {
               if (e.key === "Enter" && branchName.trim()) {
                 e.preventDefault()
-                void actions?.createBranch?.(branchName.trim(), true, commit.hash)
-                setBranchDialogOpen(false)
-                setBranchName("")
+                void createBranchFromCommit()
               }
             }}
             placeholder={t("commitDetail.branchNamePlaceholder")}
@@ -265,11 +272,7 @@ export function CommitDetail({
           <DialogFooter>
             <Button
               disabled={!branchName.trim()}
-              onClick={() => {
-                void actions?.createBranch?.(branchName.trim(), true, commit.hash)
-                setBranchDialogOpen(false)
-                setBranchName("")
-              }}
+              onClick={() => void createBranchFromCommit()}
               data-testid="create-branch-confirm"
             >
               <GitBranchPlusIcon className="size-3.5" />
@@ -290,7 +293,14 @@ export function CommitDetail({
           <AlertDialogFooter>
             <AlertDialogCancel>{t("reset.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => void actions?.checkout?.(commit.hash)}
+              onClick={(event) => {
+                event.preventDefault()
+                const checkout = actions?.checkout
+                if (!checkout) return
+                void checkout(commit.hash).then((failure) => {
+                  if (!failure) setConfirmCheckout(false)
+                })
+              }}
               data-testid="checkout-commit-confirm-action"
             >
               {t("commitDetail.checkoutAction")}
@@ -308,7 +318,13 @@ export function CommitDetail({
           <AlertDialogFooter>
             <AlertDialogCancel>{t("reset.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => void actions?.reset("hard" as GitResetMode, commit.hash)}
+              onClick={(event) => {
+                event.preventDefault()
+                if (!actions) return
+                void actions.reset("hard" as GitResetMode, commit.hash).then((failure) => {
+                  if (!failure) setConfirmHardReset(false)
+                })
+              }}
               data-testid="reset-hard-confirm-action"
             >
               {t("reset.confirmAction")}

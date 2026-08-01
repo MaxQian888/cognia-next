@@ -108,6 +108,7 @@ describe("HunkReviewList", () => {
   })
 
   it("applies accepted hunks via onStagePatch (reverse newStart) then clears + invalidates", async () => {
+    const user = userEvent.setup()
     const onStagePatch = jest.fn().mockResolvedValue(undefined)
     const onInvalidate = jest.fn()
     const hunks = [hunk(1, "a"), hunk(5, "b")]
@@ -121,15 +122,35 @@ describe("HunkReviewList", () => {
       />
     )
     // Accept both.
-    await userEvent.click(screen.getByTestId("item-0"))
-    await userEvent.click(screen.getByTestId("item-1"))
-    await act(async () => {
-      await userEvent.click(screen.getByTestId("apply-accepted"))
-    })
+    await user.click(screen.getByTestId("item-0"))
+    await user.click(screen.getByTestId("item-1"))
+    await user.click(screen.getByTestId("apply-accepted"))
     // Reverse newStart order: patch-5 before patch-1.
     expect(onStagePatch.mock.calls.map((c) => c[0])).toEqual(["patch-5", "patch-1"])
     expect(onInvalidate).toHaveBeenCalled()
     expect(useDiffReviewStore.getState().getFileDecisions("/r", "a.ts")).toEqual([])
+  })
+
+  it("preserves accepted decisions when staging a reviewed hunk fails", async () => {
+    const user = userEvent.setup()
+    const onStagePatch = jest
+      .fn()
+      .mockResolvedValue({ kind: "commandFailed", detail: "patch no longer applies" })
+    const onInvalidate = jest.fn()
+    render(
+      <HunkReviewList
+        rootDir="/r"
+        change={change}
+        diff={diff([hunk(1, "a")])}
+        onStagePatch={onStagePatch}
+        onInvalidate={onInvalidate}
+      />
+    )
+    await user.click(screen.getByTestId("item-0"))
+    await user.click(screen.getByTestId("apply-accepted"))
+
+    expect(onInvalidate).not.toHaveBeenCalled()
+    expect(useDiffReviewStore.getState().getFileDecisions("/r", "a.ts")).toHaveLength(1)
   })
 
   it("disables Apply when nothing is accepted", () => {

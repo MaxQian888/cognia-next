@@ -81,13 +81,18 @@ export function useGitBranchIndicator({
     let cancelled = false
 
     void (async () => {
-      await loadGitRepo(rootDir)
+      try {
+        await loadGitRepo(rootDir)
+      } catch {
+        // The loader records a user-visible error. Keep starting the watcher so
+        // a later filesystem change can recover the panel without a remount.
+      }
       if (cancelled) return
-      await gitWatchStart(rootDir)
+      await gitWatchStart(rootDir).catch(() => undefined)
     })()
 
     const unsubscribe = subscribeGitStatusChanged((event) => {
-      if (event.rootDir === rootDir) void refreshGitStatus(rootDir)
+      if (event.rootDir === rootDir) void refreshGitStatus(rootDir).catch(() => undefined)
     })
 
     return () => {

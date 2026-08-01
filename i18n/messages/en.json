@@ -28812,7 +28812,8 @@
       "generic": "Git operation failed: {message}",
       "noRepo": "No repository is bound — open a folder first",
       "pullFailed": "Pull failed: {message}",
-      "pushFailed": "Push failed: {message}"
+      "pushFailed": "Push failed: {message}",
+      "refreshFailed": "Repository changed, but its status could not refresh"
     },
     "explain": {
       "button": "Explain",
@@ -28879,6 +28880,12 @@
       "remove": "Remove Remote",
       "title": "Remotes",
       "urlPlaceholder": "Remote URL"
+    },
+    "repository": {
+      "errorTitle": "Could not load this repository",
+      "loading": "Loading repository status…",
+      "retry": "Retry",
+      "stale": "Showing the last known state. Refresh failed: {message}"
     },
     "reset": {
       "cancel": "Cancel",

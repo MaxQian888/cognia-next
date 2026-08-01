@@ -10,9 +10,11 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import {
+  AlertTriangleIcon,
   DownloadIcon,
   FolderOpenIcon,
   GitBranchIcon,
+  RefreshCwIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
 } from "lucide-react"
@@ -23,6 +25,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
+import { useMediaQuery } from "@/hooks/ui/use-media-query"
+import { Spinner } from "@/components/ui/spinner"
 import { gitInit } from "@/lib/git/commands"
 import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
 import { useGitRepo } from "@/hooks/git/use-git-repo"
@@ -56,6 +60,8 @@ export function SourceControlPanel() {
 
   const repoState = useGitStore((s) => s.repoState)
   const status = useGitStore((s) => s.status)
+  const loadingStatus = useGitStore((s) => s.loadingStatus)
+  const loadError = useGitStore((s) => s.loadError)
   const branches = useGitStore((s) => s.branches)
   const stashes = useGitStore((s) => s.stashes)
   const conflicts = useGitStore((s) => s.conflicts)
@@ -77,7 +83,11 @@ export function SourceControlPanel() {
   const [rebaseBase, setRebaseBase] = useState<string | null>(null)
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [timelineFile, setTimelineFile] = useState<string | null>(null)
-  const layout = useResizableLayout("cognia-git-panel")
+  const isNarrow = useMediaQuery("(max-width: 959.98px)")
+  const layout = useResizableLayout(
+    isNarrow ? "cognia-git-panel-vertical" : "cognia-git-panel-horizontal"
+  )
+  const refreshSafely = () => void refresh().catch(() => undefined)
   const cloneDialog = (
     <CloneRepositoryDialog
       open={cloneOpen}
@@ -208,7 +218,7 @@ export function SourceControlPanel() {
               onOpenTags={() => setTagOpen(true)}
               onOpenCompare={() => setCompareOpen(true)}
               onOpenWorktrees={() => setWorktreesOpen(true)}
-              onRefresh={() => void refresh()}
+              onRefresh={refreshSafely}
             />
             <Popover>
               <PopoverTrigger asChild>
@@ -265,57 +275,107 @@ export function SourceControlPanel() {
         </div>
       )}
 
-      <ResizablePanelGroup
-        orientation="horizontal"
-        defaultLayout={layout.defaultLayout}
-        onLayoutChanged={layout.onLayoutChanged}
-        className="min-h-0 flex-1"
-      >
-        <ResizablePanel id="sc-changes" defaultSize="32%" minSize="20%">
-          {status ? (
-            <ChangesView
-              rootDir={rootDir}
-              status={status}
-              actions={actions}
-              committing={committing}
-              selectedPath={selectedPath}
-              onSelectFile={(path, staged) => selectFile(path, staged)}
-              onViewHistory={(path) => openTimelineFor(path)}
-              onViewBlame={(path) => setBlameTarget({ path })}
-              onRestore={(path) => setRestorePath(path)}
-            />
-          ) : null}
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel id="sc-diff" defaultSize="68%" minSize="30%">
-          {selectedCommit ? (
-            <CommitDetail
-              rootDir={rootDir}
-              commit={syntheticCommit(selectedCommit)}
-              actions={actions}
-              onViewBlame={(path, rev) => setBlameTarget({ path, rev })}
-              onInteractiveRebase={(base) => setRebaseBase(base)}
-            />
-          ) : conflict ? (
-            <ConflictResolver
-              conflict={conflict}
-              onResolve={(resolution) => {
-                void actions.resolveConflict(conflict.path, resolution)
-                selectFile(null, false)
-              }}
-            />
-          ) : selectedPath ? (
-            <DiffPane
-              rootDir={rootDir}
-              path={selectedPath}
-              staged={selectedStaged}
-              actions={actions}
-            />
-          ) : (
-            <DiffPaneEmpty />
-          )}
-        </ResizablePanel>
-      </ResizablePanelGroup>
+      {loadError && status && (
+        <div
+          className="flex items-center gap-2 border-b border-destructive/20 bg-destructive/8 px-3 py-1.5 text-xs"
+          data-testid="sc-load-error-banner"
+        >
+          <AlertTriangleIcon className="size-3.5 shrink-0 text-destructive" />
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+            {t("repository.stale", { message: loadError })}
+          </span>
+          <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={refreshSafely}>
+            <RefreshCwIcon className="size-3" />
+            {t("repository.retry")}
+          </Button>
+        </div>
+      )}
+
+      {!status && loadingStatus ? (
+        <Empty className="min-h-0 flex-1 border-0" data-testid="sc-loading">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Spinner />
+            </EmptyMedia>
+            <EmptyTitle>{t("repository.loading")}</EmptyTitle>
+          </EmptyHeader>
+        </Empty>
+      ) : !status && loadError ? (
+        <Empty className="min-h-0 flex-1 border-0" data-testid="sc-load-error">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <AlertTriangleIcon />
+            </EmptyMedia>
+            <EmptyTitle>{t("repository.errorTitle")}</EmptyTitle>
+            <EmptyDescription>{loadError}</EmptyDescription>
+          </EmptyHeader>
+          <Button onClick={refreshSafely} data-testid="sc-load-retry">
+            <RefreshCwIcon className="size-3.5" />
+            {t("repository.retry")}
+          </Button>
+        </Empty>
+      ) : (
+        <ResizablePanelGroup
+          orientation={isNarrow ? "vertical" : "horizontal"}
+          defaultLayout={layout.defaultLayout}
+          onLayoutChanged={layout.onLayoutChanged}
+          className="min-h-0 flex-1"
+        >
+          <ResizablePanel
+            id="sc-changes"
+            defaultSize={isNarrow ? "42%" : "32%"}
+            minSize={isNarrow ? "28%" : "20%"}
+          >
+            {status && (
+              <ChangesView
+                rootDir={rootDir}
+                status={status}
+                actions={actions}
+                committing={committing}
+                selectedPath={selectedPath}
+                onSelectFile={(path, staged) => selectFile(path, staged)}
+                onViewHistory={(path) => openTimelineFor(path)}
+                onViewBlame={(path) => setBlameTarget({ path })}
+                onRestore={(path) => setRestorePath(path)}
+              />
+            )}
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel
+            id="sc-diff"
+            defaultSize={isNarrow ? "58%" : "68%"}
+            minSize={isNarrow ? "32%" : "30%"}
+          >
+            {selectedCommit ? (
+              <CommitDetail
+                rootDir={rootDir}
+                commit={syntheticCommit(selectedCommit)}
+                actions={actions}
+                onViewBlame={(path, rev) => setBlameTarget({ path, rev })}
+                onInteractiveRebase={(base) => setRebaseBase(base)}
+              />
+            ) : conflict ? (
+              <ConflictResolver
+                conflict={conflict}
+                onResolve={(resolution) => {
+                  void actions.resolveConflict(conflict.path, resolution).then((failure) => {
+                    if (!failure) selectFile(null, false)
+                  })
+                }}
+              />
+            ) : selectedPath ? (
+              <DiffPane
+                rootDir={rootDir}
+                path={selectedPath}
+                staged={selectedStaged}
+                actions={actions}
+              />
+            ) : (
+              <DiffPaneEmpty />
+            )}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      )}
 
       <StashPanel
         open={stashOpen}

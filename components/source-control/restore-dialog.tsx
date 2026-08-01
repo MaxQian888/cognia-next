@@ -56,7 +56,8 @@ export function RestoreDialog({ rootDir, path, onOpenChange, actions }: RestoreD
 
   const doRestore = useCallback(async () => {
     if (!path) return
-    await actions.restore([path], false, source.trim() || "HEAD")
+    const failure = await actions.restore([path], false, source.trim() || "HEAD")
+    if (failure) return
     onOpenChange(false)
   }, [path, source, actions, onOpenChange])
 

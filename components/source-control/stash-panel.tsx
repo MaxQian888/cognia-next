@@ -37,7 +37,12 @@ export function StashPanel({ open, onOpenChange, stashes, actions }: StashPanelP
   const [keepIndex, setKeepIndex] = useState(false)
 
   const doPush = async () => {
-    await actions.stashPush({ message: message.trim() || undefined, includeUntracked, keepIndex })
+    const failure = await actions.stashPush({
+      message: message.trim() || undefined,
+      includeUntracked,
+      keepIndex,
+    })
+    if (failure) return
     setMessage("")
   }
 

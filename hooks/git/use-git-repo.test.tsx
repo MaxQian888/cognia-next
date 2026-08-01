@@ -29,6 +29,19 @@ describe("useGitRepo", () => {
     await waitFor(() => expect(loadGitRepoMock).toHaveBeenCalledWith("/repo"))
   })
 
+  it("safely consumes an initial load rejection", async () => {
+    uiAvailableMock.mockReturnValue(true)
+    loadGitRepoMock.mockRejectedValueOnce(new Error("repository unavailable"))
+    act(() => useGitStore.setState({ rootDir: "/repo" }))
+
+    renderHook(() => useGitRepo())
+
+    await waitFor(() => expect(loadGitRepoMock).toHaveBeenCalledWith("/repo"))
+    await act(async () => {
+      await Promise.resolve()
+    })
+  })
+
   it("does not load on web", async () => {
     uiAvailableMock.mockReturnValue(false)
     act(() => useGitStore.setState({ rootDir: "/repo" }))

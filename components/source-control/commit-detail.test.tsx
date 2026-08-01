@@ -68,9 +68,10 @@ describe("CommitDetail", () => {
     await waitFor(() => expect(diffMock).toHaveBeenCalledWith("/r", commit.hash, "a.ts"))
   })
 
-  it("hides the reset control without actions", () => {
+  it("hides the reset control without actions", async () => {
     render(<CommitDetail rootDir="/r" commit={commit} />)
     expect(screen.queryByTestId("commit-reset")).not.toBeInTheDocument()
+    await screen.findByTestId("commit-file-a.ts")
   })
 
   it("shows the explain button for a selected file when the feature is enabled", async () => {
@@ -177,6 +178,23 @@ describe("CommitDetail", () => {
     expect(createBranch).toHaveBeenCalledWith("hotfix/from-commit", true, commit.hash)
   })
 
+  it("keeps the branch dialog and name after a failed create", async () => {
+    const user = userEvent.setup()
+    const createBranch = jest
+      .fn()
+      .mockResolvedValue({ kind: "commandFailed", detail: "branch exists" })
+    render(
+      <CommitDetail rootDir="/r" commit={commit} actions={{ reset: jest.fn(), createBranch }} />
+    )
+    await user.click(screen.getByTestId("commit-reset"))
+    await user.click(await screen.findByTestId("commit-create-branch"))
+    await user.type(await screen.findByTestId("create-branch-name"), "existing")
+    await user.click(screen.getByTestId("create-branch-confirm"))
+
+    expect(screen.getByTestId("create-branch-dialog")).toBeInTheDocument()
+    expect(screen.getByTestId("create-branch-name")).toHaveValue("existing")
+  })
+
   it("checks out the commit after the detached-HEAD confirm", async () => {
     const user = userEvent.setup()
     const checkout = jest.fn().mockResolvedValue(undefined)
@@ -187,6 +205,18 @@ describe("CommitDetail", () => {
     expect(checkout).not.toHaveBeenCalled()
     await user.click(await screen.findByTestId("checkout-commit-confirm-action"))
     expect(checkout).toHaveBeenCalledWith(commit.hash)
+  })
+
+  it("keeps the checkout confirmation open after a failed checkout", async () => {
+    const user = userEvent.setup()
+    const checkout = jest
+      .fn()
+      .mockResolvedValue({ kind: "dirtyWorkingTree", detail: "local changes" })
+    render(<CommitDetail rootDir="/r" commit={commit} actions={{ reset: jest.fn(), checkout }} />)
+    await user.click(screen.getByTestId("commit-reset"))
+    await user.click(await screen.findByTestId("commit-checkout"))
+    await user.click(await screen.findByTestId("checkout-commit-confirm-action"))
+    expect(screen.getByTestId("checkout-commit-confirm")).toBeInTheDocument()
   })
 
   it("hides branch/checkout items when those actions are absent", async () => {

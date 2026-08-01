@@ -56,8 +56,11 @@ export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps)
   const submit = async () => {
     const trimmed = name.trim()
     if (!trimmed) return
-    if (mode === "create") await actions.createBranch(trimmed, true)
-    else await actions.renameBranch(trimmed)
+    const failure =
+      mode === "create"
+        ? await actions.createBranch(trimmed, true)
+        : await actions.renameBranch(trimmed)
+    if (failure) return
     setName("")
     onPicked?.()
   }
@@ -74,8 +77,9 @@ export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps)
                 key={`${branch.isRemote ? "r" : "l"}:${branch.name}`}
                 value={branch.name}
                 onSelect={() => {
-                  void actions.checkout(branch.name)
-                  onPicked?.()
+                  void actions.checkout(branch.name).then((failure) => {
+                    if (!failure) onPicked?.()
+                  })
                 }}
                 className="flex items-center gap-2"
                 data-testid={`branch-item-${branch.name}`}
@@ -98,8 +102,9 @@ export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps)
                     title={t("sequencer.mergeInto")}
                     onClick={(e) => {
                       e.stopPropagation()
-                      void actions.merge(branch.name)
-                      onPicked?.()
+                      void actions.merge(branch.name).then((failure) => {
+                        if (!failure) onPicked?.()
+                      })
                     }}
                     data-testid={`branch-merge-${branch.name}`}
                   >
@@ -115,8 +120,9 @@ export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps)
                     title={t("sequencer.rebaseOnto")}
                     onClick={(e) => {
                       e.stopPropagation()
-                      void actions.rebase(branch.name)
-                      onPicked?.()
+                      void actions.rebase(branch.name).then((failure) => {
+                        if (!failure) onPicked?.()
+                      })
                     }}
                     data-testid={`branch-rebase-${branch.name}`}
                   >

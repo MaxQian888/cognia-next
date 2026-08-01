@@ -28812,7 +28812,8 @@
       "generic": "Git 操作失败：{message}",
       "noRepo": "未绑定仓库——请先打开一个文件夹",
       "pullFailed": "拉取失败：{message}",
-      "pushFailed": "推送失败：{message}"
+      "pushFailed": "推送失败：{message}",
+      "refreshFailed": "仓库操作已完成，但状态刷新失败"
     },
     "explain": {
       "button": "解释",
@@ -28879,6 +28880,12 @@
       "remove": "移除远程",
       "title": "远程仓库",
       "urlPlaceholder": "远程 URL"
+    },
+    "repository": {
+      "errorTitle": "无法加载此仓库",
+      "loading": "正在加载仓库状态…",
+      "retry": "重试",
+      "stale": "当前显示上次获取的状态。刷新失败：{message}"
     },
     "reset": {
       "cancel": "取消",

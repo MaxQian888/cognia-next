@@ -51,7 +51,7 @@ beforeEach(() => {
     if (typeof m === "function") (m as jest.Mock).mockReset().mockResolvedValue(undefined)
   })
   toastErrorMock.mockReset()
-  refresh.mockClear()
+  refresh.mockReset().mockResolvedValue(undefined)
   act(() => {
     useGitStore.setState({ rootDir: "/repo" })
     useGitStore.getState().setStatus({
@@ -179,12 +179,31 @@ describe("useGitActions", () => {
   it("records error + toasts on failure, still resets the op flag", async () => {
     commands.gitPush.mockRejectedValue({ kind: "authRequired", detail: "no creds" })
     const { result } = renderHook(() => useGitActions(refresh))
+    let failure: Awaited<ReturnType<typeof result.current.push>> | undefined
     await act(async () => {
-      await result.current.push()
+      failure = await result.current.push()
     })
+    expect(failure).toEqual({ kind: "authRequired", detail: "no creds" })
     expect(useGitStore.getState().lastError).toEqual({ op: "push", message: "no creds" })
     expect(toastErrorMock).toHaveBeenCalled()
     expect(useGitStore.getState().ops.push).toBe(false)
+  })
+
+  it("reports refresh failure separately after a successful mutation", async () => {
+    refresh.mockRejectedValue(new Error("refresh offline"))
+    const { result } = renderHook(() => useGitActions(refresh))
+
+    let failure: Awaited<ReturnType<typeof result.current.stage>> | undefined
+    await act(async () => {
+      failure = await result.current.stage(["a.ts"])
+    })
+
+    expect(commands.gitStage).toHaveBeenCalled()
+    expect(failure).toBeNull()
+    expect(useGitStore.getState().lastError).toBeNull()
+    expect(toastErrorMock).toHaveBeenCalledWith(
+      "Repository changed, but its status could not refresh"
+    )
   })
 
   it("toasts instead of silently no-opping when no repo is bound", async () => {

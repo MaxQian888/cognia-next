@@ -126,6 +126,17 @@ describe("git-store", () => {
     expect(useGitStore.getState().lastError).toBeNull()
   })
 
+  it("tracks repository load errors independently from mutation errors", () => {
+    act(() => {
+      useGitStore.getState().setError("push", "push failed")
+      useGitStore.getState().setLoadError("repository unavailable")
+    })
+    expect(useGitStore.getState().lastError).toEqual({ op: "push", message: "push failed" })
+    expect(useGitStore.getState().loadError).toBe("repository unavailable")
+    act(() => useGitStore.getState().setLoadError(null))
+    expect(useGitStore.getState().loadError).toBeNull()
+  })
+
   it("selectFile and selectCommit are mutually exclusive", () => {
     act(() => useGitStore.getState().selectFile("a.ts", true))
     expect(useGitStore.getState().selectedPath).toBe("a.ts")
