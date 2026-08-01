@@ -669,10 +669,11 @@ async function main(argv: string[]): Promise<number> {
       console.error(
         `[lint:i18n] FAIL — ${missingRefs.length} referenced key(s) missing from a locale file:`
       )
-      for (const r of missingRefs.slice(0, 20)) {
+      // Every one of these is a key someone has to go add, so the list is
+      // printed in full — a truncated one just means running the gate twice.
+      for (const r of missingRefs) {
         console.error(`  ${r.file}:${r.line}  t("${r.key}") — not in en.json and/or zh-CN.json`)
       }
-      if (missingRefs.length > 20) console.error(`  … ${missingRefs.length - 20} more`)
     } else {
       console.log(
         `[lint:i18n] OK — referenced keys exist in both locales ` +
