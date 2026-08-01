@@ -46,7 +46,7 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     expect(state.transports.remote).toBe(true)
     expect(state.transports.langfuse).toBe(true)
     const names = mod.listRegisteredTransports()
-    expect(names).toEqual(expect.arrayContaining(["console", "indexeddb"]))
+    expect(names).toEqual(expect.arrayContaining(["console", "indexeddb", "observability-spool"]))
     // Remote stays detached without a configured endpoint, even when its
     // toggle is on. Langfuse and OTel attach (they run as no-ops without
     // credentials).

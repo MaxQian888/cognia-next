@@ -66,6 +66,77 @@ export {
   type StructuredLogAdapterContext,
 } from "./observability-event"
 
+export {
+  CLIENT_PRIVACY_MANIFEST_V1,
+  applyObservabilityPrivacy,
+  createLocalDebugCaptureSession,
+  scanHighConfidenceCredentials,
+  type ClientPrivacyManifest,
+  type CredentialScanResult,
+  type HighConfidenceCredentialFinding,
+  type HighConfidenceCredentialKind,
+  type LocalDebugCaptureSession,
+  type PrivacyApplicationOptions,
+} from "./privacy-manifest"
+
+export {
+  resolveCrashCapabilities,
+  type CrashCapabilityMatrix,
+  type CrashCapabilityProbe,
+  type CrashCapabilityState,
+  type CrashCapabilityStatus,
+  type CrashPlatform,
+} from "./crash-capabilities"
+
+export {
+  MemoryObservabilitySpoolStore,
+  ObservabilitySpool,
+  type ObservabilitySpoolEnqueueResult,
+  type ObservabilitySpoolLimits,
+  type ObservabilitySpoolRecord,
+  type ObservabilitySpoolStats,
+  type ObservabilitySpoolStore,
+  type SpoolCapacityReason,
+  type SpoolDrainOptions,
+  type SpoolDrainResult,
+} from "./spool"
+
+export {
+  IndexedDBObservabilitySpoolStore,
+  type IndexedDBObservabilitySpoolStoreOptions,
+} from "./transports/indexeddb-spool-store"
+
+export {
+  ObservabilitySpoolTransport,
+  createObservabilitySpoolTransport,
+  type ObservabilitySpoolTransportOptions,
+} from "./transports/observability-spool-transport"
+
+export {
+  createRecoveryState,
+  recordChildFailure,
+  recordHealthyCheckpoint,
+  recordRendererFailure,
+  recordSubsystemCheckpoint,
+  recordUnhealthyStart,
+  type ChildRecoveryAction,
+  type RecoveryAuditEntry,
+  type RecoveryMode,
+  type RecoveryState,
+} from "./recovery-policy"
+
+export {
+  assembleDiagnosticIncident,
+  transitionIncident,
+  type AssembleDiagnosticIncidentInput,
+  type DiagnosticIncident,
+  type IncidentAttachment,
+  type IncidentAttachmentInput,
+  type IncidentAttachmentKind,
+  type IncidentState,
+  type IncidentTransition,
+} from "./incident"
+
 // Context exports
 export { logContext, generateTraceId, traced } from "./context"
 

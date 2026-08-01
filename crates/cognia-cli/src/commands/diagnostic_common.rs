@@ -1,0 +1,135 @@
+use std::path::{Path, PathBuf};
+
+use anyhow::{anyhow, bail, Context, Result};
+use ed25519_dalek::SigningKey;
+use rand::rngs::OsRng;
+use rand::RngCore;
+use serde::Serialize;
+
+use crate::cli::OutputFormat;
+
+pub fn cognia_data_dir() -> Result<PathBuf> {
+    let dirs = directories::BaseDirs::new()
+        .ok_or_else(|| anyhow!("could not determine the local data directory"))?;
+    Ok(dirs.data_local_dir().join("Cognia"))
+}
+
+pub fn resolve_log_dir(override_dir: Option<PathBuf>) -> Result<PathBuf> {
+    Ok(override_dir.unwrap_or(cognia_data_dir()?.join("logs")))
+}
+
+pub fn resolve_crash_dir(override_dir: Option<PathBuf>) -> Result<PathBuf> {
+    Ok(override_dir.unwrap_or(cognia_data_dir()?.join("crash-reports")))
+}
+
+pub fn load_or_create_signing_key(override_path: Option<PathBuf>) -> Result<SigningKey> {
+    let path = override_path.unwrap_or(cognia_data_dir()?.join("diagnostic-signing.key"));
+    if path.exists() {
+        let encoded = std::fs::read_to_string(&path)
+            .with_context(|| format!("read diagnostic signing key {}", path.display()))?;
+        let bytes = hex::decode(encoded.trim()).context("decode diagnostic signing key")?;
+        let bytes: [u8; 32] = bytes
+            .try_into()
+            .map_err(|_| anyhow!("diagnostic signing key must contain 32 bytes"))?;
+        return Ok(SigningKey::from_bytes(&bytes));
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create diagnostic key directory {}", parent.display()))?;
+    }
+    let mut secret = [0_u8; 32];
+    OsRng.fill_bytes(&mut secret);
+    let key = SigningKey::from_bytes(&secret);
+    write_private_key(&path, &hex::encode(key.to_bytes()))?;
+    Ok(key)
+}
+
+fn write_private_key(path: &Path, encoded: &str) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::{fs::OpenOptions, os::unix::fs::OpenOptionsExt};
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)
+            .with_context(|| format!("create diagnostic signing key {}", path.display()))?;
+        std::io::Write::write_all(&mut file, encoded.as_bytes())?;
+    }
+    #[cfg(not(unix))]
+    std::fs::write(path, encoded)
+        .with_context(|| format!("create diagnostic signing key {}", path.display()))?;
+    Ok(())
+}
+
+pub fn emit<T: Serialize + ?Sized>(
+    format: OutputFormat,
+    value: &T,
+    human_lines: &[String],
+) -> Result<()> {
+    match format {
+        OutputFormat::Human => {
+            for line in human_lines {
+                println!("{line}");
+            }
+        }
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(value)?),
+        OutputFormat::Ndjson => match serde_json::to_value(value)? {
+            serde_json::Value::Array(values) => {
+                for value in values {
+                    println!("{}", serde_json::to_string(&value)?);
+                }
+            }
+            value => println!("{}", serde_json::to_string(&value)?),
+        },
+    }
+    Ok(())
+}
+
+pub fn validate_stem(stem: &str) -> Result<()> {
+    if stem.is_empty()
+        || stem.contains("..")
+        || stem.contains('/')
+        || stem.contains('\\')
+        || stem.contains(':')
+    {
+        bail!("invalid crash report stem");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validates_report_stems() {
+        assert!(validate_stem("crash-2026-panic").is_ok());
+        for invalid in ["", "../x", "a/b", "a\\b", "C:x"] {
+            assert!(validate_stem(invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn explicit_directory_overrides_are_preserved() {
+        assert_eq!(
+            resolve_log_dir(Some(PathBuf::from("/tmp/logs"))).unwrap(),
+            PathBuf::from("/tmp/logs")
+        );
+        assert_eq!(
+            resolve_crash_dir(Some(PathBuf::from("/tmp/crashes"))).unwrap(),
+            PathBuf::from("/tmp/crashes")
+        );
+    }
+
+    #[test]
+    fn loads_an_explicit_signing_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("key");
+        std::fs::write(&path, hex::encode([5_u8; 32])).unwrap();
+        assert_eq!(
+            load_or_create_signing_key(Some(path)).unwrap().to_bytes(),
+            [5_u8; 32]
+        );
+    }
+}

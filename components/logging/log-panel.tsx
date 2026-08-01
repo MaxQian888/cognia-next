@@ -187,8 +187,9 @@ export function LogPanel({
     setPageSize,
     setSelectedLog,
   } = filters
-  // Above `lg` (1024px) use the side panel; below it, fall back to the bottom sheet.
-  const isDesktopViewport = useMediaQuery("(min-width: 1024px)")
+  // The diagnostics workspace reserves its third pane at xl; below 1280px the
+  // detail stays in a drawer so the navigation + list remain a true two-pane layout.
+  const isDesktopViewport = useMediaQuery("(min-width: 1280px)")
   const deferredSearchQuery = useDeferredValue(filters.searchQuery)
   // customTimeRange + currentPage + pageSize now live in useLogPanelFilters so
   // the URL-sync hook above has a single state container to mirror.
@@ -1280,7 +1281,7 @@ function MainContent({
         >
           <SheetContent
             side="bottom"
-            className="h-[85vh] md:h-[75vh] lg:h-[80vh] p-0 flex flex-col"
+            className="h-dvh max-h-dvh p-0 flex flex-col md:h-[75vh] md:max-h-[75vh]"
             data-testid="log-detail-sheet"
           >
             <SheetHeader className="sr-only">

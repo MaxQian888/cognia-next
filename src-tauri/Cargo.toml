@@ -96,6 +96,7 @@ cognia-terminal = { path = "../crates/cognia-terminal" }
 # Background-job supervisor — the non-interactive sibling of cognia-terminal.
 # Owns `bash(run_in_background)` and scheduled-task background work.
 cognia-jobs = { path = "../crates/cognia-jobs" }
+cognia-observability = { path = "../crates/cognia-observability" }
 # ADR-0067 Tier B — subscription vault/providers (ADR-0025); `subscription/`
 # stays as an app-side facade holding the top-level command surface.
 cognia-subscription = { path = "../crates/cognia-subscription" }
@@ -242,6 +243,7 @@ tokio-socks = "0.5"
 tokio-rustls = "0.26"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 futures-util = { version = "0.3", default-features = false }
+rquickjs = "0.12.1"
 bytes = "1"
 
 # Vector cloud backends (ADR-0022, qdrant/milvus/pinecone/chroma/weaviate) moved

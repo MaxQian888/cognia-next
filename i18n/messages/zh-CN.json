@@ -10382,6 +10382,174 @@
       "toolArgs": "参数",
       "toolName": "工具",
       "totalTokens": "总计"
+    },
+    "workspace": {
+      "advanced": {
+        "capabilities": {
+          "description": "由当前运行时报告各平台的采集能力与制品可用性。",
+          "status": "运行时已报告",
+          "title": "能力诊断"
+        },
+        "queues": {
+          "description": "查看持久上传进度、重试、取消和最后刷新水位。",
+          "status": "本地队列",
+          "title": "上传队列"
+        },
+        "schema": {
+          "description": "查看版本化结构字段、关联上下文、脱敏版本与 spool 序号。",
+          "status": "ObservabilityEventV1",
+          "title": "事件 Schema"
+        },
+        "symbols": {
+          "description": "处理阶段使用按 buildId 索引的 source map 与原生符号制品。",
+          "status": "服务管理",
+          "title": "符号状态"
+        }
+      },
+      "breadcrumbHome": "主页",
+      "consent": {
+        "description": "在你检查脱敏报告并明确提交前，不会上传任何内容。",
+        "descriptionLabel": "提供给支持人员的说明",
+        "descriptionPlaceholder": "可选：描述故障前正在进行的操作",
+        "minidump": "包含原生 minidump",
+        "minidumpDescription": "可能包含进程内存。默认不勾选，服务端会再次扫描。",
+        "screenshot": "包含当前状态截图",
+        "screenshotDescription": "只会在此刻获得同意后采集，绝不会伪装成崩溃时截图。",
+        "title": "提交预览"
+      },
+      "delete": {
+        "action": "删除本地报告",
+        "cancel": "保留报告",
+        "confirm": "删除报告",
+        "description": "这会从本设备移除本地诊断制品，操作无法撤销。",
+        "title": "删除此崩溃报告？"
+      },
+      "density": {
+        "comfortable": "舒适",
+        "compact": "紧凑",
+        "label": "工作区密度",
+        "spacious": "宽松"
+      },
+      "detail": {
+        "description": "检查已脱敏的本地诊断与可选附件。",
+        "loading": "正在加载脱敏预览…",
+        "noPreview": "再次选择报告以加载本地预览。",
+        "previewDescription": "这是本地脱敏后的负载，可选附件仍未包含。",
+        "previewTitle": "脱敏预览",
+        "resize": "调整事故详情面板宽度",
+        "runtime": "运行时",
+        "state": "状态",
+        "title": "事故详情"
+      },
+      "filters": {
+        "sourceLabel": "事故来源",
+        "sources": {
+          "all": "所有设备",
+          "desktop": "桌面端",
+          "mobile": "移动端"
+        },
+        "stateLabel": "事故状态"
+      },
+      "health": {
+        "cards": {
+          "capture": {
+            "description": "结构化日志与崩溃标记使用有界存储保留在本地。",
+            "title": "本地采集"
+          },
+          "privacy": {
+            "description": "IPC、导出或上传前执行版本化脱敏，服务端还会二次扫描。",
+            "title": "隐私网关"
+          },
+          "retention": {
+            "description": "日志与报告留在本设备，直到达到保留策略或用户明确删除。",
+            "title": "持久保留"
+          },
+          "submission": {
+            "description": "除非单独开启自动提交，否则崩溃报告必须先预览并获得同意。",
+            "title": "受控提交"
+          }
+        },
+        "description": "以易懂方式展示采集、隐私、保留与提交就绪状态。",
+        "localIncidents": "本设备保留的报告",
+        "localIncidentsDescription": "除非存在回执，否则这些报告不会被视为已上传。",
+        "status": {
+          "consent": "需要同意",
+          "local": "本地优先",
+          "protected": "脱敏已启用",
+          "ready": "就绪"
+        },
+        "title": "诊断健康"
+      },
+      "incidentCount": "{count, plural, =0 {无本地事故} other {# 个本地事故}}",
+      "incidents": {
+        "emptyDescription": "新的崩溃报告和异常退出会先在本地保留，再进入提交流程。",
+        "emptyTitle": "没有匹配的事故",
+        "error": "无法读取本地事故存储。",
+        "loading": "正在加载本地事故…"
+      },
+      "navigation": {
+        "collapse": "折叠诊断导航",
+        "expand": "展开诊断导航",
+        "label": "诊断工作区视图",
+        "resize": "调整诊断导航宽度"
+      },
+      "receipts": {
+        "emptyDescription": "已接收或处理中的提交会在这里显示稳定的支持码。",
+        "emptyTitle": "暂无提交回执"
+      },
+      "recovery": {
+        "checkpoints": {
+          "account": {
+            "description": "在最小壳层中保留账户访问与报告能力。",
+            "title": "账户与诊断"
+          },
+          "automation": {
+            "description": "在前序检查持续健康后，最后启用自动化与调度器。",
+            "title": "自动化"
+          },
+          "data": {
+            "description": "启用写入前先验证只读本地数据、备份与导出。",
+            "title": "本地数据"
+          },
+          "plugins": {
+            "description": "逐组启用插件，失败时返回最小壳层。",
+            "title": "插件"
+          },
+          "sidecars": {
+            "description": "以有界重试启动子运行时并执行健康检查点。",
+            "title": "Sidecar 与连接器"
+          }
+        },
+        "checkpointsDescription": "安全模式按组逐步启用子系统，并记录每次健康结果。",
+        "checkpointsTitle": "渐进恢复顺序",
+        "description": "同一构建在十分钟内出现两次不健康启动后，下次启动进入诊断优先的最小壳层。",
+        "normalDescription": "当前 renderer 未报告安全模式激活；稳定运行十分钟后恢复计数会重置。",
+        "normalTitle": "正常启动模式",
+        "title": "崩溃循环恢复"
+      },
+      "refresh": "刷新",
+      "reset": "重置布局",
+      "states": {
+        "accepted": "已接收",
+        "all": "所有状态",
+        "awaitingConsent": "等待同意",
+        "cancelled": "已取消",
+        "deleted": "已删除",
+        "detected": "已检测",
+        "processing": "处理中",
+        "queued": "已排队",
+        "rejected": "已拒绝",
+        "uploading": "上传中"
+      },
+      "title": "日志与诊断",
+      "views": {
+        "advanced": "高级",
+        "health": "健康",
+        "incidents": "事故",
+        "logs": "日志",
+        "receipts": "回执",
+        "recovery": "恢复"
+      }
     }
   },
   "loop": {

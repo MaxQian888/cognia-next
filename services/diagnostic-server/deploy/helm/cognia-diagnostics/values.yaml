@@ -1,0 +1,137 @@
+replicaCount: 2
+
+image:
+  # Must match what `.github/workflows/images.yml` publishes — the chart used
+  # to point at `diagnostic-server`, a name nothing ever pushed.
+  repository: ghcr.io/cognia-ai/cognia-diagnostics
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+config:
+  databaseMaxConnections: "20"
+  # Artifact storage. Exactly one of these must be set — the server refuses to
+  # boot without either, so the chart fails at template time rather than
+  # letting the Deployment and the migration Job crash-loop on startup.
+  # `s3Endpoint` is the normal choice; `objectStoreLocalDir` is for a
+  # single-replica install backed by a PersistentVolume.
+  s3Endpoint: ""
+  objectStoreLocalDir: ""
+  s3Bucket: cognia-diagnostics
+  s3Region: us-east-1
+  # Whether the serving pods apply migrations themselves. Off by default
+  # because `migration.enabled` runs a Job that owns DDL, which is what lets
+  # the runtime database role hold no DDL grant at all. Turn this on only if
+  # you also turn the Job off and accept schema changes from every replica.
+  runMigrations: "false"
+  # Independent rollback for the intake surface. Off means grant exchange and
+  # upload answer 503 while the read, withdraw and admin routes stay up, so a
+  # privacy incident can be contained without blocking deletion requests.
+  ingestEnabled: "true"
+  oidcIssuer: https://identity.example.com
+  oidcAudience: cognia-diagnostics
+  oidcPublicKeyPem: |
+    -----BEGIN PUBLIC KEY-----
+    REPLACE_WITH_YOUR_OIDC_PUBLIC_KEY
+    -----END PUBLIC KEY-----
+  kmsEndpoint: https://kms.us-east-1.amazonaws.com/
+  kmsRegion: us-east-1
+  kmsKeyId: alias/cognia-diagnostics
+  processingEnabled: "true"
+  processingBatchSize: "32"
+  processingIntervalMs: "1000"
+  minidumpStackwalkTimeoutSeconds: "120"
+  retentionEnabled: "true"
+  retentionIntervalMs: "5000"
+  retentionBatchSize: "32"
+  alertEnabled: "true"
+  alertIntervalMs: "1000"
+  alertBatchSize: "32"
+  alertTimeoutSeconds: "15"
+  alertWebhookUrl: ""
+  alertSmtpFrom: diagnostics@example.com
+  alertSmtpTo: operators@example.com
+
+# SMTP alert delivery. The URL and credentials live in `existingSecret`
+# (ALERT_SMTP_URL), which the chart cannot read — so the egress port has to be
+# declared here for the NetworkPolicy to let the connection out. Leaving this
+# off while configuring ALERT_SMTP_URL is the shape that silently swallowed
+# every email alert: the dispatcher tried, the policy dropped it.
+alerts:
+  smtp:
+    enabled: false
+    # 587 (submission/STARTTLS) is the default; 465 is implicit TLS, 25 is
+    # relay-to-MTA. Set whichever your provider actually listens on.
+    port: 587
+
+existingSecret:
+  name: cognia-diagnostics
+  keys:
+    databaseUrl: DATABASE_URL
+    grantSigningKey: GRANT_SIGNING_KEY
+    s3AccessKey: S3_ACCESS_KEY
+    s3SecretKey: S3_SECRET_KEY
+    kmsAccessKeyId: KMS_ACCESS_KEY_ID
+    kmsSecretAccessKey: KMS_SECRET_ACCESS_KEY
+    kmsSessionToken: KMS_SESSION_TOKEN
+    alertWebhookSecret: ALERT_WEBHOOK_SECRET
+    alertSmtpUrl: ALERT_SMTP_URL
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 75
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: true
+  ingressNamespaceSelector: {}
+  ingressPodSelector: {}
+  egressCIDRs:
+    - 0.0.0.0/0
+  egressPorts:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 5432
+    - protocol: TCP
+      port: 9000
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+migration:
+  enabled: true
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400

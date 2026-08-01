@@ -115,6 +115,8 @@ fn main() -> eyre::Result<()> {
             ui.verbose("running acp");
             commands::acp::run(&ui)
         }
+        TopCommand::Logs { command } => commands::logs::run(command, &mut ui),
+        TopCommand::Crash { command } => commands::crash::run(command, &mut ui),
         TopCommand::ReleaseKey { json } => {
             ui.flags.json = json;
             ui.verbose(format!("running release-key json={json}"));

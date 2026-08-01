@@ -31,6 +31,9 @@ crates/cognia-cli/assets/plugin-convert.cjs
 # desyncs the committed bundle from `i18n:build:check`; the codegen owns format.
 i18n/messages/en.json
 i18n/messages/zh-CN.json
+# Helm chart templates — Go templating (`{{- include ... }}`) is not valid
+# YAML, so Prettier's YAML parser rejects the file outright. Helm owns them.
+services/diagnostic-server/deploy/helm/cognia-diagnostics/templates
 # CommonJS mocks for Jest; intentionally hand-written, not Prettier-shaped.
 __mocks__
 # Capacitor mobile shell — separate package, has its own conventions.

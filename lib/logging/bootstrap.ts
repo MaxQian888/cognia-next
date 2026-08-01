@@ -8,6 +8,13 @@ import {
   removeTransport,
   updateLoggerConfig,
 } from "@cognia/logging/core"
+import {
+  IndexedDBObservabilitySpoolStore,
+  ObservabilitySpool,
+  ObservabilitySpoolTransport,
+  createObservabilitySpoolTransport,
+  logContext,
+} from "@cognia/logging"
 import { DEFAULT_UNIFIED_CONFIG } from "@/types/logging"
 import type {
   LogLevel,
@@ -51,6 +58,10 @@ import {
   persistLegacyTelemetrySecrets,
 } from "./telemetry-secrets"
 import { configureBehaviorEventExporter } from "@/lib/telemetry/events/track-event"
+import {
+  createObservabilityRuntimeScope,
+  resolveObservabilityRuntime,
+} from "./observability-runtime"
 
 export type {
   RemoteTransportDetailSettings,
@@ -67,6 +78,8 @@ export const LOGGING_TRANSPORTS_STORAGE_KEY = "cognia-logging-transports"
 export const LOGGING_RETENTION_STORAGE_KEY = "cognia-logging-retention"
 export const LOGGING_CONFIG_STORAGE_KEY = "cognia-logging-config"
 export const LOGGING_SAMPLING_STORAGE_KEY = "cognia-logging-sampling"
+export const OBSERVABILITY_SPOOL_MAX_EVENTS = 50_000
+export const OBSERVABILITY_SPOOL_MAX_BYTES = 250 * 1024 * 1024
 
 // All 6 transports enabled by default per the Phase-6 product decision.
 // Remote / Langfuse / OpenTelemetry short-circuit silently when their
@@ -589,6 +602,48 @@ function applyTransportSettings(
     removeTransport("indexeddb")
   }
 
+  const observabilitySpoolEnabled =
+    transports.indexedDB && process.env.NEXT_PUBLIC_OBSERVABILITY_V1_SPOOL !== "0"
+  if (observabilitySpoolEnabled) {
+    const existing = getTransport<ObservabilitySpoolTransport>("observability-spool")
+    if (existing) {
+      addTransport(existing)
+    } else {
+      const runtime = resolveObservabilityRuntime({
+        isTauri: isTauri(),
+        platformHint: process.env.NEXT_PUBLIC_PLATFORM,
+        userAgent: typeof navigator === "undefined" ? "" : navigator.userAgent,
+      })
+      const spool = new ObservabilitySpool(new IndexedDBObservabilitySpoolStore(), {
+        maxEvents: OBSERVABILITY_SPOOL_MAX_EVENTS,
+        maxBytes: OBSERVABILITY_SPOOL_MAX_BYTES,
+      })
+      addTransport(
+        createObservabilitySpoolTransport({
+          spool,
+          scope: () =>
+            createObservabilityRuntimeScope({
+              runtime,
+              processId: logContext.sessionId,
+              storage: typeof localStorage === "undefined" ? undefined : localStorage,
+            }),
+          onDiagnostic: (event) => {
+            emitLoggerDiagnostic({
+              code: event.code,
+              message: event.message,
+              level: event.level,
+              data: event.data,
+              sourceTransport: event.sourceTransport || "observability-spool",
+              skipTransports: ["observability-spool"],
+            })
+          },
+        })
+      )
+    }
+  } else {
+    removeTransport("observability-spool")
+  }
+
   if (transports.native) {
     addTransport(
       createNativeTransport({
@@ -965,6 +1020,10 @@ export function getLoggingBootstrapState(): LoggingBootstrapState {
 
 export function getIndexedDBTransport(): IndexedDBTransport | undefined {
   return getTransport<IndexedDBTransport>("indexeddb")
+}
+
+export function getObservabilitySpoolTransport(): ObservabilitySpoolTransport | undefined {
+  return getTransport<ObservabilitySpoolTransport>("observability-spool")
 }
 
 export function listRegisteredTransports(): string[] {

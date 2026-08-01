@@ -758,3 +758,27 @@ jobs:
       # never been part of the CI design at all, on top of never having run.
       - name: Run Rust tests (all crates except src-tauri)
         run: cargo test --locked --workspace --exclude cognia-next
+
+  cargo-test-diagnostic-server:
+    name: Rust Tests (diagnostic-server)
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    # `services/diagnostic-server` is a standalone Cargo project with its own
+    # lockfile — exactly like `sidecar/`, and for the same reason: it ships as
+    # its own container, not inside the desktop app. `cargo test --workspace`
+    # above cannot see it, so without this job its tests never run anywhere.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "services/diagnostic-server -> target"
+      - name: Run Rust tests
+        working-directory: services/diagnostic-server
+        run: cargo test --locked

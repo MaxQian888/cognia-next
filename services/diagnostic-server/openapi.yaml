@@ -1,0 +1,276 @@
+openapi: 3.1.0
+info:
+  title: Cognia Diagnostic Service
+  version: 1.0.0
+  description: Tenant-scoped control plane for consented, resumable diagnostic uploads.
+servers:
+  - url: /v1
+security:
+  - uploadGrant: []
+paths:
+  /grants/oidc:
+    post:
+      security: []
+      operationId: exchangeOidcSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OidcGrantRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/Grant" }
+        "401": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/IngestDisabled" }
+  /grants/anonymous:
+    post:
+      security: []
+      operationId: exchangeInstallationProof
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AnonymousGrantRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/Grant" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/IngestDisabled" }
+  /incidents:
+    post:
+      operationId: createIncident
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateIncidentRequest" }
+      responses:
+        "201": { description: Idempotently created incident and one-time deletion credential }
+        "413": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/IngestDisabled" }
+  /incidents/{incidentId}:
+    parameters:
+      - { $ref: "#/components/parameters/IncidentId" }
+    get:
+      operationId: getReceipt
+      responses:
+        "200": { description: Receipt and processing state }
+    delete:
+      operationId: deleteIncident
+      responses:
+        "204": { description: Artifacts deleted and metadata tombstoned }
+  /incidents/{incidentId}/parts:
+    parameters:
+      - { $ref: "#/components/parameters/IncidentId" }
+    get:
+      operationId: inspectUploadProgress
+      responses:
+        "200": { description: Checked part inventory and uploaded byte count }
+        "503": { $ref: "#/components/responses/IngestDisabled" }
+  /incidents/{incidentId}/parts/{partNumber}:
+    parameters:
+      - { $ref: "#/components/parameters/IncidentId" }
+      - name: partNumber
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1, maximum: 10000 }
+    put:
+      operationId: uploadCheckedPart
+      parameters:
+        - name: x-part-sha256
+          in: header
+          required: true
+          schema: { type: string, pattern: "^[a-fA-F0-9]{64}$" }
+        - name: x-artifact-kind
+          in: header
+          schema: { type: string, enum: [attachment, minidump] }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream: { schema: { type: string, format: binary } }
+      responses:
+        "201": { description: Privacy-scanned durable part }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/IngestDisabled" }
+  /incidents/{incidentId}/complete:
+    post:
+      operationId: completeUpload
+      parameters:
+        - { $ref: "#/components/parameters/IncidentId" }
+      responses:
+        "200": { description: Processing receipt }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/IngestDisabled" }
+  /incidents/{incidentId}/cancel:
+    post:
+      operationId: cancelUpload
+      parameters:
+        - { $ref: "#/components/parameters/IncidentId" }
+      responses:
+        "204": { description: Upload cancelled and parts removed }
+        "503": { $ref: "#/components/responses/IngestDisabled" }
+  /incidents/{incidentId}/withdraw:
+    post:
+      operationId: withdrawConsent
+      parameters:
+        - { $ref: "#/components/parameters/IncidentId" }
+      responses:
+        "204": { description: Processing blocked and deletion scheduled immediately }
+  /admin/symbols:
+    get:
+      operationId: listSymbols
+      description: Administrator-only symbol index inspection.
+      parameters:
+        - name: buildId
+          in: query
+          schema: { type: string }
+      responses:
+        "200": { description: Tenant/project-scoped symbol records }
+        "403": { $ref: "#/components/responses/Error" }
+  /admin/symbols/{buildId}/{platform}:
+    parameters:
+      - name: buildId
+        in: path
+        required: true
+        schema: { type: string, maxLength: 256 }
+      - name: platform
+        in: path
+        required: true
+        schema: { type: string, maxLength: 64 }
+    put:
+      operationId: uploadSymbol
+      description: Administrator-only idempotent symbol upload keyed by build and SHA-256.
+      parameters:
+        - name: x-symbol-sha256
+          in: header
+          required: true
+          schema: { type: string, pattern: "^[a-fA-F0-9]{64}$" }
+        - name: x-symbol-relative-path
+          in: header
+          required: true
+          schema: { type: string, maxLength: 512 }
+        - name: x-symbol-type
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: [breakpad, pdb, dsym, elf, android_mapping, android_native, source_map]
+      requestBody:
+        required: true
+        content:
+          application/octet-stream: { schema: { type: string, format: binary } }
+      responses:
+        "201": { description: Indexed symbol record }
+        "403": { $ref: "#/components/responses/Error" }
+  /admin/tenant-key:
+    post:
+      operationId: rotateTenantDataKey
+      description: Administrator-only KMS-wrapped tenant DEK rotation. Existing versions remain decryptable.
+      responses:
+        "200": { description: New active tenant key version }
+        "403": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: cryptoShredTenant
+      description: Irreversibly destroy every wrapped tenant DEK and evict cached plaintext keys.
+      parameters:
+        - name: x-confirm-crypto-shred
+          in: header
+          required: true
+          description: Must exactly equal the authenticated tenant UUID.
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Tenant artifact keys cryptographically destroyed }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    uploadGrant:
+      type: http
+      scheme: bearer
+  parameters:
+    IncidentId:
+      name: incidentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    Grant:
+      description: Short-lived tenant/project-scoped grant
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [grant, expiresInSeconds]
+            properties:
+              grant: { type: string }
+              expiresInSeconds: { type: integer }
+    IngestDisabled:
+      description: >-
+        Intake is switched off (DIAGNOSTIC_INGEST_ENABLED=false). The read,
+        withdraw and admin routes stay available; retry the upload later
+        rather than discarding the spooled report.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code: { type: string, enum: [ingest_disabled] }
+    Error:
+      description: Stable machine-readable error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code: { type: string }
+  schemas:
+    OidcGrantRequest:
+      type: object
+      required: [sessionToken, installationId]
+      properties:
+        sessionToken: { type: string }
+        installationId: { type: string }
+    AnonymousGrantRequest:
+      type: object
+      required: [tenantId, projectId, installationId, publicKey, signature, nonce, timestamp]
+      properties:
+        tenantId: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        installationId: { type: string }
+        publicKey: { type: string, contentEncoding: base64 }
+        signature: { type: string, contentEncoding: base64 }
+        nonce: { type: string }
+        timestamp: { type: integer, format: int64 }
+    CreateIncidentRequest:
+      type: object
+      required:
+        [
+          artifactHash,
+          buildId,
+          platform,
+          module,
+          exception,
+          attachmentCount,
+          eventCount,
+          totalBytes,
+          largestAttachmentBytes,
+          largestMinidumpBytes,
+          consent,
+        ]
+      properties:
+        artifactHash: { type: string, pattern: "^[a-fA-F0-9]{64}$" }
+        buildId: { type: string }
+        platform: { type: string }
+        module: { type: string }
+        exception: { type: string }
+        attachmentCount: { type: integer, maximum: 20 }
+        eventCount: { type: integer, maximum: 50000 }
+        totalBytes: { type: integer, maximum: 1073741824 }
+        largestAttachmentBytes: { type: integer, maximum: 104857600 }
+        largestMinidumpBytes: { type: integer, maximum: 536870912 }
+        consent: { type: boolean, const: true }

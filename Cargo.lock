@@ -1892,6 +1892,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "clap",
+ "cognia-observability",
  "color-eyre",
  "comfy-table",
  "ctrlc",
@@ -1914,6 +1915,7 @@ dependencies = [
  "tiny_http",
  "tungstenite 0.26.2",
  "ureq 2.12.1",
+ "uuid",
  "wasmparser 0.221.3",
  "zip 2.4.2",
 ]
@@ -1980,11 +1982,13 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
+ "chrono",
  "clap",
  "cognia-deployment",
  "ed25519-dalek 2.2.0",
  "futures-util",
  "parking_lot",
+ "rcgen",
  "reqwest 0.12.28",
  "rustls",
  "rustls-native-certs",
@@ -2197,6 +2201,7 @@ dependencies = [
  "cognia-mcp-server",
  "cognia-media",
  "cognia-net",
+ "cognia-observability",
  "cognia-ocr",
  "cognia-plugin-runtime",
  "cognia-remote-control",
@@ -2261,6 +2266,7 @@ dependencies = [
  "rcgen",
  "regex",
  "reqwest 0.12.28",
+ "rquickjs",
  "ruma",
  "rusqlite",
  "rustls",
@@ -2324,6 +2330,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-observability"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ed25519-dalek 2.2.0",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.19",
+ "uuid",
+ "zip 2.4.2",
+ "zstd",
+]
+
+[[package]]
 name = "cognia-ocr"
 version = "0.1.0"
 dependencies = [
@@ -2362,14 +2385,17 @@ dependencies = [
  "async-stream",
  "async-trait",
  "axum 0.8.9",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "cognia-deployment",
  "deadpool-postgres",
+ "ed25519-dalek 2.2.0",
  "futures-util",
  "hex",
  "jsonwebtoken",
  "parking_lot",
+ "rcgen",
  "reqwest 0.12.28",
  "rustls",
  "rustls-native-certs",
@@ -2377,6 +2403,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "thiserror 2.0.19",
+ "time",
  "tokio",
  "tokio-postgres",
  "tokio-postgres-rustls",
@@ -2426,6 +2453,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
+ "tracing",
  "url",
  "uuid",
  "wait-timeout",
@@ -5761,6 +5789,11 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash 0.2.0",
+]
 
 [[package]]
 name = "hashlink"
@@ -10952,6 +10985,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "relative-path"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bca40a312222d8ba74837cb474edef44b37f561da5f773981007a10bbaa992b0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "rend"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11183,6 +11225,35 @@ name = "roxmltree"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
+
+[[package]]
+name = "rquickjs"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e04e4eedfb060b503b5f0a2644abb890b0b3620d3fb674f9455f230014964e4"
+dependencies = [
+ "rquickjs-core",
+]
+
+[[package]]
+name = "rquickjs-core"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16e4f499ac5b943d97ee6dbc44f23c2c10426f420f7d2f1793d6318911b6608c"
+dependencies = [
+ "hashbrown 0.17.1",
+ "relative-path",
+ "rquickjs-sys",
+]
+
+[[package]]
+name = "rquickjs-sys"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a13ac243b86a74120814ef7e9e30ad5a2c1199b7b9963b1cf7c84e4cdc1cad99"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "rsa"
@@ -17583,6 +17654,34 @@ dependencies = [
  "crc32fast",
  "log",
  "simd-adler32",
+]
+
+[[package]]
+name = "zstd"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
+dependencies = [
+ "zstd-safe",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "7.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f49c4d5f0abb602a93fb8736af2a4f4dd9512e36f7f570d66e65ff867ed3b9d"
+dependencies = [
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-sys"
+version = "2.0.16+zstd.1.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748"
+dependencies = [
+ "cc",
+ "pkg-config",
 ]
 
 [[package]]
