@@ -3,13 +3,17 @@
 /**
  * Compact single-line representation of a tool call, used by the "simplified"
  * agent-flow display mode and by every sub-agent tree. Shows an icon + tool
- * name + concise target + status glyph on one row; clicking expands the same
- * rich content standard mode renders (dedicated card → structured MCP content
- * blocks → generic `ToolBody`). The row is the *collapsed* affordance — once
- * the user asks for the detail, an image must render as an image.
+ * name + concise target + status glyph on one row; clicking expands the exact
+ * same body a standard-mode card shows, via the shared `ToolDetailBody`. The
+ * row is the *collapsed* affordance — once the user asks for the detail, an
+ * image must render as an image, a failed call must show its parsed trace, and
+ * an A2UI surface must stay interactive.
  *
  * Supports both controlled (`expanded` + `onToggle`, driven by the activity
- * group's expand-all/collapse-all) and uncontrolled (internal state) use.
+ * group's expand-all/collapse-all in simplified mode) and uncontrolled use. In
+ * the uncontrolled case `defaultOpen` seeds the initial state — the activity
+ * group's standard/detailed path remounts its children with a fresh key to
+ * apply it, the same convention the `<Tool>` cards use.
  */
 
 import { memo, useMemo, useState } from "react"
@@ -35,11 +39,7 @@ import {
 import type { LucideIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 
-import {
-  isStructuredMcpToolPart,
-  MCPToolCard,
-  McpToolBodyOrContent,
-} from "@/components/chat/message-parts/mcp-tool-card"
+import { ToolDetailBody } from "@/components/chat/message-parts/tool-detail-body"
 import { summarizeToolCall, type ToolIconKey } from "@/lib/chat/tool-summary"
 import {
   describeRunningProgress,
@@ -101,15 +101,21 @@ export interface ToolCallRowProps {
   /** Controlled open state; omit for uncontrolled (internal) toggling. */
   expanded?: boolean
   onToggle?: () => void
+  /** Seeds the uncontrolled open state at mount (read once, like `defaultOpen`). */
+  defaultOpen?: boolean
+  /** Owning chat session — threaded to the detail body's structured cards. */
+  sessionId?: string
 }
 
 export const ToolCallRow = memo(function ToolCallRow({
   part,
   expanded,
   onToggle,
+  defaultOpen,
+  sessionId,
 }: ToolCallRowProps) {
   const t = useTranslations("chat.agentFlow")
-  const [internalOpen, setInternalOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(defaultOpen ?? false)
   const controlled = expanded !== undefined
   const open = controlled ? expanded : internalOpen
 
@@ -170,11 +176,7 @@ export const ToolCallRow = memo(function ToolCallRow({
       <MotionCollapse open={open}>
         {/* ml aligns the left rule under the chevron (px-1.5 + half of size-3.5). */}
         <div className="ml-[13px] mb-1 space-y-3 border-l pl-3 pt-1 text-popover-foreground">
-          {isStructuredMcpToolPart(part) ? (
-            <MCPToolCard part={part} />
-          ) : (
-            <McpToolBodyOrContent part={part} />
-          )}
+          <ToolDetailBody part={part} sessionId={sessionId} />
         </div>
       </MotionCollapse>
     </div>

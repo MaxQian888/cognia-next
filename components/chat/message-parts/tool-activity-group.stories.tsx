@@ -2,7 +2,11 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import type { ReactNode } from "react"
 import type { ToolUIPart } from "ai"
 
-import { ToolActivityGroup, type ToolActivityGroupEntry } from "./tool-activity-group"
+import {
+  ToolActivityGroup,
+  type ToolActivityChildOptions,
+  type ToolActivityGroupEntry,
+} from "./tool-activity-group"
 
 const part = (
   type: string,
@@ -42,34 +46,40 @@ const entries: ToolActivityGroupEntry[] = [
   },
 ]
 
-// Standard/detailed modes call renderCard; a minimal placeholder card is enough
-// to exercise the group chrome in the story.
-const renderCard = (p: ToolUIPart, key: string): ReactNode => (
-  <div
+// Every mode routes its children through renderChild; a minimal placeholder is
+// enough to exercise the group chrome in the story. It reflects whichever
+// open-state channel the group is driving so both are visible here.
+const renderChild = (p: ToolUIPart, key: string, opts: ToolActivityChildOptions): ReactNode => (
+  <button
     key={key}
-    className="rounded-md border bg-muted/30 px-2.5 py-1.5 text-sm"
+    type="button"
+    onClick={opts.onToggle}
+    className="block w-full rounded-md border bg-muted/30 px-2.5 py-1.5 text-left text-sm"
     data-state={p.state}
   >
     <span className="font-mono text-xs text-muted-foreground">{p.type}</span>
-  </div>
+    {opts.expanded || opts.forceOpen ? (
+      <span className="ml-2 text-xs text-muted-foreground">— open</span>
+    ) : null}
+  </button>
 )
 
 const meta = {
   title: "Chat/MessageParts/ToolActivityGroup",
   component: ToolActivityGroup,
   parameters: { layout: "padded" },
-  args: { entries, renderCard },
+  args: { entries, renderChild },
 } satisfies Meta<typeof ToolActivityGroup>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
-// Simplified — collapsed by default; children are compact ToolCallRows.
+// Simplified — collapsed by default; children get controlled open state.
 export const Simplified: Story = {
   args: { mode: "simplified" },
 }
 
-// Standard — expanded by default; children render via renderCard.
+// Standard — expanded by default; children get forceOpen + a remount key.
 export const Standard: Story = {
   args: { mode: "standard" },
 }

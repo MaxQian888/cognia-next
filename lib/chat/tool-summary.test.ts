@@ -2,8 +2,9 @@ import {
   aggregateToolStatus,
   clampTarget,
   countErroredTools,
-  isContextFoldTool,
+  isContextFoldPart,
   normalizeToolName,
+  resolveToolPartName,
   summarizeContextCounts,
   summarizeToolCall,
   tallyToolNames,
@@ -168,28 +169,63 @@ describe("aggregateToolStatus", () => {
   })
 })
 
-describe("isContextFoldTool", () => {
+describe("resolveToolPartName", () => {
+  it("resolves both tool encodings and folds the mcp namespace", () => {
+    expect(resolveToolPartName({ type: "tool-Read" })).toBe("Read")
+    expect(resolveToolPartName({ type: "tool-mcp__cognia-tools__grep" })).toBe("grep")
+    expect(resolveToolPartName({ type: "dynamic-tool", toolName: "Read" })).toBe("Read")
+    expect(resolveToolPartName({ type: "dynamic-tool", toolName: "mcp__x__grep" })).toBe("grep")
+  })
+
+  it("is null for anything that is not a named tool call", () => {
+    expect(resolveToolPartName({ type: "text" })).toBeNull()
+    expect(resolveToolPartName({ type: "dynamic-tool" })).toBeNull()
+    expect(resolveToolPartName({ type: "dynamic-tool", toolName: "   " })).toBeNull()
+    expect(resolveToolPartName({})).toBeNull()
+    expect(resolveToolPartName(undefined)).toBeNull()
+  })
+})
+
+describe("isContextFoldPart", () => {
   it("is true for read/search/glob/list/web context tools", () => {
-    expect(isContextFoldTool("tool-Read")).toBe(true)
-    expect(isContextFoldTool("tool-Grep")).toBe(true)
-    expect(isContextFoldTool("tool-Glob")).toBe(true)
-    expect(isContextFoldTool("tool-ls")).toBe(true)
-    expect(isContextFoldTool("tool-WebFetch")).toBe(true)
-    expect(isContextFoldTool("tool-WebSearch")).toBe(true)
+    expect(isContextFoldPart({ type: "tool-Read" })).toBe(true)
+    expect(isContextFoldPart({ type: "tool-Grep" })).toBe(true)
+    expect(isContextFoldPart({ type: "tool-Glob" })).toBe(true)
+    expect(isContextFoldPart({ type: "tool-ls" })).toBe(true)
+    expect(isContextFoldPart({ type: "tool-WebFetch" })).toBe(true)
+    expect(isContextFoldPart({ type: "tool-WebSearch" })).toBe(true)
   })
 
   it("is false for actions (edit/write/bash), tasks and non-tools", () => {
-    expect(isContextFoldTool("tool-Edit")).toBe(false)
-    expect(isContextFoldTool("tool-Write")).toBe(false)
-    expect(isContextFoldTool("tool-Bash")).toBe(false)
-    expect(isContextFoldTool("tool-TodoWrite")).toBe(false)
-    expect(isContextFoldTool("tool-mcp__x__frobnicate")).toBe(false)
-    expect(isContextFoldTool("text")).toBe(false)
-    expect(isContextFoldTool(undefined)).toBe(false)
+    expect(isContextFoldPart({ type: "tool-Edit" })).toBe(false)
+    expect(isContextFoldPart({ type: "tool-Write" })).toBe(false)
+    expect(isContextFoldPart({ type: "tool-Bash" })).toBe(false)
+    expect(isContextFoldPart({ type: "tool-TodoWrite" })).toBe(false)
+    expect(isContextFoldPart({ type: "tool-mcp__x__frobnicate" })).toBe(false)
+    expect(isContextFoldPart({ type: "text" })).toBe(false)
+    expect(isContextFoldPart(undefined)).toBe(false)
   })
 
   it("folds mcp-namespaced context tools by their bare name", () => {
-    expect(isContextFoldTool("tool-mcp__cognia-tools__grep")).toBe(true)
+    expect(isContextFoldPart({ type: "tool-mcp__cognia-tools__grep" })).toBe(true)
+  })
+
+  // Third-party MCP servers name their readers `search` / `list` / `view` just
+  // as often as `Grep` / `LS` / `Read`; the CLI's context set covers both.
+  it("folds the common third-party aliases the CLI recognizes", () => {
+    expect(isContextFoldPart({ type: "tool-mcp__docs__search" })).toBe(true)
+    expect(isContextFoldPart({ type: "tool-mcp__docs__list" })).toBe(true)
+    expect(isContextFoldPart({ type: "tool-mcp__docs__view" })).toBe(true)
+    expect(isContextFoldPart({ type: "tool-mcp__docs__cat" })).toBe(true)
+  })
+
+  // Imported transcripts and CLI handoff sessions carry `dynamic-tool` parts,
+  // whose name lives on `toolName` — a type-only check refused to fold them.
+  it("classifies dynamic-tool parts by their toolName", () => {
+    expect(isContextFoldPart({ type: "dynamic-tool", toolName: "Read" })).toBe(true)
+    expect(isContextFoldPart({ type: "dynamic-tool", toolName: "mcp__x__grep" })).toBe(true)
+    expect(isContextFoldPart({ type: "dynamic-tool", toolName: "Edit" })).toBe(false)
+    expect(isContextFoldPart({ type: "dynamic-tool" })).toBe(false)
   })
 })
 

@@ -47,7 +47,10 @@ import type { AgentFlowMode } from "@/types/appearance"
 import { ChainOfThoughtStep } from "@/components/ai-elements/chain-of-thought"
 import { MotionCollapse, MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
 import { BackgroundedRunControls } from "@/components/chat/message-parts/backgrounded-run-controls"
-import { ToolActivityGroup } from "@/components/chat/message-parts/tool-activity-group"
+import {
+  ToolActivityGroup,
+  type ToolActivityChildOptions,
+} from "@/components/chat/message-parts/tool-activity-group"
 import { ToolCallRow } from "@/components/chat/message-parts/tool-call-row"
 import { toToolActivityEntries } from "@/lib/claude/subagent-tool-parts"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
@@ -125,8 +128,23 @@ const SubagentLogBody = memo(function SubagentLogBody({
   const t = useTranslations("chat.subagentPart")
   const tailLogs = useMemo(() => logs.slice(-50), [logs])
   const entries = useMemo(() => toToolActivityEntries(toolCalls), [toolCalls])
-  const renderToolRow = (part: (typeof entries)[number]["part"], key: string) => (
-    <ToolCallRow key={key} part={part} />
+  // A sub-agent's tool list is compact in every display mode, so the child is
+  // always a row. Honour whichever open-state channel the group is using —
+  // controlled (`expanded`/`onToggle`, simplified) or seeded-at-mount
+  // (`forceOpen` + the group's generation-stamped key, standard/detailed) —
+  // otherwise the group's expand-all button is inert here.
+  const renderToolRow = (
+    part: (typeof entries)[number]["part"],
+    key: string,
+    opts: ToolActivityChildOptions
+  ) => (
+    <ToolCallRow
+      key={key}
+      part={part}
+      expanded={opts.expanded}
+      onToggle={opts.onToggle}
+      defaultOpen={opts.forceOpen}
+    />
   )
   return (
     <>
@@ -135,11 +153,7 @@ const SubagentLogBody = memo(function SubagentLogBody({
       {/* Inline tool list (reuses the main chat's tool flow). */}
       {entries.length >= 2 ? (
         <div data-testid="subagent-tool-activity">
-          <ToolActivityGroup
-            entries={entries}
-            mode={mode}
-            renderCard={(part, key) => renderToolRow(part, key)}
-          />
+          <ToolActivityGroup entries={entries} mode={mode} renderChild={renderToolRow} />
         </div>
       ) : entries.length === 1 ? (
         <div data-testid="subagent-tool-activity">

@@ -7,8 +7,10 @@ import type { ToolUIPart } from "ai"
 import { TerminalToolPart } from "./terminal-tool-part"
 
 jest.mock("@/components/ai-elements/tool", () => ({
-  Tool: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="tool-wrapper">{children}</div>
+  Tool: ({ children, defaultOpen }: { children: React.ReactNode; defaultOpen?: boolean }) => (
+    <div data-testid="tool-wrapper" data-default-open={String(defaultOpen)}>
+      {children}
+    </div>
   ),
   ToolBody: () => <div data-testid="tool-body" />,
   ToolHeader: ({ state }: { state: string }) => (
@@ -59,15 +61,20 @@ const mockRunInDock = jest.fn(async (..._args: unknown[]) => ({
 jest.mock("@/lib/terminal/run-in-dock", () => ({
   runInDockTab: (...args: unknown[]) => mockRunInDock(...args),
 }))
+// Which choice the picker stub reports on click. Mutable so a test can exercise
+// the existing-tab branch as well as the new-tab one.
+const pickerChoice: { current: { kind: "new" } | { kind: "existing"; row: { id: string } } } = {
+  current: { kind: "new" },
+}
 jest.mock("@/components/chat/terminal-tab-picker", () => ({
   TerminalTabPicker: ({
     children,
     onPick,
   }: {
     children: React.ReactNode
-    onPick: (c: { kind: "new" }) => void
+    onPick: (c: unknown) => void
   }) => (
-    <div data-testid="terminal-tab-picker-stub" onClick={() => onPick({ kind: "new" })}>
+    <div data-testid="terminal-tab-picker-stub" onClick={() => onPick(pickerChoice.current)}>
       {children}
     </div>
   ),
@@ -79,9 +86,21 @@ jest.mock("@/stores/chat/chat-store", () => ({
   useChatStore: (selector: (s: { activeSessionId: string }) => unknown) =>
     selector({ activeSessionId: "chat-1" }),
 }))
+// Mutable so a test can exercise the "project supplies the terminal defaults"
+// branch of the new-tab request as well as the bare no-project one.
+type MockProject = {
+  id: string
+  rootDir?: string
+  terminalConfig?: { shell?: string; cwd?: string; env?: Record<string, string> }
+}
+const mockProjects: { current: MockProject[]; activeId: string | null } = {
+  current: [],
+  activeId: null,
+}
 jest.mock("@/stores/project/project-store", () => ({
-  useProjectStore: (selector: (s: { projects: never[]; activeProjectId: null }) => unknown) =>
-    selector({ projects: [], activeProjectId: null }),
+  useProjectStore: (
+    selector: (s: { projects: MockProject[]; activeProjectId: string | null }) => unknown
+  ) => selector({ projects: mockProjects.current, activeProjectId: mockProjects.activeId }),
 }))
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (s: { settings: { terminal: object } }) => unknown) =>
@@ -96,6 +115,12 @@ const bashPart = (state: ToolUIPart["state"], extra: Partial<ToolUIPart> = {}): 
     input: { command: "ls -la" },
     ...extra,
   }) as unknown as ToolUIPart
+
+afterEach(() => {
+  pickerChoice.current = { kind: "new" }
+  mockProjects.current = []
+  mockProjects.activeId = null
+})
 
 describe("TerminalToolPart", () => {
   it("renders Terminal view while the call is running", () => {
@@ -143,6 +168,24 @@ describe("TerminalToolPart", () => {
     expect(screen.getByTestId("tool-body")).toBeInTheDocument()
   })
 
+  // Without this the activity group's expand-all / collapse-all (and detailed
+  // mode) silently skipped every Bash card in a run.
+  it("opens while running and stays collapsed once settled, by default", () => {
+    const { unmount } = render(<TerminalToolPart part={bashPart("input-available")} />)
+    expect(screen.getByTestId("tool-wrapper")).toHaveAttribute("data-default-open", "true")
+    unmount()
+    render(<TerminalToolPart part={bashPart("output-available")} />)
+    expect(screen.getByTestId("tool-wrapper")).toHaveAttribute("data-default-open", "false")
+  })
+
+  it("lets the caller override the open default (expand-all / detailed mode)", () => {
+    const { unmount } = render(<TerminalToolPart part={bashPart("output-available")} defaultOpen />)
+    expect(screen.getByTestId("tool-wrapper")).toHaveAttribute("data-default-open", "true")
+    unmount()
+    render(<TerminalToolPart part={bashPart("input-available")} defaultOpen={false} />)
+    expect(screen.getByTestId("tool-wrapper")).toHaveAttribute("data-default-open", "false")
+  })
+
   it("renders the Run-in-dock button when a command is present and chatSessionId is known", () => {
     render(<TerminalToolPart part={bashPart("input-available")} />)
     expect(screen.getByTestId("terminal-tool-part-run-in-dock")).toBeInTheDocument()
@@ -160,5 +203,78 @@ describe("TerminalToolPart", () => {
     }
     expect(call.chatSessionId).toBe("chat-1")
     expect(call.command).toBe("ls -la")
+  })
+
+  it("routes an existing-tab pick to that tab instead of opening a new one", () => {
+    pickerChoice.current = { kind: "existing", row: { id: "tab-7" } }
+    render(<TerminalToolPart part={bashPart("input-available")} />)
+    mockRunInDock.mockClear()
+    screen.getByTestId("terminal-tab-picker-stub").click()
+    const call = mockRunInDock.mock.calls[0]?.[0] as unknown as {
+      tabId?: string
+      newTab?: unknown
+      command: string
+    }
+    expect(call.tabId).toBe("tab-7")
+    expect(call.newTab).toBeUndefined()
+    expect(call.command).toBe("ls -la")
+  })
+
+  it("seeds a new dock tab from the active project's terminal config", () => {
+    mockProjects.current = [
+      {
+        id: "proj-1",
+        rootDir: "/repo",
+        terminalConfig: { shell: "/bin/fish", cwd: "  /repo/app  ", env: { FOO: "1" } },
+      },
+    ]
+    mockProjects.activeId = "proj-1"
+    render(<TerminalToolPart part={bashPart("input-available")} />)
+    mockRunInDock.mockClear()
+    screen.getByTestId("terminal-tab-picker-stub").click()
+    const req = (
+      mockRunInDock.mock.calls[0]?.[0] as unknown as {
+        newTab: {
+          req: { shell: string; cwd?: string; env?: Record<string, string>; projectId?: string }
+        }
+      }
+    ).newTab.req
+    expect(req.shell).toBe("/bin/fish")
+    expect(req.cwd).toBe("/repo/app")
+    expect(req.env).toEqual({ FOO: "1" })
+    expect(req.projectId).toBe("proj-1")
+  })
+
+  it("falls back to the project root when the terminal config has no cwd", () => {
+    mockProjects.current = [{ id: "proj-2", rootDir: "/repo", terminalConfig: { cwd: "   " } }]
+    mockProjects.activeId = "proj-2"
+    render(<TerminalToolPart part={bashPart("input-available")} />)
+    mockRunInDock.mockClear()
+    screen.getByTestId("terminal-tab-picker-stub").click()
+    const req = (
+      mockRunInDock.mock.calls[0]?.[0] as unknown as { newTab: { req: { cwd?: string } } }
+    ).newTab.req
+    expect(req.cwd).toBe("/repo")
+  })
+
+  it("shows no live output for a result object carrying neither stdout nor stderr", () => {
+    render(
+      <TerminalToolPart
+        part={bashPart("input-available", {
+          output: { exitCode: 0 } as unknown,
+        } as Partial<ToolUIPart>)}
+      />
+    )
+    expect(screen.getByTestId("terminal")).toHaveAttribute("data-output", "")
+  })
+
+  it("hides Run-in-dock when the call carries no string command", () => {
+    render(
+      <TerminalToolPart
+        part={bashPart("input-available", { input: { timeout: 30 } } as Partial<ToolUIPart>)}
+      />
+    )
+    expect(screen.queryByTestId("terminal-tool-part-run-in-dock")).toBeNull()
+    expect(screen.queryByTestId("tool-input")).toBeNull()
   })
 })

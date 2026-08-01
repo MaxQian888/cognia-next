@@ -1,5 +1,6 @@
 import {
   groupAgentParts,
+  isGroupableToolPart,
   isGroupableToolType,
   isToolOnlyFlow,
   isToolPartType,
@@ -7,7 +8,7 @@ import {
   MIN_GROUP_SIZE,
 } from "./agent-flow-grouping"
 
-type P = { type?: string; id?: string; text?: string }
+type P = { type?: string; id?: string; text?: string; toolName?: string }
 
 describe("isToolPartType / isGroupableToolType", () => {
   it("recognizes tool- prefixed types", () => {
@@ -28,6 +29,13 @@ describe("isToolPartType / isGroupableToolType", () => {
     expect(isGroupableToolType("tool-TodoWrite")).toBe(false)
     expect(isGroupableToolType("tool-mcp__cognia-tools__TodoWrite")).toBe(false)
     expect(isGroupableToolType("text")).toBe(false)
+  })
+
+  it("isGroupableToolPart mirrors the type-level predicate", () => {
+    expect(isGroupableToolPart({ type: "tool-Read" })).toBe(true)
+    expect(isGroupableToolPart({ type: "tool-TodoWrite" })).toBe(false)
+    expect(isGroupableToolPart({ type: "dynamic-tool" })).toBe(true)
+    expect(isGroupableToolPart({})).toBe(false)
   })
 })
 
@@ -154,6 +162,40 @@ describe("groupAgentParts — simplified mode (TUI selective folding)", () => {
     const segs = groupAgentParts(parts, "simplified")
     expect(segs).toHaveLength(1)
     expect(segs[0].kind).toBe("group")
+  })
+
+  // `dynamic-tool` parts (imported transcripts, CLI handoff) carry their name
+  // on `toolName`, so classifying by part type alone left every one of them
+  // standing as its own row in simplified mode.
+  it("folds a dynamic-tool context burst", () => {
+    const parts: P[] = [
+      { type: "dynamic-tool", toolName: "Read" },
+      { type: "dynamic-tool", toolName: "Grep" },
+    ]
+    const segs = groupAgentParts(parts, "simplified")
+    expect(segs).toHaveLength(1)
+    expect(segs[0].kind).toBe("group")
+  })
+
+  it("folds dynamic and statically declared context tools into one run", () => {
+    const parts: P[] = [
+      { type: "tool-Read" },
+      { type: "dynamic-tool", toolName: "mcp__files__glob" },
+      { type: "tool-Grep" },
+    ]
+    const segs = groupAgentParts(parts, "simplified")
+    expect(segs).toHaveLength(1)
+    if (segs[0].kind === "group") expect(segs[0].entries.map((e) => e.index)).toEqual([0, 1, 2])
+  })
+
+  it("leaves a dynamic-tool action standing", () => {
+    const parts: P[] = [
+      { type: "dynamic-tool", toolName: "Read" },
+      { type: "dynamic-tool", toolName: "Edit" },
+      { type: "dynamic-tool", toolName: "Read" },
+    ]
+    const segs = groupAgentParts(parts, "simplified")
+    expect(segs.map((s) => s.kind)).toEqual(["single", "single", "single"])
   })
 
   it("standard mode still folds actions (mode defaults preserve old behaviour)", () => {

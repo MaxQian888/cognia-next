@@ -185,6 +185,37 @@ describe("ToolCallRow", () => {
     expect(queryByTestId("tool-result-chip")).toBeNull()
   })
 
+  // The activity group's standard/detailed path drives its children by
+  // remounting them with a fresh key; a row that ignored `defaultOpen` made the
+  // group's expand-all button inert inside a sub-agent tree.
+  it("seeds the uncontrolled open state from defaultOpen", () => {
+    const { getByTestId } = render(
+      <ToolCallRow part={partWith("tool-MysteryTool", { output: "raw" })} defaultOpen />
+    )
+    expect(getByTestId("tool-body")).toBeTruthy()
+  })
+
+  it("still collapses on click after opening via defaultOpen", () => {
+    const { getByRole, queryByTestId } = render(
+      <ToolCallRow part={partWith("tool-MysteryTool", { output: "raw" })} defaultOpen />
+    )
+    fireEvent.click(getByRole("button"))
+    expect(queryByTestId("tool-body")).toBeNull()
+  })
+
+  // A failed call must expand into the parsed trace, not the stringified body.
+  it("expands a failed call into its error trace, not the stringified body", () => {
+    const { getAllByRole, getAllByText, queryByTestId } = render(
+      <ToolCallRow
+        part={partWith("tool-MysteryTool", { state: "output-error", errorText: "boom\ntrace" })}
+      />
+    )
+    fireEvent.click(getAllByRole("button")[0])
+    expect(queryByTestId("tool-body")).toBeNull()
+    // The collapsed row's chip and the expanded trace both carry the message.
+    expect(getAllByText(/boom/).length).toBeGreaterThan(0)
+  })
+
   it("exposes the data-status attribute for styling/tests", () => {
     const { getByTestId } = render(
       <ToolCallRow part={part("tool-Read", { file_path: "x.ts" }, "output-error")} />
