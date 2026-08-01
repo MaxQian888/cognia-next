@@ -58,7 +58,11 @@ impl Config {
         Self {
             db_path: std::env::var("SHARE_DB_PATH")
                 .unwrap_or_else(|_| "./shares.sqlite".to_string()),
-            upload_secret: std::env::var("SHARE_UPLOAD_SECRET").unwrap_or_default(),
+            upload_secret: resolve_secret(
+                std::env::var("SHARE_UPLOAD_SECRET").ok(),
+                std::env::var_os("SHARE_UPLOAD_SECRET_FILE").map(Into::into),
+            )
+            .unwrap_or_default(),
             max_body_bytes: parse_usize_env("SHARE_MAX_BODY_BYTES")
                 .unwrap_or(DEFAULT_MAX_BODY_BYTES),
             max_ttl_seconds: parse_u64_env("SHARE_MAX_TTL_SECONDS")
@@ -85,6 +89,19 @@ impl Config {
             rate_burst: 100_000,
             reaper_interval_secs: 3_600,
         }
+    }
+}
+
+fn resolve_secret(
+    inline: Option<String>,
+    file: Option<std::path::PathBuf>,
+) -> Result<String, std::io::Error> {
+    if let Some(inline) = inline.filter(|value| !value.is_empty()) {
+        return Ok(inline);
+    }
+    match file {
+        Some(path) => std::fs::read_to_string(path).map(|value| value.trim_end().to_owned()),
+        None => Ok(String::new()),
     }
 }
 
@@ -370,5 +387,20 @@ mod tests {
             .filter(|o| !o.is_empty())
             .collect();
         assert_eq!(parsed, vec!["https://a.example", "https://b.example"]);
+    }
+
+    #[test]
+    fn secret_file_is_supported_without_leaking_it_into_environment_config() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("share-upload-secret");
+        std::fs::write(&path, "file-secret\n").unwrap();
+        assert_eq!(
+            resolve_secret(None, Some(path)).unwrap(),
+            "file-secret".to_string()
+        );
+        assert_eq!(
+            resolve_secret(Some("inline".into()), None).unwrap(),
+            "inline".to_string()
+        );
     }
 }
