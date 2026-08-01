@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="root" path="app_ACRA-approved" />
+    <exclude domain="root" path="app_ACRA-unapproved" />
+    <exclude domain="root" path="no_backup/diagnostics" />
+</full-backup-content>

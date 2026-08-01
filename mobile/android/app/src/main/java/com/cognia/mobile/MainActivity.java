@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(CogniaCrashPlugin.class);
         // Cold start: rewrite before the Bridge captures the launch intent so
         // App.getLaunchUrl() / the boot-time appUrlOpen replay see the deeplink.
         rewriteShareIntent(getIntent());

@@ -83,6 +83,29 @@ PODS:
   - IONCameraLib (1.0.4)
   - IONFilesystemLib (1.1.2)
   - IONGeolocationLib (2.1.0)
+  - KSCrash (2.5.1):
+    - KSCrash/Installations (= 2.5.1)
+  - KSCrash/Core (2.5.1)
+  - KSCrash/DemangleFilter (2.5.1):
+    - KSCrash/Recording
+  - KSCrash/Filters (2.5.1):
+    - KSCrash/Recording
+    - KSCrash/RecordingCore
+    - KSCrash/ReportingCore
+  - KSCrash/Installations (2.5.1):
+    - KSCrash/DemangleFilter
+    - KSCrash/Filters
+    - KSCrash/Recording
+    - KSCrash/Sinks
+  - KSCrash/Recording (2.5.1):
+    - KSCrash/RecordingCore
+  - KSCrash/RecordingCore (2.5.1):
+    - KSCrash/Core
+  - KSCrash/ReportingCore (2.5.1):
+    - KSCrash/Core
+  - KSCrash/Sinks (2.5.1):
+    - KSCrash/Filters
+    - KSCrash/Recording
   - MLImage (1.0.0-beta7)
   - MLKitBarcodeScanning (7.0.0):
     - MLKitCommon (~> 13.0)
@@ -136,6 +159,7 @@ DEPENDENCIES:
   - "CapacitorZeroconf (from `../../../node_modules/.pnpm/capacitor-zeroconf@4.0.0_@capacitor+core@8.4.2_bonjour@3.5.1/node_modules/capacitor-zeroconf`)"
   - "CapgoCapacitorNativeBiometric (from `../../../node_modules/.pnpm/@capgo+capacitor-native-biometric@8.4.5_@capacitor+core@8.4.2/node_modules/@capgo/capacitor-native-biometric`)"
   - "CapgoCapacitorNavigationBar (from `../../../node_modules/.pnpm/@capgo+capacitor-navigation-bar@8.1.8_@capacitor+core@8.4.2/node_modules/@capgo/capacitor-navigation-bar`)"
+  - KSCrash (= 2.5.1)
 
 SPEC REPOS:
   trunk:
@@ -147,6 +171,7 @@ SPEC REPOS:
     - IONCameraLib
     - IONFilesystemLib
     - IONGeolocationLib
+    - KSCrash
     - MLImage
     - MLKitBarcodeScanning
     - MLKitCommon
@@ -247,6 +272,7 @@ SPEC CHECKSUMS:
   IONCameraLib: f2349804460bd9e3f892e42109b8d996ab3fa19d
   IONFilesystemLib: 21a63377696b2d8fab5632ecfb7d2ac67bddb68a
   IONGeolocationLib: 6a7b6f76063fb1b01cfb14fae7d0f526e3c9b271
+  KSCrash: 8c4464fd5da7de520f2ce4a00fdf63f169a80f18
   MLImage: 2ab9c968e75f57911c16f4c9d9e8a8e9604a86a1
   MLKitBarcodeScanning: 72c6437f13a900833b400136be53a8a5d86f42fa
   MLKitCommon: 26b779f072a182c1603d4c88a101c350cac837b1
@@ -255,6 +281,6 @@ SPEC CHECKSUMS:
   PromisesObjC: 752c3227f599e3467650e47ea36f433eeb10c273
   SwiftKeychainWrapper: 807ba1d63c33a7d0613288512399cd1eda1e470c
 
-PODFILE CHECKSUM: 6e6c433c395c580450a7cc6ef7d219cb54c625f0
+PODFILE CHECKSUM: 8b12e2d0d9a142be3e14fa6008153146745cb1f7
 
 COCOAPODS: 1.16.2
