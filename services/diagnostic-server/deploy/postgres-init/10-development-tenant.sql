@@ -1,0 +1,11 @@
+INSERT INTO tenants (id, name)
+VALUES ('00000000-0000-4000-8000-000000000001', 'Cognia Development')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO projects (id, tenant_id, name)
+VALUES (
+    '00000000-0000-4000-8000-000000000002',
+    '00000000-0000-4000-8000-000000000001',
+    'Desktop and Mobile'
+)
+ON CONFLICT (tenant_id, id) DO NOTHING;

@@ -154,6 +154,26 @@ paths:
       responses:
         '201': {description: Indexed symbol record}
         '403': {$ref: '#/components/responses/Error'}
+  /admin/tenant-key:
+    post:
+      operationId: rotateTenantDataKey
+      description: Administrator-only KMS-wrapped tenant DEK rotation. Existing versions remain decryptable.
+      responses:
+        '200': {description: New active tenant key version}
+        '403': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: cryptoShredTenant
+      description: Irreversibly destroy every wrapped tenant DEK and evict cached plaintext keys.
+      parameters:
+        - name: x-confirm-crypto-shred
+          in: header
+          required: true
+          description: Must exactly equal the authenticated tenant UUID.
+          schema: {type: string, format: uuid}
+      responses:
+        '204': {description: Tenant artifact keys cryptographically destroyed}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
 components:
   securitySchemes:
     uploadGrant:

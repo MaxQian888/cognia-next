@@ -96,6 +96,10 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/admin/symbols/{build_id}/{platform}",
             put(upload_symbol),
         )
+        .route(
+            "/v1/admin/tenant-key",
+            post(rotate_tenant_key).delete(crypto_shred_tenant),
+        )
         .layer(DefaultBodyLimit::max(MAX_MINIDUMP_BYTES as usize))
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
@@ -382,7 +386,7 @@ async fn upload_part(
     );
     state
         .artifacts
-        .put_part(&object_key, scan.sanitized.clone())
+        .put_part(claims.tenant_id, &object_key, scan.sanitized.clone())
         .await
         .map_err(ApiError::internal)?;
     let record = UploadPartRecord {
@@ -547,7 +551,7 @@ async fn upload_symbol(
     );
     state
         .artifacts
-        .put_part(&object_key, body.to_vec())
+        .put_part(claims.tenant_id, &object_key, body.to_vec())
         .await
         .map_err(ApiError::internal)?;
     let record = match state
@@ -571,6 +575,42 @@ async fn upload_symbol(
         }
     };
     Ok((StatusCode::CREATED, Json(record)))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RotateTenantKeyResponse {
+    key_version: i32,
+}
+
+async fn rotate_tenant_key(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<RotateTenantKeyResponse>> {
+    let claims = authorize(&state, &headers, GrantRole::Admin)?;
+    let key_version = state
+        .artifacts
+        .rotate_tenant_key(claims.tenant_id)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(RotateTenantKeyResponse { key_version }))
+}
+
+async fn crypto_shred_tenant(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<StatusCode> {
+    let claims = authorize(&state, &headers, GrantRole::Admin)?;
+    let confirmation = required_header(&headers, "x-confirm-crypto-shred")?;
+    if confirmation != claims.tenant_id.to_string() {
+        return Err(ApiError::bad_request("crypto_shred_confirmation_mismatch"));
+    }
+    state
+        .artifacts
+        .crypto_shred_tenant(claims.tenant_id)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn delete_artifacts(state: &AppState, tenant_id: Uuid, incident_id: Uuid) -> ApiResult<()> {

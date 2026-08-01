@@ -1,0 +1,124 @@
+name: cognia-diagnostics
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: cognia_diagnostics
+      POSTGRES_USER: cognia_diagnostics
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-diagnostics-development-only}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cognia_diagnostics -d cognia_diagnostics"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [backend]
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-diagnostics-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-diagnostics-minio-development}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [backend]
+
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-07-21T05-28-08Z
+    depends_on:
+      minio: {condition: service_healthy}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - >-
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}";
+        mc mb --ignore-existing local/cognia-diagnostics;
+        mc version enable local/cognia-diagnostics;
+        mc ilm rule add --expire-days 180 local/cognia-diagnostics || true
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-diagnostics-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-diagnostics-minio-development}
+    networks: [backend]
+
+  kms:
+    image: floci/floci:1.5.14-compat
+    environment:
+      FLOCI_DEFAULT_REGION: us-east-1
+      FLOCI_STORAGE_MODE: wal
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    volumes:
+      - kms-data:/app/data
+      - ./floci-init:/etc/localstack/init/ready.d:ro
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [backend]
+
+  diagnostic-service:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    depends_on:
+      postgres: {condition: service_healthy}
+      minio-init: {condition: service_completed_successfully}
+      kms: {condition: service_healthy}
+    environment:
+      DATABASE_URL: postgres://cognia_diagnostics:${POSTGRES_PASSWORD:-diagnostics-development-only}@postgres:5432/cognia_diagnostics
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: cognia-diagnostics
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-diagnostics-minio}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-diagnostics-minio-development}
+      GRANT_SIGNING_KEY: ${GRANT_SIGNING_KEY:-development-grant-signing-key-change-me}
+      OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:3000}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-cognia-diagnostics}
+      OIDC_PUBLIC_KEY_PEM: |
+        -----BEGIN PUBLIC KEY-----
+        MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1L6rfQxU9n/Te9m7Irki
+        /Fdg1x6V/LADuS+gBB7tzJeZLo19qxcSkqe5mGrxv1HyqWeJJ31iQpxGUftVF9rs
+        fsvlWf7UACRJdWKljxgwePRXyZdQ5IAxazZGGJozweO5lLtaH4C6HWHWLG7++6Rj
+        4WXkaivkwkgmc2GBuEFLq44LBaSxpddbkf1FZfpJzhO0ktb/ZlT+PTcLJBoGQQpJ
+        rqdLw7ESJ7rkJvtvqWwSd1IcxSuAYr9mlyeeJ0n//eY9NnhGA3tf7+jth7QB9h0i
+        p2/r0i204oqyfkb5bqa1YqoCvHtkTMjeyCHtUSkPNiQdufWFz8hZSJx5hMJmDt0c
+        OwIDAQAB
+        -----END PUBLIC KEY-----
+      KMS_ENDPOINT: http://kms:4566/
+      KMS_REGION: us-east-1
+      KMS_KEY_ID: alias/cognia-diagnostics
+      KMS_ACCESS_KEY_ID: test
+      KMS_SECRET_ACCESS_KEY: test
+      PROCESSING_ENABLED: "true"
+    ports:
+      - "18080:8080"
+    volumes:
+      - processing-temp:/var/lib/cognia/diagnostics/tmp
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1770
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    restart: unless-stopped
+    networks: [backend, frontend]
+
+networks:
+  backend:
+    internal: true
+  frontend:
+
+volumes:
+  postgres-data:
+  minio-data:
+  kms-data:
+  processing-temp:

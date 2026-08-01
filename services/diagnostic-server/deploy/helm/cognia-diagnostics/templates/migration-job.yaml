@@ -1,0 +1,50 @@
+{{- if .Values.migration.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "cognia-diagnostics.fullname" . }}-migrate-{{ .Release.Revision }}
+  labels:
+    {{- include "cognia-diagnostics.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: {{ .Values.migration.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.migration.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "cognia-diagnostics.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: {{ include "cognia-diagnostics.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            {{- include "cognia-diagnostics.configEnv" . | nindent 12 }}
+            {{- include "cognia-diagnostics.secretEnv" . | nindent 12 }}
+            - name: DIAGNOSTIC_MIGRATE_ONLY
+              value: "true"
+          volumeMounts:
+            - name: runtime-temp
+              mountPath: /tmp
+      volumes:
+        - name: runtime-temp
+          emptyDir:
+            sizeLimit: 128Mi
+{{- end }}

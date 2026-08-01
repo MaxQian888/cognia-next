@@ -23,6 +23,14 @@ pub struct ServerConfig {
     pub processing_temp_dir: PathBuf,
     pub minidump_stackwalk_path: PathBuf,
     pub minidump_stackwalk_timeout: Duration,
+    pub kms_endpoint: reqwest::Url,
+    pub kms_region: String,
+    pub kms_key_id: String,
+    pub kms_access_key_id: String,
+    pub kms_secret_access_key: String,
+    pub kms_session_token: Option<String>,
+    pub kms_timeout: Duration,
+    pub migrate_only: bool,
 }
 
 impl ServerConfig {
@@ -49,6 +57,13 @@ impl ServerConfig {
         if processing_batch_size == 0 || processing_batch_size > 1_000 {
             bail!("PROCESSING_BATCH_SIZE must be between 1 and 1000");
         }
+        let kms_region = env_or("KMS_REGION", "us-east-1");
+        let kms_endpoint = env_or(
+            "KMS_ENDPOINT",
+            &format!("https://kms.{kms_region}.amazonaws.com/"),
+        )
+        .parse()
+        .context("parse KMS_ENDPOINT")?;
         Ok(Self {
             bind_address,
             database_url,
@@ -85,6 +100,21 @@ impl ServerConfig {
                     .parse()
                     .context("parse MINIDUMP_STACKWALK_TIMEOUT_SECONDS")?,
             ),
+            kms_endpoint,
+            kms_region,
+            kms_key_id: required("KMS_KEY_ID")?,
+            kms_access_key_id: required("KMS_ACCESS_KEY_ID")?,
+            kms_secret_access_key: required("KMS_SECRET_ACCESS_KEY")?,
+            kms_session_token: std::env::var("KMS_SESSION_TOKEN").ok(),
+            kms_timeout: Duration::from_secs(
+                env_or("KMS_TIMEOUT_SECONDS", "15")
+                    .parse()
+                    .context("parse KMS_TIMEOUT_SECONDS")?,
+            ),
+            migrate_only: parse_bool(
+                "DIAGNOSTIC_MIGRATE_ONLY",
+                &env_or("DIAGNOSTIC_MIGRATE_ONLY", "false"),
+            )?,
         })
     }
 }

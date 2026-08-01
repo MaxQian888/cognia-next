@@ -108,6 +108,15 @@ pub struct CreateSymbol {
     pub sha256: String,
 }
 
+#[derive(Debug, Clone, FromRow)]
+pub struct TenantKeyRecord {
+    pub tenant_id: Uuid,
+    pub key_version: i32,
+    pub wrapped_dek: Vec<u8>,
+    pub kms_key_id: String,
+    pub state: String,
+}
+
 impl DiagnosticRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -116,6 +125,143 @@ impl DiagnosticRepository {
     pub async fn health(&self) -> anyhow::Result<()> {
         sqlx::query("SELECT 1").execute(&self.pool).await?;
         Ok(())
+    }
+
+    pub async fn active_tenant_key(
+        &self,
+        tenant_id: Uuid,
+    ) -> anyhow::Result<Option<TenantKeyRecord>> {
+        let mut tx = self.tenant_transaction(tenant_id).await?;
+        let record = sqlx::query_as::<_, TenantKeyRecord>(
+            r#"SELECT tenant_id, key_version, wrapped_dek, kms_key_id, state
+            FROM tenant_keys WHERE state = 'active'"#,
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(record)
+    }
+
+    pub async fn tenant_key(
+        &self,
+        tenant_id: Uuid,
+        key_version: i32,
+    ) -> anyhow::Result<Option<TenantKeyRecord>> {
+        let mut tx = self.tenant_transaction(tenant_id).await?;
+        let record = sqlx::query_as::<_, TenantKeyRecord>(
+            r#"SELECT tenant_id, key_version, wrapped_dek, kms_key_id, state
+            FROM tenant_keys WHERE key_version = $1"#,
+        )
+        .bind(key_version)
+        .fetch_optional(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(record)
+    }
+
+    pub async fn insert_tenant_key(
+        &self,
+        tenant_id: Uuid,
+        wrapped_dek: &[u8],
+        kms_key_id: &str,
+    ) -> anyhow::Result<TenantKeyRecord> {
+        let mut tx = self.tenant_transaction(tenant_id).await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(format!("tenant-key:{tenant_id}"))
+            .execute(&mut *tx)
+            .await?;
+        if let Some(record) = sqlx::query_as::<_, TenantKeyRecord>(
+            r#"SELECT tenant_id, key_version, wrapped_dek, kms_key_id, state
+            FROM tenant_keys WHERE state = 'active' FOR UPDATE"#,
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+        {
+            tx.commit().await?;
+            return Ok(record);
+        }
+        let record = sqlx::query_as::<_, TenantKeyRecord>(
+            r#"INSERT INTO tenant_keys (tenant_id, key_version, wrapped_dek, kms_key_id)
+            SELECT $1, COALESCE(MAX(key_version), 0) + 1, $2, $3
+            FROM tenant_keys WHERE tenant_id = $1
+            RETURNING tenant_id, key_version, wrapped_dek, kms_key_id, state"#,
+        )
+        .bind(tenant_id)
+        .bind(wrapped_dek)
+        .bind(kms_key_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        audit_admin(
+            &mut tx,
+            tenant_id,
+            "tenant_key.created",
+            Some(serde_json::json!({"keyVersion": record.key_version})),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(record)
+    }
+
+    pub async fn rotate_tenant_key(
+        &self,
+        tenant_id: Uuid,
+        wrapped_dek: &[u8],
+        kms_key_id: &str,
+    ) -> anyhow::Result<TenantKeyRecord> {
+        let mut tx = self.tenant_transaction(tenant_id).await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(format!("tenant-key:{tenant_id}"))
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            r#"UPDATE tenant_keys SET state = 'retired', retired_at = now()
+            WHERE state = 'active'"#,
+        )
+        .execute(&mut *tx)
+        .await?;
+        let record = sqlx::query_as::<_, TenantKeyRecord>(
+            r#"INSERT INTO tenant_keys (tenant_id, key_version, wrapped_dek, kms_key_id)
+            SELECT $1, COALESCE(MAX(key_version), 0) + 1, $2, $3
+            FROM tenant_keys WHERE tenant_id = $1
+            RETURNING tenant_id, key_version, wrapped_dek, kms_key_id, state"#,
+        )
+        .bind(tenant_id)
+        .bind(wrapped_dek)
+        .bind(kms_key_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        audit_admin(
+            &mut tx,
+            tenant_id,
+            "tenant_key.rotated",
+            Some(serde_json::json!({"keyVersion": record.key_version})),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(record)
+    }
+
+    pub async fn shred_tenant_keys(&self, tenant_id: Uuid) -> anyhow::Result<u64> {
+        let mut tx = self.tenant_transaction(tenant_id).await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(format!("tenant-key:{tenant_id}"))
+            .execute(&mut *tx)
+            .await?;
+        let result = sqlx::query(
+            r#"UPDATE tenant_keys SET wrapped_dek = ''::bytea, state = 'destroyed',
+                destroyed_at = now() WHERE state <> 'destroyed'"#,
+        )
+        .execute(&mut *tx)
+        .await?;
+        audit_admin(
+            &mut tx,
+            tenant_id,
+            "tenant_key.crypto_shredded",
+            Some(serde_json::json!({"keyCount": result.rows_affected()})),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(result.rows_affected())
     }
 
     pub async fn register_nonce(

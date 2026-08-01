@@ -1,0 +1,97 @@
+replicaCount: 2
+
+image:
+  repository: ghcr.io/cognia-ai/diagnostic-server
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+config:
+  databaseMaxConnections: "20"
+  s3Endpoint: ""
+  s3Bucket: cognia-diagnostics
+  s3Region: us-east-1
+  oidcIssuer: https://identity.example.com
+  oidcAudience: cognia-diagnostics
+  oidcPublicKeyPem: |
+    -----BEGIN PUBLIC KEY-----
+    REPLACE_WITH_YOUR_OIDC_PUBLIC_KEY
+    -----END PUBLIC KEY-----
+  kmsEndpoint: https://kms.us-east-1.amazonaws.com/
+  kmsRegion: us-east-1
+  kmsKeyId: alias/cognia-diagnostics
+  processingEnabled: "true"
+  processingBatchSize: "32"
+  processingIntervalMs: "1000"
+  minidumpStackwalkTimeoutSeconds: "120"
+
+existingSecret:
+  name: cognia-diagnostics
+  keys:
+    databaseUrl: DATABASE_URL
+    grantSigningKey: GRANT_SIGNING_KEY
+    s3AccessKey: S3_ACCESS_KEY
+    s3SecretKey: S3_SECRET_KEY
+    kmsAccessKeyId: KMS_ACCESS_KEY_ID
+    kmsSecretAccessKey: KMS_SECRET_ACCESS_KEY
+    kmsSessionToken: KMS_SESSION_TOKEN
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 75
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: true
+  ingressNamespaceSelector: {}
+  ingressPodSelector: {}
+  egressCIDRs:
+    - 0.0.0.0/0
+  egressPorts:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 5432
+    - protocol: TCP
+      port: 9000
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+migration:
+  enabled: true
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+

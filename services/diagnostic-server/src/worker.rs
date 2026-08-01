@@ -127,7 +127,7 @@ impl DiagnosticProcessor {
         for part in &parts {
             let bytes = self
                 .artifacts
-                .get(&part.object_key)
+                .get(incident.tenant_id, &part.object_key)
                 .await
                 .map_err(|_| ProcessingFailure::StorageUnavailable)?;
             if hex::encode(Sha256::digest(&bytes)) != part.stored_sha256 {
@@ -189,7 +189,7 @@ impl DiagnosticProcessor {
             }) {
                 let bytes = self
                     .artifacts
-                    .get(&symbol.object_key)
+                    .get(incident.tenant_id, &symbol.object_key)
                     .await
                     .map_err(|_| ProcessingFailure::StorageUnavailable)?;
                 symbols.push(SymbolArtifact {

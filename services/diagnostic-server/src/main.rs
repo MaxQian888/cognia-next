@@ -30,9 +30,13 @@ async fn main() -> anyhow::Result<()> {
         .run(&pool)
         .await
         .context("run migrations")?;
+    if config.migrate_only {
+        tracing::info!("diagnostic database migrations completed");
+        return Ok(());
+    }
 
     let repository = DiagnosticRepository::new(pool);
-    let artifacts = ArtifactStore::from_config(&config)?;
+    let artifacts = ArtifactStore::from_config(&config, repository.clone())?;
     let signer = GrantSigner::new(config.grant_signing_key.as_bytes())?;
     let privacy = PrivacyGate::v1();
     let processor = config
