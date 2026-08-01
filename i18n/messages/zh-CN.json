@@ -20541,6 +20541,74 @@
         },
         "tonalityHint": "透明度仅在启用壁纸时生效。"
       },
+      "cursor": {
+        "colorHint": "主题强调色会跟随当前主题；自定义颜色则在所有光标包上固定为同一种颜色。",
+        "colorLabel": "颜色",
+        "colorModes": {
+          "accent": "主题强调色",
+          "custom": "自定义颜色",
+          "pack": "光标包配色"
+        },
+        "customColorLabel": "自定义颜色",
+        "description": "使用设计好的光标包替换指针，并可叠加粒子效果。",
+        "effect": {
+          "clickBurstHint": "在点击位置额外迸发一簇粒子。",
+          "clickBurstLabel": "点击迸发",
+          "colorLabel": "颜色",
+          "colorModes": {
+            "accent": "主题强调色",
+            "custom": "自定义颜色",
+            "pack": "光标包配色",
+            "rainbow": "彩虹"
+          },
+          "customColorLabel": "自定义颜色",
+          "description": "指针移动时在其后方绘制的粒子。",
+          "intensityLabel": "强度",
+          "kindLabel": "特效",
+          "kinds": {
+            "bubbles": "气泡",
+            "flame": "火焰",
+            "glow": "辉光",
+            "none": "无",
+            "petals": "落樱",
+            "ribbon": "彩带",
+            "ripple": "涟漪",
+            "snow": "落雪",
+            "sparkle": "闪烁",
+            "stardust": "星尘",
+            "trail": "拖尾"
+          },
+          "reducedMotionNotice": "已开启减弱动态效果，因此不会绘制特效。",
+          "scaleLabel": "粒子大小",
+          "title": "光标特效",
+          "touchNotice": "触摸输入不会绘制指针特效。"
+        },
+        "enabledHint": "关闭后使用操作系统自带的指针。",
+        "enabledLabel": "自定义光标",
+        "families": {
+          "anime": "二次元",
+          "classic": "经典",
+          "playful": "趣味",
+          "system": "系统"
+        },
+        "nativeRoles": "以下角色仍使用系统指针：{roles}",
+        "roles": {
+          "crosshair": "十字准星",
+          "default": "默认",
+          "grab": "可抓取",
+          "grabbing": "抓取中",
+          "notAllowed": "禁用",
+          "pointer": "链接",
+          "progress": "忙碌",
+          "text": "文本"
+        },
+        "rolesLabel": "光标角色",
+        "sizeLabel": "大小",
+        "systemPack": "系统",
+        "systemPackHint": "你的系统指针",
+        "systemSelectedHint": "当前使用系统指针，因此没有可预览的内容。",
+        "title": "光标"
+      },
       "customTheme": {
         "actions": {
           "export": "导出",

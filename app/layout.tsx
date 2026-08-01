@@ -82,11 +82,13 @@ import { McpLogProvider } from "@/components/providers/mcp-log-provider"
 import {
   BackgroundApplier,
   ComponentStyleApplier,
+  CursorApplier,
   DensityApplier,
   MotionApplier,
   RadiusApplier,
   TypographyApplier,
 } from "@/lib/appearance"
+import { CursorEffectLayer } from "@/components/appearance/cursor-effect-layer"
 import { CustomThemeApplier } from "@/lib/appearance/custom-theme-applier"
 import { PluginThemeApplier } from "@/lib/appearance/plugin-theme-applier"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
@@ -267,6 +269,13 @@ export default async function RootLayout({
                                           <DensityApplier />
                                           <RadiusApplier />
                                           <MotionApplier />
+                                          {/* Pointer art. After MotionApplier so
+                                  the reduce-motion class is already settled
+                                  when the effect layer reads it, and before
+                                  the color appliers because the "follow the
+                                  accent" mode resolves the palette from the
+                                  store rather than from the DOM. */}
+                                          <CursorApplier />
                                           {/* Keeps body[data-bg-*] + the cognia user-css */}
                                           {/* style tag in sync with the appearance store. */}
                                           <BackgroundApplier />
@@ -361,6 +370,10 @@ export default async function RootLayout({
                         {/* Floating virtual-pet widget — gates itself on the pet
                          * setting and degrades on mobile / reduced motion. */}
                         <PetMount />
+                        {/* Pointer particle/trail overlay — renders null unless
+                         * an effect is selected, and stands down under reduced
+                         * motion or on a coarse (touch) pointer. */}
+                        <CursorEffectLayer />
                         {/* Content-capture confirm bubble + clipboard watcher —
                          * self-gates on the capture setting (disabled by default). */}
                         <CaptureMount />

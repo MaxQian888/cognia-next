@@ -38,6 +38,7 @@ import { CustomThemeTab } from "./tabs/custom-theme-tab"
 import { AdvancedTab } from "./tabs/advanced-tab"
 import { A11yTab } from "./tabs/a11y-tab"
 import { ComponentsTab } from "./tabs/components-tab"
+import { CursorTab } from "./tabs/cursor-tab"
 import { AutoModeTab } from "./tabs/auto-mode-tab"
 import { AppearanceLibraryPanel } from "./panels/library-panel"
 import { AppearanceTypographyPanel } from "./panels/typography-panel"
@@ -72,6 +73,8 @@ function renderPanel(panel: AppearancePanelId) {
       return <AppearanceTypographyPanel />
     case "components":
       return <ComponentsTab />
+    case "cursor":
+      return <CursorTab />
     case "personalization":
       return <PersonalizationCard />
     case "a11y":

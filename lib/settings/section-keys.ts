@@ -107,6 +107,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "customCss",
     "customCssEnabled",
     "componentStyles",
+    "cursor",
     "importedVscodeThemes",
     // v47+ appearance behaviors now wired into the UI (auto light/dark
     // switching, editor theme linking, custom-CSS scope). Owned here so they

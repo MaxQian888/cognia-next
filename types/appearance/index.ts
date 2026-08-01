@@ -3,6 +3,9 @@
 // `settings` singleton) — no separate table — so the whole appearance config
 // rides along with the existing backup/restore pipeline.
 
+export * from "./cursor"
+import { DEFAULT_CURSOR, type CursorSettings } from "./cursor"
+
 export type WallpaperPosition = "cover" | "contain" | "tile" | "center"
 
 /** User-CSS injection scope: limited to the app shell (`#app`) or document-wide. */
@@ -149,6 +152,8 @@ export interface AppearanceSettingsSlice {
   customCssScope?: CustomCssScope
   /** Per-component surface customization (tonality / elevation / radius). */
   componentStyles?: ComponentStyles
+  /** Mouse-pointer art + pointer effect layer. See `./cursor.ts`. */
+  cursor?: CursorSettings
 }
 
 // ----------------------------------------------------------------------------
@@ -408,4 +413,5 @@ export const DEFAULT_APPEARANCE_SLICE: Required<AppearanceSettingsSlice> = {
   activeThemePackId: null,
   customCssScope: "app",
   componentStyles: {},
+  cursor: DEFAULT_CURSOR,
 }
