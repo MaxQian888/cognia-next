@@ -1,6 +1,10 @@
 use axum::body::{to_bytes, Body};
 use axum::http::{header, Request, StatusCode};
-use cognia_ops_controller::{router, AppState, InMemoryStore, TestAuthenticator};
+use chrono::{Duration, Utc};
+use cognia_ops_controller::{
+    router, AppState, CertificateIssuer, InMemoryStore, IssuedCertificate, OperationSigner,
+    TestAuthenticator,
+};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -8,6 +12,41 @@ use tower::ServiceExt;
 fn app() -> axum::Router {
     let store = Arc::new(InMemoryStore::default());
     router(AppState::new(store, Arc::new(TestAuthenticator)))
+}
+
+struct FakeCertificateIssuer;
+
+impl CertificateIssuer for FakeCertificateIssuer {
+    fn issue(
+        &self,
+        agent_id: &str,
+        target_id: &str,
+        _csr_pem: &str,
+    ) -> anyhow::Result<IssuedCertificate> {
+        Ok(IssuedCertificate {
+            certificate_pem: format!("certificate:{agent_id}:{target_id}"),
+            ca_certificate_pem: "test-ca".into(),
+            fingerprint_sha256: format!("fingerprint-{agent_id}-{target_id}"),
+            expires_at: Utc::now() + Duration::hours(24),
+        })
+    }
+}
+
+fn app_with_certificate_issuer() -> axum::Router {
+    router(
+        AppState::new(
+            Arc::new(InMemoryStore::default()),
+            Arc::new(TestAuthenticator),
+        )
+        .with_certificate_issuer(Arc::new(FakeCertificateIssuer))
+        .with_operation_signer(
+            OperationSigner::from_base64(
+                "test-controller".into(),
+                &base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [5_u8; 32]),
+            )
+            .expect("signer"),
+        ),
+    )
 }
 
 async fn send(request: Request<Body>) -> (StatusCode, Value) {
@@ -236,4 +275,66 @@ async fn target_validation_rejects_unknown_fields() {
     let (status, body) = send(validate).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["code"], "invalid_deployment_target");
+}
+
+#[tokio::test]
+async fn enrollment_token_is_single_use_and_returns_a_target_bound_certificate() {
+    let application = app_with_certificate_issuer();
+    let mut token_request = request(
+        "POST",
+        "/v1/agents/enrollment-tokens",
+        "tenant-a:servers:admin",
+        json!({ "targetId": "staging", "ttlSeconds": 300 }),
+    );
+    token_request
+        .headers_mut()
+        .insert("idempotency-key", "enroll-token-1".parse().expect("header"));
+    let token_response = application
+        .clone()
+        .oneshot(token_request)
+        .await
+        .expect("token response");
+    assert_eq!(token_response.status(), StatusCode::OK);
+    let token: Value = serde_json::from_slice(
+        &to_bytes(token_response.into_body(), 1024 * 1024)
+            .await
+            .expect("token body"),
+    )
+    .expect("token json");
+
+    let enroll_request = || {
+        Request::builder()
+            .method("POST")
+            .uri("/v1/agents/enroll")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "token": token["token"],
+                    "agentId": "agent-1",
+                    "csrPem": "test-csr"
+                })
+                .to_string(),
+            ))
+            .expect("enrollment request")
+    };
+    let enrolled = application
+        .clone()
+        .oneshot(enroll_request())
+        .await
+        .expect("enrollment response");
+    assert_eq!(enrolled.status(), StatusCode::OK);
+    let certificate: Value = serde_json::from_slice(
+        &to_bytes(enrolled.into_body(), 1024 * 1024)
+            .await
+            .expect("certificate body"),
+    )
+    .expect("certificate json");
+    assert_eq!(certificate["targetId"], "staging");
+    assert_eq!(certificate["certificatePem"], "certificate:agent-1:staging");
+
+    let replay = application
+        .oneshot(enroll_request())
+        .await
+        .expect("replay response");
+    assert_eq!(replay.status(), StatusCode::UNAUTHORIZED);
 }

@@ -79,6 +79,48 @@ pub trait Store: Send + Sync {
         operation: OperationKind,
         token: &str,
     ) -> Result<bool, StoreError>;
+    async fn create_enrollment_token(
+        &self,
+        tenant_id: &str,
+        target_id: &str,
+        created_by: &str,
+        ttl: Duration,
+    ) -> Result<EnrollmentToken, StoreError>;
+    async fn consume_enrollment(&self, token: &str) -> Result<EnrollmentGrant, StoreError>;
+    async fn register_agent(
+        &self,
+        grant: &EnrollmentGrant,
+        agent_id: &str,
+        certificate_fingerprint: &str,
+        certificate_expires_at: DateTime<Utc>,
+    ) -> Result<(), StoreError>;
+    async fn authenticate_agent(
+        &self,
+        agent_id: &str,
+        target_id: &str,
+        certificate_fingerprint: &str,
+    ) -> Result<Option<AgentIdentity>, StoreError>;
+    async fn claim_operation_for_target(
+        &self,
+        tenant_id: &str,
+        target_id: &str,
+        worker_id: &str,
+        lease_seconds: i64,
+    ) -> Result<Option<Operation>, StoreError>;
+    async fn heartbeat_operation(
+        &self,
+        operation_id: Uuid,
+        worker_id: &str,
+        lease_seconds: i64,
+    ) -> Result<bool, StoreError>;
+    async fn transition_operation(
+        &self,
+        operation_id: Uuid,
+        worker_id: &str,
+        next: OperationState,
+        result: Option<Value>,
+        error: Option<OpsErrorBody>,
+    ) -> Result<Operation, StoreError>;
 }
 
 #[derive(Default)]
@@ -88,6 +130,8 @@ struct MemoryData {
     idempotency: HashMap<(String, String), Uuid>,
     events: Vec<TenantOperationEvent>,
     leases: HashMap<String, MemoryLease>,
+    enrollment_tokens: HashMap<String, MemoryEnrollment>,
+    agents: HashMap<String, AgentIdentity>,
 }
 
 struct MemoryLease {
@@ -95,6 +139,12 @@ struct MemoryLease {
     subject: String,
     target_id: String,
     operation: OperationKind,
+    expires_at: DateTime<Utc>,
+}
+
+struct MemoryEnrollment {
+    tenant_id: String,
+    target_id: String,
     expires_at: DateTime<Utc>,
 }
 
@@ -287,6 +337,129 @@ impl Store for InMemoryStore {
                     && lease.expires_at > Utc::now()
             }))
     }
+
+    async fn create_enrollment_token(
+        &self,
+        tenant_id: &str,
+        target_id: &str,
+        _created_by: &str,
+        ttl: Duration,
+    ) -> Result<EnrollmentToken, StoreError> {
+        let token = Uuid::new_v4().to_string();
+        let expires_at = Utc::now() + ttl;
+        self.inner.lock().enrollment_tokens.insert(
+            hash_token(&token),
+            MemoryEnrollment {
+                tenant_id: tenant_id.into(),
+                target_id: target_id.into(),
+                expires_at,
+            },
+        );
+        Ok(EnrollmentToken { token, expires_at })
+    }
+
+    async fn consume_enrollment(&self, token: &str) -> Result<EnrollmentGrant, StoreError> {
+        let enrollment = self
+            .inner
+            .lock()
+            .enrollment_tokens
+            .remove(&hash_token(token))
+            .filter(|enrollment| enrollment.expires_at > Utc::now())
+            .ok_or(StoreError::NotFound)?;
+        Ok(EnrollmentGrant {
+            tenant_id: enrollment.tenant_id,
+            target_id: enrollment.target_id,
+        })
+    }
+
+    async fn register_agent(
+        &self,
+        grant: &EnrollmentGrant,
+        agent_id: &str,
+        certificate_fingerprint: &str,
+        _certificate_expires_at: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        let mut data = self.inner.lock();
+        let identity = AgentIdentity {
+            tenant_id: grant.tenant_id.clone(),
+            target_id: grant.target_id.clone(),
+            agent_id: agent_id.into(),
+        };
+        data.agents.insert(certificate_fingerprint.into(), identity);
+        Ok(())
+    }
+
+    async fn authenticate_agent(
+        &self,
+        agent_id: &str,
+        target_id: &str,
+        certificate_fingerprint: &str,
+    ) -> Result<Option<AgentIdentity>, StoreError> {
+        Ok(self
+            .inner
+            .lock()
+            .agents
+            .get(certificate_fingerprint)
+            .filter(|identity| identity.agent_id == agent_id && identity.target_id == target_id)
+            .cloned())
+    }
+
+    async fn claim_operation_for_target(
+        &self,
+        tenant_id: &str,
+        target_id: &str,
+        worker_id: &str,
+        _lease_seconds: i64,
+    ) -> Result<Option<Operation>, StoreError> {
+        let mut data = self.inner.lock();
+        let id = data
+            .operations
+            .iter()
+            .find(|(_, operation)| {
+                operation.tenant_id == tenant_id
+                    && operation.target_id == target_id
+                    && operation.state == OperationState::Queued
+            })
+            .map(|(id, _)| *id);
+        let Some(id) = id else { return Ok(None) };
+        let operation = data.operations.get_mut(&id).ok_or(StoreError::NotFound)?;
+        operation.state = OperationState::Validating;
+        operation.updated_at = Utc::now();
+        let _ = worker_id;
+        Ok(Some(operation.clone()))
+    }
+
+    async fn heartbeat_operation(
+        &self,
+        operation_id: Uuid,
+        _worker_id: &str,
+        _lease_seconds: i64,
+    ) -> Result<bool, StoreError> {
+        Ok(self.inner.lock().operations.contains_key(&operation_id))
+    }
+
+    async fn transition_operation(
+        &self,
+        operation_id: Uuid,
+        _worker_id: &str,
+        next: OperationState,
+        result: Option<Value>,
+        error: Option<OpsErrorBody>,
+    ) -> Result<Operation, StoreError> {
+        let mut data = self.inner.lock();
+        let operation = data
+            .operations
+            .get_mut(&operation_id)
+            .ok_or(StoreError::NotFound)?;
+        if !operation.state.can_transition_to(next) {
+            return Err(StoreError::InvalidTransition);
+        }
+        operation.state = next;
+        operation.result = result;
+        operation.error = error;
+        operation.updated_at = Utc::now();
+        Ok(operation.clone())
+    }
 }
 
 pub struct PgStore {
@@ -336,8 +509,10 @@ impl PgStore {
         Ok(())
     }
 
-    pub async fn claim_operation(
+    async fn claim_for_target(
         &self,
+        tenant_id: &str,
+        target_id: &str,
         worker_id: &str,
         lease_seconds: i64,
     ) -> Result<Option<Operation>, StoreError> {
@@ -347,7 +522,7 @@ impl PgStore {
             .query_opt(
                 "WITH candidate AS (
                    SELECT o.id, o.tenant_id, o.target_id FROM operations o
-                   WHERE o.state='queued'
+                   WHERE o.state='queued' AND o.tenant_id=$3 AND o.target_id=$4
                    ORDER BY o.created_at
                    FOR UPDATE SKIP LOCKED LIMIT 1
                  ), acquired AS (
@@ -365,7 +540,7 @@ impl PgStore {
                  UPDATE operations o SET state='validating', lease_owner=$1,
                    lease_expires_at=now() + make_interval(secs => $2), updated_at=now()
                  FROM acquired a WHERE o.id=a.operation_id RETURNING o.*",
-                &[&worker_id, &lease_seconds],
+                &[&worker_id, &lease_seconds, &tenant_id, &target_id],
             )
             .await
             .map_err(database_error)?;
@@ -375,7 +550,7 @@ impl PgStore {
         operation_from_row(&row).map(Some)
     }
 
-    pub async fn heartbeat(
+    async fn heartbeat(
         &self,
         operation_id: Uuid,
         worker_id: &str,
@@ -430,7 +605,7 @@ impl PgStore {
         Ok(changed)
     }
 
-    pub async fn transition_operation(
+    async fn transition_claimed_operation(
         &self,
         operation_id: Uuid,
         worker_id: &str,
@@ -759,6 +934,138 @@ impl Store for PgStore {
             .await
             .map_err(database_error)?;
         Ok(row.get(0))
+    }
+
+    async fn create_enrollment_token(
+        &self,
+        tenant_id: &str,
+        target_id: &str,
+        created_by: &str,
+        ttl: Duration,
+    ) -> Result<EnrollmentToken, StoreError> {
+        let client = self.client().await?;
+        let token = Uuid::new_v4().to_string();
+        let token_hash = hash_token(&token);
+        let expires_at = Utc::now() + ttl;
+        client
+            .execute(
+                "INSERT INTO agent_enrollment_tokens
+                 (token_hash, tenant_id, target_id, created_by, expires_at)
+                 VALUES ($1,$2,$3,$4,$5)",
+                &[
+                    &token_hash,
+                    &tenant_id,
+                    &target_id,
+                    &created_by,
+                    &expires_at,
+                ],
+            )
+            .await
+            .map_err(database_error)?;
+        Ok(EnrollmentToken { token, expires_at })
+    }
+
+    async fn consume_enrollment(&self, token: &str) -> Result<EnrollmentGrant, StoreError> {
+        let client = self.client().await?;
+        let row = client
+            .query_opt(
+                "UPDATE agent_enrollment_tokens SET consumed_at=now()
+                 WHERE token_hash=$1 AND expires_at>now() AND consumed_at IS NULL
+                 RETURNING tenant_id, target_id",
+                &[&hash_token(token)],
+            )
+            .await
+            .map_err(database_error)?
+            .ok_or(StoreError::NotFound)?;
+        Ok(EnrollmentGrant {
+            tenant_id: row.get("tenant_id"),
+            target_id: row.get("target_id"),
+        })
+    }
+
+    async fn register_agent(
+        &self,
+        grant: &EnrollmentGrant,
+        agent_id: &str,
+        certificate_fingerprint: &str,
+        certificate_expires_at: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        let client = self.client().await?;
+        client
+            .execute(
+                "INSERT INTO deploy_agents
+                 (agent_id, tenant_id, target_id, certificate_fingerprint, certificate_expires_at)
+                 VALUES ($1,$2,$3,$4,$5)
+                 ON CONFLICT (tenant_id, target_id, agent_id) DO UPDATE SET
+                   certificate_fingerprint=EXCLUDED.certificate_fingerprint,
+                   certificate_expires_at=EXCLUDED.certificate_expires_at,
+                   revoked_at=NULL, updated_at=now()",
+                &[
+                    &agent_id,
+                    &grant.tenant_id,
+                    &grant.target_id,
+                    &certificate_fingerprint,
+                    &certificate_expires_at,
+                ],
+            )
+            .await
+            .map_err(database_error)?;
+        Ok(())
+    }
+
+    async fn authenticate_agent(
+        &self,
+        agent_id: &str,
+        target_id: &str,
+        certificate_fingerprint: &str,
+    ) -> Result<Option<AgentIdentity>, StoreError> {
+        let client = self.client().await?;
+        let row = client
+            .query_opt(
+                "SELECT tenant_id, target_id, agent_id FROM deploy_agents
+                 WHERE agent_id=$1 AND target_id=$2 AND certificate_fingerprint=$3
+                   AND certificate_expires_at>now() AND revoked_at IS NULL",
+                &[&agent_id, &target_id, &certificate_fingerprint],
+            )
+            .await
+            .map_err(database_error)?;
+        Ok(row.map(|row| AgentIdentity {
+            tenant_id: row.get("tenant_id"),
+            target_id: row.get("target_id"),
+            agent_id: row.get("agent_id"),
+        }))
+    }
+
+    async fn claim_operation_for_target(
+        &self,
+        tenant_id: &str,
+        target_id: &str,
+        worker_id: &str,
+        lease_seconds: i64,
+    ) -> Result<Option<Operation>, StoreError> {
+        self.claim_for_target(tenant_id, target_id, worker_id, lease_seconds)
+            .await
+    }
+
+    async fn heartbeat_operation(
+        &self,
+        operation_id: Uuid,
+        worker_id: &str,
+        lease_seconds: i64,
+    ) -> Result<bool, StoreError> {
+        self.heartbeat(operation_id, worker_id, lease_seconds).await
+    }
+
+    async fn transition_operation(
+        &self,
+        operation_id: Uuid,
+        worker_id: &str,
+        next: OperationState,
+        result: Option<Value>,
+        error: Option<OpsErrorBody>,
+    ) -> Result<Operation, StoreError> {
+        self.transition_claimed_operation(operation_id, worker_id, next, result, error)
+            .await
     }
 }
 

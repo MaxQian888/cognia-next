@@ -19,15 +19,18 @@ path = "src/main.rs"
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-axum = { version = "0.8", features = ["macros"] }
+axum = { version = "0.8", features = ["macros", "ws"] }
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 cognia-deployment = { path = "../cognia-deployment" }
 futures-util = "0.3"
 hex = "0.4"
+ed25519-dalek = "2"
 jsonwebtoken = "9"
 parking_lot = "0.12"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
 serde = { version = "1", features = ["derive"] }
@@ -35,7 +38,8 @@ serde_json = "1"
 deadpool-postgres = "0.14"
 sha2 = "0.11"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+time = "0.3"
+tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-postgres-rustls = "0.13"
 tower-http = { version = "0.6", features = ["request-id", "trace"] }

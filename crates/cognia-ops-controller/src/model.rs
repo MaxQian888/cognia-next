@@ -168,3 +168,50 @@ pub struct AdminLease {
     pub token: String,
     pub expires_at: DateTime<Utc>,
 }
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateEnrollmentTokenRequest {
+    pub target_id: String,
+    pub ttl_seconds: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnrollmentToken {
+    pub token: String,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EnrollAgentRequest {
+    pub token: String,
+    pub agent_id: String,
+    pub csr_pem: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnrollAgentResponse {
+    pub target_id: String,
+    pub certificate_pem: String,
+    pub ca_certificate_pem: String,
+    pub certificate_fingerprint: String,
+    pub expires_at: DateTime<Utc>,
+    pub controller_signing_key_id: String,
+    pub controller_signing_key: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct EnrollmentGrant {
+    pub tenant_id: String,
+    pub target_id: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct AgentIdentity {
+    pub tenant_id: String,
+    pub target_id: String,
+    pub agent_id: String,
+}

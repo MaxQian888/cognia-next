@@ -112,6 +112,29 @@ CREATE TABLE IF NOT EXISTS audit_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS agent_enrollment_tokens (
+    token_hash TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS deploy_agents (
+    agent_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    certificate_fingerprint TEXT NOT NULL UNIQUE,
+    certificate_expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    last_seen_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, target_id, agent_id)
+);
+
 CREATE OR REPLACE FUNCTION append_operation_event() RETURNS TRIGGER AS $$
 BEGIN
     IF TG_OP = 'INSERT' OR OLD.state IS DISTINCT FROM NEW.state THEN

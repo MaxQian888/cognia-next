@@ -1,6 +1,8 @@
 use crate::auth::{Authenticator, Claims};
+use crate::enrollment::CertificateIssuer;
 use crate::model::*;
 use crate::store::{Store, StoreError};
+use crate::OperationSigner;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -22,11 +24,28 @@ use uuid::Uuid;
 pub struct AppState {
     pub store: Arc<dyn Store>,
     pub auth: Arc<dyn Authenticator>,
+    pub certificate_issuer: Option<Arc<dyn CertificateIssuer>>,
+    pub operation_signer: Option<Arc<OperationSigner>>,
 }
 
 impl AppState {
     pub fn new(store: Arc<dyn Store>, auth: Arc<dyn Authenticator>) -> Self {
-        Self { store, auth }
+        Self {
+            store,
+            auth,
+            certificate_issuer: None,
+            operation_signer: None,
+        }
+    }
+
+    pub fn with_certificate_issuer(mut self, issuer: Arc<dyn CertificateIssuer>) -> Self {
+        self.certificate_issuer = Some(issuer);
+        self
+    }
+
+    pub fn with_operation_signer(mut self, signer: Arc<OperationSigner>) -> Self {
+        self.operation_signer = Some(signer);
+        self
     }
 }
 
@@ -49,6 +68,12 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/servers/{id}/rotate-key", post(create_rotate_key))
         .route("/v1/operations/{id}", get(get_operation))
         .route("/v1/admin-leases", post(create_admin_lease))
+        .route(
+            "/v1/agents/enrollment-tokens",
+            post(create_enrollment_token),
+        )
+        .route("/v1/agents/enroll", post(enroll_agent))
+        .route("/v1/agent/connect", get(crate::agent_gateway::connect))
         .route("/v1/events", get(events))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
@@ -371,6 +396,98 @@ async fn create_admin_lease(
         Ok(lease) => Json(lease).into_response(),
         Err(error) => store_error(error),
     }
+}
+
+async fn create_enrollment_token(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateEnrollmentTokenRequest>,
+) -> Response {
+    let claims = match authorize_mutation(&state, &headers, "servers:admin").await {
+        Ok(claims) => claims,
+        Err(response) => return response,
+    };
+    let ttl = request.ttl_seconds.unwrap_or(600).clamp(60, 3600);
+    match state
+        .store
+        .create_enrollment_token(
+            &claims.tenant_id,
+            &request.target_id,
+            &claims.subject,
+            Duration::seconds(ttl as i64),
+        )
+        .await
+    {
+        Ok(token) => Json(token).into_response(),
+        Err(error) => store_error(error),
+    }
+}
+
+async fn enroll_agent(
+    State(state): State<AppState>,
+    Json(request): Json<EnrollAgentRequest>,
+) -> Response {
+    let Some(issuer) = state.certificate_issuer.as_ref() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "agent_enrollment_unavailable",
+            "The controller certificate issuer is not configured",
+            None,
+        );
+    };
+    let Some(signer) = state.operation_signer.as_ref() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "agent_signing_unavailable",
+            "The controller operation signer is not configured",
+            None,
+        );
+    };
+    let grant = match state.store.consume_enrollment(&request.token).await {
+        Ok(grant) => grant,
+        Err(StoreError::NotFound) => {
+            return api_error(
+                StatusCode::UNAUTHORIZED,
+                "invalid_enrollment_token",
+                "The enrollment token is invalid, expired, or already consumed",
+                None,
+            )
+        }
+        Err(error) => return store_error(error),
+    };
+    let certificate = match issuer.issue(&request.agent_id, &grant.target_id, &request.csr_pem) {
+        Ok(certificate) => certificate,
+        Err(error) => {
+            return api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_certificate_request",
+                error.to_string(),
+                None,
+            )
+        }
+    };
+    if let Err(error) = state
+        .store
+        .register_agent(
+            &grant,
+            &request.agent_id,
+            &certificate.fingerprint_sha256,
+            certificate.expires_at,
+        )
+        .await
+    {
+        return store_error(error);
+    }
+    Json(EnrollAgentResponse {
+        target_id: grant.target_id,
+        certificate_pem: certificate.certificate_pem,
+        ca_certificate_pem: certificate.ca_certificate_pem,
+        certificate_fingerprint: certificate.fingerprint_sha256,
+        expires_at: certificate.expires_at,
+        controller_signing_key_id: signer.key_id().into(),
+        controller_signing_key: signer.verifying_key_base64(),
+    })
+    .into_response()
 }
 
 async fn events(
