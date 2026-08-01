@@ -62,6 +62,7 @@ members = [
   # src-tauri and the headless `cognia-server` binary.
   "crates/cognia-jobs",
   "crates/cognia-deployment",
+  "crates/cognia-ops-controller",
 ]
 exclude = [
   "services/signaling-server",
