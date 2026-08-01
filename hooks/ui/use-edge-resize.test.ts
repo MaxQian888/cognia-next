@@ -3,9 +3,10 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 
 import { useEdgeResize } from "./use-edge-resize"
 
-function pointer(clientX: number, pointerId = 1): ReactPointerEvent {
+function pointer(clientX: number, pointerId = 1, clientY = 0): ReactPointerEvent {
   return {
     clientX,
+    clientY,
     pointerId,
     preventDefault: jest.fn(),
     currentTarget: {
@@ -13,6 +14,10 @@ function pointer(clientX: number, pointerId = 1): ReactPointerEvent {
       releasePointerCapture: jest.fn(),
     },
   } as unknown as ReactPointerEvent
+}
+
+function verticalPointer(clientY: number, pointerId = 1): ReactPointerEvent {
+  return pointer(0, pointerId, clientY)
 }
 
 function key(k: string): ReactKeyboardEvent {
@@ -39,6 +44,72 @@ describe("useEdgeResize", () => {
     act(() => result.current.onPointerDown(pointer(200)))
     act(() => result.current.onPointerMove(pointer(100))) // -100 → 156 → clamp 220
     expect(onChange).toHaveBeenLastCalledWith(220)
+  })
+
+  it("drags a top-edge handle: upward grows the panel below it", () => {
+    const onChange = jest.fn()
+    const { result } = renderHook(() =>
+      useEdgeResize({ width: 32, min: 15, max: 85, onChange, edge: "top" })
+    )
+    act(() => result.current.onPointerDown(verticalPointer(500)))
+    act(() => result.current.onPointerMove(verticalPointer(490))) // up 10 → grows
+    expect(onChange).toHaveBeenLastCalledWith(42)
+    act(() => result.current.onPointerMove(verticalPointer(520))) // down 20 → shrinks
+    expect(onChange).toHaveBeenLastCalledWith(15) // 32 - 20 = 12 → clamp 15
+  })
+
+  it("drags a bottom-edge handle: downward grows the panel above it", () => {
+    const onChange = jest.fn()
+    const { result } = renderHook(() =>
+      useEdgeResize({ width: 32, min: 15, max: 85, onChange, edge: "bottom" })
+    )
+    act(() => result.current.onPointerDown(verticalPointer(100)))
+    act(() => result.current.onPointerMove(verticalPointer(120)))
+    expect(onChange).toHaveBeenLastCalledWith(52)
+  })
+
+  it("converts pointer pixels into caller units via `scale`", () => {
+    // A dock sized as a % of an 800px-tall viewport: 1px ≈ 0.125%.
+    const onChange = jest.fn()
+    const { result } = renderHook(() =>
+      useEdgeResize({
+        width: 32,
+        min: 15,
+        max: 85,
+        onChange,
+        edge: "top",
+        scale: 100 / 800,
+      })
+    )
+    act(() => result.current.onPointerDown(verticalPointer(400)))
+    act(() => result.current.onPointerMove(verticalPointer(320))) // 80px up → +10%
+    expect(onChange).toHaveBeenLastCalledWith(42)
+  })
+
+  it("maps arrow keys to the handle's axis", () => {
+    const onChange = jest.fn()
+    const { result } = renderHook(() =>
+      useEdgeResize({ width: 32, min: 15, max: 85, onChange, edge: "top", step: 2 })
+    )
+    act(() => result.current.onKeyDown(key("ArrowUp")))
+    expect(onChange).toHaveBeenLastCalledWith(34)
+    act(() => result.current.onKeyDown(key("ArrowDown")))
+    expect(onChange).toHaveBeenLastCalledWith(30)
+    // Horizontal keys belong to the other axis and must not resize.
+    onChange.mockClear()
+    act(() => result.current.onKeyDown(key("ArrowLeft")))
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it("bottom-edge arrow keys grow with ArrowDown", () => {
+    const onChange = jest.fn()
+    const { result } = renderHook(() =>
+      useEdgeResize({ width: 32, min: 15, max: 85, onChange, edge: "bottom", step: 2 })
+    )
+    act(() => result.current.onKeyDown(key("ArrowDown")))
+    expect(onChange).toHaveBeenLastCalledWith(34)
+    act(() => result.current.onKeyDown(key("ArrowUp")))
+    expect(onChange).toHaveBeenLastCalledWith(30)
   })
 
   it("ignores pointer move when no drag is active", () => {

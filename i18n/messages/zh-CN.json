@@ -7251,6 +7251,42 @@
       "list": "列表"
     }
   },
+  "dock": {
+    "a11y": {
+      "host": "工作区停靠面板",
+      "moveHandle": "调整停靠区大小"
+    },
+    "commands": {
+      "close": "关闭面板",
+      "closeOthers": "关闭其他面板",
+      "float": "浮动",
+      "moveToNewWindow": "移到新窗口",
+      "pin": "固定",
+      "redo": "重做布局更改",
+      "redock": "送回停靠区",
+      "reset": "重置布局",
+      "splitDown": "向下拆分",
+      "splitLeft": "向左拆分",
+      "splitRight": "向右拆分",
+      "splitUp": "向上拆分",
+      "undo": "撤销布局更改"
+    },
+    "errors": {
+      "nativePanelCannotFloat": "{name} 运行在原生视图中，只能留在主布局里。",
+      "nativePanelInUse": "{name} 已在别处打开。要移到这里吗？",
+      "panelCrashed": "{name} 已停止响应。",
+      "panelCrashedRetry": "重新加载面板",
+      "permissionRevoked": "{name} 已不再拥有在此运行的权限。",
+      "pluginUnavailable": "{name} 不可用：所属插件已禁用或缺失。",
+      "pluginUnavailableHint": "面板会保留在这里，插件恢复后即可继续使用。"
+    },
+    "tabs": {
+      "close": "关闭 {name}",
+      "dirty": "{name} 有未保存的更改",
+      "preview": "{name} —— 预览标签页，双击可固定",
+      "unread": "{count, plural, other {# 条更新}}"
+    }
+  },
   "docsSite": {
     "notFound": {
       "body": "这个链接指向的页面已被移动或删除。",
@@ -26300,6 +26336,17 @@
         "chatNextAnchor": "跳到下一个消息锚点",
         "chatPrevAnchor": "跳到上一个消息锚点",
         "chatSearchToggle": "在会话中查找",
+        "dockLayoutRedo": "重做停靠布局更改",
+        "dockLayoutReset": "重置停靠布局",
+        "dockLayoutUndo": "撤销停靠布局更改",
+        "dockPanelClose": "关闭当前停靠面板",
+        "dockPanelFloat": "浮动当前停靠面板",
+        "dockPanelPopout": "将当前停靠面板移到新窗口",
+        "dockPanelRedock": "将当前停靠面板送回停靠区",
+        "dockSplitDown": "向下拆分停靠面板",
+        "dockSplitLeft": "向左拆分停靠面板",
+        "dockSplitRight": "向右拆分停靠面板",
+        "dockSplitUp": "向上拆分停靠面板",
         "observabilityFocusFilter": "聚焦筛选栏",
         "observabilityOpenSettings": "打开设置",
         "observabilityRefresh": "刷新",
@@ -26326,6 +26373,7 @@
         "a2ui": "A2UI 工作区",
         "canvasLayout": "Canvas 布局",
         "chat": "聊天",
+        "dock": "停靠面板",
         "navigation": "导航",
         "observability": "可观测",
         "panels": "面板",

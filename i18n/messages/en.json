@@ -7251,6 +7251,42 @@
       "list": "List"
     }
   },
+  "dock": {
+    "a11y": {
+      "host": "Workspace dock",
+      "moveHandle": "Resize the dock"
+    },
+    "commands": {
+      "close": "Close panel",
+      "closeOthers": "Close other panels",
+      "float": "Float",
+      "moveToNewWindow": "Move to new window",
+      "pin": "Keep open",
+      "redo": "Redo layout change",
+      "redock": "Send back to the dock",
+      "reset": "Reset layout",
+      "splitDown": "Split down",
+      "splitLeft": "Split left",
+      "splitRight": "Split right",
+      "splitUp": "Split up",
+      "undo": "Undo layout change"
+    },
+    "errors": {
+      "nativePanelCannotFloat": "{name} runs in a native view that has to stay in the main layout.",
+      "nativePanelInUse": "{name} is already open elsewhere. Move it here?",
+      "panelCrashed": "{name} stopped responding.",
+      "panelCrashedRetry": "Reload panel",
+      "permissionRevoked": "{name} no longer has permission to run here.",
+      "pluginUnavailable": "{name} is unavailable because its plugin is disabled or missing.",
+      "pluginUnavailableHint": "The panel stays here and comes back when the plugin does."
+    },
+    "tabs": {
+      "close": "Close {name}",
+      "dirty": "{name} has unsaved changes",
+      "preview": "{name} — preview tab, double-click to keep it open",
+      "unread": "{count, plural, one {# update} other {# updates}}"
+    }
+  },
   "docsSite": {
     "notFound": {
       "body": "The page this link points to has moved or no longer exists.",
@@ -26300,6 +26336,17 @@
         "chatNextAnchor": "Jump to next message anchor",
         "chatPrevAnchor": "Jump to previous message anchor",
         "chatSearchToggle": "Find in conversation",
+        "dockLayoutRedo": "Redo dock layout change",
+        "dockLayoutReset": "Reset the dock layout",
+        "dockLayoutUndo": "Undo dock layout change",
+        "dockPanelClose": "Close the active dock panel",
+        "dockPanelFloat": "Float the active dock panel",
+        "dockPanelPopout": "Move the active dock panel to a new window",
+        "dockPanelRedock": "Send the active dock panel back to the dock",
+        "dockSplitDown": "Split the dock panel downward",
+        "dockSplitLeft": "Split the dock panel to the left",
+        "dockSplitRight": "Split the dock panel to the right",
+        "dockSplitUp": "Split the dock panel upward",
         "observabilityFocusFilter": "Focus filter",
         "observabilityOpenSettings": "Open settings",
         "observabilityRefresh": "Refresh",
@@ -26326,6 +26373,7 @@
         "a2ui": "A2UI workspace",
         "canvasLayout": "Canvas layout",
         "chat": "Chat",
+        "dock": "Dock",
         "navigation": "Navigation",
         "observability": "Observability",
         "panels": "Panels",

@@ -90,6 +90,90 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
     defaultChord: "ctrl+alt+down",
     when: "chat.hasMessages",
   },
+  // ── Unified IDE dock ────────────────────────────────────────────────────
+  //
+  // Only undo/redo ship bound. Splitting, moving, floating, popping out and
+  // resetting are reachable from the tab menu and the command palette, and a
+  // chord for each would burn five more of a shrinking pool for actions most
+  // people do with a pointer. `defaultChord: ""` is the catalog's own idiom for
+  // "listed and rebindable, but not bound out of the box".
+  {
+    id: "dock.layout.undo",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.dockLayoutUndo",
+    category: "app.dock",
+    defaultChord: "ctrl+alt+z",
+  },
+  {
+    id: "dock.layout.redo",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.dockLayoutRedo",
+    category: "app.dock",
+    defaultChord: "ctrl+alt+shift+z",
+  },
+  {
+    id: "dock.layout.reset",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.dockLayoutReset",
+    category: "app.dock",
+    defaultChord: "",
+  },
+  {
+    id: "dock.panel.close",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.dockPanelClose",
+    category: "app.dock",
+    defaultChord: "",
+  },
+  {
+    id: "dock.panel.float",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.dockPanelFloat",
+    category: "app.dock",
+    defaultChord: "",
+  },
+  {
+    id: "dock.panel.popout",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.dockPanelPopout",
+    category: "app.dock",
+    defaultChord: "",
+  },
+  {
+    id: "dock.panel.redock",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.dockPanelRedock",
+    category: "app.dock",
+    defaultChord: "",
+  },
+  {
+    id: "dock.split.left",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.dockSplitLeft",
+    category: "app.dock",
+    defaultChord: "",
+  },
+  {
+    id: "dock.split.right",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.dockSplitRight",
+    category: "app.dock",
+    defaultChord: "",
+  },
+  {
+    id: "dock.split.up",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.dockSplitUp",
+    category: "app.dock",
+    defaultChord: "",
+  },
+  {
+    id: "dock.split.down",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.dockSplitDown",
+    category: "app.dock",
+    defaultChord: "",
+  },
   {
     id: "artifacts.toggleDock",
     scope: "app",

@@ -87,6 +87,20 @@ jest.mock("./workspace-mode/project-overview-panel", () => ({
   ),
 }))
 
+// The kernel branch's own wiring is specified in `chat-dock-surface.test.tsx`;
+// here it only needs to be distinguishable from the workbench.
+jest.mock("./chat-dock-surface", () => ({
+  ChatDockSurface: ({
+    contextId,
+    legacyScopeKey,
+  }: {
+    contextId: string
+    legacyScopeKey: string
+  }) => (
+    <div data-testid="chat-dock-surface" data-context={contextId} data-legacy={legacyScopeKey} />
+  ),
+}))
+
 jest.mock("./artifact-review-view", () => ({
   ArtifactReviewView: ({ artifact }: { artifact: { id: string } }) => (
     <div data-testid="review-view" data-artifact={artifact.id} />
@@ -173,6 +187,7 @@ import {
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
+import { revealActiveWorkbenchPanel } from "@/lib/context-workbench/active-context"
 
 /** The panel a scope is currently showing, per the workbench's own store. */
 function activePanelId(scope: "artifact:artifact-1" | "session:sess-1") {
@@ -206,6 +221,11 @@ beforeEach(() => {
   mockSessionMessages = []
   mockProjects = []
   localStorage.clear()
+  // Everything below is the spec for the *workbench* branch. It is the Dock
+  // kernel's rollback path (ADR-0102) and has to stay proven for as long as it
+  // is in the tree, so these suites pin the flag off rather than following its
+  // default. The kernel branch is specified in `chat-dock-surface.test.tsx`.
+  localStorage.setItem("cognia-dock-kernel-surfaces-v1", JSON.stringify({ chat: false }))
   workspaceAvailable = true
   artifactListProps.length = 0
   mockSessionRecord = null
@@ -502,6 +522,74 @@ describe("ArtifactDock — converged workbench shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.collapse" }))
 
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  // The dual of collapsing: something asks the active workbench to bring a
+  // panel forward while the container holding it is shut. Opening the panel
+  // inside a container nobody can see is a no-op the caller cannot detect, so
+  // each of the four host paths has to re-open its own container first.
+  describe("re-opening the container for an external reveal", () => {
+    it("re-opens the collapsed dock from the session surface", () => {
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+      render(<ArtifactDock />)
+      act(() => {
+        revealActiveWorkbenchPanel("browser")
+      })
+
+      expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+      expect(activePanelId("session:sess-1")).toBe("browser")
+    })
+
+    it("re-opens the collapsed dock from the artifact surface", () => {
+      activateArtifact()
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+      render(<ArtifactDock />)
+
+      act(() => {
+        revealActiveWorkbenchPanel("preview")
+      })
+
+      expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+      expect(activePanelId("artifact:artifact-1")).toBe("preview")
+    })
+
+    // The Sheet hosts ask to be opened rather than uncollapsed, and they only
+    // hear the request while they are mounted: a dismissed Sheet renders no
+    // content, so there is no workbench registered to reveal into. Reaching a
+    // closed Sheet would mean keeping the whole panel body — Monaco, the
+    // embedded browser — mounted behind it, which is the cost the Sheet exists
+    // to avoid. Within an open one the request still has to land, or the phone
+    // Sheet would be the one host that ignores an external reveal.
+    it("keeps the Sheet open for an external reveal on the artifact surface", () => {
+      activateArtifact()
+      const onOpenChange = jest.fn()
+      render(
+        <ArtifactContextWorkbench
+          artifactId="artifact-1"
+          mobile={{ open: true, onOpenChange, panelMode: "mobile" }}
+        />
+      )
+
+      act(() => {
+        revealActiveWorkbenchPanel("preview")
+      })
+
+      expect(onOpenChange).toHaveBeenCalledWith(true)
+      // …and leaves the separate desktop dock state alone, as the collapse
+      // direction already does.
+      expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+    })
+
+    it("keeps the Sheet open for an external reveal on the session surface", () => {
+      const onOpenChange = jest.fn()
+      render(<SessionContextWorkbench mobile={{ open: true, onOpenChange, panelMode: "mobile" }} />)
+
+      act(() => {
+        revealActiveWorkbenchPanel("browser")
+      })
+
+      expect(onOpenChange).toHaveBeenCalledWith(true)
+    })
   })
 
   // The session surface carried three panels while the artifact and project
@@ -1148,5 +1236,72 @@ describe("ArtifactDock — the header tab strip", () => {
       />
     )
     expect(screen.getByTestId("artifact-tab-strip")).toBeInTheDocument()
+  })
+})
+
+/**
+ * The switch between the two layout engines (ADR-0102). Every other suite in
+ * this file pins the flag off because it specifies the workbench branch; this
+ * one is about the branch itself.
+ */
+describe("ArtifactDock — the Dock kernel flag", () => {
+  function enableKernel() {
+    localStorage.setItem("cognia-dock-kernel-surfaces-v1", JSON.stringify({ chat: true }))
+  }
+
+  it("puts the desktop dock on the kernel, scoped to the conversation", () => {
+    enableKernel()
+    render(<ArtifactDock />)
+    const surface = screen.getByTestId("chat-dock-surface")
+    expect(surface).toHaveAttribute("data-context", "sess-1")
+    expect(screen.queryByTestId("context-workbench-activity-rail")).toBeNull()
+  })
+
+  it("keeps the artifact surface on the same conversation-scoped layout", () => {
+    // An artifact tab switch must not hand the user a different arrangement —
+    // the same rule that keeps the browser and the workspace mounted across one.
+    enableKernel()
+    activateArtifact()
+    render(<ArtifactDock />)
+    expect(screen.getByTestId("chat-dock-surface")).toHaveAttribute("data-context", "sess-1")
+  })
+
+  it("hands the kernel the scope key the workbench used, so the seed can find it", () => {
+    enableKernel()
+    activateArtifact()
+    render(<ArtifactDock />)
+    expect(screen.getByTestId("chat-dock-surface")).toHaveAttribute(
+      "data-legacy",
+      "test-workbench::artifact:artifact-1"
+    )
+  })
+
+  it("leaves the phone Sheet on the workbench", () => {
+    // dockview's dividers and drop zones are built for pointer precision, and a
+    // Sheet shows one full-height region anyway — there is nothing for a grid
+    // to arrange.
+    enableKernel()
+    render(
+      <SessionContextWorkbench
+        mobile={{ open: true, onOpenChange: jest.fn(), panelMode: "mobile" }}
+      />
+    )
+    expect(screen.queryByTestId("chat-dock-surface")).toBeNull()
+    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+  })
+
+  it("falls back to the workbench when the flag is off", () => {
+    localStorage.setItem("cognia-dock-kernel-surfaces-v1", JSON.stringify({ chat: false }))
+    render(<ArtifactDock />)
+    expect(screen.queryByTestId("chat-dock-surface")).toBeNull()
+    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+  })
+
+  it("keeps the artifact surface on the workbench when the flag is off", () => {
+    localStorage.setItem("cognia-dock-kernel-surfaces-v1", JSON.stringify({ chat: false }))
+    activateArtifact()
+    render(<ArtifactDock />)
+    expect(screen.queryByTestId("chat-dock-surface")).toBeNull()
+    expect(screen.getByTestId("panel-content")).toBeInTheDocument()
   })
 })
