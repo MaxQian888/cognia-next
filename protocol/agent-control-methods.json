@@ -1,0 +1,186 @@
+{
+  "$comment": "Single source for the live session-control surface. See scripts/gates/check-agent-control-methods.mjs.",
+  "schemaVersion": 1,
+  "methods": [
+    {
+      "name": "accountInfo",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "session.manage"
+    },
+    {
+      "name": "applyFlagSettings",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "session.manage"
+    },
+    {
+      "name": "backgroundTasks",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "tasks.background"
+    },
+    {
+      "name": "close",
+      "kind": "sdk",
+      "exposure": "dedicated-command",
+      "capability": "streaming",
+      "command": "agent_close_session"
+    },
+    {
+      "name": "getContextUsage",
+      "kind": "sdk",
+      "exposure": "control",
+      "capability": "context-management",
+      "args": []
+    },
+    {
+      "name": "initializationResult",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "session.manage"
+    },
+    {
+      "name": "interrupt",
+      "kind": "sdk",
+      "exposure": "dedicated-command",
+      "capability": "permissions.interrupt-resume",
+      "command": "agent_interrupt"
+    },
+    {
+      "name": "mcpServerStatus",
+      "kind": "sdk",
+      "exposure": "control",
+      "capability": "mcp",
+      "args": []
+    },
+    {
+      "name": "readFile",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "checkpoint"
+    },
+    {
+      "name": "reconnectMcpServer",
+      "kind": "sdk",
+      "exposure": "control",
+      "capability": "mcp",
+      "args": ["serverName"]
+    },
+    {
+      "name": "reinitialize",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "session.manage"
+    },
+    {
+      "name": "reloadPlugins",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "plugins.native"
+    },
+    {
+      "name": "reloadSkills",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "skills.native"
+    },
+    {
+      "name": "rewindFiles",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "checkpoint"
+    },
+    {
+      "name": "seedReadState",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "checkpoint"
+    },
+    {
+      "name": "setMaxThinkingTokens",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "thinking"
+    },
+    {
+      "name": "setMcpPermissionModeOverride",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "mcp.dynamic"
+    },
+    {
+      "name": "setMcpServers",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "mcp.dynamic"
+    },
+    {
+      "name": "setModel",
+      "kind": "sdk",
+      "exposure": "control",
+      "capability": "set-model",
+      "args": ["model"]
+    },
+    {
+      "name": "setPermissionMode",
+      "kind": "sdk",
+      "exposure": "dedicated-command",
+      "capability": "permissions.set-mode",
+      "command": "claude_set_mode"
+    },
+    {
+      "name": "steer",
+      "kind": "host",
+      "exposure": "control",
+      "capability": "steer",
+      "args": ["prompt", "priority"],
+      "note": "intercepted in agent-host.mjs routeSteer(); pushes a user turn onto the input stream"
+    },
+    {
+      "name": "stopTask",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "tasks.background"
+    },
+    {
+      "name": "streamInput",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "session.multi-turn"
+    },
+    {
+      "name": "supportedAgents",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "subagents.manage"
+    },
+    {
+      "name": "supportedCommands",
+      "kind": "sdk",
+      "exposure": "control",
+      "capability": "commands.dynamic",
+      "args": []
+    },
+    {
+      "name": "supportedModels",
+      "kind": "sdk",
+      "exposure": "control",
+      "capability": "set-model",
+      "args": []
+    },
+    {
+      "name": "toggleMcpServer",
+      "kind": "sdk",
+      "exposure": "control",
+      "capability": "mcp",
+      "args": ["serverName", "enabled"]
+    },
+    {
+      "name": "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET",
+      "kind": "sdk",
+      "exposure": "planned",
+      "capability": "observability.child"
+    }
+  ]
+}

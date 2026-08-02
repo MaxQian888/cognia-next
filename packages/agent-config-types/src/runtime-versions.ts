@@ -8,7 +8,7 @@
 
 export const PINNED_RUNTIME_VERSIONS = {
   /** Exact @anthropic-ai/claude-agent-sdk pin in sidecar/package.json. */
-  agentSdkVersion: "0.3.183",
+  agentSdkVersion: "0.3.220",
   /** crates/cognia-gateway Cargo.toml package version. */
   gatewayCrateVersion: "0.1.0",
 } as const

@@ -1,5 +1,7 @@
 import { render, screen } from "@testing-library/react"
 
+import { PINNED_RUNTIME_VERSIONS } from "@cognia/agent-config-types/runtime-versions"
+
 const liveQueryResults: unknown[] = []
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: jest.fn(() => liveQueryResults[0]),
@@ -31,9 +33,14 @@ const record = {
       translationMode: "passthrough",
       deploymentRef: "dep-1",
       model: "claude-opus-4-8",
-      agentSdkVersion: "0.3.183",
+      // Track the real pin, not a literal. The panel computes freshness
+      // against PINNED_RUNTIME_VERSIONS, so a hardcoded version turns "this
+      // record is current" into "this record was current in July" and the
+      // freshness assertion below starts failing on the next SDK bump —
+      // which is exactly what it did at 0.3.183 -> 0.3.220.
+      agentSdkVersion: PINNED_RUNTIME_VERSIONS.agentSdkVersion,
       claudeCodeVersion: "2.1.0",
-      gatewayVersion: "0.1.0",
+      gatewayVersion: PINNED_RUNTIME_VERSIONS.gatewayCrateVersion,
       suiteVersion: "1",
     },
     evidence: "cognia-verified",

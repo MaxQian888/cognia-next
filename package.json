@@ -218,6 +218,9 @@
     "conformance:prepare": "cargo build --manifest-path src-tauri/Cargo.toml --bin cognia-server",
     "check:provider-name-branches": "node scripts/gates/check-provider-name-branches.mjs",
     "check:runtime-versions": "node scripts/gates/check-runtime-versions.mjs",
+    "audit:agent-control-methods": "node scripts/gates/check-agent-control-methods.mjs",
+    "check:sdk-surface": "node scripts/gates/check-sdk-surface.mjs",
+    "check:sdk-surface:write": "node scripts/gates/check-sdk-surface.mjs --write",
     "smoke:external-parity": "node scripts/smoke/build-and-run-smoke.mjs"
   },
   "dependencies": {

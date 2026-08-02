@@ -1,0 +1,791 @@
+{
+  "$schema": "./agent-sdk-surface.schema.json",
+  "schemaVersion": 1,
+  "sdkVersion": "0.3.220",
+  "generatedBy": "pnpm check:sdk-surface:write",
+  "surface": {
+    "options": {
+      "abortController": {
+        "status": "not-applicable",
+        "note": "the sidecar owns turn cancellation through its own session lifecycle; an AbortController cannot cross the stdio boundary"
+      },
+      "additionalDirectories": {
+        "status": "supported",
+        "capability": "tools.ordinary"
+      },
+      "agent": {
+        "status": "supported",
+        "capability": "subagents.native"
+      },
+      "agentProgressSummaries": {
+        "status": "planned"
+      },
+      "agents": {
+        "status": "supported",
+        "capability": "subagents.native"
+      },
+      "allowDangerouslySkipPermissions": {
+        "status": "planned"
+      },
+      "allowedTools": {
+        "status": "supported",
+        "capability": "tools.ordinary"
+      },
+      "betas": {
+        "status": "planned"
+      },
+      "canUseTool": {
+        "status": "supported",
+        "capability": "permissions.interrupt-resume"
+      },
+      "continue": {
+        "status": "planned"
+      },
+      "cwd": {
+        "status": "supported",
+        "capability": "tools.ordinary"
+      },
+      "debug": {
+        "status": "host-only",
+        "note": "managed-host diagnostics only"
+      },
+      "debugFile": {
+        "status": "host-only",
+        "note": "writes an arbitrary host path"
+      },
+      "disallowedTools": {
+        "status": "supported",
+        "capability": "tools.ordinary"
+      },
+      "effort": {
+        "status": "supported",
+        "capability": "thinking"
+      },
+      "enableFileCheckpointing": {
+        "status": "planned"
+      },
+      "env": {
+        "status": "supported",
+        "capability": "streaming"
+      },
+      "executable": {
+        "status": "host-only",
+        "note": "selects the JS runtime that spawns claude-code"
+      },
+      "executableArgs": {
+        "status": "host-only",
+        "note": "argv for the spawned runtime"
+      },
+      "extraArgs": {
+        "status": "planned"
+      },
+      "fallbackModel": {
+        "status": "supported",
+        "capability": "set-model"
+      },
+      "forkSession": {
+        "status": "supported",
+        "capability": "session.resume"
+      },
+      "forwardSubagentText": {
+        "status": "supported",
+        "capability": "subagents.native"
+      },
+      "hooks": {
+        "status": "supported",
+        "capability": "hooks.lifecycle"
+      },
+      "includeHookEvents": {
+        "status": "planned"
+      },
+      "includePartialMessages": {
+        "status": "supported",
+        "capability": "streaming"
+      },
+      "loadTimeoutMs": {
+        "status": "planned"
+      },
+      "managedSettings": {
+        "status": "host-only",
+        "note": "admin-supplied settings object"
+      },
+      "maxBudgetUsd": {
+        "status": "supported",
+        "capability": "context-management"
+      },
+      "maxThinkingTokens": {
+        "status": "not-applicable",
+        "note": "deprecated by the SDK; translated to the typed `thinking` config in system-prompt.mjs"
+      },
+      "maxTurns": {
+        "status": "supported",
+        "capability": "session.multi-turn"
+      },
+      "mcpServers": {
+        "status": "supported",
+        "capability": "mcp"
+      },
+      "model": {
+        "status": "supported",
+        "capability": "set-model"
+      },
+      "onElicitation": {
+        "status": "planned"
+      },
+      "onUserDialog": {
+        "status": "planned"
+      },
+      "outputFormat": {
+        "status": "planned"
+      },
+      "pathToClaudeCodeExecutable": {
+        "status": "host-only",
+        "note": "selects the binary to spawn"
+      },
+      "permissionMode": {
+        "status": "supported",
+        "capability": "permissions.set-mode"
+      },
+      "permissionPromptToolName": {
+        "status": "planned"
+      },
+      "persistSession": {
+        "status": "planned"
+      },
+      "planModeInstructions": {
+        "status": "planned"
+      },
+      "plugins": {
+        "status": "planned"
+      },
+      "promptSuggestions": {
+        "status": "planned"
+      },
+      "resume": {
+        "status": "supported",
+        "capability": "session.resume"
+      },
+      "resumeSessionAt": {
+        "status": "planned"
+      },
+      "sandbox": {
+        "status": "planned"
+      },
+      "sessionId": {
+        "status": "planned"
+      },
+      "sessionStore": {
+        "status": "planned"
+      },
+      "sessionStoreFlush": {
+        "status": "planned"
+      },
+      "settingSources": {
+        "status": "supported",
+        "capability": "skills.native"
+      },
+      "settings": {
+        "status": "planned"
+      },
+      "skills": {
+        "status": "planned"
+      },
+      "spawnClaudeCodeProcess": {
+        "status": "host-only",
+        "note": "arbitrary process spawn"
+      },
+      "stderr": {
+        "status": "supported",
+        "capability": "upstream-errors"
+      },
+      "strictMcpConfig": {
+        "status": "supported",
+        "capability": "mcp"
+      },
+      "supportedDialogKinds": {
+        "status": "planned"
+      },
+      "systemPrompt": {
+        "status": "supported",
+        "capability": "context-management"
+      },
+      "taskBudget": {
+        "status": "planned"
+      },
+      "thinking": {
+        "status": "supported",
+        "capability": "thinking"
+      },
+      "title": {
+        "status": "planned"
+      },
+      "toolAliases": {
+        "status": "planned"
+      },
+      "toolConfig": {
+        "status": "planned"
+      },
+      "tools": {
+        "status": "planned"
+      }
+    },
+    "queryMethods": {
+      "accountInfo": {
+        "status": "planned"
+      },
+      "applyFlagSettings": {
+        "status": "planned"
+      },
+      "backgroundTasks": {
+        "status": "planned"
+      },
+      "close": {
+        "status": "supported",
+        "capability": "streaming"
+      },
+      "getContextUsage": {
+        "status": "supported",
+        "capability": "context-management"
+      },
+      "initializationResult": {
+        "status": "planned"
+      },
+      "interrupt": {
+        "status": "supported",
+        "capability": "permissions.interrupt-resume"
+      },
+      "mcpServerStatus": {
+        "status": "supported",
+        "capability": "mcp"
+      },
+      "readFile": {
+        "status": "planned"
+      },
+      "reconnectMcpServer": {
+        "status": "supported",
+        "capability": "mcp"
+      },
+      "reinitialize": {
+        "status": "planned"
+      },
+      "reloadPlugins": {
+        "status": "planned"
+      },
+      "reloadSkills": {
+        "status": "planned"
+      },
+      "rewindFiles": {
+        "status": "planned"
+      },
+      "seedReadState": {
+        "status": "planned"
+      },
+      "setMaxThinkingTokens": {
+        "status": "planned"
+      },
+      "setMcpPermissionModeOverride": {
+        "status": "planned"
+      },
+      "setMcpServers": {
+        "status": "planned"
+      },
+      "setModel": {
+        "status": "supported",
+        "capability": "set-model"
+      },
+      "setPermissionMode": {
+        "status": "supported",
+        "capability": "permissions.set-mode"
+      },
+      "stopTask": {
+        "status": "planned"
+      },
+      "streamInput": {
+        "status": "planned"
+      },
+      "supportedAgents": {
+        "status": "planned"
+      },
+      "supportedCommands": {
+        "status": "supported",
+        "capability": "commands.dynamic"
+      },
+      "supportedModels": {
+        "status": "supported",
+        "capability": "set-model"
+      },
+      "toggleMcpServer": {
+        "status": "supported",
+        "capability": "mcp"
+      },
+      "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET": {
+        "status": "planned"
+      }
+    },
+    "messages": {
+      "SDKAPIRetryMessage": {
+        "status": "planned"
+      },
+      "SDKAssistantMessage": {
+        "status": "supported",
+        "capability": "streaming"
+      },
+      "SDKAuthStatusMessage": {
+        "status": "planned"
+      },
+      "SDKBackgroundTasksChangedMessage": {
+        "status": "planned"
+      },
+      "SDKCommandsChangedMessage": {
+        "status": "planned"
+      },
+      "SDKCompactBoundaryMessage": {
+        "status": "supported",
+        "capability": "compaction"
+      },
+      "SDKControlRequestProgressMessage": {
+        "status": "planned"
+      },
+      "SDKConversationResetMessage": {
+        "status": "planned"
+      },
+      "SDKElicitationCompleteMessage": {
+        "status": "planned"
+      },
+      "SDKFilesPersistedEvent": {
+        "status": "planned"
+      },
+      "SDKHookProgressMessage": {
+        "status": "planned"
+      },
+      "SDKHookResponseMessage": {
+        "status": "planned"
+      },
+      "SDKHookStartedMessage": {
+        "status": "planned"
+      },
+      "SDKInformationalMessage": {
+        "status": "planned"
+      },
+      "SDKLocalCommandOutputMessage": {
+        "status": "planned"
+      },
+      "SDKMemoryRecallMessage": {
+        "status": "planned"
+      },
+      "SDKMirrorErrorMessage": {
+        "status": "planned"
+      },
+      "SDKModelRefusalFallbackMessage": {
+        "status": "planned"
+      },
+      "SDKModelRefusalNoFallbackMessage": {
+        "status": "planned"
+      },
+      "SDKNotificationMessage": {
+        "status": "planned"
+      },
+      "SDKPartialAssistantMessage": {
+        "status": "supported",
+        "capability": "streaming"
+      },
+      "SDKPermissionDeniedMessage": {
+        "status": "supported",
+        "capability": "permissions.interrupt-resume"
+      },
+      "SDKPluginInstallMessage": {
+        "status": "planned"
+      },
+      "SDKPromptSuggestionMessage": {
+        "status": "planned"
+      },
+      "SDKRateLimitEvent": {
+        "status": "supported",
+        "capability": "rate-limit-handling"
+      },
+      "SDKResultMessage": {
+        "status": "supported",
+        "capability": "streaming"
+      },
+      "SDKSessionStateChangedMessage": {
+        "status": "planned"
+      },
+      "SDKStatusMessage": {
+        "status": "planned"
+      },
+      "SDKSystemMessage": {
+        "status": "supported",
+        "capability": "streaming"
+      },
+      "SDKTaskNotificationMessage": {
+        "status": "planned"
+      },
+      "SDKTaskProgressMessage": {
+        "status": "planned"
+      },
+      "SDKTaskStartedMessage": {
+        "status": "planned"
+      },
+      "SDKTaskUpdatedMessage": {
+        "status": "planned"
+      },
+      "SDKThinkingTokensMessage": {
+        "status": "planned"
+      },
+      "SDKToolProgressMessage": {
+        "status": "planned"
+      },
+      "SDKToolUseSummaryMessage": {
+        "status": "planned"
+      },
+      "SDKUserMessage": {
+        "status": "supported",
+        "capability": "tools.results"
+      },
+      "SDKUserMessageReplay": {
+        "status": "planned"
+      },
+      "SDKWorkerShuttingDownMessage": {
+        "status": "planned"
+      }
+    },
+    "hookEvents": {
+      "ConfigChange": {
+        "status": "planned"
+      },
+      "CwdChanged": {
+        "status": "planned"
+      },
+      "DirectoryAdded": {
+        "status": "planned"
+      },
+      "Elicitation": {
+        "status": "planned"
+      },
+      "ElicitationResult": {
+        "status": "planned"
+      },
+      "FileChanged": {
+        "status": "planned"
+      },
+      "InstructionsLoaded": {
+        "status": "planned"
+      },
+      "MessageDisplay": {
+        "status": "planned"
+      },
+      "Notification": {
+        "status": "planned"
+      },
+      "PermissionDenied": {
+        "status": "planned"
+      },
+      "PermissionRequest": {
+        "status": "planned"
+      },
+      "PostCompact": {
+        "status": "planned"
+      },
+      "PostToolBatch": {
+        "status": "planned"
+      },
+      "PostToolUse": {
+        "status": "supported",
+        "capability": "hooks.lifecycle"
+      },
+      "PostToolUseFailure": {
+        "status": "supported",
+        "capability": "hooks.lifecycle"
+      },
+      "PreCompact": {
+        "status": "planned"
+      },
+      "PreToolUse": {
+        "status": "supported",
+        "capability": "hooks.lifecycle"
+      },
+      "SessionEnd": {
+        "status": "planned"
+      },
+      "SessionStart": {
+        "status": "planned"
+      },
+      "Setup": {
+        "status": "planned"
+      },
+      "Stop": {
+        "status": "planned"
+      },
+      "StopFailure": {
+        "status": "planned"
+      },
+      "SubagentStart": {
+        "status": "planned"
+      },
+      "SubagentStop": {
+        "status": "planned"
+      },
+      "TaskCompleted": {
+        "status": "planned"
+      },
+      "TaskCreated": {
+        "status": "planned"
+      },
+      "TeammateIdle": {
+        "status": "planned"
+      },
+      "UserPromptExpansion": {
+        "status": "planned"
+      },
+      "UserPromptSubmit": {
+        "status": "planned"
+      },
+      "WorktreeCreate": {
+        "status": "planned"
+      },
+      "WorktreeRemove": {
+        "status": "planned"
+      }
+    },
+    "exports": [
+      "AbortError",
+      "AccountInfo",
+      "AgentDefinition",
+      "AgentInfo",
+      "AgentMcpServerSpec",
+      "AnyZodRawShape",
+      "ApiKeySource",
+      "AsyncHookJSONOutput",
+      "BackgroundTaskSummary",
+      "BaseHookInput",
+      "BaseOutputFormat",
+      "CanUseTool",
+      "ConfigChangeHookInput",
+      "ConfigScope",
+      "CwdChangedHookInput",
+      "CwdChangedHookSpecificOutput",
+      "DirectoryAddedHookInput",
+      "EXIT_REASONS",
+      "EffortLevel",
+      "ElicitationHookInput",
+      "ElicitationHookSpecificOutput",
+      "ElicitationRequest",
+      "ElicitationResult",
+      "ElicitationResultHookInput",
+      "ElicitationResultHookSpecificOutput",
+      "ExitReason",
+      "FastModeDisabledReason",
+      "FastModeState",
+      "FileChangedHookInput",
+      "FileChangedHookSpecificOutput",
+      "ForkSessionOptions",
+      "ForkSessionResult",
+      "GetSessionInfoOptions",
+      "GetSessionMessagesOptions",
+      "GetSubagentMessagesOptions",
+      "HOOK_EVENTS",
+      "HookCallback",
+      "HookCallbackMatcher",
+      "HookEvent",
+      "HookInput",
+      "HookJSONOutput",
+      "HookPermissionDecision",
+      "ImportSessionToStoreOptions",
+      "InMemorySessionStore",
+      "InferShape",
+      "InstructionsLoadedHookInput",
+      "JsonSchemaOutputFormat",
+      "ListSessionsOptions",
+      "ListSubagentsOptions",
+      "McpClaudeAIProxyServerConfig",
+      "McpHttpServerConfig",
+      "McpSSEServerConfig",
+      "McpSdkServerConfig",
+      "McpSdkServerConfigWithInstance",
+      "McpServerConfig",
+      "McpServerConfigForProcessTransport",
+      "McpServerStatus",
+      "McpServerStatusConfig",
+      "McpServerToolPolicy",
+      "McpSetServersResult",
+      "McpStdioServerConfig",
+      "MessageDisplayHookInput",
+      "MessageDisplayHookSpecificOutput",
+      "ModelInfo",
+      "ModelUsage",
+      "NonNullableUsage",
+      "NotificationHookInput",
+      "NotificationHookSpecificOutput",
+      "ORG_POLICY_LIMIT_PREFIXES",
+      "OnElicitation",
+      "OnUserDialog",
+      "Options",
+      "OutputFormat",
+      "OutputFormatType",
+      "PermissionBehavior",
+      "PermissionDecisionClassification",
+      "PermissionDeniedHookInput",
+      "PermissionDeniedHookSpecificOutput",
+      "PermissionMode",
+      "PermissionRequestHookInput",
+      "PermissionRequestHookSpecificOutput",
+      "PermissionResult",
+      "PermissionRuleValue",
+      "PermissionUpdate",
+      "PermissionUpdateDestination",
+      "PolicySettingsOrigin",
+      "PostCompactHookInput",
+      "PostToolBatchHookInput",
+      "PostToolBatchHookSpecificOutput",
+      "PostToolBatchToolCall",
+      "PostToolUseFailureHookInput",
+      "PostToolUseFailureHookSpecificOutput",
+      "PostToolUseHookInput",
+      "PostToolUseHookSpecificOutput",
+      "PreCompactHookInput",
+      "PreToolUseHookInput",
+      "PreToolUseHookSpecificOutput",
+      "ProvenanceEntry",
+      "Query",
+      "ResolveSettingsOptions",
+      "ResolvedSettingSource",
+      "ResolvedSettings",
+      "RewindFilesResult",
+      "SDKAPIRetryMessage",
+      "SDKActiveGoalMessage",
+      "SDKAssistantMessage",
+      "SDKAssistantMessageError",
+      "SDKAuthStatusMessage",
+      "SDKBackgroundTasksChangedMessage",
+      "SDKCommandsChangedMessage",
+      "SDKCompactBoundaryMessage",
+      "SDKControlGetContextUsageResponse",
+      "SDKControlGetUsageResponse",
+      "SDKControlInitializeResponse",
+      "SDKControlInterruptResponse",
+      "SDKControlReadFileResponse",
+      "SDKControlReloadPluginsResponse",
+      "SDKControlReloadSkillsResponse",
+      "SDKControlRequest",
+      "SDKControlRequestProgressMessage",
+      "SDKControlResponse",
+      "SDKConversationResetMessage",
+      "SDKDeferredToolUse",
+      "SDKElicitationCompleteMessage",
+      "SDKFilesPersistedEvent",
+      "SDKHookProgressMessage",
+      "SDKHookResponseMessage",
+      "SDKHookStartedMessage",
+      "SDKInformationalMessage",
+      "SDKLocalCommandOutputMessage",
+      "SDKMemoryRecallMessage",
+      "SDKMessage",
+      "SDKMessageOrigin",
+      "SDKMirrorErrorMessage",
+      "SDKModelRefusalFallbackMessage",
+      "SDKModelRefusalNoFallbackMessage",
+      "SDKNotificationMessage",
+      "SDKPartialAssistantMessage",
+      "SDKPermissionDenial",
+      "SDKPermissionDeniedMessage",
+      "SDKPluginInstallMessage",
+      "SDKPromptSuggestionMessage",
+      "SDKRateLimitEvent",
+      "SDKRateLimitInfo",
+      "SDKResultError",
+      "SDKResultMessage",
+      "SDKResultSuccess",
+      "SDKSessionInfo",
+      "SDKSessionStateChangedMessage",
+      "SDKSettingsParseError",
+      "SDKStatus",
+      "SDKStatusMessage",
+      "SDKSystemMessage",
+      "SDKTaskNotificationMessage",
+      "SDKTaskProgressMessage",
+      "SDKTaskStartedMessage",
+      "SDKTaskUpdatedMessage",
+      "SDKThinkingTokensMessage",
+      "SDKToolProgressMessage",
+      "SDKToolUseSummaryMessage",
+      "SDKUserMessage",
+      "SDKUserMessageReplay",
+      "SDKWorkerShuttingDownMessage",
+      "SYSTEM_PROMPT_DYNAMIC_BOUNDARY",
+      "SandboxCredentialsConfig",
+      "SandboxFilesystemConfig",
+      "SandboxIgnoreViolations",
+      "SandboxNetworkConfig",
+      "SandboxSettings",
+      "SdkBeta",
+      "SdkMcpToolDefinition",
+      "SdkPluginConfig",
+      "SessionCronSummary",
+      "SessionEndHookInput",
+      "SessionKey",
+      "SessionMessage",
+      "SessionMutationOptions",
+      "SessionStartHookInput",
+      "SessionStartHookSpecificOutput",
+      "SessionStore",
+      "SessionStoreEntry",
+      "SessionStoreFlush",
+      "SessionSummaryEntry",
+      "SettingSource",
+      "Settings",
+      "SetupHookInput",
+      "SetupHookSpecificOutput",
+      "SlashCommand",
+      "SpawnOptions",
+      "SpawnedProcess",
+      "StopFailureHookInput",
+      "StopHookInput",
+      "StopHookSpecificOutput",
+      "SubagentStartHookInput",
+      "SubagentStartHookSpecificOutput",
+      "SubagentStopHookInput",
+      "SubagentStopHookSpecificOutput",
+      "SyncHookJSONOutput",
+      "TaskCompletedHookInput",
+      "TaskCreatedHookInput",
+      "TeammateIdleHookInput",
+      "TerminalReason",
+      "ThinkingAdaptive",
+      "ThinkingConfig",
+      "ThinkingDisabled",
+      "ThinkingEnabled",
+      "ToolConfig",
+      "Transport",
+      "USAGE_LIMIT_ERROR_PREFIXES",
+      "USAGE_TRANSITION_PREFIXES",
+      "USAGE_WARNING_PREFIXES",
+      "UserDialogRequest",
+      "UserDialogResult",
+      "UserPromptExpansionHookInput",
+      "UserPromptExpansionHookSpecificOutput",
+      "UserPromptSubmitHookInput",
+      "UserPromptSubmitHookSpecificOutput",
+      "WarmQuery",
+      "WorktreeCreateHookInput",
+      "WorktreeCreateHookSpecificOutput",
+      "WorktreeRemoveHookInput",
+      "createSdkMcpServer",
+      "deleteSession",
+      "filterEscalatingDefaultMode",
+      "foldSessionSummary",
+      "forkSession",
+      "getSessionInfo",
+      "getSessionMessages",
+      "getSubagentMessages",
+      "importSessionToStore",
+      "listSessions",
+      "listSubagents",
+      "query",
+      "renameSession",
+      "resolveSettings",
+      "startup",
+      "tagSession",
+      "tool"
+    ]
+  }
+}
