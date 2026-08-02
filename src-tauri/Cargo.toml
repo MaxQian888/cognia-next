@@ -414,7 +414,7 @@ minidumper = "0.10"
 # Real OS credential store (Windows Credential Manager) — see the keyring
 # note in [dependencies]. Without this feature keyring uses the mock store.
 keyring = { version = "3", features = ["windows-native"] }
-eventlog = "0.3"
+eventlog = "0.4"
 # ADR-0067 Phase 5 — `uiautomation` moved to `crates/cognia-automation`.
 # Direct windows-rs dep for SendInput/MOUSEEVENTF_WHEEL/GetSystemMetrics calls
 # that aren't exposed publicly through `uiautomation::inputs`. Version pinned
