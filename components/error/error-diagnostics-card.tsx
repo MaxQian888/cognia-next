@@ -1,12 +1,16 @@
 "use client"
 
 /**
- * Inline system-diagnostics card for the error page.
+ * Inline system-diagnostics section for the error page.
  *
  * Surfaces context that was previously only reachable via the crash-log export:
  * app version, platform / OS, live connectivity, locale, current route, runtime
  * host, and the resolved error category. Rendered as a collapsible so it stays
  * out of the way until a user (or support agent) wants it.
+ *
+ * Chrome-less on purpose: the error page already draws a bordered panel, so this
+ * renders as a flush disclosure row separated from its neighbours by the
+ * parent's hairline instead of another border + tinted box.
  *
  * Provider-agnostic by design: it takes resolved `locale` / `pathname` /
  * `categoryLabel` as props rather than calling `useTranslations` / `usePathname`,
@@ -18,7 +22,6 @@
 import { useEffect, useState } from "react"
 import { ChevronDown, Wifi, WifiOff } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { useNetworkStatus } from "@/hooks/use-network-status"
 import { getLocalRuntimeDiagnostics } from "@/lib/native/local-runtime"
@@ -86,11 +89,7 @@ export function ErrorDiagnosticsCard({
 
   const isTauri = diagnostics?.isTauri === true
   const rows: Array<{ key: string; label: string; value: React.ReactNode }> = [
-    {
-      key: "category",
-      label: copy.category,
-      value: <Badge variant="secondary">{categoryLabel}</Badge>,
-    },
+    { key: "category", label: copy.category, value: categoryLabel },
     { key: "appVersion", label: copy.appVersion, value: asText(diagnostics?.appVersion) },
     { key: "platform", label: copy.platform, value: asText(diagnostics?.platform) },
     { key: "osVersion", label: copy.osVersion, value: asText(diagnostics?.osVersion) },
@@ -124,12 +123,9 @@ export function ErrorDiagnosticsCard({
   ]
 
   return (
-    <Collapsible
-      className={cn("w-full rounded-md border bg-muted/30 text-left", className)}
-      data-testid="error-diagnostics-card"
-    >
+    <Collapsible className={cn("w-full text-left", className)} data-testid="error-diagnostics-card">
       <CollapsibleTrigger
-        className="group flex w-full items-center justify-between gap-2 px-3 py-2 text-sm font-medium"
+        className="group flex w-full items-center justify-between gap-2 px-5 py-3 text-sm font-medium transition-colors hover:bg-muted/40"
         data-testid="error-diagnostics-toggle"
       >
         <span>{copy.title}</span>
@@ -139,15 +135,17 @@ export function ErrorDiagnosticsCard({
         />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 px-3 pb-3 text-xs">
+        {/* A compact matrix reads better than a two-column table stretched
+            across the full panel width. */}
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 px-5 pb-4 text-xs sm:grid-cols-4">
           {rows.map((row) => (
             <div
               key={row.key}
-              className="contents"
+              className="min-w-0 space-y-0.5"
               data-testid={`error-diagnostics-row-${row.key}`}
             >
-              <dt className="text-muted-foreground">{row.label}</dt>
-              <dd className="text-right font-mono break-all">{row.value}</dd>
+              <dt className="text-[11px] text-muted-foreground">{row.label}</dt>
+              <dd className="font-mono break-all">{row.value}</dd>
             </div>
           ))}
         </dl>

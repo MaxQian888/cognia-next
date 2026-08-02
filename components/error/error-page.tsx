@@ -3,14 +3,15 @@
 /**
  * Route-level error / not-found / global-error renderer.
  *
- * Renders a bounded card whose header (icon, title, category badge, error id)
- * and footer (recovery + utility actions) are pinned `shrink-0`, with the only
- * scrollable region being the middle detail band — so a stack-heavy error
- * never pushes the title or the recovery buttons out of the clipped shell
- * viewport. The band lays `ErrorTraceDetails` (Alert + collapsible stack) beside
- * the diagnostics / recent-errors panels in two columns on wide screens and
- * stacks them on narrow ones. Every App Router boundary gets the same
- * affordances:
+ * One bounded panel, not a stack of cards. The header (icon, title, category
+ * chip, error id) and the footer (recovery + utility actions) are pinned
+ * `shrink-0`; the only scrollable region is the middle detail band, so a
+ * stack-heavy error never pushes the title or the recovery buttons out of the
+ * clipped shell viewport. Inside that band the detail sections — message +
+ * stack, diagnostics, recent errors — are flush rows separated by hairlines
+ * rather than bordered cards nested in a card, which is what the layout used to
+ * do (an outer card wrapping a destructive Alert card beside two more bordered
+ * panels). Every App Router boundary gets the same affordances:
  *   - error classification with a tailored primary recovery action
  *     (reload for stale chunks, reconnect-and-retry for network failures,
  *     boundary reset otherwise)
@@ -50,10 +51,8 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
+import { ErrorStackSection, type ErrorStackCopy } from "./error-stack-section"
 import { ErrorDiagnosticsCard, type ErrorDiagnosticsCopy } from "./error-diagnostics-card"
 import { RecentErrorsPanel, type RecentErrorsCopy } from "./recent-errors-panel"
 import { ErrorReportActions, type ErrorReportCopy } from "./error-report-actions"
@@ -101,6 +100,8 @@ interface ResolvedCopy {
   title: string
   description: string
   traceTitle: string
+  showStack: string
+  hideStack: string
   retry: string
   goHome: string
   exportCrashLog: string
@@ -170,6 +171,8 @@ const STATIC_EN_BASE: Omit<
   "title" | "description" | "categoryLabels" | "categoryDescriptions"
 > = {
   traceTitle: "Error details",
+  showStack: "Show stack trace",
+  hideStack: "Hide stack trace",
   retry: "Try again",
   goHome: "Back to home",
   exportCrashLog: "Export crash log",
@@ -257,18 +260,27 @@ function HeadlineIcon({
   category: ErrorCategory
 }) {
   if (variant === "not-found") {
-    return <FileQuestion className="size-6 text-muted-foreground" aria-hidden="true" />
+    return <FileQuestion className="size-5 text-muted-foreground" aria-hidden="true" />
   }
   if (variant === "global-error") {
-    return <ServerCrash className="size-6 text-destructive" aria-hidden="true" />
+    return <ServerCrash className="size-5 text-destructive" aria-hidden="true" />
   }
   if (category === "offline" || category === "network") {
-    return <WifiOff className="size-6 text-destructive" aria-hidden="true" />
+    return <WifiOff className="size-5 text-destructive" aria-hidden="true" />
   }
   if (category === "chunk-load") {
-    return <DownloadCloud className="size-6 text-warning" aria-hidden="true" />
+    return <DownloadCloud className="size-5 text-warning" aria-hidden="true" />
   }
-  return <AlertTriangle className="size-6 text-destructive" aria-hidden="true" />
+  return <AlertTriangle className="size-5 text-destructive" aria-hidden="true" />
+}
+
+/** Dot colour on the category chip — a chip, not a boxed badge, keeps the header flat. */
+const CATEGORY_DOT: Record<ErrorCategory, string> = {
+  "chunk-load": "bg-warning",
+  network: "bg-warning",
+  offline: "bg-muted-foreground",
+  render: "bg-destructive",
+  unknown: "bg-destructive",
 }
 
 /**
@@ -315,6 +327,8 @@ function ErrorPageIntl(props: ErrorPageProps) {
     title: props.title ?? variantTitle,
     description: props.description ?? variantDescription,
     traceTitle: t("traceTitle"),
+    showStack: t("showStack"),
+    hideStack: t("hideStack"),
     retry: t("retry"),
     goHome: variantHome,
     exportCrashLog: t("exportCrashLog"),
@@ -512,6 +526,12 @@ function ErrorPageShell({
     reset: copy.retry,
   }
 
+  const stackCopy: ErrorStackCopy = {
+    title: copy.traceTitle,
+    showStack: copy.showStack,
+    hideStack: copy.hideStack,
+  }
+
   return (
     <div
       role="alert"
@@ -521,101 +541,102 @@ function ErrorPageShell({
       className={cn("flex h-full w-full items-center justify-center p-4 sm:p-6", className)}
     >
       {/*
-        Bounded card: `max-h-full` keeps it inside the (overflow-hidden) shell
+        Bounded panel: `max-h-full` keeps it inside the (overflow-hidden) shell
         viewport, the header/footer are `shrink-0` so recovery actions and the
         title never scroll away, and only the middle detail band scrolls when an
         error carries a lot of information.
       */}
       <div
         className={cn(
-          "flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm",
-          hasBody && "lg:max-w-4xl"
+          "flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-sm",
+          hasBody && "max-w-2xl"
         )}
       >
-        {/* Header — always visible */}
-        <div className="flex shrink-0 flex-col items-center gap-3 px-6 pt-8 pb-5 text-center">
-          <EmptyMedia variant="icon" className={cn("bg-destructive/10", isNotFound && "bg-muted")}>
-            <HeadlineIcon variant={variant} category={category} />
-          </EmptyMedia>
-          <div className="flex flex-col items-center gap-2">
-            <EmptyTitle className="text-xl">{copy.title}</EmptyTitle>
-            {showCategoryBadge && (
-              <Badge variant="secondary" className="font-normal" data-testid="error-page-category">
-                {copy.categoryLabels[category]}
-              </Badge>
+        {/* Header — always visible. Icon tile beside the copy, not stacked above
+            it: the centred hero wasted the vertical room the detail band needs. */}
+        <div className="flex shrink-0 items-start gap-3.5 px-5 pt-5 pb-4">
+          <span
+            className={cn(
+              "flex size-10 shrink-0 items-center justify-center rounded-xl",
+              isNotFound ? "bg-muted" : "bg-destructive/10"
             )}
-            <EmptyDescription className="mx-auto max-w-xl text-balance">
-              {resolvedDescription}
-            </EmptyDescription>
-          </div>
-          {error?.digest && (
-            <div
-              className="flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground"
-              data-testid="error-page-id"
-            >
-              <span className="font-medium">{copy.errorIdLabel}:</span>
-              <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
-                {error.digest}
-              </code>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 gap-1 px-2 text-[11px]"
-                onClick={handleCopyErrorId}
-                data-testid="error-page-copy-id"
-              >
-                {copiedId ? (
-                  <Check className="size-3 text-success" aria-hidden="true" />
-                ) : (
-                  <Copy className="size-3" aria-hidden="true" />
-                )}
-                {copiedId ? copy.copied : copy.copyErrorId}
-              </Button>
+          >
+            <HeadlineIcon variant={variant} category={category} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <h1 className="text-base font-semibold tracking-tight">{copy.title}</h1>
+              {showCategoryBadge && (
+                <span
+                  className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                  data-testid="error-page-category"
+                >
+                  <span
+                    className={cn("size-1.5 rounded-full", CATEGORY_DOT[category])}
+                    aria-hidden="true"
+                  />
+                  {copy.categoryLabels[category]}
+                </span>
+              )}
             </div>
-          )}
+            <p className="mt-1.5 text-sm text-pretty text-muted-foreground">
+              {resolvedDescription}
+            </p>
+            {error?.digest && (
+              <div
+                className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground"
+                data-testid="error-page-id"
+              >
+                <span>{copy.errorIdLabel}</span>
+                <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">
+                  {error.digest}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 gap-1 px-1.5 text-[11px]"
+                  onClick={handleCopyErrorId}
+                  data-testid="error-page-copy-id"
+                >
+                  {copiedId ? (
+                    <Check className="size-3 text-success" aria-hidden="true" />
+                  ) : (
+                    <Copy className="size-3" aria-hidden="true" />
+                  )}
+                  {copiedId ? copy.copied : copy.copyErrorId}
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Detail band — the only scrollable region; two columns on wide screens */}
+        {/* Detail band — the only scrollable region. Flush sections split by
+            hairlines; no nested cards and no nested scrollbars. */}
         {hasBody && (
           <div
-            className="min-h-0 flex-1 overflow-y-auto border-t px-6 py-4"
+            className="min-h-0 flex-1 divide-y overflow-y-auto border-t"
             data-testid="error-page-body"
           >
-            <div className="grid gap-3 lg:grid-cols-5 lg:items-start">
-              {showTrace && (
-                <div className={cn("min-w-0", showAuxiliary ? "lg:col-span-3" : "lg:col-span-5")}>
-                  <ErrorTraceDetails
-                    error={error!}
-                    title={copy.traceTitle}
-                    className="w-full text-left"
-                  />
-                </div>
-              )}
-              {showAuxiliary && (
-                <div
-                  className={cn(
-                    "flex min-w-0 flex-col gap-3",
-                    showTrace ? "lg:col-span-2" : "lg:col-span-5"
-                  )}
-                >
-                  <ErrorDiagnosticsCard
-                    copy={copy.diagnostics}
-                    categoryLabel={copy.categoryLabels[category]}
-                    locale={locale}
-                    pathname={pathname}
-                  />
-                  <RecentErrorsPanel copy={copy.recentErrors} currentErrorId={error?.digest} />
-                </div>
-              )}
-            </div>
+            {showTrace && <ErrorStackSection error={error!} copy={stackCopy} />}
+            {showAuxiliary && (
+              <>
+                <ErrorDiagnosticsCard
+                  copy={copy.diagnostics}
+                  categoryLabel={copy.categoryLabels[category]}
+                  locale={locale}
+                  pathname={pathname}
+                />
+                <RecentErrorsPanel copy={copy.recentErrors} currentErrorId={error?.digest} />
+              </>
+            )}
           </div>
         )}
 
-        {/* Footer — always visible: recovery actions + secondary utilities */}
-        <div className="flex shrink-0 flex-col gap-3 border-t bg-card px-6 py-4">
+        {/* Footer — always visible: utilities on the left, recovery on the right */}
+        <div className="flex shrink-0 flex-col gap-2 border-t px-5 py-3">
           {autoRetry.pending && (
             <div
-              className="flex items-center justify-center gap-2 text-sm text-muted-foreground"
+              className="flex items-center gap-2 text-xs text-muted-foreground"
               data-testid="error-page-auto-retry"
             >
               <RotateCw className="size-3.5 animate-spin" aria-hidden="true" />
@@ -623,7 +644,7 @@ function ErrorPageShell({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-6 gap-1 px-2"
+                className="h-6 gap-1 px-1.5 text-xs"
                 onClick={autoRetry.cancel}
                 data-testid="error-page-cancel-auto-retry"
               >
@@ -633,76 +654,85 @@ function ErrorPageShell({
             </div>
           )}
 
-          {/* Primary recovery actions */}
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            {showRetry && (
-              <Button
-                onClick={recoveryKind === "reload" ? handleReload : reset}
-                className="gap-2"
-                data-testid="error-page-retry"
-              >
-                {recoveryKind === "reload" ? (
-                  <RotateCw className="size-4" aria-hidden="true" />
-                ) : (
-                  <RefreshCw className="size-4" aria-hidden="true" />
-                )}
-                {primaryRetryLabel[recoveryKind]}
-              </Button>
-            )}
-            {showHome && (
-              <Button variant="outline" asChild className="gap-2" data-testid="error-page-home">
-                <Link href={homeHref}>
-                  <Home className="size-4" aria-hidden="true" />
-                  {copy.goHome}
-                </Link>
-              </Button>
-            )}
-            {additionalActions}
-          </div>
-
-          {/* Secondary utilities — lower emphasis, wrap freely */}
-          <div className="flex flex-wrap items-center justify-center gap-1 text-muted-foreground">
-            {showAuxiliary && (
-              <ErrorReportActions
-                error={error}
-                copy={copy.report}
-                context={{ category, locale, pathname }}
-                toastsEnabled={toastsEnabled}
-              />
-            )}
-            {showCrashExport && (
+          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
+            {/* Secondary utilities — lower emphasis, wrap freely */}
+            <div className="-ml-2 flex flex-wrap items-center gap-0.5 text-muted-foreground">
+              {showAuxiliary && (
+                <ErrorReportActions
+                  error={error}
+                  copy={copy.report}
+                  context={{ category, locale, pathname }}
+                  toastsEnabled={toastsEnabled}
+                />
+              )}
+              {showCrashExport && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleExport}
+                  disabled={exporting}
+                  className="h-8 gap-1.5 px-2 text-xs"
+                  data-testid="error-page-export"
+                >
+                  {exported ? (
+                    <Check className="size-3.5 text-success" aria-hidden="true" />
+                  ) : (
+                    <Download className="size-3.5" aria-hidden="true" />
+                  )}
+                  {exporting
+                    ? copy.exportingCrashLog
+                    : exported
+                      ? copy.exportedCrashLog
+                      : copy.exportCrashLog}
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={handleExport}
-                disabled={exporting}
-                className="gap-2"
-                data-testid="error-page-export"
+                asChild
+                className="h-8 gap-1.5 px-2 text-xs"
+                data-testid="error-page-open-logs"
               >
-                {exported ? (
-                  <Check className="size-4 text-success" aria-hidden="true" />
-                ) : (
-                  <Download className="size-4" aria-hidden="true" />
-                )}
-                {exporting
-                  ? copy.exportingCrashLog
-                  : exported
-                    ? copy.exportedCrashLog
-                    : copy.exportCrashLog}
+                <Link href="/logs">
+                  <ScrollText className="size-3.5" aria-hidden="true" />
+                  {copy.openLogs}
+                </Link>
               </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              asChild
-              className="gap-2"
-              data-testid="error-page-open-logs"
-            >
-              <Link href="/logs">
-                <ScrollText className="size-4" aria-hidden="true" />
-                {copy.openLogs}
-              </Link>
-            </Button>
+            </div>
+
+            {/* Primary recovery actions */}
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              {additionalActions}
+              {showHome && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  asChild
+                  className="gap-2"
+                  data-testid="error-page-home"
+                >
+                  <Link href={homeHref}>
+                    <Home className="size-4" aria-hidden="true" />
+                    {copy.goHome}
+                  </Link>
+                </Button>
+              )}
+              {showRetry && (
+                <Button
+                  size="sm"
+                  onClick={recoveryKind === "reload" ? handleReload : reset}
+                  className="gap-2"
+                  data-testid="error-page-retry"
+                >
+                  {recoveryKind === "reload" ? (
+                    <RotateCw className="size-4" aria-hidden="true" />
+                  ) : (
+                    <RefreshCw className="size-4" aria-hidden="true" />
+                  )}
+                  {primaryRetryLabel[recoveryKind]}
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </div>

@@ -84,17 +84,14 @@ export function RecentErrorsPanel({
   const cascading = isCascading(entries)
 
   return (
-    <Collapsible
-      className={cn("w-full rounded-md border bg-muted/30 text-left", className)}
-      data-testid="recent-errors-panel"
-    >
+    <Collapsible className={cn("w-full text-left", className)} data-testid="recent-errors-panel">
       <CollapsibleTrigger
-        className="group flex w-full items-center justify-between gap-2 px-3 py-2 text-sm font-medium"
+        className="group flex w-full items-center justify-between gap-2 px-5 py-3 text-sm font-medium transition-colors hover:bg-muted/40"
         data-testid="recent-errors-toggle"
       >
         <span className="flex items-center gap-2">
           {copy.title}
-          <span className="rounded-full bg-muted px-1.5 text-xs text-muted-foreground">
+          <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">
             {entries.length}
           </span>
         </span>
@@ -106,13 +103,13 @@ export function RecentErrorsPanel({
       <CollapsibleContent>
         {cascading && (
           <p
-            className="mx-3 mb-2 rounded bg-destructive/10 px-2 py-1 text-xs text-destructive"
+            className="mb-2 border-l-2 border-destructive/60 px-5 py-1 text-xs text-destructive"
             data-testid="recent-errors-cascade"
           >
             {copy.cascadeHint}
           </p>
         )}
-        <ul className="flex flex-col gap-1 px-3 pb-3 text-xs">
+        <ul className="flex flex-col gap-1.5 px-5 pb-4 text-xs">
           {entries.map((entry) => {
             const theme = LEVEL_THEME[entry.level]
             const Icon = theme.icon
