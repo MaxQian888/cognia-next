@@ -19,6 +19,7 @@ import { resolveLspServers } from "@/lib/lsp/resolve-config"
 import { readProjectLspFile } from "@/lib/lsp/project-file-reader"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import { setActiveSandboxTier } from "@/lib/sandbox/microvm-bridge"
+import { resolveSandboxSessionBinding, validateSandboxSessionBinding } from "@/lib/sandbox/binding"
 import { setActiveSandboxPolicy } from "@/lib/sandbox/policy-bridge"
 import { setActiveSandboxConfine } from "@/lib/claude/sandbox-confine-state"
 import {
@@ -2490,8 +2491,32 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // the app default. Stamped onto the microvm-bridge so the
     // `cognia-sandboxed-tools` plugin can route this session's exec
     // calls to e2b when the user opts into microVM isolation.
-    const sandboxTier: "os" | "microvm" = character?.sandboxTier ?? appSettings?.sandboxTier ?? "os"
-    setActiveSandboxTier(session?.id, sandboxTier)
+    // Epic 5 — the tier and the Computer Use target are resolved together into
+    // one binding, so a `cua-desktop` tier cannot end up driving a remote GUI
+    // while Bash still runs on the host. An unusable binding (the tier needs a
+    // connection and none is selected) is reported, never silently downgraded:
+    // the user asked for isolation and must not lose it quietly.
+    const sandboxBinding = resolveSandboxSessionBinding({
+      session: {
+        sandboxTier: session?.sandboxTier,
+        computerUseTarget: session?.computerUseTarget,
+      },
+      character: {
+        sandboxTier: character?.sandboxTier,
+        computerUseTarget: character?.computerUseTarget,
+      },
+      appSettings: { sandboxTier: appSettings?.sandboxTier },
+    })
+    const bindingCheck = validateSandboxSessionBinding(sandboxBinding)
+    if (!bindingCheck.ok) {
+      loggers.app.warn("unusable sandbox binding", {
+        sessionId: session?.id,
+        violation: bindingCheck.violation,
+        shellTier: sandboxBinding.shellTier,
+        computerTarget: sandboxBinding.computerTarget,
+      })
+    }
+    setActiveSandboxTier(session?.id, sandboxBinding.shellTier)
     // ADR-0028 — resolve the resource/network ceiling (character beats app)
     // and stamp it so `cognia-sandboxed-tools` can clamp each call to it.
     const resolvedSandboxPolicy = character?.sandboxPolicy ?? appSettings?.sandboxPolicy ?? null

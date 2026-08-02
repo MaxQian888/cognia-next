@@ -1553,6 +1553,13 @@ export interface ChatSession {
    * local (`lib/automation/sandbox-target.ts`).
    */
   computerUseTarget?: import("@/lib/automation/sandbox-target").ComputerUseTargetSetting
+  /**
+   * Per-session override of the sandbox tier (Epic 5). Beats
+   * `Character.sandboxTier`, which beats `AppSettings.sandboxTier`.
+   * `undefined` inherits. Resolved together with `computerUseTarget` into a
+   * single `SandboxSessionBinding` by `lib/sandbox/binding.ts`.
+   */
+  sandboxTier?: import("@/types/sandbox").SandboxShellTier
   systemPrompt?: string
   /**
    * Identity of the system-prompt preset this session was last configured
@@ -3456,9 +3463,14 @@ export interface AppSettings {
    * routes Bash / Edit / Write through the per-platform OS sandbox
    * (sandbox-exec / bwrap / windows-codex). `"microvm"` routes them
    * through the existing `plugins/e2b-sandbox/` Firecracker workspace
-   * backend for the strongest isolation. Beaten by `Character.sandboxTier`
-   * when both are set. Only consulted when `sandboxDefaultEnabled` /
-   * `sandboxEnabled` resolves true.
+   * backend for the strongest isolation. Beaten by `Character.sandboxTier`,
+   * which is beaten by `ChatSession.sandboxTier`. Only consulted when
+   * `sandboxDefaultEnabled` / `sandboxEnabled` resolves true. Resolution lives
+   * in `lib/sandbox/binding.ts`.
+   *
+   * Deliberately NOT widened to `"cua-desktop"` (Epic 5): that tier needs a
+   * bound sandbox connection, which only exists on a character or session, so
+   * an app-wide default of it could never resolve to a valid binding.
    */
   sandboxTier?: "os" | "microvm"
   /**
@@ -4158,10 +4170,13 @@ export interface Character {
    * Sandbox tier (ADR-0028 T4). `"os"` (default) routes Bash / Edit / Write
    * through the per-platform OS sandbox (sandbox-exec / bwrap / windows-codex).
    * `"microvm"` routes them through the existing `plugins/e2b-sandbox/`
-   * Firecracker workspace backend for the strongest isolation. Only relevant
-   * when `sandboxEnabled` resolves true.
+   * Firecracker workspace backend for the strongest isolation. `"cua-desktop"`
+   * (Epic 5) routes them into the bound sandbox connection alongside Computer
+   * Use — it requires a `computerUseTarget` connection and forces Computer Use
+   * onto that same connection. Only relevant when `sandboxEnabled` resolves
+   * true. Beaten by `ChatSession.sandboxTier`.
    */
-  sandboxTier?: "os" | "microvm"
+  sandboxTier?: import("@/types/sandbox").SandboxShellTier
   /**
    * Per-character sandbox resource + network ceiling (ADR-0028). Beats
    * `AppSettings.sandboxPolicy`. Only relevant when `sandboxEnabled` is true.

@@ -19,6 +19,8 @@
  *      §Strict mode).
  */
 
+import type { SandboxShellTier } from "@/types/sandbox"
+
 /** One result row from a sandboxed exec call — shape mirrored from
  *  `src-tauri/src/sandbox/types.rs::SandboxResult`. */
 export interface MicrovmResult {
@@ -71,7 +73,7 @@ export function getMicrovmExec(): MicrovmExec | null {
 }
 
 /** Active tier per session id. Keyed by session id; default = `"os"`. */
-const activeTier = new Map<string, "os" | "microvm">()
+const activeTier = new Map<string, SandboxShellTier>()
 
 /**
  * Stamp the resolved tier for the next send on `sessionId`. Called by
@@ -80,16 +82,28 @@ const activeTier = new Map<string, "os" | "microvm">()
  */
 export function setActiveSandboxTier(
   sessionId: string | null | undefined,
-  tier: "os" | "microvm"
+  tier: SandboxShellTier
 ): void {
   if (!sessionId) return
   activeTier.set(sessionId, tier)
 }
 
 /** Read the active tier for `sessionId`. Defaults to `"os"`. */
-export function getActiveSandboxTier(sessionId: string | null | undefined): "os" | "microvm" {
+export function getActiveSandboxTier(sessionId: string | null | undefined): SandboxShellTier {
   if (!sessionId) return "os"
   return activeTier.get(sessionId) ?? "os"
+}
+
+/**
+ * Should the e2b microVM adapter claim this session's exec calls?
+ *
+ * Only the `"microvm"` tier — `"cua-desktop"` routes exec into the bound
+ * sandbox connection instead, and must NOT be treated as microVM. Callers use
+ * this rather than comparing the tier themselves, so adding a tier cannot
+ * silently widen what e2b claims.
+ */
+export function isMicrovmTier(sessionId: string | null | undefined): boolean {
+  return getActiveSandboxTier(sessionId) === "microvm"
 }
 
 /** Clear the active tier when a session ends. Optional — Map entries are

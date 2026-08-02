@@ -366,6 +366,224 @@ describe("getDb", () => {
     )
   })
 
+  it("v142 backfills corpusId, copies manifests, and renames discarded → rejected", async () => {
+    const name = `cognia-v142-corpora-${Date.now()}`
+    const legacy = new Dexie(name)
+    // v141-shaped wiki tables: `&slug` unique, manifest keyed by scope, and an
+    // inboundDrafts status union that still spells rejection "discarded".
+    legacy.version(141).stores({
+      wikiArticles: "&id, &slug, scope, module, pageRank, generatedAt, [scope+module]",
+      wikiSections: "&id, articleId, [articleId+sectionIndex]",
+      wikiManifest: "&scope, lastBuildAt",
+      inboundDrafts: "&id, kind, status, createdAt",
+    })
+    await legacy.open()
+    await legacy.table("wikiArticles").bulkPut([
+      { id: "wka_1", slug: "lib-foo", scope: "cognia-self", module: "lib/foo", pageRank: 0.4 },
+      // Predates the `scope` field entirely — must still land somewhere reachable.
+      { id: "wka_2", slug: "lib-bar", module: "lib/bar", pageRank: 0.1 },
+    ])
+    await legacy.table("wikiSections").bulkPut([
+      { id: "wks_1", articleId: "wka_1", sectionIndex: 0 },
+      // Orphan: its article is already gone. Must not end up with an
+      // undefined corpusId that no query can reach.
+      { id: "wks_orphan", articleId: "wka_missing", sectionIndex: 0 },
+    ])
+    await legacy.table("wikiManifest").put({
+      scope: "cognia-self",
+      fileHashes: { "lib/foo/index.ts": "sha-foo" },
+      lastBuildAt: 1234,
+      articleCount: 2,
+      generatorVersion: "v1",
+    })
+    await legacy.table("inboundDrafts").bulkPut([
+      { id: "d_old", kind: "note", status: "discarded", title: "t", body: "b", createdAt: 1 },
+      { id: "d_ok", kind: "note", status: "accepted", title: "t", body: "b", createdAt: 2 },
+      { id: "d_new", kind: "note", status: "pending", title: "t", body: "b", createdAt: 3 },
+    ])
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    // (1) Every article carries a corpus, and the scope-less row falls back to
+    // the self corpus rather than to an unindexable `undefined`.
+    expect((await upgraded.wikiArticles.get("wka_1"))?.corpusId).toBe("cognia-self")
+    expect((await upgraded.wikiArticles.get("wka_2"))?.corpusId).toBe("cognia-self")
+    expect((await upgraded.wikiSections.get("wks_1"))?.corpusId).toBe("cognia-self")
+    expect((await upgraded.wikiSections.get("wks_orphan"))?.corpusId).toBe("cognia-self")
+
+    // The new unique index is reachable — proof the backfill actually populated it.
+    expect(
+      (
+        await upgraded.wikiArticles
+          .where("[corpusId+slug]")
+          .equals(["cognia-self", "lib-foo"])
+          .first()
+      )?.id
+    ).toBe("wka_1")
+
+    // (2) Manifests are COPIED, not moved: a rollback to v141 must still find
+    // its rows where it left them.
+    const corpusManifest = await upgraded.wikiCorpusManifest.get("cognia-self")
+    expect(corpusManifest).toMatchObject({
+      corpusId: "cognia-self",
+      scope: "cognia-self",
+      fileHashes: { "lib/foo/index.ts": "sha-foo" },
+      lastBuildAt: 1234,
+      generatorVersion: "v1",
+    })
+    expect(corpusManifest?.manifestHash).toMatch(/^[0-9a-f]{8}$/)
+    expect(await upgraded.wikiManifest.get("cognia-self")).toBeDefined()
+
+    // (3) One spelling for "the operator said no"; other statuses untouched.
+    expect((await upgraded.inboundDrafts.get("d_old"))?.status).toBe("rejected")
+    expect((await upgraded.inboundDrafts.get("d_ok"))?.status).toBe("accepted")
+    expect((await upgraded.inboundDrafts.get("d_new"))?.status).toBe("pending")
+
+    upgraded.close()
+    await Dexie.delete(name)
+  }, 30_000)
+
+  it("v143 splits sandbox connections into provider/driver, keeping legacy mirrors", async () => {
+    const name = `cognia-v143-sandbox-${Date.now()}`
+    const legacy = new Dexie(name)
+    // v142-shaped: Docker fields at the top level, no provider/driver split.
+    legacy.version(142).stores({ sandboxConnections: "&id, name, createdAt, updatedAt" })
+    await legacy.open()
+    await legacy.table("sandboxConnections").bulkPut([
+      {
+        id: "conn_running",
+        name: "home-docker",
+        provider: "docker",
+        image: "ghcr.io/trycua/cua-xfce:latest",
+        host: "127.0.0.1",
+        port: 49201,
+        containerId: "abc123",
+        lastHealthStatus: "ok",
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      {
+        // Never started: no container id at all.
+        id: "conn_fresh",
+        name: "unused",
+        provider: "docker",
+        image: "",
+        host: "127.0.0.1",
+        port: 0,
+        lastHealthStatus: "unknown",
+        createdAt: 3,
+        updatedAt: 3,
+      },
+      {
+        // Had a container but could not be reached — must NOT claim "running".
+        id: "conn_unreachable",
+        name: "flaky",
+        provider: "docker",
+        image: "img:1",
+        host: "127.0.0.1",
+        port: 5000,
+        containerId: "def456",
+        lastHealthStatus: "unreachable",
+        lastHealthError: "connection refused",
+        createdAt: 4,
+        updatedAt: 5,
+      },
+    ])
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBeGreaterThanOrEqual(143)
+
+    // (1) Docker fields move into a discriminated `config`.
+    const running = await upgraded.sandboxConnections.get("conn_running")
+    expect(running).toMatchObject({
+      provider: "docker",
+      driver: "computer-server",
+      state: "running",
+      config: {
+        provider: "docker",
+        image: "ghcr.io/trycua/cua-xfce:latest",
+        host: "127.0.0.1",
+        port: 49201,
+        containerId: "abc123",
+      },
+    })
+    expect(running?.capabilities?.start).toBe(true)
+    // Docker has no suspend/resume — the matrix must say so, not stay silent.
+    expect(running?.capabilities?.suspend).toBe(false)
+
+    // (2) Lifecycle state is reconstructed conservatively.
+    expect((await upgraded.sandboxConnections.get("conn_fresh"))?.state).toBe("uninitialized")
+    expect((await upgraded.sandboxConnections.get("conn_unreachable"))?.state).toBe("stopped")
+    expect((await upgraded.sandboxConnections.get("conn_unreachable"))?.lastHealthError).toBe(
+      "connection refused"
+    )
+
+    // (3) The legacy top-level fields survive for one release, so a downgrade
+    // to the v142 build still finds a working Docker row.
+    expect(running?.image).toBe("ghcr.io/trycua/cua-xfce:latest")
+    expect(running?.host).toBe("127.0.0.1")
+    expect(running?.port).toBe(49201)
+    expect(running?.containerId).toBe("abc123")
+
+    // (4) The new `provider` index is reachable — proof the write landed.
+    expect(
+      (await upgraded.sandboxConnections.where("provider").equals("docker").toArray()).length
+    ).toBe(3)
+
+    upgraded.close()
+    await Dexie.delete(name)
+  }, 30_000)
+
+  it("v143 leaves an already-migrated sandbox row untouched", async () => {
+    const name = `cognia-v143-idempotent-${Date.now()}`
+    const first = new CogniaDB(name)
+    await first.open()
+    await first.sandboxConnections.put({
+      id: "conn_new",
+      name: "cloud",
+      provider: "cua-cloud",
+      driver: "cua-driver",
+      config: { provider: "cua-cloud", instanceName: "desk-1", instanceId: "i-1" },
+      state: "suspended",
+      capabilities: {
+        create: true,
+        connect: true,
+        start: true,
+        suspend: true,
+        resume: true,
+        stop: true,
+        delete: true,
+        health: true,
+        gui: true,
+        workspaceRead: true,
+        workspaceExec: true,
+      },
+      lastHealthStatus: "unknown",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    first.close()
+
+    // Re-opening runs the upgrade chain again; the row must come back verbatim
+    // rather than being re-migrated into a Docker shape.
+    const reopened = new CogniaDB(name)
+    await reopened.open()
+    const row = await reopened.sandboxConnections.get("conn_new")
+    expect(row).toMatchObject({
+      provider: "cua-cloud",
+      state: "suspended",
+      config: { provider: "cua-cloud", instanceName: "desk-1", instanceId: "i-1" },
+    })
+    expect(row).not.toHaveProperty("image")
+
+    reopened.close()
+    await Dexie.delete(name)
+  }, 30_000)
+
   it("v135 upgrades v1 deployment model references and profile metadata", async () => {
     const name = `cognia-v135-provider-catalog-${Date.now()}`
     const legacy = new Dexie(name)
@@ -2416,6 +2634,7 @@ describe("getDb", () => {
 
     await db.wikiArticles.put({
       id: "wka_1",
+      corpusId: "cognia-self",
       slug: "lib-foo",
       title: "lib/foo overview",
       module: "lib/foo",
@@ -2433,6 +2652,7 @@ describe("getDb", () => {
 
     await db.wikiSections.put({
       id: "wks_1",
+      corpusId: "cognia-self",
       articleId: "wka_1",
       sectionIndex: 0,
       headingPath: ["overview"],

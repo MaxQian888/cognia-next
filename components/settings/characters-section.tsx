@@ -60,6 +60,7 @@ import {
 } from "@/lib/plugin/character-pack/local-pack-store"
 import { usePluginMetadata } from "@/hooks/plugins/use-plugin-metadata"
 import { useSandboxConnections } from "@/hooks/automation/use-sandbox-connections"
+import type { SandboxShellTier } from "@/types/sandbox"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import { isTauri } from "@/lib/tauri"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
@@ -1331,7 +1332,7 @@ export type EditorState = {
   /** ADR-0028 Phase 10 — per-character sandbox enablement override. */
   sandboxEnabled: boolean
   /** ADR-0028 Phase 10 — `"inherit"` writes back as `undefined`. */
-  sandboxTier: "os" | "microvm" | "inherit"
+  sandboxTier: SandboxShellTier | "inherit"
   /** ADR-0028 Phase 10 — account UUID from `ProviderVault::accounts[]`. */
   accountIdOverride: string | "inherit"
   // ---- ADR-0030 v2 fields ---------------------------------------------------
@@ -1377,7 +1378,7 @@ type EditorOutput = {
   computerUseSettings?: Character["computerUseSettings"]
   computerUseTarget?: Character["computerUseTarget"]
   sandboxEnabled?: boolean
-  sandboxTier?: "os" | "microvm"
+  sandboxTier?: SandboxShellTier
   accountIdOverride?: string
   // ---- ADR-0030 v2 fields ----
   persona?: PluginCharacterPersona
@@ -1816,7 +1817,20 @@ export function CharacterEditor({
             />
             <ComputerUseTargetPicker
               value={s.computerUseTarget}
-              onChange={(target) => setS({ ...s, computerUseTarget: target })}
+              onChange={(target) =>
+                setS({
+                  ...s,
+                  computerUseTarget: target,
+                  // Dropping back to the local desktop leaves `cua-desktop`
+                  // with nothing to bind to, which would save a combination
+                  // that can only ever be refused at send time. Fall back to
+                  // inheriting rather than persisting an unusable tier.
+                  sandboxTier:
+                    target === "local" && s.sandboxTier === "cua-desktop"
+                      ? "inherit"
+                      : s.sandboxTier,
+                })
+              }
             />
           </>
         )}
@@ -1863,6 +1877,15 @@ export function CharacterEditor({
               <SelectItem value="inherit">{tSandbox("tier.inherit")}</SelectItem>
               <SelectItem value="os">{tSandbox("tier.os")}</SelectItem>
               <SelectItem value="microvm">{tSandbox("tier.microvm")}</SelectItem>
+              {/* Offered only when this character already targets a sandbox
+                  connection for Computer Use: the tier means "run shell, file
+                  AND GUI work in that desktop", so without a bound connection
+                  it has nothing to bind to. `lib/sandbox/binding` refuses such
+                  a binding rather than downgrading it, so the option must not
+                  be reachable in a state that can only produce a refusal. */}
+              {s.computerUseTarget !== "local" && (
+                <SelectItem value="cua-desktop">{tSandbox("tier.cuaDesktop")}</SelectItem>
+              )}
             </SelectContent>
           </Select>
           <p className="text-[10px] text-muted-foreground">{tSandbox("tier.description")}</p>

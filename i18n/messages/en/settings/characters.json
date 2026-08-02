@@ -147,6 +147,7 @@
         "label": "Sandbox Bash / Edit / Write"
       },
       "tier": {
+        "cuaDesktop": "Bound sandbox desktop",
         "description": "Beats the app-wide default. Inherit defers to Settings → Sandbox.",
         "inherit": "Inherit app default",
         "label": "Sandbox tier",

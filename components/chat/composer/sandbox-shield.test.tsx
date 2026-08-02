@@ -124,6 +124,35 @@ describe("resolveShieldState", () => {
       })
     ).toBe("os")
   })
+
+  it("session.sandboxTier beats the character tier", () => {
+    expect(
+      resolveShieldState({
+        session: { ...session, sandboxEnabled: true, sandboxTier: "cua-desktop" },
+        characterSandboxTier: "microvm",
+        defaultTier: "os",
+      })
+    ).toBe("cua-desktop")
+  })
+
+  it("surfaces the cua-desktop tier from the character layer", () => {
+    expect(
+      resolveShieldState({
+        session,
+        characterSandboxEnabled: true,
+        characterSandboxTier: "cua-desktop",
+      })
+    ).toBe("cua-desktop")
+  })
+
+  it("still reports 'off' when the sandbox is disabled, whatever the tier", () => {
+    expect(
+      resolveShieldState({
+        session: { ...session, sandboxEnabled: false, sandboxTier: "cua-desktop" },
+        characterSandboxTier: "cua-desktop",
+      })
+    ).toBe("off")
+  })
 })
 
 describe("SandboxShield component", () => {
@@ -150,6 +179,16 @@ describe("SandboxShield component", () => {
     const shield = screen.getByTestId("sandbox-shield")
     expect(shield).toHaveAttribute("data-state", "microvm")
     expect(shield).toHaveAttribute("aria-label", expect.stringMatching(/microVM/))
+  })
+
+  it("renders the 'cua-desktop' state with a distinct glyph, not a shield", () => {
+    const { container } = withIntl(<SandboxShield session={session} forceState="cua-desktop" />)
+    const shield = screen.getByTestId("sandbox-shield")
+    expect(shield).toHaveAttribute("data-state", "cua-desktop")
+    expect(shield.getAttribute("aria-label")).toBeTruthy()
+    // Execution moving to another machine is a bigger claim than "isolated
+    // here" — it must not be a recoloured shield.
+    expect(container.querySelector("svg.lucide-shield")).toBeNull()
   })
 
   it("resolves state from store hooks when forceState is omitted", () => {

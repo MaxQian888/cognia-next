@@ -4509,11 +4509,13 @@
       "removePastedChip": "Remove pasted text",
       "sandboxShield": {
         "label": {
+          "cua-desktop": "Sandbox active — bound desktop",
           "microvm": "Sandbox active — microVM tier",
           "off": "Sandbox off",
           "os": "Sandbox active — OS tier"
         },
         "tooltip": {
+          "cua-desktop": "Bash / Edit / Write and Computer Use all run inside the bound sandbox connection, not on this machine.",
           "microvm": "Bash / Edit / Write run inside an ephemeral Firecracker microVM via cognia-e2b-sandbox.",
           "off": "Sandbox disabled — SDK builtin Bash / Edit / Write are unrestricted for this session.",
           "os": "Bash / Edit / Write run inside the per-platform OS sandbox."
@@ -21517,6 +21519,7 @@
             "label": "Sandbox Bash / Edit / Write"
           },
           "tier": {
+            "cuaDesktop": "Bound sandbox desktop",
             "description": "Beats the app-wide default. Inherit defers to Settings → Sandbox.",
             "inherit": "Inherit app default",
             "label": "Sandbox tier",
