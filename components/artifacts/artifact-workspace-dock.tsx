@@ -17,7 +17,7 @@
  * Cmd/Ctrl+J toggles it (see `useArtifactDockShortcuts`).
  */
 
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import type { PanelImperativeHandle } from "react-resizable-panels"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { isProIdePanePinnedWithin } from "@/lib/codeserver/pane-manager"
@@ -290,6 +290,29 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const previousDockCollapsedRef = useRef(dockCollapsed)
   const previousDockSizeRequestRef = useRef(dockSizeRequest)
   /**
+   * The width the animation effects below should resize *to*, held in a ref so
+   * it is not a dependency of theirs.
+   *
+   * `onLayoutChanged` writes the settled percentage straight back through
+   * `setDockSize`, and the value it reports is a pixel measurement converted to
+   * a percent — so it practically never matches the requested number exactly.
+   * With `dockSize` in the dependency arrays that echo landed *mid-animation*
+   * and re-ran both effects: React fired their cleanup, which clears the timer
+   * and calls `reset()`, stripping the transition and the frozen content width
+   * one frame after they were applied. The re-run then bailed on the unchanged
+   * request token, so nothing put them back. The dock snapped to its new width
+   * with no transition while its contents were laid out at the *destination*
+   * width for a single frame inside the old box — a reflow flash that showed up
+   * as a scrollbar blinking in and out of the panel body on every panel switch.
+   *
+   * A layout effect, so the ref is current before the passive effects below run
+   * in the same commit.
+   */
+  const dockSizeRef = useRef(dockSize)
+  useLayoutEffect(() => {
+    dockSizeRef.current = dockSize
+  }, [dockSize])
+  /**
    * Whether the panel *body* is still on screen. Retracts one animation after a
    * collapse, so the shrinking shell wipes real content instead of an empty box.
    *
@@ -367,16 +390,17 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
     const element = dockPanelElementRef.current
     if (!panel || !element) return
 
+    const target = dockSizeRef.current
     return animateDockResize(
       element,
       dockContentElementRef.current,
-      dockCollapsed ? null : dockSize,
+      dockCollapsed ? null : target,
       () => {
         if (dockCollapsed) panel.collapse()
-        else panel.resize(`${dockSize}%`)
+        else panel.resize(`${target}%`)
       }
     )
-  }, [dockCollapsed, dockSize])
+  }, [dockCollapsed])
 
   // A width preset (the workbench narrow/wide buttons) asked for a specific
   // size. Keyed on the request token rather than `dockSize`, because a drag
@@ -390,24 +414,47 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
     const element = dockPanelElementRef.current
     if (!panel || !element || dockCollapsed) return
 
-    return animateDockResize(element, dockContentElementRef.current, dockSize, () =>
-      panel.resize(`${dockSize}%`)
+    const target = dockSizeRef.current
+    return animateDockResize(element, dockContentElementRef.current, target, () =>
+      panel.resize(`${target}%`)
     )
-  }, [dockCollapsed, dockSize, dockSizeRequest])
+  }, [dockCollapsed, dockSizeRequest])
 
   // Auto-expanding on a fresh artifact lives in `useDockAttentionSignal` on the
   // shared layer, so the mobile Sheet gets the identical rule.
 
   const workspaceProfile = dockProfile === "workspace"
-  const chatMinSize = workspaceProfile
-    ? `${CHAT_MIN_PERCENT.workspace}%`
-    : `${CHAT_MIN_PERCENT.default}%`
+  /**
+   * The cap the panel is actually given: the profile's own cap, or the width
+   * something just asked for — whichever is wider.
+   *
+   * `dockProfile` is written by `useDockPanelSync` in an effect that runs after
+   * the activation which requested the width, so on the frame a workspace panel
+   * asks for 65% the profile still reads `compact`, whose cap is 50%.
+   * `react-resizable-panels` clamped the request to that stale cap and echoed
+   * the clamped value back through `onLayoutChanged` — so the workspace panel
+   * settled at the artifact width, and the clamp landed as a second,
+   * untransitioned layout pass immediately after the first.
+   *
+   * Widening it costs nothing: `clampDockSize` already holds every stored width
+   * under the workspace cap, so this can never exceed 65%. Leaving the workspace
+   * profile still animates the dock back down — `setDockProfile` routes that
+   * clamp through the request token.
+   */
+  const effectiveDockMax = Math.max(
+    workspaceProfile ? WORKSPACE_DOCK_BOUNDS.max : ARTIFACT_DOCK_BOUNDS.max,
+    dockSize
+  )
+  // The chat floor has to yield by the same amount, or it re-imposes the clamp
+  // from the other side of the group.
+  const chatMinSize = `${Math.min(
+    workspaceProfile ? CHAT_MIN_PERCENT.workspace : CHAT_MIN_PERCENT.default,
+    100 - effectiveDockMax
+  )}%`
   const dockMinSize = workspaceProfile
     ? WORKSPACE_DOCK_BOUNDS.minPx
     : `${ARTIFACT_DOCK_BOUNDS.min}%`
-  const dockMaxSize = workspaceProfile
-    ? `${WORKSPACE_DOCK_BOUNDS.max}%`
-    : `${ARTIFACT_DOCK_BOUNDS.max}%`
+  const dockMaxSize = `${effectiveDockMax}%`
 
   return (
     <div
