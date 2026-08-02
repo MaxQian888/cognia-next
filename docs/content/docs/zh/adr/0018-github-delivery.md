@@ -1,9 +1,9 @@
 ---
-title: "0018 — GitHub Delivery"
+title: "0018 — GitHub 交付"
 description: "把 AI 驱动的 PR 审阅、Issue → PR 闭环、Release 自动化收编到 cognia 可视化 Workflow 里。"
 ---
 
-# ADR 0018 — GitHub Delivery
+# ADR 0018 — GitHub 交付
 
 **状态：** 已接受 —— **2026-07-28 已移除。** 内置交付栈（Settings 区、
 `/github-delivery` 看板、13 个 `action.github.*` workflow kind、

@@ -1,37 +1,30 @@
 ---
 title: "0009 — 平台连接器"
-description: "cognia-next 获得一个多平台消息适配层，使 AI 角色可以接收来自 Telegram、Discord、Slack、飞书和 OneBot 的入站消息，并通过一个健壮的 FIFO 出站队列发送回复。"
+description: "cognia-next 拥有多平台消息适配器层AI字符可以接收来自 Telegram、Discord、Slack、Lark 和 OneBot 的入站消息，并通过强大的FIFO出站队列发送回复。"
 ---
 
 # ADR 0009 — 平台连接器
 
-**状态：** 已接受  
-**日期：** 2026-05-05  
-**分支：** `feat/platform-connectors-phase1`
+**状态：** 已接受 **日期：** 2026-05-05 **分支：** `feat/platform-connectors-phase1`
 
 ---
 
 ## 背景
 
-cognia-next 拥有成熟的 AI 聊天引擎、丰富的角色/技能系统，以及一个能够
-近似某人写作风格的员工数字孪生。在本 ADR 之前，这些机器都无法
-与真实的消息平台交互——用户只能手动复制粘贴内容。
+Cognia-Next拥有成熟的AI聊天引擎、丰富的character/skill系统，以及能够模拟个人写作风格的员工数字孪生。在此ADR之前，这些机制都无法与真实的消息平台交互——用户只能手动复制粘贴内容。
 
-平台连接器的目标，是把一个 cognia-next AI 角色变成 Telegram、Discord、Slack、
-飞书和 QQ/NapCat（OneBot v11）上的 _真正的机器人_，具备：
+Platform Connectors 的目标是让 cognia-next AI 角色在 Telegram、Discord、Slack、Lark（Feishu）和 QQ/NapCat（OneBot v11）上成为_actual bot_，支持：
 
-- 三种运行模式：**auto**（AI 直接回复，无需审核）、**manual**（人工
-  键入回复文本）、**draft**（AI 生成草稿，由人工批准后再发送）。
-- 一个可靠的出站队列，带指数退避、按适配器的熔断器、限流
-  器、幂等去重，以及按对话的 FIFO 顺序。
-- 对每个入站和出站事件的简单审计日志。
-- 一个插件扩展 API，使第三方平台无需给 cognia-next 打补丁即可加入。
+- 三种操作模式：**自动**（AI回复而不审阅）、**手动**（人工输入回复文本）、**草稿**（AI生成草稿，人工审核后发送）。
+- 一个可靠的出站队列，配备指数回撤、每个适配器的断路器、速率限制器、幂等性重叠以及FIFO每次对话的排序。
+- 为每个入站和出站事件做一个简单的审计日志。
+- 一个插件扩展API可以添加第三方平台而无需修补 cognia-next。
 
 ---
 
 ## 决策
 
-### 架构概览
+### 架构概述
 
 ```
 Messaging platforms
@@ -46,158 +39,179 @@ TypeScript layer (renderer)
   └── ConnectorDrafts      — pending draft CRUD
 ```
 
-### 数据库 schema（v18）
+### 数据库模式（v18）
 
-在 `lib/db/schema.ts` v18 中新增了八张 Dexie 表：
+v18 新增了八个`lib/db/schema.ts` Dexie表：
 
-| 表                   | 键  | 用途                                           |
+| 表格 | 说明 | 目的 |
 | ----------------------- | ---- | ------------------------------------------------- |
-| `adapterInstances`      | `id` | 每个已配置的机器人一行（Telegram、Discord……） |
-| `platformIdentities`    | `id` | 每个观察到的平台用户一行                |
-| `inboundLedger`         | `id` | 去重台账（上限 1 万）                           |
-| `outboundQueue`         | `id` | 出站投递任务                            |
-| `conversationOverrides` | `id` | 按对话的模式/角色覆盖         |
-| `connectorAudit`        | `id` | 有上限的审计日志（5000 行）                |
-| `connectorDrafts`       | `id` | 等待人工批准的待定草稿            |
-| `connectorAttachments`  | `id` | 缓存的平台附件                |
+| `adapterInstances` | `id` | 每个配置好的机器人（Telegram、Discord等）只有一行 |
+| `platformIdentities` | `id` | 每个观察到的平台用户一行 |
+| `inboundLedger` | `id` | 去压账本（10k上限） |
+| `outboundQueue` | `id` | 出境配送任务 |
+| `conversationOverrides` | `id` | 每次对话mode/character覆盖 |
+| `connectorAudit` | `id` | 封顶审计日志（5,000行） |
+| `connectorDrafts` | `id` | 待审稿，等待人工审核 |
+| `connectorAttachments` | `id` | 缓存平台附件 |
 
 ### 五个内置平台适配器
 
-每个适配器遵循相同的分解方式：
-`parse.ts` / `serialize.ts` / transport / `capability.ts` / `sigverify.ts` / `index.ts`。
+每个适配器遵循相同的分解：`parse.ts` / `serialize.ts` / 传输 / `capability.ts` / `sigverify.ts` / `index.ts`。
 
-| 平台      | 传输                           | 签名校验                        |
-| ------------- | ----------------------------------- | --------------------------------------------- |
-| Telegram      | 长轮询（`getUpdates`）或 webhook | X-Telegram-Bot-Api-Secret-Token (HMAC-SHA256) |
-| Discord       | Gateway WS (v10)                    | Ed25519 (X-Signature-Ed25519)                 |
-| Slack         | Events API webhook                  | HMAC-SHA256 (X-Slack-Signature v0)            |
-| 飞书 / Lark | 长连接 WS（protobuf，**默认**）或事件回调 webhook | 长连接：app_id/app_secret WS 握手。Webhook：verification token（`header.token`）+ 可选 AES-256-CBC 解密（schema 2.0） |
-| OneBot v11    | 反向 WS（设备主动连入）             | Bearer token（可选）                       |
+| 纲领 | 传输 | 签名验证 |
+| ------------- | ----------------------------------- | ------------------------------------------------------------------------------------ |
+| 电报 | 长轮询（`getUpdates`）或网钩 | X-Telegram-Bot-Api-Secret-Token（HMAC-SHA256） |
+| Discord | Gateway WS（v10） | Ed25519（X-Signature-Ed25519） |
+| 松弛 | webhook API事件 | HMAC-SHA256（X-Slack-Signature v0） |
+| Lark / 非书 | 长连接WS（protobuf，**默认**）或事件回调webhook | 长连接：app_id/app_secret WS握手。Webhook：验证令牌（`header.token`）+ 可选AES-256-CBC体解密（模式2.0） |
+| OneBot v11 | Reverse-WS（设备连接） | 持有人令牌（可选） |
 
-### 出站执行器的保证
+### 出站跑者保证
 
-- **按适配器的熔断器**——在 10 个事件窗口内失败率达 50% 后跳闸；
-  冷却 30 秒后重新开启。
-- **按适配器的令牌桶**——容量 20，每秒补充 5 个令牌。
-- **指数退避**——`min(60 000, 1 000 × 2^attempts) + jitter(0–500 ms)`。
-- **5 次尝试后进入死信**——行转为 `deadlettered`；不再重试。
-- **幂等 LRU**——1000 条缓存短路平台的重复投递。
-- **按对话 FIFO**——`Map<conversationKey, Promise<void>>` 通道确保顺序。
-- **静默时段 + 全局静音**——每个适配器实例可选的 `quietHours` 窗口和 `muted`
-  标志会推迟出站任务，且不计为失败。
+- **每个适配器断路器** — 在10次事件窗口内，故障率达到50%后跳闸;冷却30秒后重新开启。
+- **每个适配器的令牌桶** — 容量20,5 tokens/s补充。
+- **指数级退缩** — `min(60 000, 1 000 × 2^attempts) + jitter(0–500 ms)`。
+- **5次尝试时为死符** — 行转为`deadlettered`;不再重试。
+- **幂零LRU** — 1,000条缓存短路平台重送。
+- **每段对话FIFO** — `Map<conversationKey, Promise<void>>`通道确保点餐。
+- **安静时间 + 全局静音** — 可选的 `quietHours` 窗口和每个适配器实例的 `muted` 标志可以延迟外发作业，但不计入失败。
 
 ### 模式路由
 
-三种模式由一个三层策略栈管控：
-`adapter default → per-conversation override → event-level override`。
+三种模式由三层策略栈管理：`adapter default → per-conversation override → event-level override`。
 
-| 模式     | 行为                                                                     |
+| 模式 | 行为 |
 | -------- | ----------------------------------------------------------------------------- |
-| `auto`   | 总线调用 `sendPrompt`（Phase 1 占位）；最终 AI 文本入队为出站。 |
-| `manual` | 用户在 Composer 中键入回复；直接调用 `enqueueOutbound`。          |
-| `draft`  | AI 生成一个 `ConnectorDraft`；用户经 Inbox UI 批准或拒绝。   |
+| `auto` | 公交呼叫`sendPrompt`通过`runConnectorDigestTurn`;最后AI文本被排队为出站。 |
+| `manual` | 用户输入回复，Composer;`enqueueOutbound`直接拨打。 |
+| `draft` | AI生成`ConnectorDraft`;用户通过收件箱UI批准或拒绝。 |
 
-### Inbox UI
+### 收件箱UI
 
-`app/inbox/` 渲染一个 Inbox 外壳（`InboxShell`），带一个侧边栏（`InboxSidebar`），
-列出所有绑定平台的 `ChatSession` 行，以及一个带 `ConversationHeader` /
-`MessageList` / `DraftBanner` 的详情面板。`/inbox/[conversationKey]` 路由是一个
-与 `output: "export"` 兼容的纯客户端静态页面。
+`app/inbox/` 渲染一个收件箱壳（`InboxShell`），带有侧边栏（`InboxSidebar`），列出所有平台绑定的`ChatSession`行，以及一个包含 `ConversationHeader` / `MessageList` / `DraftBanner` 的详细信息面板。`/inbox/[conversationKey]`路由是一个仅客户端的静态页面，兼容 `output: "export"`。
 
-### 设置 UI
+### 设定UI
 
-`components/settings/connections/connections-section.tsx`——位于设置中
-`?section=connections` 的分标签外壳。标签：Overview / Adapters / Conversations / Inbox /
-Outbound / Audit。每个标签是 `./tabs/` 下的一个独立组件。
+`components/settings/connections/connections-section.tsx` — 设置中的标签壳，`?section=connections`。标签页：概览 / 适配器 / 对话 / 收件箱 / 外包 / 审计。每个标签页都是`./tabs/`下的独立组件。
 
-### 插件扩展 API（任务 110）
+### 插件扩展API（任务110）
 
-`PluginManifest.connectors[]`（新增到 `types/plugin/plugin.ts`）让插件声明
-适配器工厂。`lib/plugin/bridge/connectors-bridge.ts` 桥接会在插件启用时发现并把它们
-注册到 `ConnectorBus`，并在禁用时注销。
+`PluginManifest.connectors[]`（添加到`types/plugin/plugin.ts`中）允许插件声明适配器工厂。`lib/plugin/bridge/connectors-bridge.ts`桥在启用插件时发现并注册它们，启用插件时`ConnectorBus`会取消注册。
 
-### Web 模式降级（任务 111）
+### 网页模式降级（任务111）
 
-适配器需要 Tauri 桌面运行时。在 web 模式下：
+适配器需要Tauri桌面运行时。网页模式：
 
-- `ConnectionsSection` 显示一个顶部横幅，解释该限制。
-- `ConversationHeader` 的模式切换器被包进一个 `pointer-events-none` 的禁用 span。
-- 对于绑定平台的会话，Composer 的发送按钮被禁用。
+- `ConnectionsSection`会显示一个顶部横幅，解释了这个限制。
+- `ConversationHeader`模式切换器被包裹在`pointer-events-none`的禁用区间内。
+- Composer的发送按钮在平台会话中被禁用。
 
-### 经由调度器的主动出站（任务 108）
+### 通过调度器主动出站（任务108）
 
-两个新的 `SchedulerEventType` 条目：
+两条新`SchedulerEventType`条目：
 
-- `connection:outbound:send`——直接把一个出站任务入队（无 AI）。
-- `connection:scheduled:digest`——Phase 1 占位；将在 Phase 1+ 调用 `sendPrompt`。
+- `connection:outbound:send` — 直接排队出站作业（无AI）。
+- `connection:scheduled:digest` — 调用`runConnectorDigestTurn`，驱动`sendPrompt`并排入助理回复。
 
-两者都经由 `lib/connectors/scheduled-outbound.ts` 注册为 `TaskExecutor`。
+两者都通过`lib/connectors/scheduled-outbound.ts`注册为`TaskExecutor`。
 
 ---
 
-## 实现结果（相对原始规格的差异）
+## 实现结果（与原始规范的差异）
 
-| 方面                          | 原始规格          | 实际实现                                                        |
+| 相位 | 原始规格 | 实现情况 |
 | ------------------------------- | ---------------------- | --------------------------------------------------------------------- |
-| 数据库 schema 版本         | v16                    | v18（v16 新增 canvas，v17 外部桥接，v18 连接器）           |
-| ADR 编号                      | 0008                   | 0009（0008 已被外部桥接占用）                                  |
-| axum 版本                    | 0.7                    | 0.8（实现时的最新稳定版）                            |
-| auto 模式下的 AI 运行             | 完整 `sendPrompt`      | Phase 1 占位——记录审计 + 占位任务；推迟到任务 40+  |
-| `segmentsToPlainText` 分隔符 | 未指定            | `" "`（跨 text/markdown 段以单个空格连接）                |
-| Tauri Rust HTTP 代理         | axum                   | cognia-next `connectors_http_request` Tauri 命令                   |
-| Phase 1 E2E 范围              | 完整 auto/manual/draft | 仅 auto+manual 冒烟；draft 模式待真实 `sendPrompt` 后再做 |
+| 数据库模式版本 | 第16卷 | V18（V16 增加了 canvas，v17 外部桥接器，v18 连接器） |
+| ADR号 | 0008 | 0009（0008 由外部桥接） |
+| 阿克苏姆版本 | 0.7 | 0.8（实现时的最新稳定版） |
+| AI以自动模式运行 | 全`sendPrompt` | 通过`runConnectorDigestTurn`实现;输出作为出站队列 |
+| `segmentsToPlainText`分离符 | 未说明 | `" "`（跨text/markdown段的单一行格连接） |
+| Tauri Rust HTTP代理 | 阿克苏姆 | Cognia-Next `connectors_http_request` Tauri 命令 |
+| 初始E2E范围 | 全auto/manual/draft | 最初采用自动+手动烟雾;后期完成了牵引和real-AI路径运行时 门禁 |
 
 ---
 
 ## 后果
 
-**正面**
+**阳性**
 
-- cognia-next AI 角色成为 5 大平台上的真正机器人。
-- 出站队列久经考验（熔断器、限流、退避、死信）。
-- 插件 API 让社区连接器无需分叉即可实现。
-- Web 用户获得清晰的降级路径，而非静默失败。
+- Cognia-Next AI 角色会在五大平台上成为真正的机器人。
+- 出站队列经过实战验证（断路器、速率限制、退后、死信）。
+- 插件API支持社区连接器而无需分叉。
+- 网页用户则能获得清晰的降级路径，而非无声的失败。
 
-**负面 / 已推迟**
+**当前关闭状态**
 
-- `auto` 模式的 AI 循环是占位的；完整的 `sendPrompt` → 回复 → 出站集成
-  是 Phase 1+ 的工作（任务 40+）。
-- 附件缓存（`connectorAttachments` 表）只有 schema；抓取流水线是
-  Phase 2。
-- Slack/Lark 的 OAuth 流程部分接入；生产令牌需要 Tauri keyring
-  集成和一个托管的重定向 URL。
+- `auto`模式AI环路和`connection:scheduled:digest`路径现在在`lib/connectors/scheduled-outbound.ts`中共享`runConnectorDigestTurn`。
+- 附件缓存现在TS调度器`lib/connectors/attachment-fetcher.ts`，Rust cache/fetch实现`src-tauri/src/connectors/attachments.rs`。
+- Slack/Lark OAuth代码交换通过`lib/connectors/oauth-registry.ts`和平台特定 OAuth 处理器部署仍需有效的重定向URL。
 
 ---
 
-## 修订 — 2026-07（飞书链路完整性补齐）
+## V38 — IM完工轨道（2026-05-18，见 ADR-0025）
 
-一次连接器链路审计发现若干「写好却没接通」的飞书/公共管线缺口。本次补齐它们
-（纯 TypeScript——无 Rust 改动；Rust 侧附件缓存与 OAuth 完成处理器早已存在）：
+Schema 在 v18 → v38 之间增加了三个内容：
 
-- **入站富媒体摄取（关闭「附件缓存 Phase 2」标记）。**
-  `lib/connectors/adapters/lark/inbound-media.ts:enrichLarkInboundMedia` 作为适配器
-  `dispatchEnvelope` 的第二遍,经既有加密缓存(`connectors_attachment_fetch` /
-  `connectors_attachment_read`)下载图片/文件字节,挂上内联 `dataBase64`(被已接线的入站
-  OCR + 模型视觉路径消费),文档类文件再经 `processDocumentAsync` 抽取文本。
-  `parse.ts:buildSegments` 现在把 `post` / `file` / `audio` / `media` 投影成类型化 segment,
-  而非 `[type]` 占位。
-- **以用户身份发送（关闭「OAuth 部分接入」标记）。**
-  `auth.ts:getUserAccessToken` / `refreshUserToken` 解析并静默刷新 OAuth 处理器持久化的
-  `user_token`;`index.ts:doRequest` 使用它(opt-in `settings.sendAsUser`),带 401 刷新与
-  优雅回退到机器人身份。`lark-config.tsx` 新增「以我的身份发送」区块:OAuth **连接账号**
-  按钮(打开授权 URL,由 deep-link 路由完成回调)+ opt-in 开关。
-- **公共管线修复:** `cooldown-after-bot-reply` blocker 现在真正被回写
-  (`ConnectorBus.recordBotReply`,由出站 runner 的 `onDelivered` 接线——默认群聊反刷屏冷却
-  此前从未生效);团队/工作流的 IM 派发现在与单角色路径过同一条 fail-closed PII 网关
-  (`runtime.ts`,关闭一处已确认的红线绕过);异步出站序列化器尊重显式 open_id/user_id/email
-  路由;`larkInboundToA2UI` 正确解包真实事件信封;死模块 `segments-to-a2ui.ts` 与孤儿
-  `connectors_bind_webhook_route` invoke 已移除。
+- `inboundLedger.namespace`（默认`"inbound"`），使相同的去重机制用于连接器回调;回填升级hook每个遗留行标签。
+- 新的`connectorCallbackBindings`表——由每个平台的 A2UI 映射器在出站时编写，`ConnectorBus.dispatchConnectorCallback` 读取以恢复线路动作 ID 的 `(surfaceId, componentId, conversationKey)`。
+- `adapterInstances.lastKnownCapabilities` — 每个适配器注册点的缓存`A2UICapabilityMatrix`由`ConnectorBusProvider`刷新。
+
+第二阶段关闭：
+
+- `runConnectorDigestTurn`驱动整个`resolveSendOptions → safeSendPrompt → assistantReplyToSegments → enqueueOutbound`管道。PII门控在每IM-driven回合前通过`lib/connectors/ai-loop/safe-send-prompt.ts`运行。
+- A2UI 接口原生地投影到 Slack Block Kit / Lark Interactive Card / Telegram InlineKeyboardMarkup / Discord Embed + Components / OneBot 文字和图像中。每个平台的覆盖范围都在 ADR-0025 的能力表中。
+- 入站回调（`block_actions` / `INTERACTION_CREATE` / `callback_query` / `im.interactive_message.action_triggered_v1`）会在`ConnectorBus.dispatchConnectorCallback` → `builtin:a2ui-bridge` MCP服务器（新的`a2ui_handle_connector_action`工具）→AI-loop轮流。
+- 默认情况下，计算机使用IM会话被列入黑名单;选择加入权限仍存在于`ConversationOverrideRow.allowComputerUse`。
+
+### V39（2026-05-20）——`im-gleaming-quail` Completeness Pass（完全性通行证）
+
+对IM连接器的端到端审计接口产生了十五项混凝土改进。所有这些都被寄送到同一个`~/.claude/plans/im-gleaming-quail.md`的平面文件后面。
+
+**修复漏洞（链环）:**
+
+- **Telegram `webhookSecret`持久性** — `credentialsRef.accounts`现在同时声明`botToken`和`webhookSecret`;现有行在编辑时自动迁移，因此秘密在重启后依然存在并抵达Tauri验证器。（`components/settings/connections/forms/telegram-config.tsx`）
+- **Lark TAT 401 自动刷新** — 新`lib/connectors/adapters/lark/auth-retry.ts`导出`LarkApiError`、`isLarkTatInvalidation`和`withTatRefresh`。封装`doRequest`、`send`和`edit`（用于上传预通过）意味着适配器能在一次重试中恢复服务器端TAT撤销，而无需等待长达两小时等待自然的TTL。
+- **回调绑定TTL** — `recordCallbackBinding`现在默认`expiresAt = createdAt + 30 d`。新`lib/connectors/callback-binding-cleanup.ts`每天在`ConnectorBusProvider`启动时运行;它会获得明确的过期
+  - pre-default-TTL行超过60天宽限期。无需模式提升——`expiresAt`列已经存在。
+
+**诊断/可观测性：**
+
+- **心跳携带运行时快照**——`CircuitBreaker.snapshot()`和`TokenBucket.snapshot()`是新的纯读访问者;`outbound-runner.ts`通过新的模块级`getAdapterRuntimeStateSnapshot(adapterId)`发布每个适配器的状态映射。心跳审计行的`fields`块现在包含`breakerState`、`breakerOpenedAt`、`breakerFailureRate`、`breakerEventCount`、`rateAvailable`、`rateCapacity`、`rateRefillPerSec`、`rateNextRefillAt`。
+- **出站行徽章** — 新`lib/connectors/derive-job-badge.ts`纯助手。`outbound-tab.tsx`实时查询`outboundQueue` + `adapterInstances` + 最新心跳，因此每行待处理的行都带有衍生叠加层：`paused-muted`，`paused-quiet-hours`（带ETA）、`circuit-blocked`。使用跑者使用的相同`isInQuietHours`/`msUntilQuietEnd`助手，因此UI和运行时始终一致。
+- **审计对话键过滤+导出**——`audit-tab.tsx`在 `conversationKey` 上增加了子字符串过滤器，并新增了导出菜单（CSV / JSON），并由新的纯`lib/connectors/audit-export.ts`支持。文件命名为`cognia-audit-<scope>-<YYYYMMDDHHmm>.{csv,json}`，并通过标准的 `URL.createObjectURL`+锚点模式进行流式处理。
+- **健康详情面板运行时卡** — 接口断路器小板（闭/半开/开，时间戳为开启）和带下一次加注ETA的速率桶表。`useAdapterHealth` hook现在显示了`breaker`和`rateBucket`从最新心跳行生成的打字快照。
+- **收件箱头适配器降级徽章 + 重新连接** — 当适配器状态为`degraded` / `down` / `unknown`时，amber/red徽章。点击后打开带有重新连接按钮的弹出覆盖，驱动现有`requeueAdapter`生命周期hook。重用`useAdapterHealth`，因此不会新增实时查询管道。
+
+**验证+UX完成：**
+
+- **发送测试消息** — 新`SendTestMessageSection`安装在适配器→配置详情标签页中，驱动一个真实`getBus().sendOutbound`通过总线的整个流水线（任何平台）。与现有`AdapterWhoamiPanel`（探针腿）配对，使每个平台同时拥有“凭证有效？”和“端到端可行？”的条件。
+- **安静时段自定义时区+响应式网格**——12区下拉菜单现在提供了一个`Custom…`选项，可以切换为自由IANA输入并`Intl.DateTimeFormat`验证。在窄屏（`grid-cols-1 sm:grid-cols-3`）中，网格布局降至一列。
+- **ConversationsTab CU徽章**——接口 `ConversationOverrideRow.allowComputerUse === true`为小型徽章，方便操作员一眼识别电脑频道。
+- **Discord `publicKey`第二阶段清理**——字段现在标记为`[Phase 2]`并带有内联通知;第一阶段不再写入密钥环值（避免幽灵凭证步枪），因为门户传输不消耗它。
+
+**高级：**
+
+- **出站死号批量重试** — 当过滤器设置为`deadlettered`且可见一行或多行时，芯片条中会出现“全部重试”按钮。在Dexie `bulkPut`中重复使用现有的单一任务重试语义。
+- **入门禁统计**——新的纯汇总器`lib/connectors/at-gate-stats.ts:summariseAtGateBlocks`汇总现有`inbound.policy_blocked`审计行（无需新仪器）。健康详情接口“入站过滤器（24小时）：N被丢弃，原因：......”。通过`topN`选项将长尾数据折叠到`other`桶中。
+
+**本分支未提及后续问题：**
+
+- 今天的OneBot reverse-WS探测器通过`onebot-config.tsx`中现有的`handleVerify`流发射，该流程监听`connectors://onebot/<adapterId>/open` Tauri事件，并有10秒的超时。一个专门接口 `connectors_onebot_probe` Tauri 命令实时`ws_server.connected_clients()`表是明确的下一步——计划中列为任务3.2的Rust段。
 
 ---
 
-## 参考
+## 修订版 — 2026-07（Lark链接完整性检查）
+
+连接链审计发现了几个Lark/pipeline间隙，这些漏洞是建成但未接线的。这次处理会封闭它们（TypeScript-only——没有Rust变化;Rust附件缓存和OAuth补全 处理器 已经存在）：
+
+- **进入富媒体摄取（关闭“第二阶段附件缓存”标记）。** `lib/connectors/adapters/lark/inbound-media.ts:enrichLarkInboundMedia`作为适配器`dispatchEnvelope`的第二遍运行，通过现有加密缓存（`connectors_attachment_fetch` / `connectors_attachment_read`）下载image/file字节，附加内联`dataBase64`（被已有有线的OCR+模型视野路径消耗），文档文件则通过`processDocumentAsync`提取文本。`parse.ts:buildSegments`现在把`post` / `file` / `audio` / `media` 投影成类型段，而不是`[type]`存根。
+- **以用户身份发送（关闭“OAuth部分”标记）。** `auth.ts:getUserAccessToken` / `refreshUserToken` resolve + OAuth 处理器持续存在时静默刷新`user_token`;`index.ts:doRequest`（选择加入`settings.sendAsUser`）配合 refresh-on-401 并优雅地退回机器人身份。`lark-config.tsx`会获得一个“以我身份发送”的部分，带有一个OAuth**连接账户**按钮（打开授权URL;深度链接路由器完成）+ 选择加入开关。
+- **流水线修复：** `cooldown-after-bot-reply`拦截器现在实际上被输入（`ConnectorBus.recordBotReply`，从出站跑道`onDelivered`有线——默认群聊反垃圾邮件冷却从未触发）;team/workflow IM调度现在通过与单字符路径相同的失败闭合PII 门禁（`runtime.ts`，关闭确认的红线绕过）;异步出站串行器尊重显式open_id/user_id/email路由;`larkInboundToA2UI`展开真实事件包络;而死`segments-to-a2ui.ts`模块+孤儿`connectors_bind_webhook_route`召唤者则被移除。
+
+---
+
+## 参考文献
 
 - 原始规格：`C:\Users\qwdma\.claude\plans\d-project-agentforge-astrbot-fluttering-cerf.md`
-- 实现计划：`docs/superpowers/plans/2026-05-05-platform-connectors.md`
-- 关键文件：`lib/connectors/`、`types/connectors/`、`src-tauri/src/connectors/`、
-  `components/settings/connections/`、`components/inbox/`、`app/inbox/`
+- 实施计划：`docs/superpowers/plans/2026-05-05-platform-connectors.md`
+- 关键文件：`lib/connectors/`、`types/connectors/`、`src-tauri/src/connectors/`、`components/settings/connections/`、`components/inbox/`、`app/inbox/`

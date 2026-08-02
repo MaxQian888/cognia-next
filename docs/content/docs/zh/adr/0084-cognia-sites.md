@@ -1,9 +1,9 @@
 ---
-title: "0084 — Cognia Sites"
+title: "0084 — Cognia 站点"
 description: "定义由 Cognia 自主管理的站点创作、不可变版本、可恢复部署、供应商资源和访客访问，同时不重复实现项目、编辑器、浏览器、Git、终端与凭据体系。"
 ---
 
-# ADR 0084 — Cognia Sites
+# ADR 0084 — Cognia 站点
 
 **状态：** 已接受  
 **日期：** 2026-07-18
