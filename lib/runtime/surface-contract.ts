@@ -252,6 +252,7 @@ export const INTERNAL_ROUTE_EXEMPTIONS = [
   "/plugin-auth/callback",
   "/selection-toolbar",
   "/share-target",
+  "/tray-panel",
 ] as const
 
 const CONTRACT_BY_ID = new Map<string, SurfaceContract>(

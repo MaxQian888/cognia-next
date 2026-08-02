@@ -63,6 +63,15 @@ pub(crate) enum PetPanelRole {
     /// borrowing another role would let that role's dismissal cancel an
     /// in-flight controller reveal.
     RecorderController,
+    /// The tray quick panel — the popover anchored under the menu-bar /
+    /// taskbar icon. Key-capable, because delegating a task means typing into
+    /// its composer.
+    ///
+    /// Its own role for the same reason as the two above: the lifecycle
+    /// statics are keyed BY ROLE, and the tray panel is dismissed on every
+    /// blur — sharing `Popup` would make each tray dismissal cancel an
+    /// in-flight pet-popup reveal.
+    TrayPanel,
 }
 
 static SPRITE_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -70,11 +79,13 @@ static POPUP_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static ISLAND_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static SELECTION_TOOLBAR_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static RECORDER_CONTROLLER_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
+static TRAY_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static SPRITE_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static POPUP_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static ISLAND_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static SELECTION_TOOLBAR_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static RECORDER_CONTROLLER_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
+static TRAY_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug)]
 struct PanelLifecycle {
@@ -102,6 +113,10 @@ static RECORDER_CONTROLLER_PANEL_LIFECYCLE: Mutex<PanelLifecycle> = Mutex::new(P
     destroying: false,
     in_flight_builds: 0,
 });
+static TRAY_PANEL_LIFECYCLE: Mutex<PanelLifecycle> = Mutex::new(PanelLifecycle {
+    destroying: false,
+    in_flight_builds: 0,
+});
 
 fn panel_generation(role: PetPanelRole) -> &'static AtomicU64 {
     match role {
@@ -110,6 +125,7 @@ fn panel_generation(role: PetPanelRole) -> &'static AtomicU64 {
         PetPanelRole::Island => &ISLAND_PANEL_GENERATION,
         PetPanelRole::SelectionToolbar => &SELECTION_TOOLBAR_PANEL_GENERATION,
         PetPanelRole::RecorderController => &RECORDER_CONTROLLER_PANEL_GENERATION,
+        PetPanelRole::TrayPanel => &TRAY_PANEL_GENERATION,
     }
 }
 
@@ -120,6 +136,7 @@ fn panel_open_intent(role: PetPanelRole) -> &'static AtomicBool {
         PetPanelRole::Island => &ISLAND_PANEL_OPEN,
         PetPanelRole::SelectionToolbar => &SELECTION_TOOLBAR_PANEL_OPEN,
         PetPanelRole::RecorderController => &RECORDER_CONTROLLER_PANEL_OPEN,
+        PetPanelRole::TrayPanel => &TRAY_PANEL_OPEN,
     }
 }
 
@@ -130,6 +147,7 @@ fn panel_lifecycle(role: PetPanelRole) -> &'static Mutex<PanelLifecycle> {
         PetPanelRole::Island => &ISLAND_PANEL_LIFECYCLE,
         PetPanelRole::SelectionToolbar => &SELECTION_TOOLBAR_PANEL_LIFECYCLE,
         PetPanelRole::RecorderController => &RECORDER_CONTROLLER_PANEL_LIFECYCLE,
+        PetPanelRole::TrayPanel => &TRAY_PANEL_LIFECYCLE,
     }
 }
 
@@ -231,6 +249,7 @@ impl PetPanelRole {
                 | PetPanelRole::Island
                 | PetPanelRole::SelectionToolbar
                 | PetPanelRole::RecorderController
+                | PetPanelRole::TrayPanel
         )
     }
 
@@ -246,8 +265,11 @@ impl PetPanelRole {
             // `NSStatusWindowLevel` (25) — one above `NSMainMenuWindowLevel`
             // (24) so the top-hugging island draws over the menu bar instead
             // of hiding behind it. The recorder controller needs the same, so
-            // it stays reachable over a full-screen app being recorded.
-            PetPanelRole::Island | PetPanelRole::RecorderController => 25,
+            // it stays reachable over a full-screen app being recorded, and so
+            // does the tray panel: it hangs off the status item, so a level
+            // below the menu bar would let a maximized window clip the popover
+            // the user just opened from it.
+            PetPanelRole::Island | PetPanelRole::RecorderController | PetPanelRole::TrayPanel => 25,
         }
     }
 
@@ -383,7 +405,8 @@ pub(crate) fn apply_pet_panel_behavior<R: Runtime>(
         PetPanelRole::Popup
         | PetPanelRole::Island
         | PetPanelRole::SelectionToolbar
-        | PetPanelRole::RecorderController => {
+        | PetPanelRole::RecorderController
+        | PetPanelRole::TrayPanel => {
             debug_assert!(role.can_become_key());
             let panel = window
                 .to_panel::<PetPopupPanel<R>>()
@@ -614,10 +637,41 @@ mod tests {
             PetPanelRole::Island,
             PetPanelRole::SelectionToolbar,
             PetPanelRole::RecorderController,
+            PetPanelRole::TrayPanel,
         ] {
             assert!(!role.hides_on_deactivate());
             assert!(role.works_when_modal());
         }
+    }
+
+    #[test]
+    fn tray_panel_is_key_capable_and_floats_above_the_menu_bar() {
+        // It carries the delegate composer, so it must take the keyboard.
+        assert!(PetPanelRole::TrayPanel.can_become_key());
+        // Anchored to the status item: a maximized window must never clip the
+        // popover the user just opened from the menu bar.
+        assert_eq!(PetPanelRole::TrayPanel.window_level(), 25);
+    }
+
+    /// Same rationale as `recorder_controller_has_its_own_reveal_generation`.
+    /// The tray panel is dismissed on EVERY blur, so a shared generation would
+    /// make each tray dismissal cancel an in-flight reveal of the other role
+    /// (and vice versa).
+    ///
+    /// Paired with `Island` rather than `Popup`: these statics are process-wide
+    /// and `cargo test` runs cases in parallel threads, so the counterpart has
+    /// to be a role no other test mutates.
+    #[test]
+    fn tray_panel_has_its_own_reveal_generation() {
+        let tray = begin_panel_open(PetPanelRole::TrayPanel);
+        let island = begin_panel_open(PetPanelRole::Island);
+
+        cancel_panel_reveal(PetPanelRole::Island);
+
+        assert!(!panel_generation_is_current(PetPanelRole::Island, island));
+        assert!(panel_generation_is_current(PetPanelRole::TrayPanel, tray));
+
+        cancel_panel_reveal(PetPanelRole::TrayPanel);
     }
 
     #[test]

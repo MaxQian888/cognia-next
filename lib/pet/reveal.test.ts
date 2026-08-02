@@ -22,6 +22,14 @@ jest.mock("@/lib/tauri/pet-window", () => ({
   revealIslandWindow: (focus: boolean) => revealIslandWindowMock(focus),
 }))
 
+// Same rationale as the `@/lib/tauri/os` stub above: `@/lib/tauri/tray-panel`
+// imports `@/lib/tauri`, whose transport picker calls `isTauri()` at module
+// init → a TDZ crash under this file's mock.
+const revealTrayPanelMock = jest.fn().mockResolvedValue(true)
+jest.mock("@/lib/tauri/tray-panel", () => ({
+  revealTrayPanel: (focus: boolean) => revealTrayPanelMock(focus),
+}))
+
 let mockWindowRole: ReturnType<typeof import("@/lib/pet/window-role").getPetWindowRole> = "overlay"
 jest.mock("@/lib/pet/window-role", () => ({
   getPetWindowRole: () => mockWindowRole,
@@ -182,6 +190,36 @@ describe("schedulePetWindowReveal", () => {
     expect(revealPetWindowMock).not.toHaveBeenCalled()
     expect(showMock).not.toHaveBeenCalled()
     expect(setFocusMock).not.toHaveBeenCalled()
+  })
+
+  it("routes the macOS tray-panel reveal to its own NSPanel command", async () => {
+    mockIsTauri = true
+    mockIsMac = true
+    mockWindowRole = "tray-panel"
+    schedulePetWindowReveal({ focus: true })
+    flushRaf()
+    flushRaf()
+    await flushAsync()
+
+    expect(revealTrayPanelMock).toHaveBeenCalledWith(true)
+    expect(revealPetWindowMock).not.toHaveBeenCalled()
+    expect(revealIslandWindowMock).not.toHaveBeenCalled()
+    expect(showMock).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the generic show path for the tray panel off macOS", async () => {
+    // Windows/Linux have no NSPanel — the shared show + resize-nudge path runs
+    // for the tray panel exactly as it does for the pet windows.
+    mockIsTauri = true
+    mockIsMac = false
+    mockWindowRole = "tray-panel"
+    schedulePetWindowReveal({ focus: true })
+    flushRaf()
+    flushRaf()
+    await flushAsync()
+
+    expect(revealTrayPanelMock).not.toHaveBeenCalled()
+    expect(showMock).toHaveBeenCalled()
   })
 
   it("focuses after showing when focus is requested (popup blur-to-close)", async () => {

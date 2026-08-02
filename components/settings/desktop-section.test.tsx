@@ -54,6 +54,17 @@ jest.mock("@tauri-apps/api/path", () => ({ appDataDir: () => appDataDirMock() })
 jest.mock("@cognia/logging", () => ({
   loggers: { app: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } },
 }))
+// The tray quick-panel settings render inside this page and read their config
+// through `invoke` on mount. Left real, that read consumes the
+// `invokeMock.mockRejectedValueOnce` the desktop-action tests arm for the
+// "Ping Rust" button. Its own behaviour is covered by
+// `components/settings/tray-panel/tray-panel-settings.test.tsx`.
+jest.mock("@/lib/tauri/tray-panel", () => ({
+  DEFAULT_TRAY_PANEL_CONFIG: { leftClick: "panel", width: 380, height: 460 },
+  getTrayPanelConfig: jest.fn().mockResolvedValue({ leftClick: "panel", width: 380, height: 460 }),
+  openTrayPanel: jest.fn().mockResolvedValue(true),
+  setTrayLeftClickAction: jest.fn().mockResolvedValue(true),
+}))
 const toastSuccessMock = jest.fn()
 const toastErrorMock = jest.fn()
 const toastMessageMock = jest.fn()

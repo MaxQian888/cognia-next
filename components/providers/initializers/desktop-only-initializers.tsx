@@ -128,6 +128,10 @@ const SelectionToolbarInitializer = dynamic(
   () => import("./selection-toolbar-initializer").then((m) => m.SelectionToolbarInitializer),
   { ssr: false }
 )
+const TrayPanelInitializer = dynamic(
+  () => import("./tray-panel-initializer").then((m) => m.TrayPanelInitializer),
+  { ssr: false }
+)
 
 export function DesktopOnlyInitializers() {
   const isClient = useIsClient()
@@ -163,6 +167,7 @@ export function DesktopOnlyInitializers() {
       <ExitConfirmationDialog />
       <CrashReportDialog />
       <SelectionToolbarInitializer />
+      <TrayPanelInitializer />
     </>
   )
 }

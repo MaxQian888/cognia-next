@@ -27625,6 +27625,105 @@
       "title": "工作区信任",
       "trustedAt": "信任于 {date}",
       "trustedFoldersLabel": "已信任的文件夹"
+    },
+    "trayPanel": {
+      "desktopOnly": "托盘快捷面板仅在桌面版中可用。",
+      "behavior": {
+        "title": "托盘快捷面板",
+        "description": "位于托盘图标下方的弹窗，可用于委派任务或执行快捷操作。",
+        "leftClick": "点击托盘图标时",
+        "leftClickHint": "右键始终打开托盘菜单。",
+        "leftClickOptions": {
+          "panel": "打开快捷面板",
+          "toggle-window": "显示或隐藏主窗口",
+          "none": "不做任何事"
+        },
+        "preview": "预览",
+        "previewHint": "在托盘图标最近所在的位置打开面板。",
+        "previewAction": "打开面板"
+      },
+      "actions": {
+        "title": "面板操作",
+        "description": "面板中提供的操作及其顺序。每个操作都可以携带自定义输入框。",
+        "add": "添加操作",
+        "reset": "重置",
+        "builtIn": "内置",
+        "edit": "编辑",
+        "remove": "删除",
+        "hide": "隐藏",
+        "show": "显示",
+        "moveUp": "上移",
+        "moveDown": "下移"
+      },
+      "editor": {
+        "title": "编辑操作",
+        "description": "设置该操作何时出现、执行什么，以及需要收集哪些输入。",
+        "label": "名称",
+        "icon": "图标",
+        "iconPlaceholder": "Lucide 图标名，例如 rocket",
+        "trigger": "触发方式",
+        "triggers": {
+          "manual": "点击时",
+          "submit": "主操作（回车）",
+          "open": "面板打开时",
+          "hotkey": "快捷键"
+        },
+        "chord": "快捷键",
+        "when": "显示条件",
+        "whenPlaceholder": "例如 automation.running",
+        "whenHint": "可选。表达式为真时该操作才会显示。",
+        "effect": "执行",
+        "effects": {
+          "delegate": "委派任务",
+          "slash": "执行斜杠命令",
+          "command": "执行已注册命令",
+          "navigate": "打开页面",
+          "native": "执行托盘动作"
+        },
+        "prompt": "提示词",
+        "promptPlaceholder": "审阅 {{path}} 并总结风险",
+        "promptHint": "使用 {{fieldId}} 引用输入字段。",
+        "target": "目标",
+        "targetHint": "可填 newSession、activeSession，或用 {{fieldId}} 由输入决定。",
+        "slash": "斜杠命令",
+        "commandId": "命令 id",
+        "path": "路径",
+        "nativeAction": "托盘动作",
+        "focusMainWindow": "同时切换到主窗口",
+        "fields": "输入字段",
+        "fieldsHint": "执行前收集；在效果中用 {{fieldId}} 引用。",
+        "save": "保存",
+        "cancel": "取消",
+        "issues": {
+          "missingLabel": "请填写操作名称。",
+          "duplicateFieldId": "字段 id 重复：{id}",
+          "invalidFieldId": "字段 id「{id}」只能包含字母、数字、- 和 _。",
+          "unknownPlaceholder": "没有匹配的字段：{ids}",
+          "emptyEffect": "请填写该操作要执行的内容。",
+          "illegalTrigger": "只有「打开页面」和「执行命令」可以在面板打开时自动执行。",
+          "missingChord": "请输入快捷键，例如 mod+1。",
+          "emptySelect": "下拉框「{id}」至少需要一个选项。"
+        }
+      },
+      "fieldEditor": {
+        "empty": "没有输入字段 — 该操作会直接执行。",
+        "add": "添加字段",
+        "remove": "删除字段",
+        "id": "Id",
+        "label": "名称",
+        "kind": "类型",
+        "kinds": {
+          "text": "单行文本",
+          "textarea": "多行文本",
+          "select": "下拉框",
+          "switch": "开关",
+          "number": "数字"
+        },
+        "options": "选项",
+        "optionsPlaceholder": "value=显示名，每行一个",
+        "required": "必填",
+        "submitOnEnter": "回车提交"
+      }
     }
   },
   "share": {
@@ -30506,7 +30605,8 @@
       "openSettings": "订阅设置…",
       "refresh": "刷新额度",
       "title": "订阅额度"
-    }
+    },
+    "trayPanelToggle": "快捷面板"
   },
   "tts": {
     "nowPlaying": {
@@ -36032,6 +36132,56 @@
       "recentHeading": "最近",
       "searchPlaceholder": "搜索工作区…",
       "untrustedHint": "未受信任的工作区"
+    }
+  },
+  "trayPanel": {
+    "title": "Cognia",
+    "dismiss": "关闭面板",
+    "openSettings": "打开设置",
+    "run": "执行",
+    "empty": "暂无操作 — 可在「设置 › 桌面」中添加。",
+    "targets": {
+      "newSession": "新建会话",
+      "activeSession": "当前会话"
+    },
+    "actions": {
+      "delegate": {
+        "label": "委派任务",
+        "description": "无需打开主窗口，直接把任务交给 Cognia。",
+        "promptLabel": "任务",
+        "promptPlaceholder": "描述你希望 Cognia 做什么…",
+        "targetLabel": "发送到",
+        "autoSendLabel": "立即发送"
+      },
+      "newChat": {
+        "label": "新建会话"
+      },
+      "openApp": {
+        "label": "打开 Cognia"
+      },
+      "agentRuns": {
+        "label": "智能体运行"
+      },
+      "scheduler": {
+        "label": "定时任务"
+      },
+      "stopAutomation": {
+        "label": "停止自动化"
+      },
+      "settings": {
+        "label": "设置"
+      }
+    },
+    "errors": {
+      "required": "请先填写必填项。",
+      "unknownPlaceholder": "未知占位符：{ids}",
+      "badTarget": "「{value}」不是有效的目标。",
+      "illegalTrigger": "该操作不能在面板打开时自动执行。",
+      "emptyEffect": "该操作没有可执行的内容。",
+      "runFailed": "执行该操作失败。",
+      "runFailedFor": "执行「{action}」失败",
+      "deliveryFailed": "Cognia 主窗口未响应。",
+      "unknownCommand": "未知命令：{id}"
     }
   }
 }

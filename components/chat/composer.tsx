@@ -1611,6 +1611,11 @@ function ComposerInner(props: InnerProps) {
     sessionId ? state.pendingBySession[sessionId] : undefined
   )
   const consumeComposerIntent = useComposerIntentStore((state) => state.consume)
+  // Text an auto-sending intent staged, held until the input state catches up.
+  // A ref, not state: this is a one-shot latch between two effects, and a
+  // `useState` write inside an effect body is a cascading render
+  // (`react-hooks/set-state-in-effect`). See the handshake below.
+  const pendingAutoSendRef = useRef<string | null>(null)
   // See `restoredAttachments` above: only the ones we could not bring back.
   const tDraft = useTranslations("chat.composer.draftRestore")
   // The next-intl translator isn't a stable reference, so we read it through a
@@ -1710,9 +1715,13 @@ function ComposerInner(props: InnerProps) {
     const intent = consumeComposerIntent(sessionId, pendingComposerIntent.candidateId)
     if (!intent) return
     if (intent.prompt) {
-      controller.textInput.setInput(
-        mergeComposerIntentPrompt(controller.textInput.value, intent.prompt)
-      )
+      const merged = mergeComposerIntentPrompt(controller.textInput.value, intent.prompt)
+      controller.textInput.setInput(merged)
+      // Auto-send (tray quick panel) is armed here but fired by the effect
+      // below, once the input state has actually flushed: `submit` closes over
+      // `controller.textInput.value`, so calling it now would send the text
+      // that was in the box BEFORE this line.
+      if (intent.autoSend) pendingAutoSendRef.current = merged
     }
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [
@@ -1723,6 +1732,16 @@ function ComposerInner(props: InnerProps) {
     persistDrafts,
     sessionId,
   ])
+
+  // Second half of the auto-send handshake: fire only once the committed input
+  // matches the text we staged, so the send can never race the state write.
+  useEffect(() => {
+    const pending = pendingAutoSendRef.current
+    if (pending === null) return
+    if (controller.textInput.value !== pending) return
+    pendingAutoSendRef.current = null
+    void submit()
+  }, [controller.textInput.value, submit])
 
   // Memoised on the file list + staged state so the persist effect below — which
   // also depends on the text value — doesn't rebuild these rows on every

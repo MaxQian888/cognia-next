@@ -29,6 +29,16 @@ export const DEFAULT_TRAY_ITEMS: TrayMenuItem[] = [
     payload: { kind: "native", action: "toggle-window" },
   },
   {
+    // Second route to the quick panel. The primary one is a left-click on the
+    // icon, but that is a user preference (`tray-panel.json:leftClick`) — this
+    // row keeps the panel reachable when they have rebound it.
+    kind: "action",
+    id: "tray.panel-toggle",
+    label: "tray.trayPanelToggle",
+    iconHint: "window",
+    payload: { kind: "native", action: "tray-panel-toggle" },
+  },
+  {
     kind: "action",
     id: "tray.pet-toggle",
     label: "tray.petToggle",

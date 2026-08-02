@@ -59,6 +59,7 @@ const BYPASS_PREFIXES = [
   "/pet-popup",
   "/island",
   "/selection-toolbar",
+  "/tray-panel",
 ]
 
 export function isShellBypassRoute(pathname: string | null | undefined): boolean {

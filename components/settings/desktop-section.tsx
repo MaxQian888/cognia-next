@@ -19,6 +19,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { loggers } from "@cognia/logging"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { TraySection } from "./tray-section"
+import { TrayPanelSettings } from "./tray-panel/tray-panel-settings"
 import { SelectionToolbarSettings } from "./selection-toolbar-settings"
 
 /**
@@ -315,6 +316,13 @@ export function DesktopSection() {
 
       <section className="space-y-3 rounded-md border p-4">
         <TraySection />
+      </section>
+
+      {/* Card-free by design (`SettingsStack`/`SettingsBlock`): the quick panel
+          settings are a flat, hairline-separated stack, not another bordered
+          box. Rendered as a bare section so nothing re-introduces a wrapper. */}
+      <section className="pt-2">
+        <TrayPanelSettings />
       </section>
     </div>
   )

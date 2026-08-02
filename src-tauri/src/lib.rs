@@ -753,6 +753,7 @@ pub fn run() {
             tray::panel::tray_panel_resize,
             tray::panel::tray_panel_get_config,
             tray::panel::tray_panel_set_left_click,
+            tray::panel::tray_run_native_action,
             shortcuts::commands::shortcut_bind,
             shortcuts::commands::shortcut_unbind,
             shortcuts::commands::shortcut_list,

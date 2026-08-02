@@ -27625,6 +27625,105 @@
       "title": "Workspace Trust",
       "trustedAt": "Trusted {date}",
       "trustedFoldersLabel": "Trusted folders"
+    },
+    "trayPanel": {
+      "desktopOnly": "The tray quick panel is only available in the desktop build.",
+      "behavior": {
+        "title": "Tray quick panel",
+        "description": "A popover under the tray icon for delegating a task or firing a quick action.",
+        "leftClick": "Clicking the tray icon",
+        "leftClickHint": "Right-click always opens the tray menu.",
+        "leftClickOptions": {
+          "panel": "Opens the quick panel",
+          "toggle-window": "Shows or hides the main window",
+          "none": "Does nothing"
+        },
+        "preview": "Preview",
+        "previewHint": "Opens the panel where the tray icon last was.",
+        "previewAction": "Open the panel"
+      },
+      "actions": {
+        "title": "Panel actions",
+        "description": "What the panel offers, in order. Each action can carry its own input fields.",
+        "add": "Add action",
+        "reset": "Reset",
+        "builtIn": "Built-in",
+        "edit": "Edit",
+        "remove": "Remove",
+        "hide": "Hide",
+        "show": "Show",
+        "moveUp": "Move up",
+        "moveDown": "Move down"
+      },
+      "editor": {
+        "title": "Edit action",
+        "description": "Choose when the action is offered, what it does, and which inputs it collects.",
+        "label": "Label",
+        "icon": "Icon",
+        "iconPlaceholder": "Lucide icon name, e.g. rocket",
+        "trigger": "Trigger",
+        "triggers": {
+          "manual": "On click",
+          "submit": "Primary (Enter)",
+          "open": "When the panel opens",
+          "hotkey": "Keyboard shortcut"
+        },
+        "chord": "Shortcut",
+        "when": "Condition",
+        "whenPlaceholder": "e.g. automation.running",
+        "whenHint": "Optional. The action is hidden unless the expression is true.",
+        "effect": "Does",
+        "effects": {
+          "delegate": "Delegate a task",
+          "slash": "Run a slash command",
+          "command": "Run a registered command",
+          "navigate": "Open a page",
+          "native": "Run a tray action"
+        },
+        "prompt": "Prompt",
+        "promptPlaceholder": "Review {{path}} and summarise the risks",
+        "promptHint": "Reference an input field with {{fieldId}}.",
+        "target": "Destination",
+        "targetHint": "newSession, activeSession, or {{fieldId}} to let an input decide.",
+        "slash": "Slash command",
+        "commandId": "Command id",
+        "path": "Path",
+        "nativeAction": "Tray action",
+        "focusMainWindow": "Bring the main window forward",
+        "fields": "Input fields",
+        "fieldsHint": "Collected before the action runs; reference them as {{fieldId}}.",
+        "save": "Save",
+        "cancel": "Cancel",
+        "issues": {
+          "missingLabel": "Give the action a label.",
+          "duplicateFieldId": "Duplicate field id: {id}",
+          "invalidFieldId": "Field id \"{id}\" may only use letters, digits, - and _.",
+          "unknownPlaceholder": "No field matches: {ids}",
+          "emptyEffect": "Fill in what this action should do.",
+          "illegalTrigger": "Only \"open a page\" and \"run a command\" may run when the panel opens.",
+          "missingChord": "Enter a shortcut, e.g. mod+1.",
+          "emptySelect": "Dropdown \"{id}\" needs at least one option."
+        }
+      },
+      "fieldEditor": {
+        "empty": "No input fields — the action runs straight away.",
+        "add": "Add field",
+        "remove": "Remove field",
+        "id": "Id",
+        "label": "Label",
+        "kind": "Type",
+        "kinds": {
+          "text": "Text",
+          "textarea": "Long text",
+          "select": "Dropdown",
+          "switch": "Switch",
+          "number": "Number"
+        },
+        "options": "Options",
+        "optionsPlaceholder": "value=Label, one per line",
+        "required": "Required",
+        "submitOnEnter": "Enter submits"
+      }
     }
   },
   "share": {
@@ -30506,7 +30605,8 @@
       "openSettings": "Subscription settings…",
       "refresh": "Refresh usage",
       "title": "Subscription usage"
-    }
+    },
+    "trayPanelToggle": "Quick panel"
   },
   "tts": {
     "nowPlaying": {
@@ -36032,6 +36132,56 @@
       "recentHeading": "Recent",
       "searchPlaceholder": "Search workspaces…",
       "untrustedHint": "Untrusted workspace"
+    }
+  },
+  "trayPanel": {
+    "title": "Cognia",
+    "dismiss": "Close panel",
+    "openSettings": "Open settings",
+    "run": "Run",
+    "empty": "No actions yet — add one in Settings › Desktop.",
+    "targets": {
+      "newSession": "New conversation",
+      "activeSession": "Current conversation"
+    },
+    "actions": {
+      "delegate": {
+        "label": "Delegate",
+        "description": "Hand a task to Cognia without opening the window.",
+        "promptLabel": "Task",
+        "promptPlaceholder": "Describe what Cognia should do…",
+        "targetLabel": "Send to",
+        "autoSendLabel": "Send immediately"
+      },
+      "newChat": {
+        "label": "New conversation"
+      },
+      "openApp": {
+        "label": "Open Cognia"
+      },
+      "agentRuns": {
+        "label": "Agent runs"
+      },
+      "scheduler": {
+        "label": "Scheduled tasks"
+      },
+      "stopAutomation": {
+        "label": "Stop automation"
+      },
+      "settings": {
+        "label": "Settings"
+      }
+    },
+    "errors": {
+      "required": "Fill in the required fields first.",
+      "unknownPlaceholder": "Unknown placeholder: {ids}",
+      "badTarget": "\"{value}\" is not a valid destination.",
+      "illegalTrigger": "This action can't run automatically when the panel opens.",
+      "emptyEffect": "This action has nothing to run.",
+      "runFailed": "Couldn't run that action.",
+      "runFailedFor": "Couldn't run “{action}”",
+      "deliveryFailed": "Cognia's main window didn't respond.",
+      "unknownCommand": "Unknown command: {id}"
     }
   }
 }

@@ -11,6 +11,7 @@
 import { isTauri } from "@/lib/platform/detect"
 import { isMacPlatform } from "@/lib/tauri/os"
 import { revealIslandWindow, revealPetWindow } from "@/lib/tauri/pet-window"
+import { revealTrayPanel } from "@/lib/tauri/tray-panel"
 import { getPetWindowRole, PET_POPUP_WINDOW_LABEL, PET_WINDOW_LABEL } from "@/lib/pet/window-role"
 
 export interface PetWindowRevealOptions {
@@ -50,6 +51,8 @@ export function schedulePetWindowReveal(options: PetWindowRevealOptions = {}): (
           const role = getPetWindowRole()
           if (role === "island") {
             await revealIslandWindow(Boolean(options.focus))
+          } else if (role === "tray-panel") {
+            await revealTrayPanel(Boolean(options.focus))
           } else if (role === "overlay" || role === "popup") {
             await revealPetWindow(
               Boolean(options.focus),

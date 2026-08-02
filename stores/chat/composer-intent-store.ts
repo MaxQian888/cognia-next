@@ -6,6 +6,15 @@ export interface PendingComposerIntent {
   candidateId: string
   /** `null` means focus the Composer without inserting a stock instruction. */
   prompt: string | null
+  /**
+   * Send the staged text immediately instead of leaving it for the user to
+   * edit. Used by the tray quick panel's "delegate" action — the whole point
+   * of that surface is to hand off work without opening the app first.
+   *
+   * The selection toolbar never sets it: its prompts are starting points the
+   * user is expected to adjust before sending.
+   */
+  autoSend?: boolean
 }
 
 interface ComposerIntentState {
