@@ -25,8 +25,11 @@ jest.mock("dexie-react-hooks", () => ({
   },
 }))
 
+// When true, both live queries hand back a pending promise — the pre-hydration
+// state the component has to survive without rows.
+let liveQueriesPending = false
 jest.mock("@/lib/db/sessions", () => ({
-  listSessions: () => liveSessions,
+  listSessions: () => (liveQueriesPending ? Promise.resolve([]) : liveSessions),
   forkSessionFromParent: jest.fn(),
   deleteSession: jest.fn(),
   updateSession: jest.fn(),
@@ -35,7 +38,7 @@ jest.mock("@/lib/db/sessions", () => ({
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
     sessionUsage: {
-      toArray: () => liveUsage,
+      toArray: () => (liveQueriesPending ? Promise.resolve([]) : liveUsage),
     },
   }),
 }))
@@ -73,6 +76,7 @@ const mockedUpdate = updateSession as unknown as jest.Mock
 
 beforeEach(() => {
   jest.clearAllMocks()
+  liveQueriesPending = false
   liveSessions.length = 0
   liveUsage.length = 0
   activeSessionId = null
@@ -241,5 +245,100 @@ describe("SessionsTab — row actions", () => {
     render(<SessionsTab />)
     await user.click(screen.getByTestId("fork-s1"))
     await waitFor(() => expect(mockedFork).toHaveBeenCalled())
+  })
+
+  it("Rename can be dismissed with Cancel and with Escape", async () => {
+    const user = userEvent.setup()
+    render(<SessionsTab />)
+
+    await user.click(screen.getByTestId("rename-s1"))
+    await user.click(await screen.findByRole("button", { name: "cancel" }))
+    await waitFor(() => expect(screen.queryByTestId("rename-input")).not.toBeInTheDocument())
+
+    await user.click(screen.getByTestId("rename-s1"))
+    await screen.findByTestId("rename-input")
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByTestId("rename-input")).not.toBeInTheDocument())
+  })
+
+  it("falls back to placeholders for an untitled, kindless row", () => {
+    liveSessions.push({ id: "bare", title: "", updatedAt: Date.now(), createdAt: 0 } as never)
+    render(<SessionsTab />)
+    const row = screen.getByTestId("session-row-bare")
+    expect(row).toHaveTextContent("untitled")
+    expect(row).toHaveTextContent("direct")
+  })
+
+  it("labels each age band of the Updated column", () => {
+    const now = Date.now()
+    pushSession({ id: "now", title: "Now", updatedAt: now })
+    pushSession({ id: "mins", title: "Mins", updatedAt: now - 5 * 60_000 })
+    pushSession({ id: "hours", title: "Hours", updatedAt: now - 5 * 3_600_000 })
+    pushSession({ id: "days", title: "Days", updatedAt: now - 5 * 86_400_000 })
+    render(<SessionsTab />)
+
+    expect(screen.getByTestId("session-row-now")).toHaveTextContent("ago.justNow")
+    expect(screen.getByTestId("session-row-mins")).toHaveTextContent("ago.minutes")
+    expect(screen.getByTestId("session-row-hours")).toHaveTextContent("ago.hours")
+    expect(screen.getByTestId("session-row-days")).toHaveTextContent("ago.days")
+  })
+
+  it("names an untitled session by its id in the resume toast", async () => {
+    const user = userEvent.setup()
+    liveSessions.push({ id: "bare", title: "", updatedAt: Date.now(), createdAt: 0 } as never)
+    render(<SessionsTab />)
+    await user.click(screen.getByTestId("resume-bare"))
+    expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("bare"))
+  })
+
+  it("surfaces a rename failure and unblocks the row", async () => {
+    const user = userEvent.setup()
+    mockedUpdate.mockRejectedValueOnce(new Error("write refused"))
+    render(<SessionsTab />)
+
+    await user.click(screen.getByTestId("rename-s1"))
+    fireEvent.change(screen.getByTestId("rename-input"), { target: { value: "New" } })
+    await user.click(screen.getByTestId("rename-confirm"))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("write refused"))
+  })
+
+  it("surfaces a delete failure and keeps the row", async () => {
+    const user = userEvent.setup()
+    mockedDelete.mockRejectedValueOnce("boom")
+    render(<SessionsTab />)
+
+    await user.click(screen.getByTestId("delete-s1"))
+    await user.click(await screen.findByTestId("delete-confirm"))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("boom"))
+    expect(screen.getByTestId("session-row-s1")).toBeInTheDocument()
+  })
+
+  it("renders the empty state while both live queries are still pending", () => {
+    liveQueriesPending = true
+    render(<SessionsTab />)
+    expect(screen.getByText(/emptyAll/)).toBeInTheDocument()
+  })
+
+  it("stringifies a non-Error rename failure", async () => {
+    const user = userEvent.setup()
+    mockedUpdate.mockRejectedValueOnce("rename blew up")
+    render(<SessionsTab />)
+
+    await user.click(screen.getByTestId("rename-s1"))
+    fireEvent.change(screen.getByTestId("rename-input"), { target: { value: "New" } })
+    await user.click(screen.getByTestId("rename-confirm"))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("rename blew up"))
+  })
+
+  it("reads the message off an Error delete failure", async () => {
+    const user = userEvent.setup()
+    mockedDelete.mockRejectedValueOnce(new Error("delete refused"))
+    render(<SessionsTab />)
+
+    await user.click(screen.getByTestId("delete-s1"))
+    await user.click(await screen.findByTestId("delete-confirm"))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("delete refused"))
   })
 })

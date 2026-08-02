@@ -14,12 +14,21 @@ jest.mock("@/lib/claude/ipc", () => ({
   getSidecarStatus: (...args: unknown[]) => getSidecarStatusMock(...args),
   restartSidecar: (...args: unknown[]) => restartSidecarMock(...args),
 }))
+// Both live queries default to a pending promise (undefined rows, the
+// pre-hydration state); flip `hydratedRows` to exercise the resolved counts.
+let hydratedRows = false
 jest.mock("@/lib/db/sessions", () => ({
   getSession: (...args: unknown[]) => getSessionMock(...args),
-  listSessions: () => Promise.resolve([]),
+  listSessions: () => (hydratedRows ? [{ id: "s1" }] : Promise.resolve([])),
 }))
 jest.mock("@/lib/db/mcp-servers", () => ({
-  listMcpServers: () => Promise.resolve([]),
+  listMcpServers: () =>
+    hydratedRows
+      ? [
+          { id: "m1", enabled: true },
+          { id: "m2", enabled: false },
+        ]
+      : Promise.resolve([]),
 }))
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: (fn: () => unknown) => {
@@ -46,8 +55,9 @@ jest.mock("@/lib/slash-commands/registry", () => ({
 jest.mock("@/hooks/chat/use-sdk-session-capabilities", () => ({
   useSdkSessionCapabilities: () => ({ models: null, commands: null, refresh: jest.fn() }),
 }))
+const routerReplaceMock = jest.fn()
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: jest.fn() }),
+  useRouter: () => ({ replace: (...args: unknown[]) => routerReplaceMock(...args) }),
 }))
 jest.mock("@/stores/chat", () => ({
   useChatStore: (selector: (state: unknown) => unknown) =>
@@ -57,6 +67,7 @@ jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn(), message: jest.fn() },
 }))
 
+import { toast } from "sonner"
 import { SidecarTab } from "./sidecar-tab"
 
 const isTauriMock = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).isTauri
@@ -68,6 +79,7 @@ describe("SidecarTab", () => {
     getSidecarStatusMock.mockReset()
     restartSidecarMock.mockReset()
     getSessionMock.mockReset()
+    hydratedRows = false
   })
 
   it("shows the Desktop-only badge in web mode", () => {
@@ -136,5 +148,78 @@ describe("SidecarTab", () => {
     expect(screen.getByTestId("count-tile-slash-commands")).toBeInTheDocument()
     expect(screen.getByTestId("count-tile-hooks")).toBeInTheDocument()
     expect(screen.getByTestId("count-tile-mcp")).toBeInTheDocument()
+  })
+})
+
+describe("SidecarTab — count tiles", () => {
+  it("routes each tile to the section that owns it", async () => {
+    const user = userEvent.setup()
+    routerReplaceMock.mockClear()
+    render(<SidecarTab />)
+
+    await user.click(screen.getByTestId("count-tile-sessions"))
+    expect(routerReplaceMock).toHaveBeenLastCalledWith(
+      expect.stringContaining("agentRuntimeTab=sessions"),
+      expect.objectContaining({ scroll: false })
+    )
+
+    await user.click(screen.getByTestId("count-tile-slash-commands"))
+    expect(routerReplaceMock).toHaveBeenLastCalledWith(
+      expect.stringContaining("section=slash-commands"),
+      expect.objectContaining({ scroll: false })
+    )
+
+    await user.click(screen.getByTestId("count-tile-hooks"))
+    expect(routerReplaceMock).toHaveBeenLastCalledWith(
+      expect.stringContaining("section=hooks"),
+      expect.objectContaining({ scroll: false })
+    )
+
+    await user.click(screen.getByTestId("count-tile-mcp"))
+    expect(routerReplaceMock).toHaveBeenLastCalledWith(
+      expect.stringContaining("section=mcp"),
+      expect.objectContaining({ scroll: false })
+    )
+  })
+
+  it("clears the SDK session id when the session lookup rejects", async () => {
+    getSidecarStatusMock.mockResolvedValue({ ready: true })
+    getSessionMock.mockRejectedValue(new Error("dexie down"))
+    render(<SidecarTab />)
+    await waitFor(() => expect(screen.getByTestId("count-tile-sessions")).toBeInTheDocument())
+    expect(screen.getByText("sdkSessionLabel").parentElement).toHaveTextContent("—")
+  })
+
+  it("surfaces a restart failure and unblocks the button", async () => {
+    const user = userEvent.setup()
+    getSidecarStatusMock.mockResolvedValue({ ready: true })
+    getSessionMock.mockResolvedValue({ sdkSessionId: "x" })
+    restartSidecarMock.mockRejectedValue(new Error("sidecar refused"))
+    render(<SidecarTab />)
+
+    await user.click(screen.getByRole("button", { name: "restartBtn" }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("sidecar refused"))
+    expect(screen.getByRole("button", { name: "restartBtn" })).not.toBeDisabled()
+  })
+
+  it("counts hydrated sessions and enabled-vs-total MCP servers", async () => {
+    hydratedRows = true
+    getSidecarStatusMock.mockResolvedValue({ ready: true })
+    getSessionMock.mockResolvedValue({ sdkSessionId: "x" })
+    render(<SidecarTab />)
+
+    await waitFor(() => expect(screen.getByTestId("count-tile-sessions")).toHaveTextContent("1"))
+    expect(screen.getByTestId("count-tile-mcp")).toHaveTextContent("1/2")
+  })
+
+  it("stringifies a non-Error restart failure", async () => {
+    const user = userEvent.setup()
+    getSidecarStatusMock.mockResolvedValue({ ready: true })
+    getSessionMock.mockResolvedValue({ sdkSessionId: "x" })
+    restartSidecarMock.mockRejectedValue("plain string boom")
+    render(<SidecarTab />)
+
+    await user.click(screen.getByRole("button", { name: "restartBtn" }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("plain string boom"))
   })
 })

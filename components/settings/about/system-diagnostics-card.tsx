@@ -6,7 +6,6 @@ import { toast } from "sonner"
 import { ClipboardCopyIcon, FolderOpenIcon, MonitorCogIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { APP_NAME, APP_VERSION } from "@/lib/app-metadata"
 import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
@@ -20,6 +19,7 @@ import {
 import { getNativeLoggingReadiness } from "@/lib/native/native-logging"
 import type { NativeLoggingReadiness } from "@/lib/native/native-logging-readiness"
 
+import { AboutCard } from "./about-card"
 import { InfoRow } from "./info-row"
 
 /** Human-readable byte size for the log-footprint row. */
@@ -139,107 +139,107 @@ export function SystemDiagnosticsCard({
   }
 
   return (
-    <Card data-testid="about-system-card">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <MonitorCogIcon className="size-4" />
-          {t("system.title")}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {osInfo ? (
-          <>
-            <InfoRow
-              label={t("system.os")}
-              value={`${osInfo.osType} ${osInfo.version}`}
-              testid="row-os"
-            />
-            <InfoRow label={t("system.arch")} value={osInfo.arch} mono testid="row-arch" />
-            {osInfo.locale && (
-              <InfoRow label={t("system.locale")} value={osInfo.locale} testid="row-locale" />
-            )}
-          </>
-        ) : (
+    <AboutCard icon={MonitorCogIcon} title={t("system.title")} testid="about-system-card">
+      {osInfo ? (
+        <>
           <InfoRow
-            label={t("system.locale")}
-            value={t("system.unavailable")}
-            testid="row-locale-fallback"
+            label={t("system.os")}
+            value={`${osInfo.osType} ${osInfo.version}`}
+            testid="row-os"
           />
-        )}
-        {dataDir && (
-          <InfoRow label={t("system.dataDir")} value={dataDir} mono testid="row-data-dir" />
-        )}
-
-        <div className="mt-4 mb-1 text-sm font-medium text-muted-foreground">
-          {t("crashLogs.title")}
-        </div>
+          <InfoRow label={t("system.arch")} value={osInfo.arch} mono testid="row-arch" />
+          {osInfo.locale && (
+            <InfoRow label={t("system.locale")} value={osInfo.locale} testid="row-locale" />
+          )}
+        </>
+      ) : (
         <InfoRow
-          label={t("crashLogs.globalErrorHandlers")}
-          value={t("crashLogs.ready")}
-          testid="row-global-error-handlers"
+          label={t("system.locale")}
+          value={t("system.unavailable")}
+          testid="row-locale-fallback"
         />
-        {crashDiag ? (
-          <>
-            <InfoRow
-              label={t("crashLogs.crashReports")}
-              value={String(crashDiag.crashReportCount)}
-              testid="row-crash-count"
-            />
-            {crashDiag.latestCrashAt && (
-              <InfoRow
-                label={t("crashLogs.lastCrash")}
-                value={crashDiag.latestCrashAt}
-                testid="row-last-crash"
-              />
-            )}
-            <InfoRow
-              label={t("crashLogs.logFootprint")}
-              value={formatBytes(crashDiag.logDirBytes)}
-              testid="row-log-footprint"
-            />
-            <InfoRow
-              label={t("crashLogs.retention")}
-              value={t("crashLogs.retentionValue", {
-                days: crashDiag.retentionMaxAgeDays,
-                reports: crashDiag.retentionMaxReports,
-                logs: crashDiag.rotatedLogKeep,
-              })}
-              testid="row-retention"
-            />
-            {nativeLogging && (
-              <InfoRow
-                label={t("crashLogs.nativeLogging")}
-                value={`${nativeLogging.startupMode} / ${nativeLogging.startupHealth}`}
-                testid="row-native-logging"
-              />
-            )}
-          </>
-        ) : (
+      )}
+      {dataDir && (
+        <InfoRow label={t("system.dataDir")} value={dataDir} mono testid="row-data-dir" />
+      )}
+
+      <div className="mt-4 mb-1 flex items-center gap-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        {t("crashLogs.title")}
+        <span aria-hidden className="h-px flex-1 bg-border" />
+      </div>
+      <InfoRow
+        label={t("crashLogs.globalErrorHandlers")}
+        value={t("crashLogs.ready")}
+        testid="row-global-error-handlers"
+      />
+      {crashDiag ? (
+        <>
           <InfoRow
             label={t("crashLogs.crashReports")}
-            value={t("system.unavailable")}
-            testid="row-crash-unavailable"
+            value={String(crashDiag.crashReportCount)}
+            testid="row-crash-count"
           />
-        )}
-
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={handleCopy} data-testid="copy-diagnostics">
-            <ClipboardCopyIcon className="mr-2 size-4" />
-            {t("system.copy")}
-          </Button>
-          {dataDir && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleReveal}
-              data-testid="reveal-data-dir"
-            >
-              <FolderOpenIcon className="mr-2 size-4" />
-              {t("system.reveal")}
-            </Button>
+          {crashDiag.latestCrashAt && (
+            <InfoRow
+              label={t("crashLogs.lastCrash")}
+              value={crashDiag.latestCrashAt}
+              testid="row-last-crash"
+            />
           )}
-        </div>
-      </CardContent>
-    </Card>
+          <InfoRow
+            label={t("crashLogs.logFootprint")}
+            value={formatBytes(crashDiag.logDirBytes)}
+            testid="row-log-footprint"
+          />
+          <InfoRow
+            label={t("crashLogs.retention")}
+            value={t("crashLogs.retentionValue", {
+              days: crashDiag.retentionMaxAgeDays,
+              reports: crashDiag.retentionMaxReports,
+              logs: crashDiag.rotatedLogKeep,
+            })}
+            testid="row-retention"
+          />
+          {nativeLogging && (
+            <InfoRow
+              label={t("crashLogs.nativeLogging")}
+              value={`${nativeLogging.startupMode} / ${nativeLogging.startupHealth}`}
+              testid="row-native-logging"
+            />
+          )}
+        </>
+      ) : (
+        <InfoRow
+          label={t("crashLogs.crashReports")}
+          value={t("system.unavailable")}
+          testid="row-crash-unavailable"
+        />
+      )}
+
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleCopy}
+          data-testid="copy-diagnostics"
+          className="w-full sm:w-auto"
+        >
+          <ClipboardCopyIcon className="mr-2 size-4" />
+          {t("system.copy")}
+        </Button>
+        {dataDir && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleReveal}
+            data-testid="reveal-data-dir"
+            className="w-full sm:w-auto"
+          >
+            <FolderOpenIcon className="mr-2 size-4" />
+            {t("system.reveal")}
+          </Button>
+        )}
+      </div>
+    </AboutCard>
   )
 }

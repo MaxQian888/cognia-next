@@ -13,7 +13,7 @@
 import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { useChatStore } from "@/stores/chat"
 import { useSdkSessionCapabilities } from "@/hooks/chat/use-sdk-session-capabilities"
 
@@ -26,55 +26,54 @@ export function SdkCapabilitiesCard() {
   if (!models && !commands) return null
 
   return (
-    <Card data-testid="sdk-capabilities-card">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm">{t("title")}</CardTitle>
-        <CardDescription className="text-xs">{t("description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3 text-xs">
-        {models && models.length > 0 ? (
-          <div className="space-y-1.5" data-testid="sdk-capabilities-models">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              {t("modelsLabel", { count: models.length })}
-            </p>
-            <div className="flex flex-wrap gap-1">
-              {models.map((m) => (
-                <Badge
-                  key={m.value}
-                  variant="secondary"
-                  className="text-[10px]"
-                  title={m.description}
-                >
-                  {m.displayName}
-                  {m.supportsEffort ? (
-                    <span className="ml-1 opacity-60">{t("effortFlag")}</span>
-                  ) : null}
-                </Badge>
-              ))}
-            </div>
+    <SettingsBlock
+      title={t("title")}
+      description={t("description")}
+      testid="sdk-capabilities-card"
+      contentClassName="space-y-3 text-xs"
+    >
+      {models && models.length > 0 ? (
+        <div className="space-y-1.5" data-testid="sdk-capabilities-models">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            {t("modelsLabel", { count: models.length })}
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {models.map((m) => (
+              <Badge
+                key={m.value}
+                variant="secondary"
+                className="text-[10px]"
+                title={m.description}
+              >
+                {m.displayName}
+                {m.supportsEffort ? (
+                  <span className="ml-1 opacity-60">{t("effortFlag")}</span>
+                ) : null}
+              </Badge>
+            ))}
           </div>
-        ) : null}
-        {commands && commands.length > 0 ? (
-          <div className="space-y-1.5" data-testid="sdk-capabilities-commands">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              {t("commandsLabel", { count: commands.length })}
-            </p>
-            <div className="flex flex-wrap gap-1">
-              {commands.map((c) => (
-                <Badge
-                  key={c.name}
-                  variant="outline"
-                  className="font-mono text-[10px]"
-                  title={c.description}
-                >
-                  /{c.name}
-                </Badge>
-              ))}
-            </div>
+        </div>
+      ) : null}
+      {commands && commands.length > 0 ? (
+        <div className="space-y-1.5" data-testid="sdk-capabilities-commands">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            {t("commandsLabel", { count: commands.length })}
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {commands.map((c) => (
+              <Badge
+                key={c.name}
+                variant="outline"
+                className="font-mono text-[10px]"
+                title={c.description}
+              >
+                /{c.name}
+              </Badge>
+            ))}
           </div>
-        ) : null}
-      </CardContent>
-    </Card>
+        </div>
+      ) : null}
+    </SettingsBlock>
   )
 }
 

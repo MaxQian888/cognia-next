@@ -5911,7 +5911,23 @@
     "sortByName": "按名称排序",
     "sortByUpdated": "按更新时间排序",
     "tools": "{count} 个工具",
-    "usedTimes": "使用 {count} 次"
+    "usedTimes": "使用 {count} 次",
+    "mobileTrigger": "模式",
+    "selectMode": "选择 {name}",
+    "detailEmptyTitle": "未选择模式",
+    "detailEmptyDescription": "从列表中选择一个模式，查看它会改变什么。",
+    "detail": {
+      "tools": "工具",
+      "tags": "标签",
+      "none": "无",
+      "outputFormat": "输出格式",
+      "permissionMode": "权限模式",
+      "modelOverride": "模型覆盖",
+      "usage": "使用情况",
+      "updated": "更新时间",
+      "systemPrompt": "系统提示词",
+      "noSystemPrompt": "此模式不添加系统提示词。"
+    }
   },
   "desktop": {
     "barCustomize": {
@@ -20035,7 +20051,8 @@
         "showAdvanced": "显示运行时详情",
         "tauri": "Tauri",
         "title": "版本与构建",
-        "version": "版本"
+        "version": "版本",
+        "runtime": "运行时"
       },
       "versionLine": "版本",
       "versionUnknown": "—",
@@ -20084,7 +20101,11 @@
       "title": "账户",
       "usageFiveHour": "5 小时用量",
       "usageReset": "剩余 {remaining}",
-      "usageSevenDay": "7 天用量"
+      "usageSevenDay": "7 天用量",
+      "sessionTitle": "会话",
+      "sessionDescription": "当前登录状态及其保持活跃的时长。",
+      "manageTitle": "管理账户",
+      "manageDescription": "更改套餐、账单信息，或退出登录。"
     },
     "actions": {
       "cancel": "取消",
@@ -20289,7 +20310,8 @@
           "verdictDeny": "拒绝",
           "verdictLabel": "裁决",
           "wildcardTool": "所有工具（*）"
-        }
+        },
+        "categoriesTitle": "工具类别"
       },
       "sessions": {
         "ago": {
@@ -20381,6 +20403,10 @@
         "toolsLabel": "始终加载的工具",
         "toolsPlaceholder": "工具名称，例如 read_file",
         "unknownHint": "未在当前工具目录中找到——在匹配的服务器或工具存在之前，此固定项不会生效。"
+      },
+      "nav": {
+        "title": "智能体运行时设置",
+        "mobileTrigger": "分区"
       }
     },
     "agentTeams": {
@@ -25277,7 +25303,8 @@
             "label": "检索"
           }
         },
-        "title": "记忆设置"
+        "title": "记忆设置",
+        "mobileTrigger": "分区"
       },
       "overview": {
         "byScope": {

@@ -12,8 +12,14 @@
  * appear" preview at the top reflects drafts as you type.
  *
  * `showEmail` lets the embedding Account section suppress the read-only email
- * line (it renders the email itself in its plan card); mobile keeps the
+ * line (it renders the email itself in its plan block); mobile keeps the
  * default so `/me/profile` still shows who you're signed in as.
+ *
+ * Card-free: this editor is embedded inside the Account page's flat stack, so a
+ * `<Card>` here would nest a bordered box inside a bordered pane. The fields
+ * pair up two-per-row via `@container/profile-form`, never `sm:`/`md:` — mobile
+ * `/me/profile` is full-width while the desktop embed is a fraction of the
+ * window, and the viewport cannot tell those apart.
  */
 
 import { useState } from "react"
@@ -22,7 +28,6 @@ import { UserRoundIcon } from "lucide-react"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -111,82 +116,81 @@ export function ProfileSection({ showEmail = true }: ProfileSectionProps = {}) {
   )
 
   return (
-    <div className="space-y-6" data-testid="profile-section">
-      <div className="space-y-1">
-        <Label className="flex items-center gap-2">
-          <UserRoundIcon className="size-4" />
-          {t("title")}
-        </Label>
-        <p className="text-xs text-muted-foreground">{t("description")}</p>
+    <div className="min-w-0 space-y-4" data-testid="profile-section">
+      <div className="flex items-start gap-2.5">
+        <UserRoundIcon aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 space-y-0.5">
+          <h3 className="text-sm font-semibold tracking-tight">{t("title")}</h3>
+          <p className="text-xs text-pretty text-muted-foreground">{t("description")}</p>
+        </div>
       </div>
 
       {!loaded ? (
         <Skeleton className="h-40 w-full" data-testid="profile-section-skeleton" />
       ) : (
-        <Card>
-          <CardContent className="flex flex-col gap-6 pt-6">
-            <div className="flex flex-col gap-2" data-testid="profile-preview">
-              <span className="text-xs font-medium text-muted-foreground">{t("previewTitle")}</span>
-              <div className="flex items-center gap-3 rounded-lg border bg-muted/40 p-3">
-                <Avatar className="size-12">
-                  {resolvedAvatarUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- avatar is a small data: URL, not an optimizable remote asset
-                    <img
-                      src={resolvedAvatarUrl}
-                      alt=""
-                      className="size-full object-cover"
-                      data-testid="profile-preview-avatar"
-                    />
-                  ) : (
-                    <AvatarFallback
-                      style={{ backgroundColor: deterministicColor(previewDisplayName) }}
-                    >
-                      {initials(previewDisplayName)}
-                    </AvatarFallback>
-                  )}
-                </Avatar>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="truncate text-sm font-semibold"
-                      data-testid="profile-preview-name"
-                    >
-                      {previewDisplayName}
-                    </span>
-                    {pronounsValue ? (
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {pronounsValue}
-                      </span>
-                    ) : null}
-                  </div>
-                  {statusValue ? (
-                    <p
-                      className="truncate text-xs text-muted-foreground"
-                      data-testid="profile-preview-status"
-                    >
-                      {statusValue}
-                    </p>
-                  ) : (
-                    <p className="truncate text-xs text-muted-foreground/70">{t("previewHint")}</p>
-                  )}
+        <div className="@container/profile-form flex flex-col gap-5">
+          <div className="flex flex-col gap-2" data-testid="profile-preview">
+            <span className="text-xs font-medium text-muted-foreground">{t("previewTitle")}</span>
+            <div className="flex items-center gap-3 rounded-lg border bg-muted/40 p-3">
+              <Avatar className="size-12">
+                {resolvedAvatarUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- avatar is a small data: URL, not an optimizable remote asset
+                  <img
+                    src={resolvedAvatarUrl}
+                    alt=""
+                    className="size-full object-cover"
+                    data-testid="profile-preview-avatar"
+                  />
+                ) : (
+                  <AvatarFallback
+                    style={{ backgroundColor: deterministicColor(previewDisplayName) }}
+                  >
+                    {initials(previewDisplayName)}
+                  </AvatarFallback>
+                )}
+              </Avatar>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="truncate text-sm font-semibold"
+                    data-testid="profile-preview-name"
+                  >
+                    {previewDisplayName}
+                  </span>
+                  {pronounsValue ? (
+                    <span className="shrink-0 text-xs text-muted-foreground">{pronounsValue}</span>
+                  ) : null}
                 </div>
+                {statusValue ? (
+                  <p
+                    className="truncate text-xs text-muted-foreground"
+                    data-testid="profile-preview-status"
+                  >
+                    {statusValue}
+                  </p>
+                ) : (
+                  <p className="truncate text-xs text-muted-foreground/70">{t("previewHint")}</p>
+                )}
               </div>
             </div>
+          </div>
 
-            <div className="flex flex-col gap-1">
-              <ProfileAvatarPicker
-                value={resolvedAvatarUrl}
-                fallbackName={previewName}
-                onChange={(dataUrl) => save({ avatarDataUrl: dataUrl ?? "" })}
-              />
-              {showEmail && email ? (
-                <p className="text-xs text-muted-foreground" data-testid="profile-email">
-                  {t("emailReadOnly", { email })}
-                </p>
-              ) : null}
-            </div>
+          <div className="flex flex-col gap-1">
+            <ProfileAvatarPicker
+              value={resolvedAvatarUrl}
+              fallbackName={previewName}
+              onChange={(dataUrl) => save({ avatarDataUrl: dataUrl ?? "" })}
+            />
+            {showEmail && email ? (
+              <p className="text-xs text-muted-foreground" data-testid="profile-email">
+                {t("emailReadOnly", { email })}
+              </p>
+            ) : null}
+          </div>
 
-            <div className="flex flex-col gap-2">
+          {/* Two-up from ~34rem of *container* width; one column below that. */}
+          <div className="grid grid-cols-1 gap-x-6 gap-y-5 @lg/profile-form:grid-cols-2">
+            <div className="flex min-w-0 flex-col gap-2">
               <Label htmlFor="profile-display-name">{t("displayNameLabel")}</Label>
               <Input
                 id="profile-display-name"
@@ -200,7 +204,7 @@ export function ProfileSection({ showEmail = true }: ProfileSectionProps = {}) {
               <p className="text-xs text-muted-foreground">{t("displayNameHint")}</p>
             </div>
 
-            <div className="flex flex-col gap-2">
+            <div className="flex min-w-0 flex-col gap-2">
               <Label htmlFor="profile-pronouns">{t("pronounsLabel")}</Label>
               <Input
                 id="profile-pronouns"
@@ -214,7 +218,7 @@ export function ProfileSection({ showEmail = true }: ProfileSectionProps = {}) {
               <p className="text-xs text-muted-foreground">{t("pronounsHint")}</p>
             </div>
 
-            <div className="flex flex-col gap-2">
+            <div className="flex min-w-0 flex-col gap-2">
               <Label htmlFor="profile-status">{t("statusLabel")}</Label>
               <Input
                 id="profile-status"
@@ -227,7 +231,7 @@ export function ProfileSection({ showEmail = true }: ProfileSectionProps = {}) {
               />
             </div>
 
-            <div className="flex flex-col gap-2">
+            <div className="flex min-w-0 flex-col gap-2">
               <Label>{t("timezoneLabel")}</Label>
               <TimezoneSelect
                 value={timezoneValue}
@@ -238,51 +242,51 @@ export function ProfileSection({ showEmail = true }: ProfileSectionProps = {}) {
               />
               <p className="text-xs text-muted-foreground">{t("timezoneHint")}</p>
             </div>
+          </div>
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="profile-bio">{t("bioLabel")}</Label>
-              <Textarea
-                id="profile-bio"
-                value={bioValue}
-                maxLength={BIO_MAX}
-                rows={3}
-                placeholder={t("bioPlaceholder")}
-                onChange={(e) => setBioDraft(e.target.value)}
-                onBlur={commitBio}
-                data-testid="profile-bio"
-              />
-              <p
-                className="text-right text-xs text-muted-foreground"
-                data-testid="profile-bio-counter"
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="profile-bio">{t("bioLabel")}</Label>
+            <Textarea
+              id="profile-bio"
+              value={bioValue}
+              maxLength={BIO_MAX}
+              rows={3}
+              placeholder={t("bioPlaceholder")}
+              onChange={(e) => setBioDraft(e.target.value)}
+              onBlur={commitBio}
+              data-testid="profile-bio"
+            />
+            <p
+              className="text-right text-xs text-muted-foreground"
+              data-testid="profile-bio-counter"
+            >
+              {t("bioCounter", { count: bioValue.length, max: BIO_MAX })}
+            </p>
+          </div>
+
+          {hasAnyProfile ? (
+            <div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  void save({
+                    displayName: "",
+                    bio: "",
+                    pronouns: "",
+                    statusMessage: "",
+                    avatarDataUrl: "",
+                    timezone: "",
+                  })
+                }
+                data-testid="profile-reset"
               >
-                {t("bioCounter", { count: bioValue.length, max: BIO_MAX })}
-              </p>
+                {t("reset")}
+              </Button>
             </div>
-
-            {hasAnyProfile ? (
-              <div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    void save({
-                      displayName: "",
-                      bio: "",
-                      pronouns: "",
-                      statusMessage: "",
-                      avatarDataUrl: "",
-                      timezone: "",
-                    })
-                  }
-                  data-testid="profile-reset"
-                >
-                  {t("reset")}
-                </Button>
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
+          ) : null}
+        </div>
       )}
     </div>
   )

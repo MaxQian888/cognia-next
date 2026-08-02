@@ -171,6 +171,13 @@ describe("AccountOverviewSection", () => {
     expect(stub).toHaveAttribute("data-show-email", "false")
   })
 
+  it("lays the groups out as a flat stack with no card chrome", () => {
+    const { container } = render(<AccountOverviewSection />)
+    expect(screen.getByTestId("account-session-block")).toBeInTheDocument()
+    expect(screen.getByTestId("account-links-block")).toBeInTheDocument()
+    expect(container.querySelector("[data-slot='card']")).toBeNull()
+  })
+
   it("renders signed-out state with a connect CTA and no session actions", () => {
     render(<AccountOverviewSection />)
     expect(screen.getByText("notSignedIn")).toBeInTheDocument()
@@ -298,7 +305,7 @@ describe("AccountOverviewSection", () => {
     expect(pushMock).toHaveBeenCalledWith("/settings?section=companion")
   })
 
-  it("hides the local accounts and security cards off Tauri", async () => {
+  it("hides the local accounts and security blocks off Tauri", async () => {
     mockIsTauri = false
     render(<AccountOverviewSection />)
     await Promise.resolve()
@@ -306,7 +313,7 @@ describe("AccountOverviewSection", () => {
     expect(screen.queryByTestId("account-overview-manage-security")).not.toBeInTheDocument()
   })
 
-  it("shows the local accounts card on Tauri and opens the manage dialog", async () => {
+  it("shows the local accounts block on Tauri and opens the manage dialog", async () => {
     mockIsTauri = true
     mockAccounts = [
       { id: "acct_alpha", displayName: "Alpha" },

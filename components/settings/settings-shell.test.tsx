@@ -217,6 +217,21 @@ describe("SettingsShell fill-height layout", () => {
     expect(container.innerHTML).not.toMatch(/max-w-5xl/)
   })
 
+  // The three sections converted from card stacks to master/detail. Each owns
+  // an internal scroller, so leaving any of them capped at max-w-5xl inside the
+  // outer ScrollArea puts the scrollbar on the page instead of the pane.
+  it.each(["agent-modes", "agent-runtime", "memory"] as const)(
+    "renders the %s section in the fixed-frame fill-height branch",
+    (section) => {
+      mockSection = section
+      const { container } = render(<SettingsShell />)
+      const panel = container.querySelector("[data-settings-panel]")
+      expect(panel).not.toBeNull()
+      expect(panel!.className).toMatch(/\bflex-1\b/)
+      expect(container.innerHTML).not.toMatch(/max-w-5xl/)
+    }
+  )
+
   it("keeps a plain section inside the scrollable, width-capped branch", () => {
     mockSection = "notifications"
     const { container } = render(<SettingsShell />)

@@ -25,7 +25,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { SettingsCard, SettingsToggle } from "@/components/settings/common/settings-section"
+import { SettingsBlock, SettingsField } from "@/components/settings/common/settings-block"
+import { Switch } from "@/components/ui/switch"
 import { useSettingsStore } from "@/stores/settings"
 import type { ToolSearchRuntimeConfig } from "@cognia/agent-config-types"
 import { BUILTIN_SERVER_NAME } from "@/lib/settings/builtin-tools"
@@ -80,18 +81,18 @@ export function ToolSearchRuntimeCard() {
   }
 
   return (
-    <SettingsCard
-      icon={<SearchCodeIcon className="size-4" />}
-      title={t("title")}
-      description={t("description")}
-    >
-      <SettingsToggle
-        id="tool-search-enabled"
+    <SettingsBlock icon={<SearchCodeIcon />} title={t("title")} description={t("description")}>
+      <SettingsField
+        htmlFor="tool-search-enabled"
         label={t("enableLabel")}
         description={t("enableHelp")}
-        checked={config.enabled}
-        onCheckedChange={(v) => update({ enabled: v })}
-      />
+      >
+        <Switch
+          id="tool-search-enabled"
+          checked={config.enabled}
+          onCheckedChange={(v) => update({ enabled: v })}
+        />
+      </SettingsField>
 
       {config.enabled && (
         <div className="space-y-4">
@@ -123,7 +124,7 @@ export function ToolSearchRuntimeCard() {
           />
         </div>
       )}
-    </SettingsCard>
+    </SettingsBlock>
   )
 }
 

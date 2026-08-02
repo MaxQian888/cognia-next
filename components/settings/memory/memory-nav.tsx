@@ -16,6 +16,14 @@ export interface MemoryNavProps {
   conflictCount?: number
   /** Renders a warning dot on the retrieval row when recall silently degraded. */
   retrievalDegraded?: boolean
+  /**
+   * Distinguishes the two mounts of this nav. The desktop rail is only
+   * `display:none` below `md`, so while the mobile Sheet is open BOTH copies
+   * are in the tree — and only one element may ever carry a given shared-layout
+   * `layoutId`. Sharing one made Motion light the selection pill on a second,
+   * unselected row.
+   */
+  idPrefix?: string
 }
 
 export function MemoryNav({
@@ -23,6 +31,7 @@ export function MemoryNav({
   onSelect,
   conflictCount = 0,
   retrievalDegraded = false,
+  idPrefix = "memory",
 }: MemoryNavProps) {
   const t = useTranslations("settings.memory.nav")
   const { reduce } = useFlowMotion()
@@ -58,7 +67,7 @@ export function MemoryNav({
                 the pill is dropped entirely and the row paints its own bg. */}
             {isActive && !reduce ? (
               <motion.div
-                layoutId="memory-nav-pill"
+                layoutId={`${idPrefix}-nav-pill`}
                 transition={MOBILE_SPRING}
                 className="absolute inset-0 rounded-md bg-accent"
                 aria-hidden
@@ -67,7 +76,7 @@ export function MemoryNav({
             <button
               type="button"
               aria-current={isActive ? "true" : undefined}
-              data-testid={`memory-nav-item-${id}`}
+              data-testid={`${idPrefix}-nav-item-${id}`}
               data-active={isActive}
               onClick={() => onSelect(id)}
               className={cn(
@@ -89,7 +98,7 @@ export function MemoryNav({
                 <Badge
                   variant={id === "overview" ? "destructive" : "secondary"}
                   className="mt-0.5 shrink-0 px-1.5 text-[10px]"
-                  data-testid={`memory-nav-badge-${id}`}
+                  data-testid={`${idPrefix}-nav-badge-${id}`}
                 >
                   {badge}
                 </Badge>

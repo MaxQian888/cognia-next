@@ -94,6 +94,51 @@ describe("CommandAutoModeCard", () => {
     })
   })
 
+  it("switches the decision engine through save()", () => {
+    setSettings({ agentPermissions: { autoApprove: { enabled: true } } })
+    render(<CommandAutoModeCard />)
+    // The engine select is the first shimmed <select> on the card.
+    fireEvent.change(screen.getAllByTestId("select")[0], { target: { value: "rules+model" } })
+    expect(save).toHaveBeenCalledWith({
+      agentPermissions: { autoApprove: { enabled: true, mode: "rules+model" } },
+    })
+  })
+
+  it("toggles deny-on-high-risk in rules+model mode", () => {
+    setSettings({ agentPermissions: { autoApprove: { enabled: true, mode: "rules+model" } } })
+    render(<CommandAutoModeCard />)
+    fireEvent.click(screen.getByLabelText("denyHighRisk"))
+    expect(save).toHaveBeenCalledWith({
+      agentPermissions: {
+        autoApprove: { enabled: true, mode: "rules+model", denyOnHighRisk: false },
+      },
+    })
+  })
+
+  it("adds a rule from the Enter key with the chosen verdict", () => {
+    setSettings({ agentPermissions: { autoApprove: { enabled: true } } })
+    render(<CommandAutoModeCard />)
+    // Verdict select is the last shimmed <select>.
+    const selects = screen.getAllByTestId("select")
+    fireEvent.change(selects[selects.length - 1], { target: { value: "deny" } })
+    const pattern = screen.getByLabelText("patternPlaceholder")
+    fireEvent.change(pattern, { target: { value: "rm -rf*" } })
+    fireEvent.keyDown(pattern, { key: "Enter" })
+    expect(save).toHaveBeenCalledWith({
+      agentPermissions: {
+        autoApprove: { enabled: true },
+        commandRules: { "rm -rf*": "deny" },
+      },
+    })
+  })
+
+  it("ignores Enter and the add button while the pattern is blank", () => {
+    setSettings({ agentPermissions: { autoApprove: { enabled: true } } })
+    render(<CommandAutoModeCard />)
+    fireEvent.keyDown(screen.getByLabelText("patternPlaceholder"), { key: "Enter" })
+    expect(save).not.toHaveBeenCalled()
+  })
+
   it("removes an existing command rule", () => {
     setSettings({
       agentPermissions: {

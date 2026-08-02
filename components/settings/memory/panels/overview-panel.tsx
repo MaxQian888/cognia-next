@@ -16,7 +16,6 @@ import { cn } from "@/lib/utils"
 import { STAGGER_CHILD, STAGGER_CONTAINER, MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { RollingNumber } from "@/components/settings/subagents/motion/rolling-number"
-import { StatCard } from "@/components/scheduler/stat-card"
 import { Button } from "@/components/ui/button"
 import type { MemoryInsights } from "@/hooks/memory/use-memory-insights"
 import { RetrievalModeAlert } from "../retrieval-mode-alert"
@@ -40,13 +39,16 @@ export function OverviewPanel({
 
   const coveragePct = Math.round(corpus.vector.coverage * 100)
 
-  const cards = [
+  // One metric strip, not five cards: these are five readings of the same
+  // corpus, so they belong in one divided container the eye scans across —
+  // five bordered, shadowed, gradient-accented tiles inside an already-bordered
+  // detail pane was chrome competing with a two-digit number.
+  const stats = [
     {
       key: "active",
       label: t("stats.active"),
       value: corpus.stats.active,
       icon: <BrainIcon className="size-4" />,
-      accentGradient: "from-violet-500 to-purple-400",
       iconBgClassName: "bg-violet-500/15 text-violet-500",
     },
     {
@@ -54,7 +56,6 @@ export function OverviewPanel({
       label: tTypes("semantic"),
       value: corpus.stats.byType.semantic,
       icon: <NotebookPenIcon className="size-4" />,
-      accentGradient: "from-sky-500 to-cyan-400",
       iconBgClassName: "bg-sky-500/15 text-sky-500",
     },
     {
@@ -62,7 +63,6 @@ export function OverviewPanel({
       label: tTypes("episodic"),
       value: corpus.stats.byType.episodic,
       icon: <ListChecksIcon className="size-4" />,
-      accentGradient: "from-emerald-500 to-green-400",
       iconBgClassName: "bg-emerald-500/15 text-emerald-500",
     },
     {
@@ -70,7 +70,6 @@ export function OverviewPanel({
       label: tTypes("procedural"),
       value: corpus.stats.byType.procedural,
       icon: <ArchiveIcon className="size-4" />,
-      accentGradient: "from-amber-500 to-orange-400",
       iconBgClassName: "bg-amber-500/15 text-amber-500",
     },
     {
@@ -78,33 +77,50 @@ export function OverviewPanel({
       label: t("stats.conflicts"),
       value: corpus.stats.conflicts,
       icon: <TriangleAlertIcon className="size-4" />,
-      accentGradient: "from-red-500 to-rose-400",
       iconBgClassName: "bg-red-500/15 text-red-500",
     },
   ]
 
   return (
-    <div className="space-y-4">
-      <motion.div
-        className="grid grid-cols-2 gap-2 @2xl/memory-pane:grid-cols-5"
+    <div className="space-y-5">
+      {/* Dividers come from a per-cell outline, not a `gap-px` over a
+          border-coloured container: five readings never fill a 2- or 3-column
+          grid evenly, and the container trick painted the leftover cell as a
+          solid grey block. Outlines overlap, so neighbours share one hairline
+          and the empty tail of the grid stays empty. */}
+      <motion.dl
+        className="grid grid-cols-2 overflow-hidden rounded-lg border border-border/60 @lg/memory-pane:grid-cols-3 @2xl/memory-pane:grid-cols-5"
         variants={reduce ? undefined : STAGGER_CONTAINER}
         initial={reduce ? undefined : "initial"}
         animate={reduce ? undefined : "animate"}
+        data-testid="memory-stat-strip"
       >
-        {cards.map((card) => (
-          <motion.div key={card.key} variants={reduce ? undefined : STAGGER_CHILD}>
-            <StatCard
-              label={card.label}
-              value={<RollingNumber value={card.value} data-testid={`memory-stat-${card.key}`} />}
-              icon={card.icon}
-              accentGradient={card.accentGradient}
-              iconBgClassName={card.iconBgClassName}
-              size="sm"
-              className="h-full"
-            />
+        {stats.map((stat) => (
+          <motion.div
+            key={stat.key}
+            variants={reduce ? undefined : STAGGER_CHILD}
+            className="flex items-center gap-2.5 p-3 outline outline-border/60 -outline-offset-[0.5px]"
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "flex size-7 shrink-0 items-center justify-center rounded-md",
+                stat.iconBgClassName
+              )}
+            >
+              {stat.icon}
+            </span>
+            <span className="min-w-0">
+              <dt className="truncate text-[10px] tracking-wider text-muted-foreground uppercase">
+                {stat.label}
+              </dt>
+              <dd className="text-lg leading-tight font-bold tabular-nums">
+                <RollingNumber value={stat.value} data-testid={`memory-stat-${stat.key}`} />
+              </dd>
+            </span>
           </motion.div>
         ))}
-      </motion.div>
+      </motion.dl>
 
       <RetrievalModeAlert
         mode={insights.retrievalMode}
@@ -112,7 +128,7 @@ export function OverviewPanel({
         onAllowCloudEmbedding={onAllowCloudEmbedding}
       />
 
-      <div className="space-y-1.5 rounded-lg border p-3">
+      <div className="space-y-1.5 border-t border-border/60 pt-4">
         <div className="flex items-baseline justify-between gap-2">
           <p className="text-xs font-medium">{t("coverage.title")}</p>
           <p className="text-xs tabular-nums text-muted-foreground">
@@ -146,9 +162,9 @@ export function OverviewPanel({
         <p className="text-[11px] text-muted-foreground">{t("coverage.hint")}</p>
       </div>
 
-      <div className="space-y-1.5 rounded-lg border p-3">
+      <div className="space-y-1.5 border-t border-border/60 pt-4">
         <p className="text-xs font-medium">{t("byScope.title")}</p>
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-1 @2xl/memory-pane:grid-cols-4">
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 @2xl/memory-pane:grid-cols-4">
           {(["global", "workspace", "character", "agent"] as const).map((scope) => (
             <div key={scope} className="flex items-baseline justify-between gap-2">
               <dt className="truncate text-[11px] text-muted-foreground">{tScopes(scope)}</dt>

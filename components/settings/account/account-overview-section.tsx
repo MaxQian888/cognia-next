@@ -5,12 +5,17 @@
  * in place of the mobile `/me` hub (the desktop `/me` route redirects here,
  * and `?section=profile` now redirects here too).
  *
- * This is the aggregation surface: a credential-only "plan & session" card
+ * This is the aggregation surface: a credential-only "plan & session" block
  * (plan, email, usage, session lifecycle), the embedded profile EDITOR
  * (`<ProfileSection />` — the single owner of avatar/name/pronouns/status/bio/
  * timezone, so those fields render exactly once), local-account management +
  * quick-switch, and jump-offs to the subscription, security, and
  * companion-devices sections.
+ *
+ * Layout: a flat `SettingsStack`, not a stack of cards. Every group here is
+ * three or four lines of read-only summary plus one button — a `<Card>` per
+ * group turned the page into six floating boxes with more chrome than content,
+ * and boxed the embedded profile editor inside a second border.
  *
  * Reuses the same neutral hooks the mobile AccountCard sits on — but NOT the
  * mobile-coupled AccountCard component itself (it hard-links into `/me/*`).
@@ -27,11 +32,19 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { CopyIcon, LockIcon, LogOutIcon, PlugZapIcon, RefreshCwIcon } from "lucide-react"
+import {
+  CopyIcon,
+  KeyRoundIcon,
+  LinkIcon,
+  LockIcon,
+  LogOutIcon,
+  PlugZapIcon,
+  RefreshCwIcon,
+  UsersRoundIcon,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import {
   Select,
@@ -41,6 +54,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { AccountManageDialog } from "@/components/account/account-manage-dialog"
+import {
+  SettingsBlock,
+  SettingsField,
+  SettingsStack,
+} from "@/components/settings/common/settings-block"
 import { isTauri } from "@/lib/tauri"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
 import { useActiveAnthropicCredential, useAnthropicUsage } from "@/lib/subscription/anthropic/hooks"
@@ -187,72 +205,22 @@ export function AccountOverviewSection() {
   }
 
   return (
-    <div className="space-y-6" data-testid="account-overview-section">
-      <div className="space-y-1">
-        <h2 className="text-base font-semibold">{t("title")}</h2>
-        <p className="text-xs text-muted-foreground">{t("description")}</p>
+    <div className="flex min-w-0 flex-col gap-5" data-testid="account-overview-section">
+      <div className="min-w-0 space-y-1">
+        <h2 className="text-base font-semibold tracking-tight">{t("title")}</h2>
+        <p className="text-xs text-pretty text-muted-foreground">{t("description")}</p>
       </div>
 
-      <Card>
-        <CardContent className="flex flex-col gap-4 pt-6">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1 space-y-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge
-                  variant="outline"
-                  className="text-[10px]"
-                  data-testid="account-overview-plan"
-                >
-                  {planLabel}
-                </Badge>
-                {credential && expiry ? (
-                  <span
-                    className="text-[11px] text-muted-foreground"
-                    data-testid="account-overview-expiry"
-                  >
-                    {tSub("account.expiresLabel")}: {expiry}
-                  </span>
-                ) : null}
-              </div>
-              {email ? (
-                <div className="flex items-center gap-1">
-                  <p
-                    className="truncate text-xs text-muted-foreground"
-                    data-testid="account-overview-email"
-                  >
-                    {email}
-                  </p>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-5 shrink-0 text-muted-foreground"
-                    onClick={() => void copyEmail()}
-                    aria-label={t("emailCopyAria")}
-                    data-testid="account-overview-copy-email"
-                  >
-                    <CopyIcon className="size-3" />
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <p className="text-xs text-muted-foreground">{t("notSignedIn")}</p>
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    className="h-auto gap-1 p-0 text-xs"
-                    onClick={() => router.push("/settings?section=subscription")}
-                    data-testid="account-overview-connect"
-                  >
-                    <PlugZapIcon className="size-3" />
-                    {t("connect")}
-                  </Button>
-                </div>
-              )}
-            </div>
-            {credential ? (
-              <div className="flex shrink-0 items-center gap-2">
+      <SettingsStack>
+        {/* ── Plan & session ─────────────────────────────────────────────── */}
+        <SettingsBlock
+          icon={<KeyRoundIcon />}
+          title={t("sessionTitle")}
+          description={t("sessionDescription")}
+          testid="account-session-block"
+          action={
+            credential ? (
+              <div className="flex items-center gap-2">
                 <Button
                   type="button"
                   variant="outline"
@@ -280,10 +248,60 @@ export function AccountOverviewSection() {
                   {tSub("account.signOut")}
                 </Button>
               </div>
+            ) : null
+          }
+        >
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
+            <Badge variant="outline" className="text-[10px]" data-testid="account-overview-plan">
+              {planLabel}
+            </Badge>
+            {credential && expiry ? (
+              <span
+                className="text-[11px] text-muted-foreground"
+                data-testid="account-overview-expiry"
+              >
+                {tSub("account.expiresLabel")}: {expiry}
+              </span>
             ) : null}
+            {email ? (
+              <span className="flex min-w-0 items-center gap-1">
+                <span
+                  className="truncate text-xs text-muted-foreground"
+                  data-testid="account-overview-email"
+                >
+                  {email}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-5 shrink-0 text-muted-foreground"
+                  onClick={() => void copyEmail()}
+                  aria-label={t("emailCopyAria")}
+                  data-testid="account-overview-copy-email"
+                >
+                  <CopyIcon className="size-3" />
+                </Button>
+              </span>
+            ) : (
+              <span className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">{t("notSignedIn")}</span>
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="h-auto gap-1 p-0 text-xs"
+                  onClick={() => router.push("/settings?section=subscription")}
+                  data-testid="account-overview-connect"
+                >
+                  <PlugZapIcon className="size-3" />
+                  {t("connect")}
+                </Button>
+              </span>
+            )}
           </div>
           {fiveHour || sevenDay ? (
-            <div className="flex flex-col gap-2 border-t pt-3">
+            <div className="flex flex-col gap-2 border-t border-border/50 pt-3">
               <UsageRow
                 label={t("usageFiveHour")}
                 utilization={fiveHour?.utilization ?? null}
@@ -300,26 +318,16 @@ export function AccountOverviewSection() {
               />
             </div>
           ) : null}
-        </CardContent>
-      </Card>
+        </SettingsBlock>
 
-      {desktopReady ? (
-        <Card>
-          <CardContent className="flex flex-col gap-3 pt-6">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">{t("localAccountsTitle")}</p>
-                <p
-                  className="truncate text-xs text-muted-foreground"
-                  data-testid="account-overview-local-summary"
-                >
-                  {t("localAccountsSummary", {
-                    name: activeAccount?.displayName ?? t("fallbackName"),
-                    count: accountCount,
-                  })}
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
+        {/* ── Local accounts (desktop only) ──────────────────────────────── */}
+        {desktopReady ? (
+          <SettingsBlock
+            icon={<UsersRoundIcon />}
+            title={t("localAccountsTitle")}
+            testid="account-local-block"
+            action={
+              <div className="flex items-center gap-2">
                 {unlockedAccountId ? (
                   <Button
                     type="button"
@@ -343,109 +351,117 @@ export function AccountOverviewSection() {
                   {t("localAccountsManage")}
                 </Button>
               </div>
-            </div>
-            {accounts.length > 1 ? (
-              <Select value={activeAccount?.id ?? undefined} onValueChange={handleSwitch}>
-                <SelectTrigger
-                  className="w-full"
-                  aria-label={t("switchAccountAria")}
-                  data-testid="account-overview-switch"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {accounts.map((account) => (
-                    <SelectItem key={account.id} value={account.id}>
-                      {account.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : null}
-          </CardContent>
-        </Card>
-      ) : null}
-
-      <ProfileSection showEmail={false} />
-
-      <Card>
-        <CardContent className="flex items-center justify-between gap-3 pt-6">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">{t("subscriptionTitle")}</p>
-            <p className="truncate text-xs text-muted-foreground">{planLabel}</p>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => router.push("/settings?section=subscription")}
-            data-testid="account-overview-manage-subscription"
+            }
           >
-            {t("subscriptionManage")}
-          </Button>
-        </CardContent>
-      </Card>
-
-      {desktopReady ? (
-        <Card>
-          <CardContent className="flex items-center justify-between gap-3 pt-6">
-            <div className="min-w-0">
-              <p className="text-sm font-medium">{t("securityTitle")}</p>
-              <p
-                className="truncate text-xs text-muted-foreground"
-                data-testid="account-overview-security-summary"
-              >
-                {autoLockMinutes > 0
-                  ? t("securityAutoLockOn", { minutes: autoLockMinutes })
-                  : t("securityAutoLockOff")}
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => router.push("/settings?section=security")}
-              data-testid="account-overview-manage-security"
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="account-overview-local-summary"
             >
-              {t("securityManage")}
-            </Button>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      <Card>
-        <CardContent className="flex items-center justify-between gap-3 pt-6">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">{t("devicesTitle")}</p>
-            <p className="truncate text-xs text-muted-foreground">
-              {paired && shortDeviceId
-                ? t("devicePaired", { id: shortDeviceId })
-                : t("deviceUnpaired")}
+              {t("localAccountsSummary", {
+                name: activeAccount?.displayName ?? t("fallbackName"),
+                count: accountCount,
+              })}
             </p>
-          </div>
-          {paired ? (
+            {accounts.length > 1 ? (
+              <SettingsField label={t("switchAccountAria")} stacked>
+                <Select value={activeAccount?.id ?? undefined} onValueChange={handleSwitch}>
+                  <SelectTrigger
+                    className="w-full"
+                    aria-label={t("switchAccountAria")}
+                    data-testid="account-overview-switch"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {accounts.map((account) => (
+                      <SelectItem key={account.id} value={account.id}>
+                        {account.displayName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </SettingsField>
+            ) : null}
+          </SettingsBlock>
+        ) : null}
+
+        {/* ── Profile editor ─────────────────────────────────────────────── */}
+        <ProfileSection showEmail={false} />
+
+        {/* ── Jump-offs to the sections that own these settings ──────────── */}
+        <SettingsBlock
+          icon={<LinkIcon />}
+          title={t("manageTitle")}
+          description={t("manageDescription")}
+          testid="account-links-block"
+          contentClassName="space-y-0 [&>*+*]:pt-4"
+        >
+          <SettingsField label={t("subscriptionTitle")} description={planLabel}>
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => router.push("/settings?section=companion")}
-              data-testid="account-overview-manage-devices"
+              onClick={() => router.push("/settings?section=subscription")}
+              data-testid="account-overview-manage-subscription"
             >
-              {t("devicesManage")}
+              {t("subscriptionManage")}
             </Button>
-          ) : (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => router.push("/pair")}
-              data-testid="account-overview-pair"
+          </SettingsField>
+
+          {desktopReady ? (
+            <SettingsField
+              label={t("securityTitle")}
+              description={
+                autoLockMinutes > 0
+                  ? t("securityAutoLockOn", { minutes: autoLockMinutes })
+                  : t("securityAutoLockOff")
+              }
+              testid="account-overview-security-summary"
             >
-              {t("pair")}
-            </Button>
-          )}
-        </CardContent>
-      </Card>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => router.push("/settings?section=security")}
+                data-testid="account-overview-manage-security"
+              >
+                {t("securityManage")}
+              </Button>
+            </SettingsField>
+          ) : null}
+
+          <SettingsField
+            label={t("devicesTitle")}
+            description={
+              paired && shortDeviceId
+                ? t("devicePaired", { id: shortDeviceId })
+                : t("deviceUnpaired")
+            }
+          >
+            {paired ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => router.push("/settings?section=companion")}
+                data-testid="account-overview-manage-devices"
+              >
+                {t("devicesManage")}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => router.push("/pair")}
+                data-testid="account-overview-pair"
+              >
+                {t("pair")}
+              </Button>
+            )}
+          </SettingsField>
+        </SettingsBlock>
+      </SettingsStack>
 
       {desktopReady ? <AccountManageDialog open={manageOpen} onOpenChange={setManageOpen} /> : null}
     </div>

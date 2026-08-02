@@ -5911,7 +5911,23 @@
     "sortByName": "Sort by name",
     "sortByUpdated": "Sort by updated",
     "tools": "{count} tools",
-    "usedTimes": "Used {count} times"
+    "usedTimes": "Used {count} times",
+    "mobileTrigger": "Modes",
+    "selectMode": "Select {name}",
+    "detailEmptyTitle": "No mode selected",
+    "detailEmptyDescription": "Pick a mode from the list to see what it changes.",
+    "detail": {
+      "tools": "Tools",
+      "tags": "Tags",
+      "none": "None",
+      "outputFormat": "Output format",
+      "permissionMode": "Permission mode",
+      "modelOverride": "Model override",
+      "usage": "Usage",
+      "updated": "Updated",
+      "systemPrompt": "System prompt",
+      "noSystemPrompt": "This mode adds no system prompt."
+    }
   },
   "desktop": {
     "barCustomize": {
@@ -20035,7 +20051,8 @@
         "showAdvanced": "Show runtime details",
         "tauri": "Tauri",
         "title": "Version & build",
-        "version": "Version"
+        "version": "Version",
+        "runtime": "Runtime"
       },
       "versionLine": "version",
       "versionUnknown": "—",
@@ -20084,7 +20101,11 @@
       "title": "Account",
       "usageFiveHour": "5-hour usage",
       "usageReset": "{remaining} left",
-      "usageSevenDay": "7-day usage"
+      "usageSevenDay": "7-day usage",
+      "sessionTitle": "Session",
+      "sessionDescription": "Your current sign-in and how long it stays active.",
+      "manageTitle": "Manage account",
+      "manageDescription": "Change your plan, billing details, or sign out."
     },
     "actions": {
       "cancel": "Cancel",
@@ -20289,7 +20310,8 @@
           "verdictDeny": "Deny",
           "verdictLabel": "Verdict",
           "wildcardTool": "All tools (*)"
-        }
+        },
+        "categoriesTitle": "Tool categories"
       },
       "sessions": {
         "ago": {
@@ -20381,6 +20403,10 @@
         "toolsLabel": "Always-loaded tools",
         "toolsPlaceholder": "Tool name, e.g. read_file",
         "unknownHint": "Not found in the current tool catalog — this pin won't take effect until a matching server or tool exists."
+      },
+      "nav": {
+        "title": "Agent runtime settings",
+        "mobileTrigger": "Sections"
       }
     },
     "agentTeams": {
@@ -25277,7 +25303,8 @@
             "label": "Retrieval"
           }
         },
-        "title": "Memory settings"
+        "title": "Memory settings",
+        "mobileTrigger": "Sections"
       },
       "overview": {
         "byScope": {

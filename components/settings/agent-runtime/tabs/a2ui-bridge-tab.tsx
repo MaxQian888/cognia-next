@@ -7,7 +7,7 @@
 
 import { useTranslations } from "next-intl"
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
 import { Switch } from "@/components/ui/switch"
 import { useSettingsStore } from "@/stores/settings"
 
@@ -21,18 +21,21 @@ export function A2UIBridgeTab() {
   }
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-3 pb-3">
-        <div className="space-y-1">
-          <CardTitle className="text-sm">{t("title")}</CardTitle>
-          <CardDescription className="text-xs">{t("description")}</CardDescription>
-        </div>
-        <Switch checked={Boolean(enabled)} onCheckedChange={handleToggle} aria-label={t("title")} />
-      </CardHeader>
-      <CardContent>
-        <p className="text-xs text-muted-foreground">{t("hint")}</p>
-      </CardContent>
-    </Card>
+    <SettingsStack>
+      <SettingsBlock
+        title={t("title")}
+        description={t("description")}
+        action={
+          <Switch
+            checked={Boolean(enabled)}
+            onCheckedChange={handleToggle}
+            aria-label={t("title")}
+          />
+        }
+      >
+        <p className="text-xs text-pretty text-muted-foreground">{t("hint")}</p>
+      </SettingsBlock>
+    </SettingsStack>
   )
 }
 

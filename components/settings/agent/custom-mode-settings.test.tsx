@@ -12,7 +12,7 @@
  */
 
 import React from "react"
-import { render, screen, within, act } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { CustomModeSettings } from "./custom-mode-settings"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
@@ -85,7 +85,31 @@ jest.mock("@/hooks/agent/use-agent-mode", () => ({
 // CustomModeEditor pulls in many side-effect-heavy components; stub it so
 // these focused row tests don't need to mount the full editor tree.
 jest.mock("@/components/agent/mode/custom-mode-editor", () => ({
-  CustomModeEditor: () => null,
+  CustomModeEditor: ({
+    open,
+    mode,
+    onSave,
+  }: {
+    open: boolean
+    mode?: { id: string }
+    onSave: () => void
+  }) =>
+    open ? (
+      <div data-testid="stub-mode-editor" data-mode-id={mode?.id ?? ""}>
+        <button type="button" onClick={onSave}>
+          stub-save
+        </button>
+      </div>
+    ) : null,
+}))
+
+const toastSuccess = jest.fn()
+const toastError = jest.fn()
+jest.mock("@/components/ui/sonner", () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccess(...args),
+    error: (...args: unknown[]) => toastError(...args),
+  },
 }))
 
 // Quiet the agent logger spam during tests
@@ -241,37 +265,122 @@ const polishCustomB: CustomModeConfig = {
   name: "Polish B",
   description: "tagline beta",
   category: "creative",
+  systemPrompt: "answer briefly",
+  tools: ["Read"],
+  tags: ["beta"],
+  permissionMode: "plan",
+  modelOverride: "claude-opus-5",
+  usageCount: 9,
+  createdAt: new Date(1_000),
+  updatedAt: new Date(1_000),
+}
+
+// The export path builds a Blob URL and clicks a synthetic anchor; jsdom
+// implements neither, so stub both rather than letting the handler throw.
+const createObjectURL = jest.fn(() => "blob:mode")
+const revokeObjectURL = jest.fn()
+const anchorClick = jest.fn()
+beforeAll(() => {
+  Object.assign(URL, { createObjectURL, revokeObjectURL })
+  jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(anchorClick)
+})
+
+/**
+ * Drive the hidden file input with `content`, then wait for the async
+ * `FileReader.onload` to land. `File.text()` is not what the component uses —
+ * it reads through `FileReader`, so the test has to await the callback, not the
+ * promise.
+ */
+async function readFileInto(input: HTMLInputElement, content: string) {
+  const before = toastSuccess.mock.calls.length + toastError.mock.calls.length
+  const file = new File([content], "modes.json", { type: "application/json" })
+  fireEvent.change(input, { target: { files: [file] } })
+  await waitFor(() =>
+    expect(toastSuccess.mock.calls.length + toastError.mock.calls.length).toBeGreaterThan(before)
+  )
+}
+
+/** Handles for the store mocks the master/detail tests drive. */
+let storeMocks: {
+  deleteMode: jest.Mock
+  duplicateMode: jest.Mock
+  exportMode: jest.Mock
+  exportAllModes: jest.Mock
+  importMode: jest.Mock
+  importModes: jest.Mock
 }
 
 describe("CustomModeSettings — polish-phase", () => {
   beforeEach(() => {
-    customModeStoreRef.current = {
-      customModes: { "polish-a": polishCustomA, "polish-b": polishCustomB },
+    toastSuccess.mockClear()
+    toastError.mockClear()
+    anchorClick.mockClear()
+    storeMocks = {
       deleteMode: jest.fn(),
-      duplicateMode: jest.fn(),
-      exportMode: jest.fn(() => "{}"),
-      exportAllModes: jest.fn(() => "{}"),
+      duplicateMode: jest.fn(() => polishCustomA),
+      exportMode: jest.fn(() => '{"type":"custom-mode"}'),
+      exportAllModes: jest.fn(() => '{"type":"custom-modes-collection"}'),
       importMode: jest.fn(),
       importModes: jest.fn(),
     }
+    customModeStoreRef.current = {
+      customModes: { "polish-a": polishCustomA, "polish-b": polishCustomB },
+      ...storeMocks,
+    }
   })
 
-  it("filter row uses responsive flex-col on mobile and flex-row on md+", () => {
+  it("splits into a rail and a detail pane, with no card chrome", () => {
     const { container } = render(<CustomModeSettings />)
-    const filters = container.querySelector(".flex-col.md\\:flex-row")
-    expect(filters).not.toBeNull()
+    expect(screen.getByTestId("custom-mode-settings")).toBeInTheDocument()
+    expect(screen.getByTestId("custom-mode-rail")).toBeInTheDocument()
+    expect(container.querySelector("[data-slot='card']")).toBeNull()
   })
 
-  it("each mode row has an inline Edit button hidden on mobile (md:flex)", () => {
+  it("auto-selects the first row and shows its detail", () => {
     render(<CustomModeSettings />)
-    const editA = screen.getByTestId("mode-edit-polish-a")
-    expect(editA.className).toContain("hidden")
-    expect(editA.className).toContain("md:flex")
+    expect(screen.getByTestId("custom-mode-row-polish-a")).toHaveAttribute("data-active", "true")
+    expect(screen.getByTestId("custom-mode-row-polish-b")).toHaveAttribute("data-active", "false")
+    expect(screen.getByTestId("custom-mode-detail-meta")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Polish A" })).toBeInTheDocument()
   })
 
-  it("dropdown trigger has an aria-label that includes the mode name", () => {
+  it("clicking a row swaps the detail pane to that mode", async () => {
+    const user = userEvent.setup()
     render(<CustomModeSettings />)
+    await user.click(screen.getByTestId("custom-mode-row-polish-b"))
+    expect(screen.getByRole("heading", { name: "Polish B" })).toBeInTheDocument()
+    expect(screen.getByTestId("custom-mode-row-polish-b")).toHaveAttribute("data-active", "true")
+  })
+
+  it("surfaces the selected mode's prompt, tools and tags in the pane", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+    await user.click(screen.getByTestId("custom-mode-row-polish-b"))
+    // polish-b carries a prompt, one tool and one tag (see the fixture).
+    expect(screen.getByTestId("custom-mode-system-prompt")).toHaveTextContent("answer briefly")
+    expect(screen.getByText("Read")).toBeInTheDocument()
+    expect(screen.getByText("beta")).toBeInTheDocument()
+  })
+
+  it("says so when the selected mode has no prompt, tools or tags", () => {
+    render(<CustomModeSettings />)
+    // polish-a has none of the three.
+    expect(screen.queryByTestId("custom-mode-system-prompt")).not.toBeInTheDocument()
+    expect(screen.getByText("This mode adds no system prompt.")).toBeInTheDocument()
+    expect(screen.getAllByText("None")).toHaveLength(2)
+  })
+
+  it("edit and more-actions are labelled with the selected mode's name", () => {
+    render(<CustomModeSettings />)
+    expect(screen.getByTestId("mode-edit-polish-a")).toHaveAccessibleName("Edit Polish A")
     expect(screen.getByLabelText("More actions for Polish A")).toBeInTheDocument()
+  })
+
+  it("keeps the rail reachable through a sheet on narrow viewports", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+    await user.click(screen.getByTestId("custom-mode-mobile-nav-trigger"))
+    expect(screen.getAllByTestId("custom-mode-rail").length).toBeGreaterThan(1)
   })
 
   it("renders the results-count line only when filtered", async () => {
@@ -283,5 +392,228 @@ describe("CustomModeSettings — polish-phase", () => {
     const count = screen.getByTestId("custom-mode-results-count")
     expect(count.textContent).toContain("1")
     expect(count.textContent).toContain("2")
+  })
+
+  it("narrows the rail by search and empties the pane when nothing matches", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+    await user.type(screen.getByPlaceholderText("Search modes…"), "zzz")
+    expect(screen.queryByTestId("custom-mode-row-polish-a")).not.toBeInTheDocument()
+    expect(screen.getByText("No modes match the filters")).toBeInTheDocument()
+    expect(screen.getByText("No mode selected")).toBeInTheDocument()
+  })
+
+  it("shows the create-first empty state when there are no modes at all", () => {
+    customModeStoreRef.current = { customModes: {}, ...storeMocks }
+    render(<CustomModeSettings />)
+    expect(screen.getByText("No custom modes yet")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Create first mode/ })).toBeInTheDocument()
+  })
+
+  it("keeps the pane pinned to a mode that survives a narrowing filter", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+    await user.click(screen.getByTestId("custom-mode-row-polish-b"))
+    await user.type(screen.getByPlaceholderText("Search modes…"), "beta")
+    expect(screen.getByRole("heading", { name: "Polish B" })).toBeInTheDocument()
+  })
+
+  it("opens the editor with no mode from Create, and with the active mode from Edit", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+
+    await user.click(screen.getByTestId("mode-edit-polish-a"))
+    expect(screen.getByTestId("stub-mode-editor")).toHaveAttribute("data-mode-id", "polish-a")
+  })
+
+  it("creates a new mode with an empty editor", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+    // The header's Create button — the empty-state one is not rendered here.
+    await user.click(screen.getByRole("button", { name: "Create Custom Mode" }))
+    expect(screen.getByTestId("stub-mode-editor")).toHaveAttribute("data-mode-id", "")
+  })
+
+  it("duplicates the selected mode through the store", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+    await user.click(screen.getByLabelText("More actions for Polish A"))
+    await user.click(await screen.findByRole("menuitem", { name: /Duplicate/ }))
+    expect(storeMocks.duplicateMode).toHaveBeenCalledWith("polish-a")
+    expect(toastSuccess).toHaveBeenCalledWith("Mode duplicated")
+  })
+
+  it("stays quiet when duplicating a mode the store cannot find", async () => {
+    storeMocks.duplicateMode.mockReturnValueOnce(undefined)
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+    await user.click(screen.getByLabelText("More actions for Polish A"))
+    await user.click(await screen.findByRole("menuitem", { name: /Duplicate/ }))
+    expect(toastSuccess).not.toHaveBeenCalled()
+  })
+
+  it("exports the selected mode and the whole collection", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+
+    await user.click(screen.getByLabelText("More actions for Polish A"))
+    await user.click(await screen.findByRole("menuitem", { name: /Export/ }))
+    expect(storeMocks.exportMode).toHaveBeenCalledWith("polish-a")
+
+    await user.click(screen.getByRole("button", { name: /^Export$/ }))
+    expect(storeMocks.exportAllModes).toHaveBeenCalledTimes(1)
+  })
+
+  it("skips the download when the store has nothing to export for that id", async () => {
+    storeMocks.exportMode.mockReturnValueOnce("")
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+    await user.click(screen.getByLabelText("More actions for Polish A"))
+    await user.click(await screen.findByRole("menuitem", { name: /Export/ }))
+    expect(toastSuccess).not.toHaveBeenCalledWith("Mode exported")
+  })
+
+  it("deletes the selected mode after confirmation and unpins the pane", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+    await user.click(screen.getByTestId("custom-mode-row-polish-b"))
+    await user.click(screen.getByLabelText("More actions for Polish B"))
+    await user.click(await screen.findByRole("menuitem", { name: /Delete/ }))
+    // Confirm in the alert dialog.
+    await user.click(await screen.findByRole("button", { name: "Delete" }))
+    expect(storeMocks.deleteMode).toHaveBeenCalledWith("polish-b")
+    expect(toastSuccess).toHaveBeenCalledWith("Mode deleted")
+  })
+
+  it("cancels a delete without touching the store", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+    await user.click(screen.getByLabelText("More actions for Polish A"))
+    await user.click(await screen.findByRole("menuitem", { name: /Delete/ }))
+    await user.click(await screen.findByRole("button", { name: "Cancel" }))
+    expect(storeMocks.deleteMode).not.toHaveBeenCalled()
+  })
+
+  it("bulk-selects, selects all, clears, and bulk-deletes", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+
+    await user.click(screen.getByLabelText("Select Polish A"))
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Select all" }))
+    expect(screen.getByText("2 selected")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Clear" }))
+    expect(screen.queryByText(/selected$/)).not.toBeInTheDocument()
+
+    await user.click(screen.getByLabelText("Select Polish A"))
+    await user.click(screen.getByLabelText("Select Polish A"))
+    expect(screen.queryByText(/selected$/)).not.toBeInTheDocument()
+
+    await user.click(screen.getByLabelText("Select Polish B"))
+    await user.click(screen.getByRole("button", { name: /Delete selected/ }))
+    expect(storeMocks.deleteMode).toHaveBeenCalledWith("polish-b")
+    expect(toastSuccess).toHaveBeenCalledWith("Deleted 1 modes")
+  })
+
+  it("imports a collection, a single mode, and reports bad payloads", async () => {
+    storeMocks.importModes.mockReturnValue(2)
+    storeMocks.importMode.mockReturnValue({ name: "Imported" })
+    const { container } = render(<CustomModeSettings />)
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+
+    await readFileInto(input, JSON.stringify({ type: "custom-modes-collection" }))
+    expect(storeMocks.importModes).toHaveBeenCalled()
+    expect(toastSuccess).toHaveBeenCalledWith("Imported 2 modes")
+
+    await readFileInto(input, JSON.stringify({ type: "custom-mode" }))
+    expect(storeMocks.importMode).toHaveBeenCalled()
+    expect(toastSuccess).toHaveBeenCalledWith('Imported mode "Imported"')
+
+    storeMocks.importMode.mockReturnValueOnce(undefined)
+    await readFileInto(input, JSON.stringify({ type: "custom-mode" }))
+    expect(toastError).toHaveBeenCalledWith("Failed to import mode")
+
+    await readFileInto(input, JSON.stringify({ type: "nonsense" }))
+    expect(toastError).toHaveBeenCalledWith("Invalid file format")
+
+    await readFileInto(input, "{not json")
+    expect(toastError).toHaveBeenCalledWith("Failed to parse file")
+  })
+
+  it("shows the permission and model overrides only when the mode sets them", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+    // polish-a sets neither.
+    expect(screen.queryByText("claude-opus-5")).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId("custom-mode-row-polish-b"))
+    expect(screen.getByText("plan")).toBeInTheDocument()
+    expect(screen.getByText("claude-opus-5")).toBeInTheDocument()
+  })
+
+  it("filters by category and re-sorts the rail", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+
+    // Name order (the default) puts A before B.
+    const railOrder = () =>
+      screen.getAllByTestId(/^custom-mode-row-/).map((el) => el.getAttribute("data-testid"))
+    expect(railOrder()).toEqual(["custom-mode-row-polish-a", "custom-mode-row-polish-b"])
+
+    // Most-used first flips them: polish-b has 9 uses, polish-a has 1.
+    await user.click(screen.getByLabelText("Sort by"))
+    await user.click(await screen.findByRole("option", { name: "Sort by most used" }))
+    expect(railOrder()).toEqual(["custom-mode-row-polish-b", "custom-mode-row-polish-a"])
+
+    // Newest-first orderings agree: polish-b was created and updated later.
+    await user.click(screen.getByLabelText("Sort by"))
+    await user.click(await screen.findByRole("option", { name: "Sort by created" }))
+    expect(railOrder()).toEqual(["custom-mode-row-polish-b", "custom-mode-row-polish-a"])
+
+    await user.click(screen.getByLabelText("Sort by"))
+    await user.click(await screen.findByRole("option", { name: "Sort by updated" }))
+    expect(railOrder()).toEqual(["custom-mode-row-polish-b", "custom-mode-row-polish-a"])
+
+    // Category narrows to the one creative mode.
+    await user.click(screen.getByLabelText("Category"))
+    await user.click(await screen.findByRole("option", { name: "Creative" }))
+    expect(railOrder()).toEqual(["custom-mode-row-polish-b"])
+  })
+
+  it("closes the editor once the dialog reports a save", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+    await user.click(screen.getByTestId("mode-edit-polish-a"))
+    await user.click(screen.getByRole("button", { name: "stub-save" }))
+    expect(screen.queryByTestId("stub-mode-editor")).not.toBeInTheDocument()
+  })
+
+  it("creates a mode straight from the empty detail pane", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+    await user.type(screen.getByPlaceholderText("Search modes…"), "zzz")
+    // Header button and empty-pane button share a label; the pane's is last.
+    const createButtons = screen.getAllByRole("button", { name: "Create Custom Mode" })
+    await user.click(createButtons[createButtons.length - 1])
+    expect(screen.getByTestId("stub-mode-editor")).toHaveAttribute("data-mode-id", "")
+  })
+
+  it("falls back to the default glyph when a mode names an unknown icon", () => {
+    customModeStoreRef.current = {
+      customModes: { "polish-a": { ...polishCustomA, icon: "ThisIconDoesNotExist" } },
+      ...storeMocks,
+    }
+    render(<CustomModeSettings />)
+    expect(screen.getByTestId("custom-mode-row-polish-a")).toBeInTheDocument()
+  })
+
+  it("does nothing when the file picker is dismissed without a file", () => {
+    const { container } = render(<CustomModeSettings />)
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(input, { target: { files: [] } })
+    expect(storeMocks.importMode).not.toHaveBeenCalled()
+    expect(storeMocks.importModes).not.toHaveBeenCalled()
   })
 })

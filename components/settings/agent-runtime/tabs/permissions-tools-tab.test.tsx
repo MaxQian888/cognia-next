@@ -168,4 +168,34 @@ describe("PermissionsToolsTab", () => {
     // One switch per category still renders; their state defaults to false.
     expect(screen.getAllByRole("switch")).toHaveLength(CATEGORY_COUNT)
   })
+
+  it("approves every built-in tool in one click", async () => {
+    const user = userEvent.setup()
+    stateRef.current = {
+      settings: {
+        alwaysAllowTools: [],
+        builtinTools: {},
+      } as Record<string, unknown>,
+    }
+    render(<PermissionsToolsTab />)
+
+    await user.click(screen.getByRole("button", { name: /approveAllBuiltin/ }))
+
+    // One toggle per namespaced built-in tool, across every category.
+    expect(toggleAlwaysAllow.mock.calls.length).toBeGreaterThan(CATEGORY_COUNT)
+    for (const [name, enabled] of toggleAlwaysAllow.mock.calls) {
+      expect(name).toMatch(/^mcp__/)
+      expect(enabled).toBe(true)
+    }
+  })
+
+  it("adds a tool from the Add button, not just the Enter key", async () => {
+    const user = userEvent.setup()
+    render(<PermissionsToolsTab />)
+    fireEvent.change(screen.getByPlaceholderText("addToolPlaceholder"), {
+      target: { value: "mcp__custom__from_button" },
+    })
+    await user.click(screen.getByRole("button", { name: /addBtn/ }))
+    expect(toggleAlwaysAllow).toHaveBeenCalledWith("mcp__custom__from_button", true)
+  })
 })

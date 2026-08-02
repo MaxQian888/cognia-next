@@ -2,13 +2,18 @@
 
 /**
  * Settings → Agent 评估 — project-level eval defaults that previously had no
- * home (they could only be set per-run). Four cards:
+ * home (they could only be set per-run). Four blocks:
  *   1. Judge      — which model runs the LLM scorers + a deterministic-only kill switch.
  *   2. Run        — default k (pass^k) + default scorer selection (grouped picker).
- *   3. Gate       — thresholds stamped onto brand-new datasets.
- *   4. Cost guard — warn before an expensive run.
+ *   3. Gate       — thresholds stamped onto brand-new datasets (collapsible).
+ *   4. Cost guard — warn before an expensive run (collapsible).
  * Everything persists to `AppSettings.evalSettings` (one Dexie write); the
  * run-config dialog and `createDataset` read it back through `resolveEvalSettings`.
+ *
+ * Layout: this page is a short, flat form — four groups of at most four fields —
+ * so it is a plain `SettingsStack`, not a stack of cards. The two advanced
+ * groups (gate thresholds, cost guard) fold away behind a disclosure instead of
+ * each claiming a bordered box of its own.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -42,14 +47,15 @@ import {
   CommandSeparator,
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Switch } from "@/components/ui/switch"
 import { collectOptions, groupByProvider } from "@cognia/provider-routing/model-option-source"
+import { SettingsAlert } from "@/components/settings/common/settings-section"
 import {
-  SettingsCard,
-  SettingsRow,
-  SettingsToggle,
-  SettingsPageHeader,
-  SettingsAlert,
-} from "@/components/settings/common/settings-section"
+  SettingsBlock,
+  SettingsField,
+  SettingsStack,
+} from "@/components/settings/common/settings-block"
+import { Badge } from "@/components/ui/badge"
 import {
   ScorerPicker,
   expandScorerSelection,
@@ -223,187 +229,231 @@ export function EvalSettingsSection() {
   const totalScorerCount = ALL_SCORER_IDS.length
 
   return (
-    <div className="space-y-4" data-testid="eval-settings-section">
-      <SettingsPageHeader
-        icon={<ClipboardCheckIcon className="size-5" />}
-        title={t("title")}
-        description={t("description")}
-        actions={
-          <div className="flex items-center gap-2">
-            {saveState !== "idle" && (
-              <span
-                role="status"
-                aria-live="polite"
-                data-testid="eval-save-status"
-                className="text-muted-foreground flex items-center gap-1 text-xs"
-              >
-                {saveState === "saving" ? (
-                  <Loader2Icon className="size-3.5 animate-spin" />
-                ) : (
-                  <CheckIcon className="size-3.5 text-emerald-500" />
-                )}
-                {saveState === "saving" ? t("saving") : t("saved")}
-              </span>
-            )}
-            <Button variant="outline" size="sm" onClick={() => router.push("/eval")}>
-              <ExternalLinkIcon className="size-4" />
-              {t("openWorkspace")}
-            </Button>
-          </div>
-        }
-      />
-
-      {/* 1. Judge */}
-      <SettingsCard icon={<ScaleIcon className="size-4" />} title={t("judgeTitle")}>
-        <SettingsRow label={t("judgeModelLabel")} description={t("judgeModelDescription")}>
-          <JudgeModelPicker
-            value={resolved.judgeModel}
-            onSelect={(modelId) => patch({ judgeModel: modelId })}
-            disabled={deterministicOnly}
-          />
-        </SettingsRow>
-        <SettingsToggle
-          id="eval-deterministic-only"
-          label={t("deterministicLabel")}
-          description={t("deterministicDescription")}
-          checked={deterministicOnly}
-          onCheckedChange={(v) => patch({ deterministicOnly: v })}
-        />
-        {deterministicOnly && (
-          <SettingsAlert icon={<InfoIcon className="size-4" />}>
-            {t("deterministicActiveHint")}
-          </SettingsAlert>
-        )}
-      </SettingsCard>
-
-      {/* 2. Run defaults */}
-      <SettingsCard icon={<PlayIcon className="size-4" />} title={t("runTitle")}>
-        <SettingsRow label={t("defaultKLabel")} description={t("defaultKDescription")}>
-          <Input
-            type="number"
-            min={EVAL_K_RANGE.min}
-            max={EVAL_K_RANGE.max}
-            aria-label={t("defaultKLabel")}
-            value={resolved.defaultK}
-            onChange={(e) =>
-              patch({
-                defaultK:
-                  parseOptionalNumber(e.target.value, EVAL_K_RANGE.min, EVAL_K_RANGE.max) ??
-                  EVAL_K_RANGE.min,
-              })
-            }
-            className="h-8 w-20"
-          />
-        </SettingsRow>
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
-            <p className="text-sm font-medium">{t("defaultScorersLabel")}</p>
-            <p className="text-muted-foreground text-xs tabular-nums">
-              {t("scorersSelectedSummary", {
-                count: selectedScorerCount,
-                total: totalScorerCount,
-              })}
-            </p>
-          </div>
-          <p className="text-muted-foreground text-xs">{t("defaultScorersDescription")}</p>
-          <ScorerPicker
-            value={expandScorerSelection(resolved.defaultScorerIds)}
-            onChange={(ids) => patch({ defaultScorerIds: normalizeScorerSelection(ids) })}
-            judgeAvailable={!deterministicOnly}
-          />
+    <div className="flex min-w-0 flex-col gap-5" data-testid="eval-settings-section">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0 space-y-1">
+          <h2 className="flex items-center gap-2 text-base font-semibold tracking-tight">
+            <ClipboardCheckIcon className="size-4 text-muted-foreground" />
+            {t("title")}
+          </h2>
+          <p className="text-xs text-pretty text-muted-foreground">{t("description")}</p>
         </div>
-      </SettingsCard>
+        <div className="flex shrink-0 items-center gap-2">
+          {saveState !== "idle" && (
+            <span
+              role="status"
+              aria-live="polite"
+              data-testid="eval-save-status"
+              className="flex items-center gap-1 text-xs text-muted-foreground"
+            >
+              {saveState === "saving" ? (
+                <Loader2Icon className="size-3.5 animate-spin" />
+              ) : (
+                <CheckIcon className="size-3.5 text-emerald-500" />
+              )}
+              {saveState === "saving" ? t("saving") : t("saved")}
+            </span>
+          )}
+          <Button variant="outline" size="sm" onClick={() => router.push("/eval")}>
+            <ExternalLinkIcon className="size-4" />
+            {t("openWorkspace")}
+          </Button>
+        </div>
+      </div>
 
-      {/* 3. Gate defaults */}
-      <SettingsCard
-        icon={<ShieldCheckIcon className="size-4" />}
-        title={t("gateTitle")}
-        description={t("gateDescription")}
-        badge={gateActive ? t("gateActive") : t("gateInactive")}
-        badgeVariant={gateActive ? "default" : "outline"}
-      >
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <label className="flex flex-col gap-1 text-sm">
-            <span>{t("gateMinPassAt1")}</span>
-            <Input
-              type="number"
-              min={0}
-              max={1}
-              step={0.05}
-              aria-label={t("gateMinPassAt1")}
-              value={gate.minPassAt1 ?? ""}
-              onChange={(e) => patchGate({ minPassAt1: parseOptionalNumber(e.target.value, 0, 1) })}
-              className="h-8"
+      <SettingsStack>
+        {/* 1. Judge */}
+        <SettingsBlock
+          icon={<ScaleIcon />}
+          title={t("judgeTitle")}
+          testid="eval-block-judge"
+          contentClassName="space-y-0 [&>*+*]:pt-4"
+        >
+          <SettingsField
+            label={t("judgeModelLabel")}
+            description={t("judgeModelDescription")}
+            disabled={deterministicOnly}
+          >
+            <JudgeModelPicker
+              value={resolved.judgeModel}
+              onSelect={(modelId) => patch({ judgeModel: modelId })}
+              disabled={deterministicOnly}
             />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span>{t("gateMinPassHatK")}</span>
+          </SettingsField>
+          <SettingsField
+            htmlFor="eval-deterministic-only"
+            label={t("deterministicLabel")}
+            description={t("deterministicDescription")}
+          >
+            <Switch
+              id="eval-deterministic-only"
+              checked={deterministicOnly}
+              onCheckedChange={(v) => patch({ deterministicOnly: v })}
+            />
+          </SettingsField>
+          {deterministicOnly && (
+            <SettingsAlert icon={<InfoIcon className="size-4" />}>
+              {t("deterministicActiveHint")}
+            </SettingsAlert>
+          )}
+        </SettingsBlock>
+
+        {/* 2. Run defaults */}
+        <SettingsBlock
+          icon={<PlayIcon />}
+          title={t("runTitle")}
+          testid="eval-block-run"
+          contentClassName="space-y-0 [&>*+*]:pt-4"
+        >
+          <SettingsField label={t("defaultKLabel")} description={t("defaultKDescription")}>
             <Input
               type="number"
-              min={0}
-              max={1}
-              step={0.05}
-              aria-label={t("gateMinPassHatK")}
-              value={gate.minPassHatK ?? ""}
+              min={EVAL_K_RANGE.min}
+              max={EVAL_K_RANGE.max}
+              aria-label={t("defaultKLabel")}
+              value={resolved.defaultK}
               onChange={(e) =>
-                patchGate({ minPassHatK: parseOptionalNumber(e.target.value, 0, 1) })
+                patch({
+                  defaultK:
+                    parseOptionalNumber(e.target.value, EVAL_K_RANGE.min, EVAL_K_RANGE.max) ??
+                    EVAL_K_RANGE.min,
+                })
               }
-              className="h-8"
+              className="h-8 w-20"
             />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span>{t("gateMinScorerPassRate")}</span>
-            <Input
-              type="number"
-              min={0}
-              max={1}
-              step={0.05}
-              aria-label={t("gateMinScorerPassRate")}
-              value={minScorerPassRate ?? ""}
-              onChange={(e) =>
-                patchGate({ minScorerPassRate: parseOptionalNumber(e.target.value, 0, 1) })
-              }
-              className="h-8"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span>{t("gateMaxCost")}</span>
+          </SettingsField>
+          {/* The scorer picker is a full-width grid of toggles — it gets its own
+              line rather than being squeezed into a right-hand control slot. */}
+          <SettingsField
+            label={t("defaultScorersLabel")}
+            description={t("defaultScorersDescription")}
+            stacked
+          >
+            <div className="space-y-2">
+              <p className="text-xs tabular-nums text-muted-foreground">
+                {t("scorersSelectedSummary", {
+                  count: selectedScorerCount,
+                  total: totalScorerCount,
+                })}
+              </p>
+              <ScorerPicker
+                value={expandScorerSelection(resolved.defaultScorerIds)}
+                onChange={(ids) => patch({ defaultScorerIds: normalizeScorerSelection(ids) })}
+                judgeAvailable={!deterministicOnly}
+              />
+            </div>
+          </SettingsField>
+        </SettingsBlock>
+
+        {/* 3. Gate defaults — advanced, so it folds away. */}
+        <SettingsBlock
+          icon={<ShieldCheckIcon />}
+          title={t("gateTitle")}
+          description={t("gateDescription")}
+          badge={
+            <Badge variant={gateActive ? "default" : "outline"} className="text-[10px]">
+              {gateActive ? t("gateActive") : t("gateInactive")}
+            </Badge>
+          }
+          collapsible
+          testid="eval-block-gate"
+        >
+          <div className="grid grid-cols-1 gap-x-6 gap-y-3 @md/settings-stack:grid-cols-2">
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">
+                {t("gateMinPassAt1")}
+              </span>
+              <Input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                aria-label={t("gateMinPassAt1")}
+                value={gate.minPassAt1 ?? ""}
+                onChange={(e) =>
+                  patchGate({ minPassAt1: parseOptionalNumber(e.target.value, 0, 1) })
+                }
+                className="h-8"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">
+                {t("gateMinPassHatK")}
+              </span>
+              <Input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                aria-label={t("gateMinPassHatK")}
+                value={gate.minPassHatK ?? ""}
+                onChange={(e) =>
+                  patchGate({ minPassHatK: parseOptionalNumber(e.target.value, 0, 1) })
+                }
+                className="h-8"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">
+                {t("gateMinScorerPassRate")}
+              </span>
+              <Input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                aria-label={t("gateMinScorerPassRate")}
+                value={minScorerPassRate ?? ""}
+                onChange={(e) =>
+                  patchGate({ minScorerPassRate: parseOptionalNumber(e.target.value, 0, 1) })
+                }
+                className="h-8"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">{t("gateMaxCost")}</span>
+              <Input
+                type="number"
+                min={0}
+                step={0.5}
+                aria-label={t("gateMaxCost")}
+                value={gate.maxTotalCostUsd ?? ""}
+                onChange={(e) =>
+                  patchGate({ maxTotalCostUsd: parseOptionalNumber(e.target.value, 0, 1_000_000) })
+                }
+                className="h-8"
+              />
+            </label>
+          </div>
+          {gateInconsistent && (
+            <SettingsAlert variant="destructive" icon={<AlertTriangleIcon className="size-4" />}>
+              {t("gateInconsistent")}
+            </SettingsAlert>
+          )}
+        </SettingsBlock>
+
+        {/* 4. Cost guard */}
+        <SettingsBlock
+          icon={<CoinsIcon />}
+          title={t("costTitle")}
+          collapsible
+          testid="eval-block-cost"
+        >
+          <SettingsField label={t("costWarnLabel")} description={t("costWarnDescription")}>
             <Input
               type="number"
               min={0}
               step={0.5}
-              aria-label={t("gateMaxCost")}
-              value={gate.maxTotalCostUsd ?? ""}
+              aria-label={t("costWarnLabel")}
+              value={resolved.costWarnUsd ?? ""}
               onChange={(e) =>
-                patchGate({ maxTotalCostUsd: parseOptionalNumber(e.target.value, 0, 1_000_000) })
+                patch({ costWarnUsd: parseOptionalNumber(e.target.value, 0, 1_000_000) })
               }
-              className="h-8"
+              className="h-8 w-24"
             />
-          </label>
-        </div>
-        {gateInconsistent && (
-          <SettingsAlert variant="destructive" icon={<AlertTriangleIcon className="size-4" />}>
-            {t("gateInconsistent")}
-          </SettingsAlert>
-        )}
-      </SettingsCard>
-
-      {/* 4. Cost guard */}
-      <SettingsCard icon={<CoinsIcon className="size-4" />} title={t("costTitle")}>
-        <SettingsRow label={t("costWarnLabel")} description={t("costWarnDescription")}>
-          <Input
-            type="number"
-            min={0}
-            step={0.5}
-            aria-label={t("costWarnLabel")}
-            value={resolved.costWarnUsd ?? ""}
-            onChange={(e) =>
-              patch({ costWarnUsd: parseOptionalNumber(e.target.value, 0, 1_000_000) })
-            }
-            className="h-8 w-24"
-          />
-        </SettingsRow>
-      </SettingsCard>
+          </SettingsField>
+        </SettingsBlock>
+      </SettingsStack>
     </div>
   )
 }

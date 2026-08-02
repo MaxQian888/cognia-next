@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 
 const getBuildInfoMock = jest.fn(() => ({
   commit: "abc1234",
@@ -53,14 +53,27 @@ describe("<VersionBuildCard />", () => {
     await waitFor(() => expect(screen.getByTestId("row-native-build")).toHaveTextContent("4242"))
   })
 
-  it("reveals runtime versions when advanced is expanded", async () => {
+  it("shows the runtime chips inline, with no expand step", async () => {
     render(<VersionBuildCard />)
-    expect(screen.queryByTestId("row-tauri")).not.toBeInTheDocument()
-    fireEvent.click(screen.getByTestId("advanced-toggle"))
+    expect(screen.queryByTestId("advanced-toggle")).not.toBeInTheDocument()
+    // React is always rendered so the chip strip never changes line count.
+    expect(screen.getByTestId("row-react")).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.getByTestId("row-tauri")).toHaveTextContent("2.9.0")
       expect(screen.getByTestId("row-react")).toHaveTextContent("19.2.0")
       expect(screen.getByTestId("row-engine")).toHaveTextContent("Chromium 130.0.0.0")
     })
+  })
+
+  it("omits the host-only chips when the runtime does not report them", async () => {
+    getRuntimeVersionsMock.mockResolvedValue({
+      tauri: undefined,
+      react: "19.2.0",
+      engine: undefined,
+    } as never)
+    render(<VersionBuildCard />)
+    await waitFor(() => expect(screen.getByTestId("row-react")).toHaveTextContent("19.2.0"))
+    expect(screen.queryByTestId("row-tauri")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("row-engine")).not.toBeInTheDocument()
   })
 })

@@ -1,88 +1,155 @@
 "use client"
 
-// Built-in Agent Runtime — top-level tabbed shell for the in-process Claude
-// SDK runtime. Mirrors `data-section.tsx`'s URL-tab pattern with a private
-// `?agentRuntimeTab=` param so deep-linking lands on the right tab.
+/**
+ * Built-in Agent Runtime — master/detail shell for the in-process Claude SDK
+ * runtime.
+ *
+ * Was five top-level tabs over stacks of cards. Tabs hid the descriptions that
+ * say what each area actually governs, and the cards nested a border per group
+ * inside the settings pane, so a page of switches read as a page of boxes. It
+ * is now the same master/detail shape as Providers / Gateway / External Bridge:
+ * `md:grid-cols-[280px_1fr]`, the nav collapsing into a left Sheet below `md`,
+ * and a detail pane that owns its scroll. The panels themselves are flat
+ * `SettingsStack`s.
+ *
+ * The deep-link param is unchanged (`?agentRuntimeTab=`), so bookmarks and the
+ * Sidecar panel's sessions counter still land on the right panel.
+ */
 
+import { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter, useSearchParams } from "next/navigation"
-import { WorkflowIcon } from "lucide-react"
-import { Label } from "@/components/ui/label"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { DefaultsTab } from "./tabs/defaults-tab"
-import { PermissionsToolsTab } from "./tabs/permissions-tools-tab"
-import { SidecarTab } from "./tabs/sidecar-tab"
-import { A2UIBridgeTab } from "./tabs/a2ui-bridge-tab"
-import { SessionsTab } from "./tabs/sessions-tab"
+import { MenuIcon, WorkflowIcon } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
+import { PanelTransition } from "@/components/settings/common/panel-transition"
 import {
   CLAUDE_CODE_RELATED,
   RelatedSectionsStrip,
 } from "@/components/settings/common/related-sections-strip"
 
-const TAB_PARAM = "agentRuntimeTab"
+import { AgentRuntimeNav } from "./agent-runtime-nav"
+import {
+  AGENT_RUNTIME_NAV_GROUPS,
+  AGENT_RUNTIME_PANEL_PARAM,
+  resolveAgentRuntimePanel,
+  type AgentRuntimePanelId,
+} from "./nav-config"
+import { DefaultsTab } from "./tabs/defaults-tab"
+import { PermissionsToolsTab } from "./tabs/permissions-tools-tab"
+import { SidecarTab } from "./tabs/sidecar-tab"
+import { A2UIBridgeTab } from "./tabs/a2ui-bridge-tab"
+import { SessionsTab } from "./tabs/sessions-tab"
 
-export type AgentRuntimeTabId = "defaults" | "permissions" | "sidecar" | "sessions" | "a2ui"
-
-const TAB_IDS: AgentRuntimeTabId[] = ["defaults", "permissions", "sessions", "sidecar", "a2ui"]
-
-function isTab(value: string | null): value is AgentRuntimeTabId {
-  return !!value && (TAB_IDS as string[]).includes(value)
-}
+/** Re-exported under the old name — external callers type tabs, not panels. */
+export type AgentRuntimeTabId = AgentRuntimePanelId
 
 export function AgentRuntimeSection() {
   const t = useTranslations("settings.agentRuntimeSection")
   const router = useRouter()
   const params = useSearchParams()
-  const requested = params.get(TAB_PARAM)
-  const activeTab: AgentRuntimeTabId = isTab(requested) ? requested : "defaults"
+  const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
 
-  const onTabChange = (value: string) => {
-    if (!isTab(value)) return
-    const next = new URLSearchParams(params.toString())
-    next.set(TAB_PARAM, value)
-    router.replace(`?${next.toString()}`, { scroll: false })
-  }
+  const activePanel = resolveAgentRuntimePanel(params.get(AGENT_RUNTIME_PANEL_PARAM))
+
+  const onSelect = useCallback(
+    (id: AgentRuntimePanelId) => {
+      const next = new URLSearchParams(params.toString())
+      next.set(AGENT_RUNTIME_PANEL_PARAM, id)
+      router.replace(`?${next.toString()}`, { scroll: false })
+      setMobileSheetOpen(false)
+    },
+    [router, params]
+  )
+
+  // Two mounts, two prefixes: the desktop rail is only `display:none` below
+  // `md`, so it and the Sheet copy are both in the tree while the Sheet is
+  // open, and they must not share one shared-layout pill id.
+  const renderNav = (idPrefix: string) => (
+    <AgentRuntimeNav
+      groups={AGENT_RUNTIME_NAV_GROUPS}
+      activeId={activePanel}
+      onSelect={onSelect}
+      idPrefix={idPrefix}
+    />
+  )
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <Label className="flex items-center gap-2">
-          <WorkflowIcon className="size-4" />
-          {t("title")}
-        </Label>
-        <p className="text-xs text-muted-foreground">{t("description")}</p>
+    <div className="flex h-full min-h-0 flex-col gap-4" data-testid="agent-runtime-section">
+      <div className="flex min-w-0 items-start gap-2.5">
+        <WorkflowIcon aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 space-y-0.5">
+          <h2 className="text-base font-semibold tracking-tight">{t("title")}</h2>
+          <p className="text-xs text-pretty text-muted-foreground">{t("description")}</p>
+        </div>
       </div>
 
       <RelatedSectionsStrip current="agent-runtime" targets={CLAUDE_CODE_RELATED} />
 
-      <Tabs value={activeTab} onValueChange={onTabChange}>
-        <div className="-mx-1 overflow-x-auto px-1">
-          <TabsList className="w-max">
-            <TabsTrigger value="defaults">{t("tabs.defaults")}</TabsTrigger>
-            <TabsTrigger value="permissions">{t("tabs.permissions")}</TabsTrigger>
-            <TabsTrigger value="sessions">{t("tabs.sessions")}</TabsTrigger>
-            <TabsTrigger value="sidecar">{t("tabs.sidecar")}</TabsTrigger>
-            <TabsTrigger value="a2ui">{t("tabs.a2ui")}</TabsTrigger>
-          </TabsList>
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
+        {/* Desktop nav */}
+        <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
+          {renderNav("agent-runtime")}
         </div>
-        <TabsContent value="defaults" className="mt-4">
-          <DefaultsTab />
-        </TabsContent>
-        <TabsContent value="permissions" className="mt-4">
-          <PermissionsToolsTab />
-        </TabsContent>
-        <TabsContent value="sessions" className="mt-4">
-          <SessionsTab />
-        </TabsContent>
-        <TabsContent value="sidecar" className="mt-4">
-          <SidecarTab />
-        </TabsContent>
-        <TabsContent value="a2ui" className="mt-4">
-          <A2UIBridgeTab />
-        </TabsContent>
-      </Tabs>
+
+        {/* Below md the nav lives in a Sheet; the bar shows where you are. */}
+        <div className="flex items-center gap-2 md:hidden">
+          <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
+            <SheetTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 gap-1.5"
+                data-testid="agent-runtime-mobile-nav-trigger"
+              >
+                <MenuIcon className="size-4" />
+                {t("nav.mobileTrigger")}
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-[300px] p-0">
+              <SheetHeader className="px-3 pt-3">
+                <SheetTitle className="text-sm">{t("nav.title")}</SheetTitle>
+              </SheetHeader>
+              {renderNav("agent-runtime-sheet")}
+            </SheetContent>
+          </Sheet>
+          <p className="min-w-0 flex-1 truncate text-sm font-medium">
+            {t(`nav.items.${activePanel}.label`)}
+          </p>
+        </div>
+
+        {/* The pane is a fraction of the window, so panel internals size off
+            `@container/settings-stack` (declared by `SettingsStack`) rather
+            than the viewport. */}
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+          <div
+            className="min-h-0 flex-1 overflow-y-auto p-4"
+            data-testid="agent-runtime-panel-body"
+          >
+            <PanelTransition activeKey={activePanel}>
+              <AgentRuntimePanelBody panel={activePanel} />
+            </PanelTransition>
+          </div>
+        </div>
+      </div>
     </div>
   )
+}
+
+function AgentRuntimePanelBody({ panel }: { panel: AgentRuntimePanelId }) {
+  switch (panel) {
+    case "defaults":
+      return <DefaultsTab />
+    case "permissions":
+      return <PermissionsToolsTab />
+    case "sessions":
+      return <SessionsTab />
+    case "sidecar":
+      return <SidecarTab />
+    case "a2ui":
+      return <A2UIBridgeTab />
+  }
 }
 
 export default AgentRuntimeSection

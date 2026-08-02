@@ -18,7 +18,7 @@ import { GitBranchIcon, PencilIcon, PlayIcon, Trash2Icon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
 import { Input } from "@/components/ui/input"
 import {
   AlertDialog,
@@ -225,13 +225,13 @@ export function SessionsTab() {
   }
 
   return (
-    <div className="space-y-4" data-testid="sessions-tab">
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">{t("title")}</CardTitle>
-          <CardDescription className="text-xs">{t("description")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
+    <div className="min-w-0" data-testid="sessions-tab">
+      <SettingsStack>
+        <SettingsBlock
+          title={t("title")}
+          description={t("description")}
+          contentClassName="space-y-3"
+        >
           <Input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -250,8 +250,12 @@ export function SessionsTab() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>{t("colTitle")}</TableHead>
-                    <TableHead className="hidden md:table-cell">{t("colKind")}</TableHead>
-                    <TableHead className="hidden md:table-cell">{t("colUpdated")}</TableHead>
+                    <TableHead className="hidden @xl/settings-stack:table-cell">
+                      {t("colKind")}
+                    </TableHead>
+                    <TableHead className="hidden @xl/settings-stack:table-cell">
+                      {t("colUpdated")}
+                    </TableHead>
                     <TableHead className="text-right">{t("colTurns")}</TableHead>
                     <TableHead className="text-right">{t("colTokens")}</TableHead>
                     <TableHead className="text-right">{t("colCost")}</TableHead>
@@ -272,12 +276,12 @@ export function SessionsTab() {
                           {r.session.id}
                         </p>
                       </TableCell>
-                      <TableCell className="hidden md:table-cell">
+                      <TableCell className="hidden @xl/settings-stack:table-cell">
                         <Badge variant="outline" className="text-[10px]">
                           {r.session.kind ?? "direct"}
                         </Badge>
                       </TableCell>
-                      <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
+                      <TableCell className="hidden @xl/settings-stack:table-cell text-xs text-muted-foreground">
                         {formatRelative(now - r.session.updatedAt, t)}
                       </TableCell>
                       <TableCell className="text-right text-xs">{r.turns}</TableCell>
@@ -345,8 +349,8 @@ export function SessionsTab() {
               </Table>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </SettingsBlock>
+      </SettingsStack>
 
       {/* Rename dialog */}
       <Dialog open={renameTarget !== null} onOpenChange={(open) => !open && setRenameTarget(null)}>

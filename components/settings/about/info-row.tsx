@@ -13,14 +13,19 @@ export interface InfoRowProps {
 }
 
 /**
- * A single label/value row used across the About cards. Label sits left in
- * muted text; value is right-aligned and may be monospaced.
+ * A single label/value row used across the About cards — a spec-sheet line:
+ * muted label, hairline divider, value right-aligned (and optionally
+ * monospaced). Below `sm` the pair stacks so long paths and hashes never
+ * squeeze the label; the last row in a group drops its divider.
  */
 export function InfoRow({ label, value, mono, testid }: InfoRowProps) {
   return (
-    <div className="flex items-start justify-between gap-4 py-1.5" data-testid={testid}>
+    <div
+      className="flex flex-col gap-0.5 border-b border-border/50 py-2 last:border-b-0 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4"
+      data-testid={testid}
+    >
       <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
-      <span className={cn("text-right text-sm", mono && "break-all font-mono text-[12px]")}>
+      <span className={cn("min-w-0 text-sm sm:text-right", mono && "font-mono text-xs break-all")}>
         {value}
       </span>
     </div>

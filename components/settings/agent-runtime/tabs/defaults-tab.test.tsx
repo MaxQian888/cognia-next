@@ -313,4 +313,112 @@ describe("DefaultsTab", () => {
       "planStyleDefault"
     )
   })
+
+  it("persists a permission mode picked from the dropdown", async () => {
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    await user.click(screen.getAllByRole("combobox")[0])
+    await user.click(screen.getByRole("option", { name: "permPlan" }))
+    expect(save).toHaveBeenCalledWith({ permissionMode: "plan" })
+  })
+
+  it("persists the thinking budget from both the slider and the number input", () => {
+    render(<DefaultsTab />)
+
+    const input = screen.getByTestId("thinking-budget-input") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "2048" } })
+    fireEvent.blur(input)
+    expect(save).toHaveBeenCalledWith({ defaultMaxThinkingTokens: 2048 })
+
+    // Above the max, the commit clamps rather than shipping the raw number.
+    fireEvent.change(input, { target: { value: "999999" } })
+    fireEvent.blur(input)
+    expect(save).toHaveBeenLastCalledWith({ defaultMaxThinkingTokens: 64000 })
+
+    // Zero means "let the SDK decide", persisted as undefined.
+    fireEvent.click(screen.getByTestId("thinking-budget-reset"))
+    expect(save).toHaveBeenLastCalledWith({ defaultMaxThinkingTokens: undefined })
+  })
+
+  it("persists a custom output style on blur, and only in custom mode", async () => {
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    await user.click(screen.getByTestId("output-style-select"))
+    await user.click(screen.getByRole("option", { name: "outputStyle.custom" }))
+
+    const textarea = screen.getByLabelText("outputStyle.customPlaceholder")
+    fireEvent.change(textarea, { target: { value: "  answer in haiku  " } })
+    fireEvent.blur(textarea)
+    expect(save).toHaveBeenLastCalledWith({ customOutputStyle: "answer in haiku" })
+
+    // A whitespace-only style clears the field rather than persisting "   ".
+    fireEvent.change(textarea, { target: { value: "   " } })
+    fireEvent.blur(textarea)
+    expect(save).toHaveBeenLastCalledWith({ customOutputStyle: undefined })
+  })
+
+  it("persists the plan approval switch and the refinement cap", () => {
+    render(<DefaultsTab />)
+
+    fireEvent.click(screen.getByTestId("plan-require-approval-switch"))
+    expect(save).toHaveBeenLastCalledWith({
+      planSettings: expect.objectContaining({ requireApproval: false }),
+    })
+
+    const refinements = screen.getByTestId("plan-max-refinements-input") as HTMLInputElement
+    fireEvent.change(refinements, { target: { value: "4" } })
+    fireEvent.blur(refinements)
+    expect(save).toHaveBeenLastCalledWith({
+      planSettings: expect.objectContaining({ maxAutoRefinements: 4 }),
+    })
+
+    // Out-of-range values clamp instead of persisting nonsense.
+    fireEvent.change(refinements, { target: { value: "99" } })
+    fireEvent.blur(refinements)
+    expect(save).toHaveBeenLastCalledWith({
+      planSettings: expect.objectContaining({ maxAutoRefinements: 10 }),
+    })
+  })
+
+  it("persists the thinking budget dragged on the slider", () => {
+    render(<DefaultsTab />)
+    // Radix exposes the thumb as role=slider; arrow keys fire change + commit.
+    const thumb = screen.getByRole("slider")
+    fireEvent.keyDown(thumb, { key: "ArrowRight" })
+    expect(save).toHaveBeenCalledWith({ defaultMaxThinkingTokens: 1024 })
+  })
+
+  it("persists bare and brief mode both on and off", () => {
+    render(<DefaultsTab />)
+
+    // OFF persists `undefined` (the flag is opt-in), ON persists `true`.
+    const bare = screen.getByRole("switch", { name: "bareMode" })
+    fireEvent.click(bare)
+    expect(save).toHaveBeenLastCalledWith({ bareMode: true })
+    fireEvent.click(bare)
+    expect(save).toHaveBeenLastCalledWith({ bareMode: undefined })
+
+    const brief = screen.getByRole("switch", { name: "briefMode" })
+    fireEvent.click(brief)
+    expect(save).toHaveBeenLastCalledWith({ briefMode: true })
+    fireEvent.click(brief)
+    expect(save).toHaveBeenLastCalledWith({ briefMode: undefined })
+  })
+
+  it("treats a cleared numeric field as zero rather than NaN", () => {
+    render(<DefaultsTab />)
+
+    const thinking = screen.getByTestId("thinking-budget-input") as HTMLInputElement
+    fireEvent.change(thinking, { target: { value: "2048" } })
+    fireEvent.change(thinking, { target: { value: "" } })
+    fireEvent.blur(thinking)
+    expect(save).toHaveBeenLastCalledWith({ defaultMaxThinkingTokens: undefined })
+
+    const refinements = screen.getByTestId("plan-max-refinements-input") as HTMLInputElement
+    fireEvent.change(refinements, { target: { value: "" } })
+    fireEvent.blur(refinements)
+    expect(save).toHaveBeenLastCalledWith({
+      planSettings: expect.objectContaining({ maxAutoRefinements: 0 }),
+    })
+  })
 })
