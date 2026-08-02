@@ -254,6 +254,33 @@ pub async fn agent_command_telemetry() -> Result<serde_json::Value, String> {
     }))
 }
 
+/// Execution-spec contract versions this host understands.
+///
+/// Mirrors `RESOLVED_SPEC_VERSION` in
+/// `packages/agent-config-types/src/agent-execution.ts`. v1 is still accepted
+/// because flag-off callers keep emitting it until the resolver is
+/// default-on; v2 adds per-capability `support` verdicts.
+pub const SUPPORTED_EXECUTION_SPEC_VERSION_MIN: i64 = 1;
+pub const SUPPORTED_EXECUTION_SPEC_VERSION_MAX: i64 = 2;
+
+/// Shallow skew guard for `options.execution`. Pure so it is unit-testable
+/// without a running sidecar.
+///
+/// Deep validation stays renderer-side (`validateAgentExecutionSendSpec`).
+/// This only answers "could this host have produced or understood it".
+/// Rejecting an unknown future version is deliberate: a host older than the
+/// renderer must fail loudly rather than forward a spec whose semantics it
+/// cannot honour.
+pub fn execution_spec_is_acceptable(execution: &Value) -> bool {
+    matches!(
+        execution.get("specVersion").and_then(|v| v.as_i64()),
+        Some(SUPPORTED_EXECUTION_SPEC_VERSION_MIN..=SUPPORTED_EXECUTION_SPEC_VERSION_MAX)
+    ) && execution
+        .get("runtimeAdapter")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.is_empty())
+}
+
 /// Canonical send. Requires a well-formed `options.execution` spec when one
 /// is present (deep validation stays renderer-side; this guards skew).
 #[tauri::command]
@@ -266,12 +293,7 @@ pub async fn agent_send(
 ) -> Result<(), String> {
     if let Some(opts) = &options {
         if let Some(execution) = opts.extra.get("execution") {
-            let spec_ok = execution.get("specVersion").and_then(|v| v.as_i64()) == Some(1)
-                && execution
-                    .get("runtimeAdapter")
-                    .and_then(|v| v.as_str())
-                    .is_some();
-            if !spec_ok {
+            if !execution_spec_is_acceptable(execution) {
                 return Err(
                     "agent_send: malformed execution spec (specVersion/runtimeAdapter)".into(),
                 );
@@ -1001,6 +1023,42 @@ mod tests {
             build_plugin_tool_response_payload("s1".into(), "t1".into(), None, Some("boom".into()));
         assert_eq!(p["error"], "boom");
         assert!(p["result"].is_null());
+    }
+
+    #[test]
+    fn accepts_every_live_execution_spec_version() {
+        for version in SUPPORTED_EXECUTION_SPEC_VERSION_MIN..=SUPPORTED_EXECUTION_SPEC_VERSION_MAX {
+            let spec = json!({ "specVersion": version, "runtimeAdapter": "claude-agent-sdk" });
+            assert!(
+                execution_spec_is_acceptable(&spec),
+                "specVersion {version} must be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_an_unknown_future_execution_spec_version() {
+        // A renderer newer than this host must not have its spec forwarded on
+        // a shrug: the host would pass through semantics it cannot honour.
+        let spec = json!({
+            "specVersion": SUPPORTED_EXECUTION_SPEC_VERSION_MAX + 1,
+            "runtimeAdapter": "claude-agent-sdk",
+        });
+        assert!(!execution_spec_is_acceptable(&spec));
+    }
+
+    #[test]
+    fn rejects_execution_specs_missing_a_runtime_adapter() {
+        assert!(!execution_spec_is_acceptable(&json!({ "specVersion": 2 })));
+        assert!(!execution_spec_is_acceptable(
+            &json!({ "specVersion": 2, "runtimeAdapter": "" })
+        ));
+        assert!(!execution_spec_is_acceptable(
+            &json!({ "specVersion": 2, "runtimeAdapter": 7 })
+        ));
+        assert!(!execution_spec_is_acceptable(
+            &json!({ "runtimeAdapter": "ai-sdk" })
+        ));
     }
 
     #[test]

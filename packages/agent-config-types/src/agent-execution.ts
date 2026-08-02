@@ -59,6 +59,28 @@ export type AgentCapabilityId =
   | "set-model"
   | "checkpoint"
   | "compaction"
+  // --- Claude Agent SDK 0.3.220 parity (see protocol/agent-sdk-surface.json) ---
+  // Each of these names a surface the SDK exposes and the unified contract has
+  // to be able to answer "yes / equivalent / no" about, per runtime. They are
+  // deliberately runtime-neutral: an AI SDK adapter can satisfy
+  // `output.structured` through its own JSON-schema path without the contract
+  // caring how.
+  | "output.structured"
+  | "session.store"
+  | "session.manage"
+  | "permissions.update-rules"
+  | "hooks.lifecycle"
+  | "input.elicitation"
+  | "input.dialog"
+  | "plugins.native"
+  | "skills.native"
+  | "mcp.dynamic"
+  | "subagents.manage"
+  | "tasks.background"
+  | "commands.dynamic"
+  | "sandbox.native"
+  | "observability.child"
+  | "startup.prewarm"
 
 export const AGENT_CAPABILITY_IDS: readonly AgentCapabilityId[] = [
   "streaming",
@@ -85,7 +107,44 @@ export const AGENT_CAPABILITY_IDS: readonly AgentCapabilityId[] = [
   "set-model",
   "checkpoint",
   "compaction",
+  "output.structured",
+  "session.store",
+  "session.manage",
+  "permissions.update-rules",
+  "hooks.lifecycle",
+  "input.elicitation",
+  "input.dialog",
+  "plugins.native",
+  "skills.native",
+  "mcp.dynamic",
+  "subagents.manage",
+  "tasks.background",
+  "commands.dynamic",
+  "sandbox.native",
+  "observability.child",
+  "startup.prewarm",
 ]
+
+/**
+ * How well a runtime satisfies a capability.
+ *
+ * The distinction that matters is `equivalent`: an adapter that reaches the
+ * same observable outcome by another mechanism (an AI SDK provider doing
+ * structured output through its own schema path rather than the SDK's
+ * `outputFormat`). Recording it as `native` would erase a real behavioural
+ * difference; recording it as `unsupported` would fail a session that works.
+ */
+export type AgentCapabilitySupport = "native" | "equivalent" | "unsupported"
+
+/**
+ * Per-capability verdict. `reason` is required for anything other than
+ * `native` — an `unsupported` with no explanation is indistinguishable from an
+ * unfinished adapter, and that ambiguity is what fail-closed exists to prevent.
+ */
+export interface AgentCapabilityEvidence {
+  support: AgentCapabilitySupport
+  reason?: string
+}
 
 /**
  * Caller-facing execution policy (plan §3.1). Everything is declarative;
@@ -149,12 +208,23 @@ export type AgentResolvedRoute =
     }
 
 /**
+ * Current spec version. v2 adds `capabilities.support` — the per-capability
+ * `native | equivalent | unsupported` verdict the SDK-parity work needs in
+ * order to refuse a provider *before* spending a model turn rather than
+ * discovering the gap mid-stream.
+ *
+ * v1 specs are still accepted on the way in and upcast by
+ * {@link upgradeResolvedAgentExecutionSpec}; nothing new is ever emitted as v1.
+ */
+export const RESOLVED_SPEC_VERSION = 2
+
+/**
  * Immutable output of `resolveAgentExecutionSpec()`. Serialisable, secret-free
  * and stable for the whole session: callers must never re-derive runtime,
  * route or host from anything else once a spec exists.
  */
 export interface ResolvedAgentExecutionSpec {
-  specVersion: 1
+  specVersion: 1 | 2
   identity: AgentExecutionIdentity
   /** Deterministic hash over the non-volatile spec fields (see fingerprint.ts). */
   executionFingerprint: string
@@ -175,6 +245,12 @@ export interface ResolvedAgentExecutionSpec {
     effective: AgentCapabilityId[]
     /** Preferred-but-unavailable capabilities the resolver switched off. */
     disabledOptional: AgentCapabilityId[]
+    /**
+     * v2+. Per-capability verdict for everything in `effective`, plus any
+     * capability the caller asked about and did not get. Absent on an
+     * un-upcast v1 spec.
+     */
+    support?: Partial<Record<AgentCapabilityId, AgentCapabilityEvidence>>
   }
   credential?: {
     /** Reference into the Provider Profile Store — never a value. */
@@ -197,7 +273,7 @@ export interface ResolvedAgentExecutionSpec {
  * credentials) are NOT here — they ride `SendOptions.env`.
  */
 export interface AgentExecutionSendSpec {
-  specVersion: 1
+  specVersion: 1 | 2
   executionFingerprint: string
   runtimeAdapter: AgentRuntimeAdapterId
   executionKind: "agent" | "completion"
@@ -208,9 +284,44 @@ export interface AgentExecutionSendSpec {
   capabilities: {
     effective: AgentCapabilityId[]
     disabledOptional: AgentCapabilityId[]
+    /** v2+. Mirrors the resolved spec so the sidecar can fail closed too. */
+    support?: Partial<Record<AgentCapabilityId, AgentCapabilityEvidence>>
   }
   identity: { runId: string; parentRunId?: string; attemptId: string }
   hostRef: string
+}
+
+/**
+ * Upcast a v1 spec to v2.
+ *
+ * A v1 spec carries no per-capability verdicts, and inventing them would be a
+ * lie in the dangerous direction — claiming `native` for something never
+ * tested. So every capability v1 listed as effective becomes `native` with an
+ * explicit reason recording *why* we believe it: it was in `effective` under
+ * the v1 static table, which only ever contained natively-supported ids. The
+ * 16 SDK-parity capabilities added in v2 are simply absent, which the gate
+ * treats as unsupported.
+ *
+ * Idempotent: a v2 spec is returned unchanged.
+ */
+export function upgradeResolvedAgentExecutionSpec(
+  spec: ResolvedAgentExecutionSpec
+): ResolvedAgentExecutionSpec {
+  if (spec.specVersion === 2) return spec
+
+  const support: Partial<Record<AgentCapabilityId, AgentCapabilityEvidence>> = {}
+  for (const id of spec.capabilities.effective) {
+    support[id] = {
+      support: "native",
+      reason: "carried forward from a v1 spec, whose effective set was natively supported only",
+    }
+  }
+
+  return {
+    ...spec,
+    specVersion: 2,
+    capabilities: { ...spec.capabilities, support },
+  }
 }
 
 // ---- Canonical events -------------------------------------------------------
@@ -517,13 +628,55 @@ function validateModelBindings(v: unknown, errors: string[], path: string): void
   }
 }
 
+const CAPABILITY_SUPPORTS: readonly string[] = ["native", "equivalent", "unsupported"]
+
+/**
+ * `capabilities.support` is v2-only, keyed by known capability ids, and every
+ * non-`native` verdict must say why.
+ *
+ * The reason requirement is not decoration: an `unsupported` with no
+ * explanation reads identically whether the runtime genuinely cannot do the
+ * thing or an adapter was left half-written, and the whole point of
+ * fail-closed is that those two must never be confused.
+ */
+function validateCapabilitySupport(support: unknown, specVersion: unknown, errors: string[]): void {
+  if (support === undefined) {
+    if (specVersion === 2) errors.push("capabilities.support is required on a v2 spec")
+    return
+  }
+  if (specVersion === 1) {
+    errors.push("capabilities.support is not valid on a v1 spec")
+    return
+  }
+  if (!isRecord(support)) {
+    errors.push("capabilities.support must be an object")
+    return
+  }
+
+  for (const [id, entry] of Object.entries(support)) {
+    if (!isAgentCapabilityId(id)) {
+      errors.push(`capabilities.support has unknown capability id "${id}"`)
+      continue
+    }
+    if (!isRecord(entry) || !CAPABILITY_SUPPORTS.includes(entry.support as string)) {
+      errors.push(
+        `capabilities.support.${id}.support must be one of ${CAPABILITY_SUPPORTS.join("|")}`
+      )
+      continue
+    }
+    if (entry.support !== "native" && (typeof entry.reason !== "string" || !entry.reason.trim())) {
+      errors.push(`capabilities.support.${id} is "${entry.support}" and must carry a reason`)
+    }
+  }
+}
+
 export function validateResolvedAgentExecutionSpec(
   v: unknown
 ): ValidationResult<ResolvedAgentExecutionSpec> {
   const errors: string[] = []
   if (!isRecord(v)) return { ok: false, errors: ["spec must be an object"] }
 
-  if (v.specVersion !== 1) errors.push("specVersion must be 1")
+  if (v.specVersion !== 1 && v.specVersion !== 2) errors.push("specVersion must be 1 or 2")
   validateIdentity(v.identity, errors, "identity")
   if (typeof v.executionFingerprint !== "string" || v.executionFingerprint.length === 0) {
     errors.push("executionFingerprint must be a non-empty string")
@@ -586,6 +739,8 @@ export function validateResolvedAgentExecutionSpec(
     !isCapabilityIdArray(caps.disabledOptional)
   ) {
     errors.push("capabilities.effective/disabledOptional must be capability id arrays")
+  } else {
+    validateCapabilitySupport(caps.support, v.specVersion, errors)
   }
 
   if (v.credential !== undefined) {
@@ -617,7 +772,7 @@ export function validateAgentExecutionSendSpec(
   const errors: string[] = []
   if (!isRecord(v)) return { ok: false, errors: ["execution spec must be an object"] }
 
-  if (v.specVersion !== 1) errors.push("specVersion must be 1")
+  if (v.specVersion !== 1 && v.specVersion !== 2) errors.push("specVersion must be 1 or 2")
   if (typeof v.executionFingerprint !== "string" || v.executionFingerprint.length === 0) {
     errors.push("executionFingerprint must be a non-empty string")
   }

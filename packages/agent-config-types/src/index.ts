@@ -3133,10 +3133,15 @@ export interface AppSettings {
    *    "Try a prompt" starters, the flag keeps it hidden across reloads.
    *    (Stale `quickStart` flags from before the capability grid was removed
    *    are ignored.)
+   *  - `welcomeStats`: the usage dashboard's layout — on/off, trailing window,
+   *    active face (stat grid vs. per-model), which tiles are shown, and whether
+   *    the calendar heatmap is drawn. Partial; unset fields fall back to
+   *    `DEFAULT_WELCOME_STATS_PREFS`. See `@/lib/chat/welcome-stats-prefs`.
    */
   userName?: string
   welcomeStyle?: "rich" | "minimal"
   welcomeHidden?: { tryPrompt?: boolean }
+  welcomeStats?: import("@/lib/chat/welcome-stats-prefs").StoredWelcomeStatsPrefs
   /**
    * Persisted view preferences for the MCP servers management panel
    * (`/settings?section=mcp`). Lives in settings JSON (same pattern as

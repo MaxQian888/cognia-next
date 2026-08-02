@@ -225,7 +225,10 @@ describe("sendSpecFromResolved", () => {
     const sent = sendSpecFromResolved(spec)
     expect(sent).toEqual(
       expect.objectContaining({
-        specVersion: 1,
+        // Mirrors the resolved spec rather than a literal: a v1 wire spec
+        // would silently drop `capabilities.support`, which the sidecar needs
+        // in order to fail closed on its own side.
+        specVersion: spec.specVersion,
         executionFingerprint: spec.executionFingerprint,
         runtimeAdapter: "claude-agent-sdk",
         executionKind: "agent",
@@ -236,6 +239,9 @@ describe("sendSpecFromResolved", () => {
     )
     expect(sent.identity).toEqual({ runId: "s-1", attemptId: "a1" })
     expect(JSON.stringify(sent)).not.toMatch(/sk-|api[_-]?key|bearer|token/i)
+    // The capability verdicts must survive the projection — the sidecar reads
+    // them to refuse a control before it reaches the live Query.
+    expect(sent.capabilities.support).toEqual(spec.capabilities.support)
   })
 
   it("carries endpoint+ticketId ONLY when the caller minted a ticket for a gateway route", () => {
@@ -269,5 +275,61 @@ describe("runtime capability tables", () => {
     expect(RUNTIME_CAPABILITIES["ai-sdk"]).not.toContain("subagents.native")
     expect(RUNTIME_CAPABILITIES["external"]).toContain("steer")
     expect(RUNTIME_CAPABILITIES["claude-agent-sdk"]).not.toContain("steer")
+  })
+
+  it("never claims a capability the runtime has not actually implemented", () => {
+    // The 16 SDK-parity ids exist in the vocabulary from contract v2, but a
+    // runtime table entry is a claim that code exists. Each id joins its
+    // adapter's list only when the corresponding stage lands; listing them
+    // early is the "built but dormant" failure this repo keeps hitting.
+    const allTabled = new Set(Object.values(RUNTIME_CAPABILITIES).flat())
+    for (const notYetImplemented of [
+      "session.store",
+      "output.structured",
+      "input.elicitation",
+      "input.dialog",
+      "plugins.native",
+      "startup.prewarm",
+      "sandbox.native",
+      "tasks.background",
+    ]) {
+      expect(allTabled.has(notYetImplemented as never)).toBe(false)
+    }
+  })
+})
+
+describe("contract v2 capability verdicts", () => {
+  it("emits specVersion 2 with a native verdict for every effective capability", () => {
+    const { spec } = resolveAgentExecutionSpec(baseInput())
+    expect(spec.specVersion).toBe(2)
+
+    const support = spec.capabilities.support ?? {}
+    for (const cap of spec.capabilities.effective) {
+      expect(support[cap]).toEqual({ support: "native" })
+    }
+    expect(validateResolvedAgentExecutionSpec(spec).ok).toBe(true)
+  })
+
+  it("records an asked-for capability the runtime lacks as unsupported, with the reason", () => {
+    const { spec } = resolveAgentExecutionSpec(
+      baseInput({
+        policy: {
+          executionKind: "agent",
+          runtimePolicy: "claude-agent-sdk",
+          routePolicy: "direct",
+          // `steer` is real but only on the external adapter, so asking the
+          // Claude runtime for it must produce a stated refusal rather than
+          // silence.
+          prefers: ["steer"],
+          fallbackPolicy: "none",
+        },
+      })
+    )
+
+    expect(spec.capabilities.support?.steer).toEqual({
+      support: "unsupported",
+      reason: 'runtime adapter "claude-agent-sdk" does not implement "steer"',
+    })
+    expect(validateResolvedAgentExecutionSpec(spec).ok).toBe(true)
   })
 })
