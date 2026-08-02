@@ -29664,7 +29664,18 @@
       "costOverTime": {
         "description": "Estimated daily spend across the selected range.",
         "empty": "No usage in this range yet.",
-        "title": "Cost over time"
+        "title": "Cost over time",
+        "view": {
+          "label": "Chart view",
+          "heatmap": "Heatmap",
+          "bar": "Bar chart"
+        },
+        "heatmap": {
+          "less": "Less",
+          "more": "More",
+          "cell": "{date}: {cost} · {requests, plural, =0 {no requests} one {# request} other {# requests}}",
+          "total": "{cost} over the last {days, plural, one {# day} other {# days}} · {requests, plural, one {# request} other {# requests}}"
+        }
       },
       "display": {
         "aria": "Usage display mode",
@@ -29717,8 +29728,8 @@
       "range": {
         "30d": "Last 30 days",
         "7d": "Last 7 days",
-        "all": "All time",
-        "label": "Time range"
+        "label": "Time range",
+        "90d": "Last 90 days"
       },
       "shareCard": {
         "action": "Share card",

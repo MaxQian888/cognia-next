@@ -9,6 +9,7 @@ import {
   buildUsageFilename,
   effectiveCostUsd,
   estimateCostFromTotals,
+  fillDailyRange,
   filterByRange,
   HIGH_CONTEXT_THRESHOLD,
   toUsageCsv,
@@ -180,9 +181,11 @@ describe("aggregateByModel", () => {
 })
 
 describe("aggregateByDay", () => {
-  it("buckets by UTC day ascending", () => {
-    const day1 = Date.UTC(2026, 4, 30, 23, 0, 0)
-    const day2 = Date.UTC(2026, 4, 31, 1, 0, 0)
+  it("buckets by local calendar day ascending", () => {
+    // Local (not UTC) days: build the timestamps from local-time parts so the
+    // assertion holds in any TZ the suite happens to run in.
+    const day1 = new Date(2026, 4, 30, 23, 0, 0).getTime()
+    const day2 = new Date(2026, 4, 31, 1, 0, 0).getTime()
     const out = aggregateByDay(
       [
         row({ at: day2, costUsd: 2, inputTokens: 10, outputTokens: 0 }),
@@ -195,6 +198,93 @@ describe("aggregateByDay", () => {
     expect(out[1]!.requests).toBe(2)
     expect(out[1]!.cost).toBe(5)
     expect(out[1]!.tokens).toBe(30)
+  })
+
+  it("keeps a local-midnight turn on its own local day", () => {
+    // 00:30 local — under the old UTC bucketing this landed on the previous or
+    // next day for most of the world.
+    const midnight = new Date(2026, 4, 31, 0, 30, 0).getTime()
+    const out = aggregateByDay([row({ at: midnight, costUsd: 1 })], priceFor)
+    expect(out.map((d) => d.date)).toEqual(["2026-05-31"])
+  })
+
+  it("emits only the days that carry usage", () => {
+    const out = aggregateByDay(
+      [
+        row({ at: new Date(2026, 4, 20, 12).getTime(), costUsd: 1 }),
+        row({ at: new Date(2026, 4, 25, 12).getTime(), costUsd: 1 }),
+      ],
+      priceFor
+    )
+    expect(out.map((d) => d.date)).toEqual(["2026-05-20", "2026-05-25"])
+  })
+})
+
+describe("fillDailyRange", () => {
+  const LOCAL_NOW = new Date(2026, 4, 31, 15, 0, 0).getTime()
+
+  it("pads to exactly `days` cells, today inclusive, in ascending order", () => {
+    const out = fillDailyRange([], 7, LOCAL_NOW)
+    expect(out).toHaveLength(7)
+    expect(out.map((d) => d.date)).toEqual([
+      "2026-05-25",
+      "2026-05-26",
+      "2026-05-27",
+      "2026-05-28",
+      "2026-05-29",
+      "2026-05-30",
+      "2026-05-31",
+    ])
+    expect(out.every((d) => d.cost === 0 && d.tokens === 0 && d.requests === 0)).toBe(true)
+  })
+
+  it("keeps the aggregate for days that have usage", () => {
+    const daily = aggregateByDay(
+      [
+        row({
+          at: new Date(2026, 4, 30, 9).getTime(),
+          costUsd: 4,
+          inputTokens: 7,
+          outputTokens: 0,
+        }),
+      ],
+      priceFor
+    )
+    const out = fillDailyRange(daily, 7, LOCAL_NOW)
+    const hit = out.find((d) => d.date === "2026-05-30")
+    expect(hit).toEqual({ date: "2026-05-30", cost: 4, tokens: 7, requests: 1 })
+  })
+
+  it("drops days that fall outside the window", () => {
+    const daily = [{ date: "2026-05-01", tokens: 1, cost: 1, requests: 1 }]
+    const out = fillDailyRange(daily, 7, LOCAL_NOW)
+    expect(out.some((d) => d.date === "2026-05-01")).toBe(false)
+    expect(out.reduce((sum, d) => sum + d.cost, 0)).toBe(0)
+  })
+
+  it("returns exactly 30 and 90 cells for the wider ranges", () => {
+    expect(fillDailyRange([], 30, LOCAL_NOW)).toHaveLength(30)
+    const ninety = fillDailyRange([], 90, LOCAL_NOW)
+    expect(ninety).toHaveLength(90)
+    expect(ninety[0]!.date).toBe("2026-03-03")
+    expect(ninety.at(-1)!.date).toBe("2026-05-31")
+  })
+
+  it("returns nothing for a non-positive or non-finite window", () => {
+    expect(fillDailyRange([], 0, LOCAL_NOW)).toEqual([])
+    expect(fillDailyRange([], -3, LOCAL_NOW)).toEqual([])
+    expect(fillDailyRange([], Number.NaN, LOCAL_NOW)).toEqual([])
+  })
+
+  it("crosses a month boundary without gaps or duplicates", () => {
+    const out = fillDailyRange([], 5, new Date(2026, 5, 2, 8).getTime())
+    expect(out.map((d) => d.date)).toEqual([
+      "2026-05-29",
+      "2026-05-30",
+      "2026-05-31",
+      "2026-06-01",
+      "2026-06-02",
+    ])
   })
 })
 
@@ -237,6 +327,22 @@ describe("filterByRange", () => {
     const out = filterByRange(rows, 7, NOW)
     expect(out).toHaveLength(1)
     expect(out[0]!.at).toBe(NOW - 2 * 86_400_000)
+  })
+
+  it("cuts at local midnight with today counted as one day", () => {
+    const now = new Date(2026, 4, 31, 15, 0, 0).getTime()
+    // Day 7 of the window is 2026-05-25 — 00:00 is in, 23:59 the day before is out.
+    const firstDay = row({ at: new Date(2026, 4, 25, 0, 0, 0).getTime() })
+    const dayBefore = row({ at: new Date(2026, 4, 24, 23, 59, 59).getTime() })
+    const out = filterByRange([dayBefore, firstDay], 7, now)
+    expect(out).toEqual([firstDay])
+  })
+
+  it("keeps only today when the range is a single day", () => {
+    const now = new Date(2026, 4, 31, 15, 0, 0).getTime()
+    const today = row({ at: new Date(2026, 4, 31, 0, 0, 0).getTime() })
+    const yesterday = row({ at: new Date(2026, 4, 30, 23, 0, 0).getTime() })
+    expect(filterByRange([yesterday, today], 1, now)).toEqual([today])
   })
 })
 

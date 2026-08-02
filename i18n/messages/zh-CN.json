@@ -29664,7 +29664,18 @@
       "costOverTime": {
         "description": "所选范围内每日估算花费。",
         "empty": "该范围内还没有用量。",
-        "title": "成本随时间"
+        "title": "成本随时间",
+        "view": {
+          "label": "图表视图",
+          "heatmap": "热力图",
+          "bar": "柱状图"
+        },
+        "heatmap": {
+          "less": "少",
+          "more": "多",
+          "cell": "{date}：{cost}，{requests} 次请求",
+          "total": "最近 {days} 天共 {cost} · {requests} 次请求"
+        }
       },
       "display": {
         "aria": "用量展示模式",
@@ -29717,8 +29728,8 @@
       "range": {
         "30d": "最近 30 天",
         "7d": "最近 7 天",
-        "all": "全部时间",
-        "label": "时间范围"
+        "label": "时间范围",
+        "90d": "最近 90 天"
       },
       "shareCard": {
         "action": "分享卡片",
