@@ -41,8 +41,6 @@ import { useContextWorkbenchInstanceId } from "@/hooks/context-workbench/use-con
 import { resolveContextCapabilities } from "@/lib/context-workbench/capabilities"
 import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-comment-badge"
 import { useProjectStore } from "@/stores/project/project-store"
-import { useDockKernelSurface } from "@/hooks/dock/use-dock-kernel-surface"
-import { ChatDockSurface } from "./chat-dock-surface"
 import type { UIMessage } from "ai"
 
 /**
@@ -232,7 +230,6 @@ export function ArtifactContextWorkbench({
   railOnly?: boolean
 }) {
   const workbenchInstanceId = useContextWorkbenchInstanceId("artifact")
-  const dockKernel = useDockKernelSurface("chat")
   const artifact = useArtifactStore((state) => state.artifacts[artifactId])
   const unresolvedCommentCount = useContextCommentBadge("artifact", artifactId)
   const pendingReview = useArtifactStore((state) => state.pendingReviews[artifactId] ?? null)
@@ -370,24 +367,6 @@ export function ArtifactContextWorkbench({
   // single shell.
   if (!resource) return <SessionContextWorkbench mobile={mobile} railOnly={railOnly} />
 
-  // The Dock kernel takes the desktop dock only. The phone Sheet stays on the
-  // workbench deliberately: dockview's dividers and drop zones are built for
-  // pointer precision, and a Sheet has one full-height region to show anyway,
-  // so there is nothing for a grid to arrange (ADR-0102).
-  if (dockKernel && !mobile) {
-    return (
-      <ChatDockSurface
-        workbenchInstanceId={workbenchInstanceId}
-        resource={resource}
-        panels={panels}
-        contextId={activeSessionId ?? "none"}
-        legacyScopeKey={scopeKey}
-        railOnly={railOnly}
-        className="w-full"
-      />
-    )
-  }
-
   return mobile ? (
     <ContextWorkbenchMobileSheet
       open={mobile.open}
@@ -437,7 +416,6 @@ export function SessionContextWorkbench({
   railOnly?: boolean
 }) {
   const workbenchInstanceId = useContextWorkbenchInstanceId("artifact")
-  const dockKernel = useDockKernelSurface("chat")
   const activeSessionId = useChatStore((state) => state.activeSessionId)
   // The conversation's *record* (model, working dir, timestamps) lives in
   // `sessionStore`; `chatStore.sessions` is the per-session message slice.
@@ -505,21 +483,6 @@ export function SessionContextWorkbench({
     }),
     [activeSessionId, workspaceAvailable]
   )
-
-  // See the artifact surface: the Dock kernel takes the desktop dock only.
-  if (dockKernel && !mobile) {
-    return (
-      <ChatDockSurface
-        workbenchInstanceId={workbenchInstanceId}
-        resource={resource}
-        panels={panels}
-        contextId={activeSessionId ?? "none"}
-        legacyScopeKey={scopeKey}
-        railOnly={railOnly}
-        className="w-full"
-      />
-    )
-  }
 
   return mobile ? (
     <ContextWorkbenchMobileSheet

@@ -67,16 +67,19 @@ export const CANONICAL_CONTEXT_ACTIVITIES = [
 
 /**
  * Activities no first-party panel registers into — rail groups reserved for
- * plugins. `templates` is claimed by the in-tree `prompt-templates` plugin,
- * which registers imperatively via `ctx.contextPanels.register()` rather than
- * declaring a manifest panel, so it does not read as a first-party consumer.
+ * plugins. Empty today, and that is the honest state: every canonical activity
+ * has a first-party consumer.
+ *
+ * `templates` used to be listed here on the grounds that only the in-tree
+ * `prompt-templates` plugin claimed it. That stopped being true when the
+ * workflow editor's Templates tab became a workbench panel — the gate simply
+ * could not see it, because its scraper did not read the workflow sidebar.
  *
  * Same contract as the capability list above: the taxonomy gate test rejects an
  * activity that is neither consumed nor listed here.
  */
-export const INTENTIONALLY_UNCONSUMED_CONTEXT_ACTIVITIES = [
-  "templates",
-] as const satisfies readonly CanonicalContextActivity[]
+export const INTENTIONALLY_UNCONSUMED_CONTEXT_ACTIVITIES =
+  [] as const satisfies readonly CanonicalContextActivity[]
 
 export type CanonicalContextActivity = (typeof CANONICAL_CONTEXT_ACTIVITIES)[number]
 export type ContextActivity = CanonicalContextActivity | (string & {})

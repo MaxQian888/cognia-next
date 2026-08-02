@@ -29,7 +29,6 @@ import { ProjectMonaco } from "./project-monaco"
 import { ProjectSearchPanel } from "./project-search-panel"
 import { useProjectEditor, type UseProjectEditorArgs } from "./use-project-editor"
 import { ProjectContextWorkbench, ProjectContextWorkbenchMobile } from "./project-context-workbench"
-import { useContextWorkbenchSurfaceFlag } from "@/hooks/context-workbench/use-context-workbench-surface-flag"
 import type { TextSelectionCoordinates } from "@/types/context-workbench"
 import type { EditorLike, MonacoLike } from "@/hooks/use-monaco-markers"
 
@@ -281,8 +280,7 @@ export function ProjectEditorFileWorkbench({
   layout = "split",
 }: ProjectEditorFileWorkbenchProps) {
   const t = useTranslations("projectEditor")
-  const workbenchEnabled = useContextWorkbenchSurfaceFlag("project")
-  const contextWorkbenchVisible = workbenchEnabled && showContextWorkbench
+  const contextWorkbenchVisible = showContextWorkbench
   const [mobileWorkbenchOpen, setMobileWorkbenchOpen] = useState(false)
   const [editorSelectionState, setEditorSelectionState] = useState<{
     relPath: string

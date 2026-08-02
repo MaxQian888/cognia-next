@@ -328,9 +328,6 @@ importers:
       dexie-react-hooks:
         specifier: ^4.4.0
         version: 4.4.0(dexie@4.4.4)(react@19.2.8)
-      dockview-react:
-        specifier: 7.0.4
-        version: 7.0.4(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       docx:
         specifier: ^9.7.1
         version: 9.7.1
@@ -841,6 +838,8 @@ importers:
       '@capacitor/core':
         specifier: ^8.4.2
         version: 8.4.2
+
+  packages/agent: {}
 
   packages/agent-config-types:
     dependencies:
@@ -8085,18 +8084,6 @@ packages:
 
   dns-txt@2.0.2:
     resolution: {integrity: sha512-Ix5PrWjphuSoUXV/Zv5gaFHjnaJtb02F2+Si3Ht9dyJ87+Z/lMmy+dpNHtTGraNK958ndXq2i+GLkWsWHcKaBQ==}
-
-  dockview-core@7.0.4:
-    resolution: {integrity: sha512-AiIzD6ov153L/VuhqVBg5KD5oSAgJGH7L1xvzV/X+ghIEOTFfEQYEBGNd/ys+ZjQfdGRogHSeQ0v9JF/L6JrPg==}
-
-  dockview-react@7.0.4:
-    resolution: {integrity: sha512-eUhR3J3prpuFcaPJwQ4rzcRAghO3p4JVXlj5zfdQTlb3Qwa8VUpy3KvyV6BCsIjNk1toTdd8/NyADcZXMvpmtA==}
-    peerDependencies:
-      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
-      react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
-
-  dockview@7.0.4:
-    resolution: {integrity: sha512-n6n9WpYZgp/WY8SgvP4hr9qh01ZXhSGIRmlhoJXxRU3f34bwxCbFyOhBArV4W8quolX8OQe1yPfAUwUUjdnZPA==}
 
   doctrine@2.1.0:
     resolution: {integrity: sha512-35mSku4ZXK0vfCuHEDAwt55dg2jNajHZ1odvF+8SSr82EsZY4QmXfuWso8oEd8zRhVObSN18aM0CjSdoBX7zIw==}
@@ -20933,18 +20920,6 @@ snapshots:
   dns-txt@2.0.2:
     dependencies:
       buffer-indexof: 1.1.1
-
-  dockview-core@7.0.4: {}
-
-  dockview-react@7.0.4(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
-    dependencies:
-      dockview: 7.0.4
-      react: 19.2.8
-      react-dom: 19.2.8(react@19.2.8)
-
-  dockview@7.0.4:
-    dependencies:
-      dockview-core: 7.0.4
 
   doctrine@2.1.0:
     dependencies:

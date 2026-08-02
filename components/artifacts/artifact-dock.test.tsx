@@ -87,20 +87,6 @@ jest.mock("./workspace-mode/project-overview-panel", () => ({
   ),
 }))
 
-// The kernel branch's own wiring is specified in `chat-dock-surface.test.tsx`;
-// here it only needs to be distinguishable from the workbench.
-jest.mock("./chat-dock-surface", () => ({
-  ChatDockSurface: ({
-    contextId,
-    legacyScopeKey,
-  }: {
-    contextId: string
-    legacyScopeKey: string
-  }) => (
-    <div data-testid="chat-dock-surface" data-context={contextId} data-legacy={legacyScopeKey} />
-  ),
-}))
-
 jest.mock("./artifact-review-view", () => ({
   ArtifactReviewView: ({ artifact }: { artifact: { id: string } }) => (
     <div data-testid="review-view" data-artifact={artifact.id} />
@@ -221,11 +207,6 @@ beforeEach(() => {
   mockSessionMessages = []
   mockProjects = []
   localStorage.clear()
-  // Everything below is the spec for the *workbench* branch. It is the Dock
-  // kernel's rollback path (ADR-0102) and has to stay proven for as long as it
-  // is in the tree, so these suites pin the flag off rather than following its
-  // default. The kernel branch is specified in `chat-dock-surface.test.tsx`.
-  localStorage.setItem("cognia-dock-kernel-surfaces-v1", JSON.stringify({ chat: false }))
   workspaceAvailable = true
   artifactListProps.length = 0
   mockSessionRecord = null
@@ -1236,72 +1217,5 @@ describe("ArtifactDock — the header tab strip", () => {
       />
     )
     expect(screen.getByTestId("artifact-tab-strip")).toBeInTheDocument()
-  })
-})
-
-/**
- * The switch between the two layout engines (ADR-0102). Every other suite in
- * this file pins the flag off because it specifies the workbench branch; this
- * one is about the branch itself.
- */
-describe("ArtifactDock — the Dock kernel flag", () => {
-  function enableKernel() {
-    localStorage.setItem("cognia-dock-kernel-surfaces-v1", JSON.stringify({ chat: true }))
-  }
-
-  it("puts the desktop dock on the kernel, scoped to the conversation", () => {
-    enableKernel()
-    render(<ArtifactDock />)
-    const surface = screen.getByTestId("chat-dock-surface")
-    expect(surface).toHaveAttribute("data-context", "sess-1")
-    expect(screen.queryByTestId("context-workbench-activity-rail")).toBeNull()
-  })
-
-  it("keeps the artifact surface on the same conversation-scoped layout", () => {
-    // An artifact tab switch must not hand the user a different arrangement —
-    // the same rule that keeps the browser and the workspace mounted across one.
-    enableKernel()
-    activateArtifact()
-    render(<ArtifactDock />)
-    expect(screen.getByTestId("chat-dock-surface")).toHaveAttribute("data-context", "sess-1")
-  })
-
-  it("hands the kernel the scope key the workbench used, so the seed can find it", () => {
-    enableKernel()
-    activateArtifact()
-    render(<ArtifactDock />)
-    expect(screen.getByTestId("chat-dock-surface")).toHaveAttribute(
-      "data-legacy",
-      "test-workbench::artifact:artifact-1"
-    )
-  })
-
-  it("leaves the phone Sheet on the workbench", () => {
-    // dockview's dividers and drop zones are built for pointer precision, and a
-    // Sheet shows one full-height region anyway — there is nothing for a grid
-    // to arrange.
-    enableKernel()
-    render(
-      <SessionContextWorkbench
-        mobile={{ open: true, onOpenChange: jest.fn(), panelMode: "mobile" }}
-      />
-    )
-    expect(screen.queryByTestId("chat-dock-surface")).toBeNull()
-    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
-  })
-
-  it("falls back to the workbench when the flag is off", () => {
-    localStorage.setItem("cognia-dock-kernel-surfaces-v1", JSON.stringify({ chat: false }))
-    render(<ArtifactDock />)
-    expect(screen.queryByTestId("chat-dock-surface")).toBeNull()
-    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
-  })
-
-  it("keeps the artifact surface on the workbench when the flag is off", () => {
-    localStorage.setItem("cognia-dock-kernel-surfaces-v1", JSON.stringify({ chat: false }))
-    activateArtifact()
-    render(<ArtifactDock />)
-    expect(screen.queryByTestId("chat-dock-surface")).toBeNull()
-    expect(screen.getByTestId("panel-content")).toBeInTheDocument()
   })
 })
