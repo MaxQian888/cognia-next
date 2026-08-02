@@ -5,7 +5,7 @@
 import "fake-indexeddb/auto"
 
 /** Lets a test move the client onto a different host mid-run. */
-let companionConfig: { deviceId: string } | null = null
+let companionConfig: { deviceId: string; targetId?: string; accountId?: string } | null = null
 jest.mock("@/lib/tauri/transport-companion", () => ({
   loadCompanionConfig: () => companionConfig,
 }))
@@ -520,5 +520,167 @@ describe("host isolation (v130)", () => {
 
     expect(await db.characters.get("from-host-a")).toBeDefined()
     expect(await db.hostSyncCursors.get(["device-on-host-a", "characters"])).toBeDefined()
+  })
+})
+
+describe("cursor namespace keying (ADR-0097 D13)", () => {
+  const handlerFor = (nextSince: number) =>
+    jest.fn().mockResolvedValue(makeOkOutcome("characters", 0, nextSince))
+
+  async function seedCursor(serverKey: string, since: number): Promise<void> {
+    await whenSeeded()
+    // Let the beforeEach `clearCursors()` land before seeding the state a
+    // restart would have left behind.
+    await new Promise((r) => setTimeout(r, 5))
+    await getDb().hostSyncCursors.put({
+      serverKey,
+      table: "characters",
+      since,
+      lastSyncAt: 1,
+      lastError: null,
+    })
+  }
+
+  it("files cursors under {accountNamespace}:{hostId}, not the bare device id", async () => {
+    await whenSeeded()
+    companionConfig = { deviceId: "dev-1", targetId: "host-a", accountId: "acct_a" }
+
+    await runSyncDown({
+      transport: makeTransport(),
+      handlers: [{ table: "characters" as const, run: handlerFor(7) }],
+    })
+    await new Promise((r) => setTimeout(r, 5))
+
+    // The pair {hostId, accountNamespace} is what the mirror belongs to, so it
+    // is what the watermark has to be filed under: the same desktop reached
+    // from a second local account must not advance this account's cursor.
+    expect((await getDb().hostSyncCursors.get(["acct_a:host-a", "characters"]))?.since).toBe(7)
+    expect(await getDb().hostSyncCursors.get(["dev-1", "characters"])).toBeUndefined()
+  })
+
+  it("keeps the watermark when the same host issues a new device id on re-pair", async () => {
+    // `deviceId` is minted per pairing, so keying on it made re-pairing to the
+    // SAME desktop read as a different host: a full re-pull of every table plus
+    // a mirror wipe, for a machine whose state had not changed at all.
+    await seedCursor("__local__:host-a", 500)
+    const db = getDb()
+    await db.characters.put({ id: "from-this-host", name: "A" } as never)
+
+    companionConfig = { deviceId: "dev-2-after-repair", targetId: "host-a" }
+    const handler = handlerFor(501)
+    await runSyncDown({
+      transport: makeTransport(),
+      handlers: [{ table: "characters" as const, run: handler }],
+    })
+    await new Promise((r) => setTimeout(r, 5))
+
+    expect(handler.mock.calls[0][1]).toEqual({ since: 500 })
+    expect(await db.characters.get("from-this-host")).toBeDefined()
+  })
+
+  it("adopts cursors an earlier build wrote under this host's bare device id", async () => {
+    // The upgrade path. Without adoption the install's own rows sit under a key
+    // this build no longer recognises, get classified as another host's, and
+    // the mirror of the host we are still paired to is wiped on first launch.
+    await seedCursor("dev-1", 500)
+    const db = getDb()
+    await db.characters.put({ id: "from-this-host", name: "A" } as never)
+
+    companionConfig = { deviceId: "dev-1" }
+    const handler = handlerFor(501)
+    await runSyncDown({
+      transport: makeTransport(),
+      handlers: [{ table: "characters" as const, run: handler }],
+    })
+    await new Promise((r) => setTimeout(r, 5))
+
+    expect(handler.mock.calls[0][1]).toEqual({ since: 500 })
+    expect(await db.characters.get("from-this-host")).toBeDefined()
+    // …and the legacy row is gone, so the next run does not see it as foreign.
+    expect(await db.hostSyncCursors.get(["dev-1", "characters"])).toBeUndefined()
+    expect((await db.hostSyncCursors.get(["__local__:dev-1", "characters"]))?.since).toBe(501)
+  })
+
+  it("prefers the namespaced cursor over a stale legacy one for the same host", async () => {
+    await seedCursor("__local__:dev-1", 10)
+    await getDb().hostSyncCursors.put({
+      serverKey: "dev-1",
+      table: "characters",
+      since: 500,
+      lastSyncAt: 1,
+      lastError: null,
+    })
+
+    companionConfig = { deviceId: "dev-1" }
+    const handler = handlerFor(11)
+    await runSyncDown({
+      transport: makeTransport(),
+      handlers: [{ table: "characters" as const, run: handler }],
+    })
+    await new Promise((r) => setTimeout(r, 5))
+
+    // The namespaced row was written by this build against the key we resume
+    // from; the legacy row is a stale duplicate, not a newer watermark.
+    expect(handler.mock.calls[0][1]).toEqual({ since: 10 })
+    expect(await getDb().hostSyncCursors.get(["dev-1", "characters"])).toBeUndefined()
+  })
+
+  it("adopts nothing when the pairing carries no device id", async () => {
+    await seedCursor("", 500)
+    companionConfig = { deviceId: "", targetId: "host-a" }
+
+    const handler = handlerFor(1)
+    await runSyncDown({
+      transport: makeTransport(),
+      handlers: [{ table: "characters" as const, run: handler }],
+    })
+    await new Promise((r) => setTimeout(r, 5))
+
+    // `""` is the unpaired key, not this host's former key — adopting it would
+    // hand every unpaired client's watermark to the first host it pairs with.
+    expect(handler.mock.calls[0][1]).toEqual({ since: 0 })
+  })
+
+  it("keeps both hosts' mirrors when each host has its own database", async () => {
+    // ADR-0061 L3 — switching hosts activates that host's runtime-target
+    // database (`activateAccountDatabase(accountId, targetId)`) instead of
+    // clearing the other host's state. The wipe is driven by what THIS database
+    // holds, so once the mirrors are in separate Dexie files the scan finds
+    // nothing foreign and neither host loses its cache.
+    await whenSeeded()
+    const db = getDb()
+    companionConfig = { deviceId: "dev-a", targetId: "host-a" }
+    const handlers = [{ table: "characters" as const, run: handlerFor(1) }]
+    await runSyncDown({ transport: makeTransport(), handlers })
+    await new Promise((r) => setTimeout(r, 5))
+
+    // The switch activated host B's own database: a different file, holding B's
+    // mirror and no cursor for A. `fake-indexeddb` gives the suite a single
+    // database, so that state is presented directly.
+    await db.hostSyncCursors.clear()
+    await db.characters.put({ id: "from-host-b", name: "B" } as never)
+    companionConfig = { deviceId: "dev-b", targetId: "host-b" }
+    await runSyncDown({ transport: makeTransport(), handlers })
+    await new Promise((r) => setTimeout(r, 5))
+
+    expect(await db.characters.get("from-host-b")).toBeDefined()
+  })
+
+  it("still wipes when the two hosts share one database", async () => {
+    // The other side of the same rule: an install with no runtime target keeps
+    // both hosts' rows in one file, so a foreign cursor is a real blend.
+    await seedCursor("__local__:host-a", 500)
+    const db = getDb()
+    await db.characters.put({ id: "from-host-a", name: "A" } as never)
+
+    companionConfig = { deviceId: "dev-b", targetId: "host-b" }
+    await runSyncDown({
+      transport: makeTransport(),
+      handlers: [{ table: "characters" as const, run: handlerFor(1) }],
+    })
+    await new Promise((r) => setTimeout(r, 5))
+
+    expect(await db.characters.get("from-host-a")).toBeUndefined()
+    expect(await db.hostSyncCursors.get(["__local__:host-a", "characters"])).toBeUndefined()
   })
 })
