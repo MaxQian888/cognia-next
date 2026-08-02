@@ -26,6 +26,14 @@ pub mod screenshot;
 // native backends don't compile.
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
 pub mod tree_shape;
+// Epic 5 — versioned, re-resolvable element locators. Replaces the macOS
+// cache-only element refs (cleared on every `read_tree`) with an ancestry
+// recipe the backend can replay. The matching logic is generic over
+// `LocatorNode` so the ambiguity and drift cases are unit-tested against a
+// fake tree on every host — a real desktop cannot be asked for two
+// identically-named siblings or an identifier collision on demand.
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+pub mod element_locator;
 // KEY=value line parser for shell-tool output (`xdotool --shell`). Only
 // the Linux backend consumes it in production; compiled with tests
 // everywhere so the parser stays covered on the Windows dev host.
