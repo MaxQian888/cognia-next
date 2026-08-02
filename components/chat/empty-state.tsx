@@ -140,12 +140,20 @@ interface Props {
   onDismissSection?: (section: WelcomeSection) => void
 }
 
-const HEADING_TEXT_CLASS = "text-xs font-medium uppercase tracking-wide text-muted-foreground"
-const GROUP_HEADING_CLASS = `mb-2 ${HEADING_TEXT_CLASS}`
-const INTERACTIVE_CARD_CLASS =
-  "rounded-xl border bg-card/70 shadow-xs transition-all motion-safe:hover:-translate-y-0.5 hover:border-foreground/15 hover:bg-accent/60 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+const HEADING_TEXT_CLASS =
+  "shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground"
+/**
+ * Card-less interactive surface: no border, no elevated card background — the
+ * item only materialises on hover/focus so the welcome page reads as open
+ * space instead of a grid of boxes.
+ */
+const QUIET_ITEM_CLASS =
+  "rounded-xl transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-0"
 
-/** Section heading with an optional dismiss (✕) affordance. */
+/**
+ * Section heading with a hairline rule and an optional dismiss (✕). The rule
+ * is what separates groups now that the sections no longer sit inside cards.
+ */
 function SectionHeading({
   label,
   dismissLabel,
@@ -155,18 +163,20 @@ function SectionHeading({
   dismissLabel?: string
   onDismiss?: () => void
 }) {
-  if (!onDismiss) return <h3 className={GROUP_HEADING_CLASS}>{label}</h3>
   return (
-    <div className="mb-2 flex items-center justify-between gap-2">
+    <div className="mb-2 flex items-center gap-3">
       <h3 className={HEADING_TEXT_CLASS}>{label}</h3>
-      <button
-        type="button"
-        onClick={onDismiss}
-        aria-label={dismissLabel}
-        className="-mr-1 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <XIcon className="size-3.5" aria-hidden />
-      </button>
+      <span className="h-px flex-1 bg-border/60" aria-hidden />
+      {onDismiss ? (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label={dismissLabel}
+          className="-mr-1 shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <XIcon className="size-3.5" aria-hidden />
+        </button>
+      ) : null}
     </div>
   )
 }
@@ -224,7 +234,7 @@ export function EmptyChatState({
   const showStarters = !hideSamples && !hiddenSections?.tryPrompt && starters.length > 0
 
   return (
-    <div className="@container relative flex flex-1 flex-col overflow-x-hidden overflow-y-auto px-4 py-6 sm:px-8 sm:py-10">
+    <div className="@container relative flex flex-1 flex-col overflow-x-hidden overflow-y-auto py-6 @2xl:py-10">
       {/* Inline rich/minimal switch (desktop only — the pane omits the handler
           on mobile, where the style is force-minimal). */}
       {onToggleStyle ? (
@@ -244,7 +254,10 @@ export function EmptyChatState({
       ) : null}
 
       <motion.div
-        className="relative z-10 m-auto flex w-full max-w-4xl flex-col items-center gap-8"
+        // Same reading column as the composer (`composer-reading-column`):
+        // padding INSIDE the max-width cap, so the welcome content and the
+        // composer box share one content edge at every pane width.
+        className="relative z-10 m-auto flex w-full max-w-[52rem] flex-col items-center gap-8 px-3 sm:px-5 @2xl:gap-10"
         initial={reduce ? false : "initial"}
         animate="animate"
         variants={STAGGER_CONTAINER}
@@ -256,14 +269,15 @@ export function EmptyChatState({
           </motion.div>
         ) : null}
 
-        {/* Calm, single-focus welcome hero. Rich mode adds the generated
-            workspace illustration; minimal mode keeps the same hierarchy
-            without decorative media. */}
+        {/* Calm, single-focus welcome hero — card-less by design: the copy sits
+            directly on the page and only an ambient glow anchors the
+            illustration. Rich mode adds the generated workspace artwork;
+            minimal mode keeps the same hierarchy without decorative media. */}
         <motion.section
           className={cn(
             "w-full",
             rich
-              ? "grid items-center gap-6 overflow-hidden rounded-3xl border bg-card/70 p-5 shadow-sm sm:p-7 @3xl:grid-cols-[minmax(0,1fr)_minmax(16rem,0.9fr)] @3xl:gap-8"
+              ? "grid items-center gap-8 @3xl:grid-cols-[minmax(0,1fr)_minmax(16rem,0.9fr)] @3xl:gap-12"
               : "flex flex-col items-center text-center"
           )}
           variants={STAGGER_CHILD}
@@ -271,7 +285,7 @@ export function EmptyChatState({
         >
           <div
             className={cn(
-              "flex flex-col gap-3",
+              "flex flex-col gap-4",
               rich ? "items-start text-left" : "items-center text-center"
             )}
           >
@@ -279,25 +293,34 @@ export function EmptyChatState({
               <Image
                 src="/icons/icon-512.png"
                 alt=""
-                width={36}
-                height={36}
-                className="size-9 rounded-xl ring-1 ring-border/70"
+                width={28}
+                height={28}
+                className="size-7 rounded-lg"
               />
-              <span className="text-sm font-semibold tracking-tight">{t("brandAlt")}</span>
+              <span className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                {t("brandAlt")}
+              </span>
             </div>
             <div className="flex flex-col gap-2">
               <h2
                 className={cn(
-                  "font-semibold tracking-tight text-balance",
-                  rich ? "text-3xl sm:text-4xl" : "text-2xl"
+                  "font-semibold leading-[1.1] tracking-tight text-balance",
+                  rich ? "text-3xl @lg:text-4xl @3xl:text-5xl" : "text-2xl @lg:text-3xl"
                 )}
               >
                 {heading}
               </h2>
               {rich && !override?.title ? (
-                <p className="text-base font-medium text-foreground/90">{t("title")}</p>
+                <p className="text-lg font-medium text-foreground/80 text-balance">{t("title")}</p>
               ) : null}
-              <p className="max-w-md text-sm leading-relaxed text-muted-foreground">{subheading}</p>
+              <p
+                className={cn(
+                  "max-w-md text-sm leading-relaxed text-muted-foreground text-pretty",
+                  rich ? "" : "mx-auto"
+                )}
+              >
+                {subheading}
+              </p>
             </div>
 
             {variant === "fullscreen" ? (
@@ -310,9 +333,15 @@ export function EmptyChatState({
 
           {rich ? (
             <div
-              className="relative mx-auto aspect-[3/2] w-full max-w-sm overflow-hidden rounded-2xl bg-muted/35"
+              className="relative mx-auto aspect-[3/2] w-full max-w-sm"
               data-testid="welcome-illustration"
             >
+              {/* Ambient glow replaces the former framed tile — it grounds the
+                  artwork without drawing a box around it. */}
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-8 rounded-full bg-primary/10 blur-3xl"
+              />
               <Image
                 src="/illustrations/cognia-workspace-hero.png"
                 alt={t("illustrationAlt")}
@@ -320,7 +349,7 @@ export function EmptyChatState({
                 height={1024}
                 sizes="(max-width: 767px) 82vw, 360px"
                 loading="eager"
-                className="size-full object-contain p-2"
+                className="relative size-full object-contain drop-shadow-[0_16px_36px_rgba(0,0,0,0.16)]"
               />
             </div>
           ) : null}
@@ -338,7 +367,7 @@ export function EmptyChatState({
             sends its prompt via onUseSample. */}
         {aiPrompts.length > 0 ? (
           <motion.div className="w-full" variants={STAGGER_CHILD} data-testid="ai-starters">
-            <h3 className={GROUP_HEADING_CLASS}>{t("sections.aiPrompts")}</h3>
+            <SectionHeading label={t("sections.aiPrompts")} />
             <Suggestions className="py-1">
               {aiPrompts.map((prompt, i) => (
                 <Suggestion
@@ -359,9 +388,9 @@ export function EmptyChatState({
         {/* Character starters — exemplar prompts from the active character */}
         {charPrompts.length > 0 ? (
           <motion.div className="w-full" variants={STAGGER_CHILD}>
-            <h3 className={GROUP_HEADING_CLASS}>{t("sections.characterPrompts")}</h3>
+            <SectionHeading label={t("sections.characterPrompts")} />
             <motion.div
-              className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+              className="grid grid-cols-1 gap-1 @2xl:grid-cols-2"
               variants={STAGGER_CONTAINER}
             >
               {charPrompts.map((prompt, i) => (
@@ -371,11 +400,14 @@ export function EmptyChatState({
                     aria-label={prompt}
                     onClick={() => onUseSample(prompt)}
                     className={cn(
-                      "flex h-full w-full items-center gap-2 p-3 text-left",
-                      INTERACTIVE_CARD_CLASS
+                      "group flex h-full w-full items-center gap-2.5 px-3 py-2.5 text-left",
+                      QUIET_ITEM_CLASS
                     )}
                   >
-                    <SparklesIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <SparklesIcon
+                      className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary"
+                      aria-hidden
+                    />
                     <span className="line-clamp-2 text-sm">{prompt}</span>
                   </button>
                 </motion.div>
@@ -393,7 +425,7 @@ export function EmptyChatState({
               onDismiss={onDismissSection ? () => onDismissSection("tryPrompt") : undefined}
             />
             <motion.div
-              className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+              className="grid grid-cols-1 gap-1 @2xl:grid-cols-2"
               variants={STAGGER_CONTAINER}
             >
               {starters.map(({ key, icon: Icon, title, prompt }) => (
@@ -403,17 +435,19 @@ export function EmptyChatState({
                     aria-label={title}
                     onClick={() => onUseSample(prompt)}
                     className={cn(
-                      "group flex h-full w-full flex-col gap-2 p-4 text-left",
-                      INTERACTIVE_CARD_CLASS
+                      "group flex h-full w-full items-start gap-3 px-3 py-2.5 text-left",
+                      QUIET_ITEM_CLASS
                     )}
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="flex size-7 items-center justify-center rounded-lg bg-muted text-muted-foreground transition-colors group-hover:bg-background group-hover:text-foreground">
-                        <Icon className="size-4" aria-hidden />
-                      </span>
+                    <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground transition-colors group-hover:bg-primary/10 group-hover:text-primary">
+                      <Icon className="size-4" aria-hidden />
+                    </span>
+                    <span className="flex min-w-0 flex-col gap-0.5">
                       <span className="text-sm font-medium">{title}</span>
-                    </div>
-                    <p className="line-clamp-2 text-xs text-muted-foreground">{prompt}</p>
+                      <span className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                        {prompt}
+                      </span>
+                    </span>
                   </button>
                 </motion.div>
               ))}
@@ -424,8 +458,8 @@ export function EmptyChatState({
         {/* Continue — recent sessions */}
         {showRecents ? (
           <motion.div className="w-full" variants={STAGGER_CHILD}>
-            <h3 className={GROUP_HEADING_CLASS}>{t("sections.continue")}</h3>
-            <motion.div className="flex flex-col gap-1" variants={STAGGER_CONTAINER}>
+            <SectionHeading label={t("sections.continue")} />
+            <motion.div className="flex flex-col" variants={STAGGER_CONTAINER}>
               {recents.map((s) => (
                 <motion.div key={s.id} variants={STAGGER_CHILD}>
                   <button
@@ -433,16 +467,16 @@ export function EmptyChatState({
                     onClick={() => onResumeSession?.(s.id)}
                     aria-label={s.title}
                     className={cn(
-                      "flex w-full items-center gap-2 rounded-md border border-transparent px-3 py-2 text-left",
-                      INTERACTIVE_CARD_CLASS
+                      "group flex w-full items-center gap-2.5 px-3 py-2 text-left",
+                      QUIET_ITEM_CLASS
                     )}
                   >
                     <MessageSquareTextIcon
-                      className="size-4 shrink-0 text-muted-foreground"
+                      className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
                       aria-hidden
                     />
                     <span className="truncate text-sm">{s.title}</span>
-                    <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                    <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
                       {format.relativeTime(s.updatedAt, now)}
                     </span>
                   </button>
