@@ -118,6 +118,13 @@ interface Props {
    */
   quickActionsSlot?: ReactNode
   /**
+   * Usage dashboard, rendered directly under the hero. The chat pane injects
+   * `<WelcomeStats />` here; it stays a slot (rather than an import) so this
+   * component keeps no database dependency and surfaces with their own copy —
+   * the workflow-editor chat tab — can leave it off.
+   */
+  statsSlot?: ReactNode
+  /**
    * Visual density. `"rich"` (default) shows the illustrated two-column hero
    * and quiet surfaced starter cards; `"minimal"` uses a compact, media-free
    * layout. The chat pane forces `"minimal"` on mobile/narrow viewports.
@@ -153,20 +160,28 @@ const QUIET_ITEM_CLASS =
 /**
  * Section heading with a hairline rule and an optional dismiss (✕). The rule
  * is what separates groups now that the sections no longer sit inside cards.
+ *
+ * `actions` renders between the rule and the ✕ — the usage dashboard hangs its
+ * view/range/customize controls there so every welcome section keeps one
+ * heading treatment. Exported for that reuse.
  */
-function SectionHeading({
+export function SectionHeading({
   label,
   dismissLabel,
   onDismiss,
+  actions,
 }: {
   label: string
   dismissLabel?: string
   onDismiss?: () => void
+  /** Trailing controls, right-aligned before the dismiss affordance. */
+  actions?: ReactNode
 }) {
   return (
     <div className="mb-2 flex items-center gap-3">
       <h3 className={HEADING_TEXT_CLASS}>{label}</h3>
       <span className="h-px flex-1 bg-border/60" aria-hidden />
+      {actions ? <div className="flex shrink-0 items-center gap-1">{actions}</div> : null}
       {onDismiss ? (
         <button
           type="button"
@@ -193,6 +208,7 @@ export function EmptyChatState({
   hideSamples,
   headerExtraSlot,
   quickActionsSlot,
+  statsSlot,
   welcomeStyle = "rich",
   onToggleStyle,
   userName,
@@ -359,6 +375,13 @@ export function EmptyChatState({
         {quickActionsSlot ? (
           <motion.div className="w-full" variants={STAGGER_CHILD}>
             {quickActionsSlot}
+          </motion.div>
+        ) : null}
+
+        {/* Usage dashboard — self-hides when the user turned it off. */}
+        {statsSlot ? (
+          <motion.div className="w-full" variants={STAGGER_CHILD} data-testid="welcome-stats-slot">
+            {statsSlot}
           </motion.div>
         ) : null}
 

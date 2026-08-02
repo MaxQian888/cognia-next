@@ -4696,7 +4696,40 @@
         "toggleLabel": "Switch welcome layout"
       },
       "subtitle": "Ask anything, jump into a capability, or pick up where you left off.",
-      "title": "What do you want to get done?"
+      "title": "What do you want to get done?",
+      "stats": {
+        "title": "Your activity",
+        "empty": "No usage recorded in this window yet.",
+        "none": "—",
+        "dayCount": "{count}d",
+        "customize": "Customize stats",
+        "customizeTitle": "Show on the welcome page",
+        "heatmap": "Calendar heatmap",
+        "view": {
+          "label": "Dashboard view",
+          "overview": "Overview",
+          "models": "Models"
+        },
+        "range": {
+          "label": "Time range",
+          "days": "{days}d"
+        },
+        "tiles": {
+          "sessions": "Sessions",
+          "turns": "Turns",
+          "tokens": "Total tokens",
+          "cost": "Total cost",
+          "activeDays": "Active days",
+          "currentStreak": "Current streak",
+          "longestStreak": "Longest streak",
+          "peakHour": "Peak hour",
+          "topModel": "Top model"
+        },
+        "models": {
+          "empty": "No model usage in this window.",
+          "turns": "{count} turns"
+        }
+      }
     },
     "filePreview": {
       "extractedChars": "{count, plural, =1 {1 char} other {# chars}} extracted",

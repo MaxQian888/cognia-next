@@ -27,7 +27,11 @@ export function PersonalizationCard() {
 
   const welcomeStyle: WelcomeStyle = settings?.welcomeStyle ?? "rich"
   const hidden = settings?.welcomeHidden ?? {}
-  const hasHidden = Boolean(hidden.tryPrompt)
+  // The usage dashboard is dismissed through its own `enabled` flag rather than
+  // `welcomeHidden`, but from the user's side it is the same ✕ on the same page
+  // — so one "restore" brings back everything they closed on the welcome page.
+  const statsHidden = settings?.welcomeStats?.enabled === false
+  const hasHidden = Boolean(hidden.tryPrompt) || statsHidden
 
   // Name is edited locally and committed on blur so we don't write a settings
   // row on every keystroke.
@@ -98,7 +102,12 @@ export function PersonalizationCard() {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => void save({ welcomeHidden: {} })}
+            onClick={() =>
+              void save({
+                welcomeHidden: {},
+                welcomeStats: { ...settings?.welcomeStats, enabled: true },
+              })
+            }
           >
             {t("personalization.restoreSections")}
           </Button>

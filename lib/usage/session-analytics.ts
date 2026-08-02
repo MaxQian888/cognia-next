@@ -164,12 +164,31 @@ export function aggregateByModel(
  * here on purpose: that module imports `getDb` (Dexie) at the top level, and
  * this one is consumed by the CLI (`cli/src/tui/runtime/agent-stats-model.ts`),
  * which must not pull the browser database into its module graph.
+ *
+ * Exported so every surface that buckets usage by day — the Usage tab's
+ * heatmap, the share card's "active days", and the welcome dashboard — agrees
+ * on which calendar day a turn belongs to. A second (UTC) definition is exactly
+ * how "active days" drifted between two views of the same rows.
  */
-function localDay(at: number): string {
+export function localDay(at: number): string {
   const d = new Date(at)
   const month = String(d.getMonth() + 1).padStart(2, "0")
   const day = String(d.getDate()).padStart(2, "0")
   return `${d.getFullYear()}-${month}-${day}`
+}
+
+/**
+ * Inverse of {@link localDay}: read a "YYYY-MM-DD" key back as that day's LOCAL
+ * midnight. Shared by the heatmap's cell labels and the streak walk so a day key
+ * round-trips through exactly one definition.
+ *
+ * `||` rather than `??` on the fallbacks: a non-numeric segment parses to NaN,
+ * which `??` would pass straight through and turn every derived label into
+ * "Invalid Date".
+ */
+export function parseLocalDay(date: string): Date {
+  const [y, m, d] = date.split("-").map(Number)
+  return new Date(y || 1970, (m || 1) - 1, d || 1)
 }
 
 /** Midnight (local) of the day `daysBack` calendar days before `now`. */
@@ -231,6 +250,27 @@ export function fillDailyRange(
     cursor.setDate(cursor.getDate() + 1)
   }
   return out
+}
+
+/**
+ * The model that moved the most tokens in `rows`, or `null` when there are
+ * none. Volume — not cost — on purpose: this answers "what did I actually work
+ * with", which a single expensive turn on a premium model should not win.
+ *
+ * Shared by the usage share card and the welcome dashboard so both name the
+ * same "top model" for the same rows.
+ */
+export function topModelByTokens(
+  rows: readonly SessionUsageRow[],
+  resolve: PricingResolver = resolveModelPricingUsd
+): string | null {
+  const byModel = aggregateByModel(rows, resolve)
+  if (byModel.length === 0) return null
+  return [...byModel].sort(
+    (a, b) =>
+      b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens) ||
+      a.model.localeCompare(b.model)
+  )[0].model
 }
 
 export interface SessionUsageSummary {

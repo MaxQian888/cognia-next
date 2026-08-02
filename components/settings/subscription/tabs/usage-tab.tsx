@@ -29,7 +29,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useSubscriptionNow } from "@/lib/subscription/core/now-ticker"
-import { useLocale, useTranslations } from "next-intl"
+import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   Area,
@@ -69,14 +69,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import {
-  ContributionGraph,
-  ContributionGraphBlock,
-  ContributionGraphCalendar,
-  ContributionGraphFooter,
-  ContributionGraphLegend,
-  ContributionGraphTotalCount,
-} from "@/components/ui/contribution-graph"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Table,
@@ -87,14 +79,9 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import {
-  Tooltip as UiTooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
 import { SettingsAlert, SettingsEmptyState } from "@/components/settings/common/settings-section"
 import { StatCard } from "@/components/scheduler/stat-card"
+import { UsageHeatmap } from "@/components/usage/usage-heatmap"
 import { cn } from "@/lib/utils"
 
 import { useThemeColors } from "@/hooks/logging/use-theme-colors"
@@ -130,7 +117,6 @@ import {
   aggregateBySession,
   analyzeUsageContributors,
   buildUsageFilename,
-  fillDailyRange,
   filterByRange,
   toUsageCsv,
   toUsageJson,
@@ -138,7 +124,6 @@ import {
   type UsageContributors,
 } from "@/lib/usage/session-analytics"
 import type { SessionUsageRow, UsageSurface } from "@/lib/db/session-usage"
-import type { DailyUsage } from "@/types/system/usage"
 import type { SubscriptionUsageRow } from "@/types/subscription"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat"
@@ -1136,165 +1121,6 @@ function InsightsCard({
 
 /* ── Cost over time ────────────────────────────────────────────────────── */
 
-/**
- * Cost intensity bucket for one day, 0–4 (matching the graph's `maxLevel`).
- * 0 is reserved for "no spend" so an empty day always reads as an empty cell;
- * every day with spend lands in 1–4, scaled against the range's busiest day.
- */
-function costLevel(cost: number, maxCost: number): number {
-  if (!(cost > 0)) return 0
-  if (!(maxCost > 0)) return 1
-  return Math.min(4, Math.max(1, Math.ceil((cost / maxCost) * 4)))
-}
-
-/**
- * Tint one heatmap cell with the same palette colour the bar chart uses, so the
- * two views of the same data read as one series. Level 0 keeps the primitive's
- * themed `fill-muted` default (legible in both light and dark).
- */
-function levelStyle(level: number, accent: string): React.CSSProperties | undefined {
-  if (level <= 0) return undefined
-  return { fill: accent, fillOpacity: 0.25 + level * 0.1875 }
-}
-
-/** Parse a local "YYYY-MM-DD" day key back into a local `Date`. */
-function parseLocalDay(date: string): Date {
-  const [y, m, d] = date.split("-").map(Number)
-  return new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1)
-}
-
-/**
- * GitHub-style calendar heatmap of daily spend, over the vendored Kibo UI
- * `ContributionGraph` primitive. Every day in the active range gets a cell
- * (`fillDailyRange` pads the ones with no usage), intensity encodes USD cost,
- * and each cell carries both an aria-label and a tooltip that opens on hover
- * *and* on keyboard focus.
- */
-function CostHeatmap({
-  daily,
-  rangeDays,
-  now,
-}: {
-  daily: DailyUsage[]
-  rangeDays: number
-  now: number
-}) {
-  const t = useTranslations("subscription.usage.costOverTime")
-  const locale = useLocale()
-  const colors = useThemeColors()
-  const accent = paletteColor(colors, 3)
-
-  const cells = useMemo(() => fillDailyRange(daily, rangeDays, now), [daily, rangeDays, now])
-  const maxCost = useMemo(() => cells.reduce((max, c) => Math.max(max, c.cost), 0), [cells])
-  const totals = useMemo(
-    () =>
-      cells.reduce((acc, c) => ({ cost: acc.cost + c.cost, requests: acc.requests + c.requests }), {
-        cost: 0,
-        requests: 0,
-      }),
-    [cells]
-  )
-
-  const activities = useMemo(
-    () =>
-      cells.map((c) => ({
-        date: c.date,
-        count: c.requests,
-        level: costLevel(c.cost, maxCost),
-      })),
-    [cells, maxCost]
-  )
-  const byDate = useMemo(() => new Map(cells.map((c) => [c.date, c])), [cells])
-
-  // Month axis labels come from the active locale rather than a translation key
-  // per month — `Intl` already knows every calendar we ship.
-  const monthLabels = useMemo(() => {
-    const fmt = new Intl.DateTimeFormat(locale, { month: "short" })
-    return Array.from({ length: 12 }, (_, m) => fmt.format(new Date(2020, m, 15)))
-  }, [locale])
-  const dayFormat = useMemo(
-    () => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }),
-    [locale]
-  )
-
-  const cellLabel = (date: string) => {
-    const cell = byDate.get(date)
-    return t("heatmap.cell", {
-      date: dayFormat.format(parseLocalDay(date)),
-      cost: formatCostInCurrency(cell?.cost ?? 0, "USD"),
-      requests: cell?.requests ?? 0,
-    })
-  }
-
-  return (
-    <TooltipProvider delayDuration={100}>
-      <ContributionGraph
-        data={activities}
-        maxLevel={4}
-        weekStart={1}
-        blockSize={12}
-        blockMargin={3}
-        fontSize={11}
-        totalCount={totals.requests}
-        labels={{
-          months: monthLabels,
-          legend: { less: t("heatmap.less"), more: t("heatmap.more") },
-        }}
-        className="text-muted-foreground"
-        data-testid="usage-cost-heatmap"
-      >
-        <ContributionGraphCalendar>
-          {({ activity, dayIndex, weekIndex }) => (
-            <UiTooltip>
-              <TooltipTrigger asChild>
-                <ContributionGraphBlock
-                  activity={activity}
-                  dayIndex={dayIndex}
-                  weekIndex={weekIndex}
-                  className="stroke-[1px] stroke-border outline-none focus-visible:stroke-ring focus-visible:stroke-2"
-                  style={levelStyle(activity.level, accent)}
-                  role="img"
-                  tabIndex={0}
-                  aria-label={cellLabel(activity.date)}
-                  data-testid={`usage-cost-heatmap-cell-${activity.date}`}
-                />
-              </TooltipTrigger>
-              <TooltipContent>{cellLabel(activity.date)}</TooltipContent>
-            </UiTooltip>
-          )}
-        </ContributionGraphCalendar>
-        <ContributionGraphFooter className="items-center text-xs">
-          <ContributionGraphTotalCount>
-            {({ totalCount }) => (
-              <span data-testid="usage-cost-heatmap-total">
-                {t("heatmap.total", {
-                  cost: formatCostInCurrency(totals.cost, "USD"),
-                  days: cells.length,
-                  requests: totalCount,
-                })}
-              </span>
-            )}
-          </ContributionGraphTotalCount>
-          <ContributionGraphLegend>
-            {({ level }) => (
-              <svg height={12} key={level} width={12} aria-hidden>
-                <rect
-                  className={cn("stroke-[1px] stroke-border", level === 0 && "fill-muted")}
-                  style={levelStyle(level, accent)}
-                  height={12}
-                  rx={2}
-                  ry={2}
-                  width={12}
-                />
-              </svg>
-            )}
-          </ContributionGraphLegend>
-        </ContributionGraphFooter>
-      </ContributionGraph>
-    </TooltipProvider>
-  )
-}
-
 function CostOverTimeCard({
   rows,
   rangeDays,
@@ -1350,7 +1176,7 @@ function CostOverTimeCard({
           {t("empty")}
         </p>
       ) : view === "heatmap" ? (
-        <CostHeatmap daily={daily} rangeDays={rangeDays} now={now} />
+        <UsageHeatmap daily={daily} rangeDays={rangeDays} now={now} />
       ) : (
         <div className="h-48" data-testid="usage-cost-chart">
           <ResponsiveContainer

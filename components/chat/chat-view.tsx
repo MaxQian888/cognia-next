@@ -13,6 +13,7 @@ import {
   type RecentSessionEntry,
   type WelcomeSection,
 } from "./empty-state"
+import { WelcomeStats } from "./welcome/welcome-stats"
 import { DiagnosticCard, InlineError } from "@/components/error/diagnostic-card"
 import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 import { MessageList } from "./message-list"
@@ -287,6 +288,11 @@ export function ChatPane({
     void save({ welcomeHidden: { ...settings?.welcomeHidden, [section]: true } })
   }, [])
 
+  // Usage dashboard — only on the generic chat welcome. Surfaces that replace
+  // the welcome copy entirely (the workflow-editor chat tab passes
+  // `emptyState`) get their own framing and would read as off-topic with it.
+  const statsSlot = emptyState ? undefined : <WelcomeStats />
+
   if (!activeSession) {
     return (
       <EmptyChatState
@@ -298,6 +304,7 @@ export function ChatPane({
         hideSamples={welcomeExtras?.hideSamples}
         headerExtraSlot={welcomeExtras?.header}
         quickActionsSlot={welcomeExtras?.quickActions}
+        statsSlot={statsSlot}
         hiddenSections={welcomeHidden}
         onDismissSection={handleDismissSection}
       />
@@ -458,6 +465,7 @@ export function ChatPane({
                 characterSamples={characterSamples}
                 aiSamples={aiStarters}
                 override={emptyState}
+                statsSlot={statsSlot}
                 hiddenSections={welcomeHidden}
                 onDismissSection={handleDismissSection}
               />

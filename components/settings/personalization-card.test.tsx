@@ -66,6 +66,31 @@ describe("PersonalizationCard", () => {
     storeState.settings = { welcomeHidden: { tryPrompt: true } }
     rerender(<PersonalizationCard />)
     await user.click(screen.getByRole("button", { name: "personalization.restoreSections" }))
-    expect(save).toHaveBeenCalledWith({ welcomeHidden: {} })
+    // Restoring brings back everything the ✕ can hide on the welcome page —
+    // the dismissed sections AND the usage dashboard.
+    expect(save).toHaveBeenCalledWith({
+      welcomeHidden: {},
+      welcomeStats: { enabled: true },
+    })
+  })
+
+  it("offers the restore button when only the usage dashboard was dismissed", async () => {
+    const user = userEvent.setup()
+    storeState.settings = { welcomeStats: { enabled: false, rangeDays: 7 } }
+    render(<PersonalizationCard />)
+    await user.click(screen.getByRole("button", { name: "personalization.restoreSections" }))
+    // Re-enabling must not reset the rest of the dashboard's layout.
+    expect(save).toHaveBeenCalledWith({
+      welcomeHidden: {},
+      welcomeStats: { enabled: true, rangeDays: 7 },
+    })
+  })
+
+  it("keeps the restore button hidden when nothing was dismissed", () => {
+    storeState.settings = { welcomeStats: { enabled: true } }
+    render(<PersonalizationCard />)
+    expect(
+      screen.queryByRole("button", { name: "personalization.restoreSections" })
+    ).not.toBeInTheDocument()
   })
 })

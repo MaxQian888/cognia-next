@@ -5,7 +5,12 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { SparklesIcon } from "lucide-react"
 
-import { EmptyChatState, type RecentSessionEntry, type StarterSample } from "./empty-state"
+import {
+  EmptyChatState,
+  SectionHeading,
+  type RecentSessionEntry,
+  type StarterSample,
+} from "./empty-state"
 
 // next-intl: echo the key so assertions can target stable strings; stub the
 // locale-aware relative-time formatter used by the "Continue" group.
@@ -333,6 +338,47 @@ describe("<EmptyChatState />", () => {
       <EmptyChatState {...baseProps()} quickActionsSlot={<div data-testid="quick-actions" />} />
     )
     expect(screen.getByTestId("quick-actions")).toBeInTheDocument()
+  })
+
+  // ── Usage dashboard slot ──────────────────────────────────────────────
+  it("renders statsSlot under the hero and above the starter prompts", () => {
+    render(<EmptyChatState {...baseProps()} statsSlot={<div data-testid="stats" />} />)
+    const stats = screen.getByTestId("stats")
+    const hero = screen.getByTestId("welcome-hero")
+    const starters = screen.getByText("sections.tryPrompt")
+    expect(hero.compareDocumentPosition(stats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(stats.compareDocumentPosition(starters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("omits the stats section entirely when no slot is passed", () => {
+    render(<EmptyChatState {...baseProps()} />)
+    expect(screen.queryByTestId("welcome-stats-slot")).not.toBeInTheDocument()
+  })
+})
+
+describe("<SectionHeading />", () => {
+  it("renders trailing actions before the dismiss affordance", async () => {
+    const onDismiss = jest.fn()
+    const user = userEvent.setup()
+    render(
+      <SectionHeading
+        label="Your activity"
+        actions={<button type="button">range</button>}
+        dismissLabel="hide"
+        onDismiss={onDismiss}
+      />
+    )
+    const action = screen.getByRole("button", { name: "range" })
+    const dismiss = screen.getByRole("button", { name: "hide" })
+    expect(action.compareDocumentPosition(dismiss) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await user.click(dismiss)
+    expect(onDismiss).toHaveBeenCalled()
+  })
+
+  it("renders bare when neither actions nor a dismiss handler is given", () => {
+    render(<SectionHeading label="Continue" />)
+    expect(screen.getByRole("heading", { level: 3, name: "Continue" })).toBeInTheDocument()
+    expect(screen.queryByRole("button")).not.toBeInTheDocument()
   })
 
   // ── Reduced motion ────────────────────────────────────────────────────

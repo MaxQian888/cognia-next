@@ -12,6 +12,9 @@ import {
   fillDailyRange,
   filterByRange,
   HIGH_CONTEXT_THRESHOLD,
+  localDay,
+  parseLocalDay,
+  topModelByTokens,
   toUsageCsv,
   toUsageJson,
   type PricingResolver,
@@ -177,6 +180,58 @@ describe("aggregateByModel", () => {
     const out = aggregateByModel(rows, priceFor)
     // c has the most tokens → first; a sorts before b on the name tie-break.
     expect(out.map((m) => m.model)).toEqual(["c-model", "a-model", "b-model"])
+  })
+})
+
+describe("localDay", () => {
+  it("formats an epoch as a zero-padded LOCAL calendar day", () => {
+    // Built from local parts so the assertion holds in any timezone — the
+    // whole point of the helper is that it does not go through UTC.
+    expect(localDay(new Date(2026, 0, 5, 23, 59).getTime())).toBe("2026-01-05")
+    expect(localDay(new Date(2026, 11, 31, 0, 0).getTime())).toBe("2026-12-31")
+  })
+})
+
+describe("parseLocalDay", () => {
+  it("round-trips a localDay key back to that day's LOCAL midnight", () => {
+    const key = localDay(new Date(2026, 4, 20, 17, 30).getTime())
+    const parsed = parseLocalDay(key)
+    expect(parsed.getFullYear()).toBe(2026)
+    expect(parsed.getMonth()).toBe(4)
+    expect(parsed.getDate()).toBe(20)
+    expect(parsed.getHours()).toBe(0)
+  })
+
+  it("falls back to the epoch's first day rather than an Invalid Date", () => {
+    const parsed = parseLocalDay("not-a-day")
+    expect(Number.isNaN(parsed.getTime())).toBe(false)
+    expect(parsed.getFullYear()).toBe(1970)
+    expect(parsed.getMonth()).toBe(0)
+    expect(parsed.getDate()).toBe(1)
+  })
+})
+
+describe("topModelByTokens", () => {
+  it("returns null for no rows", () => {
+    expect(topModelByTokens([])).toBeNull()
+  })
+
+  it("ranks by token volume, not by cost", () => {
+    // The cheap model moved far more tokens; a cost-ranked answer would
+    // wrongly name the expensive one.
+    const rows = [
+      row({ messageId: "a", model: "haiku", inputTokens: 900_000, outputTokens: 100_000 }),
+      row({ messageId: "b", model: "opus", inputTokens: 10, outputTokens: 10, costUsd: 99 }),
+    ]
+    expect(topModelByTokens(rows, priceFor)).toBe("haiku")
+  })
+
+  it("breaks ties deterministically by model name", () => {
+    const rows = [
+      row({ messageId: "a", model: "zeta", inputTokens: 10, outputTokens: 0 }),
+      row({ messageId: "b", model: "alpha", inputTokens: 10, outputTokens: 0 }),
+    ]
+    expect(topModelByTokens(rows, priceFor)).toBe("alpha")
   })
 })
 
