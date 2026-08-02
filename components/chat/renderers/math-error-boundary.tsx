@@ -1,7 +1,8 @@
 "use client"
 
 import React from "react"
-import { AlertCircle, RefreshCw, Copy, Check } from "lucide-react"
+import { AlertCircle, RefreshCw } from "lucide-react"
+import { CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
@@ -113,7 +114,7 @@ export function MathErrorFallback({ error, latex, onRetry, className }: MathErro
               aria-label={t("copySource")}
               tooltip={t("copySource")}
             >
-              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              <CopyFeedbackIcon copied={copied} size={14} />
             </TooltipIconButton>
           )}
         </div>

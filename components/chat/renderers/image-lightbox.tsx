@@ -6,7 +6,6 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
-  DownloadIcon,
   ExternalLinkIcon,
   ImageIcon,
   RotateCwIcon,
@@ -14,6 +13,8 @@ import {
   ZoomInIcon,
   ZoomOutIcon,
 } from "lucide-react"
+import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
+import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
 
 import {
   Dialog,
@@ -200,7 +201,7 @@ function LightboxView({
             aria-label={t("download")}
             tooltip={t("download")}
           >
-            <DownloadIcon className="size-4" />
+            <AnimatedActionIcon icon={AnimatedDownloadIcon} size={16} />
           </TooltipIconButton>
           {canOpenExternally(item.src) ? (
             <TooltipIconButton

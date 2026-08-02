@@ -2,14 +2,9 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import {
-  CheckIcon,
-  CopyIcon,
-  DownloadIcon,
-  ExternalLinkIcon,
-  ImageIcon,
-  Maximize2Icon,
-} from "lucide-react"
+import { ExternalLinkIcon, ImageIcon, Maximize2Icon } from "lucide-react"
+import { AnimatedActionIcon, CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
+import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
 
 import { Image } from "@/components/ai-elements/image"
 import { Button } from "@/components/ui/button"
@@ -208,7 +203,7 @@ export const ImageBlock = memo(function ImageBlock({
             aria-label={t("download")}
             tooltip={t("download")}
           >
-            <DownloadIcon className="size-3" />
+            <AnimatedActionIcon icon={AnimatedDownloadIcon} size={12} />
           </TooltipIconButton>
           {/* A store reference is meaningless outside this app, and the object
               URL behind it dies with the document — neither is worth copying. */}
@@ -221,7 +216,7 @@ export const ImageBlock = memo(function ImageBlock({
               aria-label={t("copyUrl")}
               tooltip={t("copyUrl")}
             >
-              {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
+              <CopyFeedbackIcon copied={copied} size={12} />
             </TooltipIconButton>
           )}
         </div>

@@ -2,7 +2,9 @@
 
 import { useState, memo, useCallback, useRef, useEffect } from "react"
 import { useTranslations } from "next-intl"
-import { Copy, Check, Download, Maximize2, WrapText, Hash } from "lucide-react"
+import { Maximize2, WrapText, Hash } from "lucide-react"
+import { AnimatedActionIcon, CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
+import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
@@ -296,7 +298,7 @@ export const CodeBlock = memo(function CodeBlock({
               aria-label={t("copyAria")}
               tooltip={t("copy")}
             >
-              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+              <CopyFeedbackIcon copied={copied} size={12} />
             </TooltipIconButton>
 
             <TooltipIconButton
@@ -307,7 +309,7 @@ export const CodeBlock = memo(function CodeBlock({
               aria-label={t("downloadAria")}
               tooltip={t("download")}
             >
-              <Download className="h-3 w-3" />
+              <AnimatedActionIcon icon={AnimatedDownloadIcon} size={12} />
             </TooltipIconButton>
 
             <TooltipIconButton
@@ -362,7 +364,7 @@ export const CodeBlock = memo(function CodeBlock({
                   aria-label={t("copyAria")}
                   tooltip={t("copy")}
                 >
-                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                  <CopyFeedbackIcon copied={copied} size={14} />
                 </TooltipIconButton>
                 <TooltipIconButton
                   variant="ghost"
@@ -372,7 +374,7 @@ export const CodeBlock = memo(function CodeBlock({
                   aria-label={t("downloadAria")}
                   tooltip={t("download")}
                 >
-                  <Download className="h-3.5 w-3.5" />
+                  <AnimatedActionIcon icon={AnimatedDownloadIcon} size={14} />
                 </TooltipIconButton>
               </div>
             </DialogTitle>

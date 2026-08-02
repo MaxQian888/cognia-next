@@ -2,10 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { BellIcon, SettingsIcon } from "lucide-react"
+import { BellIcon } from "lucide-react"
 
+import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { BellIcon as AnimatedBellIcon } from "@/components/ui/bell"
 import { Button } from "@/components/ui/button"
+import { SettingsIcon as AnimatedSettingsIcon } from "@/components/ui/settings"
 import { openAppSettings } from "@/lib/capacitor/app-settings"
 import {
   checkPermission,
@@ -99,7 +102,7 @@ export function NotificationPermissionCta({
             onClick={() => void onEnable()}
             data-testid={`${testid}-enable`}
           >
-            <BellIcon className="size-4" aria-hidden="true" />
+            <AnimatedActionIcon icon={AnimatedBellIcon} size={16} data-icon="inline-start" />
             {phase.requesting ? t("enableInProgress") : t("enableButton")}
           </Button>
         ) : (
@@ -111,7 +114,7 @@ export function NotificationPermissionCta({
             onClick={() => void onOpenSettings()}
             data-testid={`${testid}-settings`}
           >
-            <SettingsIcon className="size-4" aria-hidden="true" />
+            <AnimatedActionIcon icon={AnimatedSettingsIcon} size={16} data-icon="inline-start" />
             {t("settingsButton")}
           </Button>
         )}

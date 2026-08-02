@@ -13,9 +13,12 @@
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion } from "motion/react"
-import { PauseIcon, PlayIcon, SquareIcon, Volume2Icon } from "lucide-react"
+import { SquareIcon, Volume2Icon } from "lucide-react"
 
+import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
 import { Button } from "@/components/ui/button"
+import { PauseIcon as AnimatedPauseIcon } from "@/components/ui/pause"
+import { PlayIcon as AnimatedPlayIcon } from "@/components/ui/play"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ttsOrchestrator, type TTSOrchestratorState } from "@/lib/tts/tts-orchestrator"
 import { TTS_PROVIDERS } from "@cognia/tts/types"
@@ -75,7 +78,7 @@ export function TtsNowPlayingBar() {
                   aria-label={t("pause")}
                   onClick={() => ttsOrchestrator.pause()}
                 >
-                  <PauseIcon className="size-3.5" />
+                  <AnimatedActionIcon icon={AnimatedPauseIcon} size={14} />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{t("pause")}</TooltipContent>
@@ -91,7 +94,7 @@ export function TtsNowPlayingBar() {
                   aria-label={t("resume")}
                   onClick={() => ttsOrchestrator.resume()}
                 >
-                  <PlayIcon className="size-3.5" />
+                  <AnimatedActionIcon icon={AnimatedPlayIcon} size={14} />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{t("resume")}</TooltipContent>

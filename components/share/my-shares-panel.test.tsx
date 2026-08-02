@@ -76,6 +76,37 @@ describe("MySharesPanel", () => {
         "https://share.test/v/AbC#k=K"
       )
     )
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Copy" }).querySelector('[data-state="copied"]')
+      ).toBeInTheDocument()
+    )
+  })
+
+  it("keeps copied feedback isolated to the successful row", async () => {
+    await seed()
+    await seed({ code: "DeF", title: "Other chat", url: "https://share.test/v/DeF#k=K" })
+    render(<MySharesPanel />)
+    await screen.findByText("Other chat")
+    const copyButtons = screen.getAllByRole("button", { name: "Copy" })
+
+    fireEvent.click(copyButtons[0])
+    await waitFor(() =>
+      expect(copyButtons[0].querySelector('[data-state="copied"]')).toBeInTheDocument()
+    )
+    expect(copyButtons[1].querySelector('[data-state="copied"]')).toBeNull()
+  })
+
+  it("does not show copied feedback when the clipboard write fails", async () => {
+    ;(navigator.clipboard.writeText as jest.Mock).mockRejectedValueOnce(new Error("denied"))
+    await seed()
+    render(<MySharesPanel />)
+    await screen.findByText("My chat")
+    const copyButton = screen.getByRole("button", { name: "Copy" })
+
+    fireEvent.click(copyButton)
+    await waitFor(() => expect(navigator.clipboard.writeText as jest.Mock).toHaveBeenCalled())
+    expect(copyButton.querySelector('[data-state="copied"]')).toBeNull()
   })
 
   it("fetches and shows the view count on demand", async () => {

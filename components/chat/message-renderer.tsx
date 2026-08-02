@@ -72,10 +72,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { AnimatedActionIcon, CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import {
-  BookmarkIcon,
-  CheckIcon,
-  CopyIcon,
   LinkIcon,
   CornerUpLeftIcon,
   GitBranchIcon,
@@ -85,6 +83,8 @@ import {
   RefreshCcwIcon,
   Share2Icon,
 } from "lucide-react"
+import { BookmarkIcon as AnimatedBookmarkIcon } from "@/components/ui/bookmark"
+import { CheckIcon as AnimatedCheckIcon } from "@/components/ui/check"
 import { QuoteCardDialog } from "@/components/share/quote-card-dialog"
 import { toast } from "sonner"
 import type { ToolUIPart, UIMessage } from "ai"
@@ -640,11 +640,7 @@ function MessageRendererInner({
               label={t("copyLabel")}
               onClick={handleCopy}
             >
-              {copied || richCopied ? (
-                <CheckIcon className="size-3.5" />
-              ) : (
-                <CopyIcon className="size-3.5" />
-              )}
+              <CopyFeedbackIcon copied={copied || richCopied} size={14} />
             </MessageAction>
 
             <MessageAction
@@ -666,7 +662,7 @@ function MessageRendererInner({
                 onClick={handleCopyLink}
               >
                 {linkCopied ? (
-                  <CheckIcon className="size-3.5" />
+                  <AnimatedActionIcon icon={AnimatedCheckIcon} size={14} animateOnChange />
                 ) : (
                   <LinkIcon className="size-3.5" />
                 )}
@@ -689,7 +685,12 @@ function MessageRendererInner({
               onClick={() => toggleBookmark(message.id)}
               className={cn(isBookmarked && "text-yellow-500")}
             >
-              <BookmarkIcon className={cn("size-3.5", isBookmarked && "fill-current")} />
+              <AnimatedActionIcon
+                icon={AnimatedBookmarkIcon}
+                size={14}
+                animateOnChange={isBookmarked}
+                className={isBookmarked ? "fill-current" : undefined}
+              />
             </MessageAction>
 
             {message.role === "user" && onEditResend && (

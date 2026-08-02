@@ -19,19 +19,14 @@ import {
   ArtifactTitle,
 } from "@/components/ai-elements/artifact"
 import { ArtifactPreview } from "@/components/artifacts/artifact-preview"
+import { AnimatedActionIcon, CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
+import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
 import { Button } from "@/components/ui/button"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { revealArtifactInWorkspace } from "@/lib/artifacts/reveal"
 import { useCopy } from "@/hooks/ui/use-copy"
 import type { ArtifactPart as ArtifactPartType } from "@/lib/claude/parts-extensions"
-import {
-  ChevronDownIcon,
-  ChevronUpIcon,
-  CopyIcon,
-  DownloadIcon,
-  ExternalLinkIcon,
-  FileWarningIcon,
-} from "lucide-react"
+import { ChevronDownIcon, ChevronUpIcon, ExternalLinkIcon, FileWarningIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface ArtifactPartProps {
@@ -99,17 +94,19 @@ export const ArtifactPart = memo(function ArtifactPart({ part, className }: Arti
           <ArtifactAction
             tooltip={copied ? t("copied") : t("copy")}
             label={t("copyAria")}
-            icon={CopyIcon}
             onClick={handleCopy}
             data-testid="artifact-part-copy"
-          />
+          >
+            <CopyFeedbackIcon copied={copied} size={16} />
+          </ArtifactAction>
           <ArtifactAction
             tooltip={t("download")}
             label={t("downloadAria")}
-            icon={DownloadIcon}
             onClick={handleDownload}
             data-testid="artifact-part-download"
-          />
+          >
+            <AnimatedActionIcon icon={AnimatedDownloadIcon} size={16} />
+          </ArtifactAction>
           <ArtifactAction
             tooltip={t("openInCanvas")}
             label={t("openInCanvasAria")}

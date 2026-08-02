@@ -22,11 +22,12 @@ import {
   BellIcon,
   FingerprintIcon,
   InfoIcon,
-  SettingsIcon,
   ShieldCheckIcon,
   SmartphoneIcon,
 } from "lucide-react"
 
+import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
+import { SettingsIcon as AnimatedSettingsIcon } from "@/components/ui/settings"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Item,
@@ -353,7 +354,11 @@ export function DeviceInfoCard({
                     onClick={() => void settingsOpener()}
                     data-testid="device-biometric-settings"
                   >
-                    <SettingsIcon className="size-3.5" aria-hidden="true" />
+                    <AnimatedActionIcon
+                      icon={AnimatedSettingsIcon}
+                      size={14}
+                      data-icon="inline-start"
+                    />
                     {t("actions.openSettings")}
                   </Button>
                 ) : null}
@@ -389,7 +394,11 @@ export function DeviceInfoCard({
                     onClick={() => void settingsOpener()}
                     data-testid="device-local-settings"
                   >
-                    <SettingsIcon className="size-3.5" aria-hidden="true" />
+                    <AnimatedActionIcon
+                      icon={AnimatedSettingsIcon}
+                      size={14}
+                      data-icon="inline-start"
+                    />
                     {t("actions.openSettings")}
                   </Button>
                 ) : null}

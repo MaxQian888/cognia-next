@@ -2,18 +2,11 @@
 
 import { useState, memo, useRef, useCallback, useEffect } from "react"
 import { useTranslations } from "next-intl"
-import {
-  Play,
-  Pause,
-  Volume2,
-  VolumeX,
-  Volume1,
-  Download,
-  Music,
-  SkipBack,
-  SkipForward,
-  Repeat,
-} from "lucide-react"
+import { Volume2, VolumeX, Volume1, Music, SkipBack, SkipForward, Repeat } from "lucide-react"
+import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
+import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
+import { PauseIcon as AnimatedPauseIcon } from "@/components/ui/pause"
+import { PlayIcon as AnimatedPlayIcon } from "@/components/ui/play"
 import { cn, formatVideoTime } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
@@ -229,7 +222,13 @@ export const AudioBlock = memo(function AudioBlock({
               onClick={handlePlayPause}
               disabled={isLoading}
             >
-              {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 ml-0.5" />}
+              <AnimatedActionIcon
+                icon={isPlaying ? AnimatedPauseIcon : AnimatedPlayIcon}
+                size={20}
+                animateOnChange={isPlaying}
+                className={!isPlaying ? "ml-0.5" : undefined}
+                data-state={isPlaying ? "pause" : "play"}
+              />
             </Button>
 
             <TooltipIconButton
@@ -286,7 +285,7 @@ export const AudioBlock = memo(function AudioBlock({
                 aria-label={t("download")}
                 tooltip={t("download")}
               >
-                <Download className="h-4 w-4" />
+                <AnimatedActionIcon icon={AnimatedDownloadIcon} size={16} />
               </TooltipIconButton>
             )}
           </div>

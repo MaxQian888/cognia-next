@@ -10,9 +10,10 @@
  */
 
 import { useTranslations } from "next-intl"
-import { SettingsIcon } from "lucide-react"
 
+import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
 import { Button } from "@/components/ui/button"
+import { SettingsIcon as AnimatedSettingsIcon } from "@/components/ui/settings"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
@@ -42,7 +43,7 @@ export function GoalConsolePrefsPopover() {
           aria-label={t("console.prefs.title")}
           data-testid="goal-console-prefs-trigger"
         >
-          <SettingsIcon className="size-4" aria-hidden />
+          <AnimatedActionIcon icon={AnimatedSettingsIcon} size={16} />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 space-y-4" data-testid="goal-console-prefs">

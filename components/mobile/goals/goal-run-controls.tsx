@@ -15,9 +15,12 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react"
+import { SquareIcon } from "lucide-react"
 
+import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
 import { Button } from "@/components/ui/button"
+import { PauseIcon as AnimatedPauseIcon } from "@/components/ui/pause"
+import { PlayIcon as AnimatedPlayIcon } from "@/components/ui/play"
 import { useCanControl } from "@/hooks/data/use-can-control"
 import { transport } from "@/lib/tauri/transport-instance"
 import type { Goal } from "@/types/goal"
@@ -67,7 +70,7 @@ export function GoalRunControls({ goal }: GoalRunControlsProps) {
           onClick={(e) => guard(e, "goal_pause")}
           data-testid="mobile-goal-pause"
         >
-          <PauseIcon className="size-3.5" aria-hidden="true" />
+          <AnimatedActionIcon icon={AnimatedPauseIcon} size={14} data-icon="inline-start" />
           {t("pill.pause")}
         </Button>
       ) : (
@@ -79,7 +82,7 @@ export function GoalRunControls({ goal }: GoalRunControlsProps) {
           onClick={(e) => guard(e, "goal_resume")}
           data-testid="mobile-goal-resume"
         >
-          <PlayIcon className="size-3.5" aria-hidden="true" />
+          <AnimatedActionIcon icon={AnimatedPlayIcon} size={14} data-icon="inline-start" />
           {t("pill.resume")}
         </Button>
       )}
