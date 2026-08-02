@@ -57,6 +57,7 @@ jest.mock("@/hooks/chat/use-workflow-editor-session", () => ({
 
 // Imported after the mocks so the real module resolves them.
 import { RightSidebar } from "./index"
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 
 const MESSAGES = {
   contextWorkbench: {
@@ -139,20 +140,24 @@ function harness(
   )
 }
 
+/**
+ * The rail groups `inspector`, `problems` and `settings` under one `inspect`
+ * activity, so the rail button's badge is the sum of every panel's badge in
+ * that group. Tests that care about one panel's count therefore park the
+ * others at zero rather than reading a per-panel badge that no longer exists.
+ */
+function inspectRailButton(): HTMLElement {
+  return screen.getByRole("button", { name: "Inspector" })
+}
+
 describe("RightSidebar", () => {
   beforeEach(() => {
     mockInspectorMountEffect.mockReset()
-    window.localStorage.setItem(
-      "cognia-context-workbench-surfaces-v1",
-      JSON.stringify({ workflow: false })
-    )
+    window.localStorage.clear()
+    useContextWorkbenchStore.setState({ layouts: {}, sessionOverrides: {} })
   })
 
-  it("uses the shared activity rail and preserves smart Inspector switching when enabled", async () => {
-    window.localStorage.setItem(
-      "cognia-context-workbench-surfaces-v1",
-      JSON.stringify({ workflow: true })
-    )
+  it("renders the shared activity rail and opens on Chat with an empty selection", async () => {
     const store = makeFakeStore({
       selectedNodeIds: [],
       selectedEdgeIds: [],
@@ -162,15 +167,20 @@ describe("RightSidebar", () => {
 
     expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
     expect(await screen.findByTestId("mock-chat-tab")).toBeInTheDocument()
-    act(() => setSelectionCount(store, 1))
-    expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
+  })
+
+  it("opts the workbench into the sidebar background scope", () => {
+    const store = makeFakeStore({
+      selectedNodeIds: [],
+      selectedEdgeIds: [],
+      baseWorkflow: { id: "wf_background", name: "Background" },
+    })
+    harness(store)
+
+    expect(screen.getByTestId("context-workbench")).toHaveAttribute("data-bg-target", "sidebar")
   })
 
   it("does not remount a retained panel when its mount effect updates workflow metadata", () => {
-    window.localStorage.setItem(
-      "cognia-context-workbench-surfaces-v1",
-      JSON.stringify({ workflow: true })
-    )
     const store = makeFakeStore({
       selectedNodeIds: ["n1"],
       selectedEdgeIds: [],
@@ -197,10 +207,6 @@ describe("RightSidebar", () => {
   })
 
   it("renders every workflow panel through a stable runtime-backed component", async () => {
-    window.localStorage.setItem(
-      "cognia-context-workbench-surfaces-v1",
-      JSON.stringify({ workflow: true })
-    )
     const store = makeFakeStore({
       selectedNodeIds: [],
       selectedEdgeIds: [],
@@ -234,7 +240,7 @@ describe("RightSidebar", () => {
     await user.click(screen.getByRole("button", { name: "Templates" }))
     expect(await screen.findByTestId("mock-templates-tab")).toBeInTheDocument()
 
-    await user.click(screen.getByRole("button", { name: "Inspector" }))
+    await user.click(inspectRailButton())
     await user.click(screen.getByRole("tab", { name: "Problems" }))
     expect(await screen.findByTestId("mock-problems-tab")).toBeInTheDocument()
 
@@ -242,40 +248,7 @@ describe("RightSidebar", () => {
     expect(await screen.findByTestId("mock-settings-tab")).toBeInTheDocument()
   })
 
-  it("opts the shared workbench into the sidebar background scope", () => {
-    window.localStorage.setItem(
-      "cognia-context-workbench-surfaces-v1",
-      JSON.stringify({ workflow: true })
-    )
-    const store = makeFakeStore({
-      selectedNodeIds: [],
-      selectedEdgeIds: [],
-      baseWorkflow: { id: "wf_background", name: "Background" },
-    })
-    harness(store)
-
-    expect(screen.getByTestId("context-workbench")).toHaveAttribute("data-bg-target", "sidebar")
-  })
-
-  it("opts the legacy workflow sidebar into the sidebar background scope", () => {
-    const store = makeFakeStore({
-      selectedNodeIds: [],
-      selectedEdgeIds: [],
-      baseWorkflow: { id: "wf_legacy_background", name: "Background" },
-    })
-    harness(store)
-
-    expect(screen.getByTestId("workflow-right-sidebar")).toHaveAttribute(
-      "data-bg-target",
-      "sidebar"
-    )
-  })
-
   it("uses mobile Sheet semantics without desktop layout controls", async () => {
-    window.localStorage.setItem(
-      "cognia-context-workbench-surfaces-v1",
-      JSON.stringify({ workflow: true })
-    )
     const store = makeFakeStore({
       selectedNodeIds: [],
       selectedEdgeIds: [],
@@ -293,22 +266,8 @@ describe("RightSidebar", () => {
     expect(screen.queryByRole("button", { name: "Focus" })).not.toBeInTheDocument()
   })
 
-  describe("tab auto-switch (0 → ≥1 edge trigger)", () => {
-    it("starts on Chat when selection is empty", async () => {
-      const store = makeFakeStore({
-        selectedNodeIds: [],
-        selectedEdgeIds: [],
-        baseWorkflow: { id: "wf_a", name: "Demo" },
-      })
-      harness(store)
-      const chatTrigger = screen.getByTestId("workflow-right-sidebar-tab-chat")
-      expect(chatTrigger).toHaveAttribute("data-state", "active")
-      // Chat tab is lazy-loaded → wait for the Suspense fallback to swap in
-      // the mocked module.
-      expect(await screen.findByTestId("mock-chat-tab")).toBeInTheDocument()
-    })
-
-    it("auto-switches to Inspector on the 0 → 1 transition", () => {
+  describe("inspector auto-reveal (0 → ≥1 edge trigger)", () => {
+    it("reveals the Inspector on the 0 → 1 transition", () => {
       const store = makeFakeStore({
         selectedNodeIds: [],
         selectedEdgeIds: [],
@@ -316,11 +275,10 @@ describe("RightSidebar", () => {
       })
       harness(store)
       act(() => setSelectionCount(store, 1))
-      const inspectorTrigger = screen.getByTestId("workflow-right-sidebar-tab-inspector")
-      expect(inspectorTrigger).toHaveAttribute("data-state", "active")
+      expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
     })
 
-    it("does NOT re-trigger on internal selection growth (1 → 2)", async () => {
+    it("does NOT re-trigger on internal selection growth (1 → 2) once a panel is pinned", async () => {
       const user = userEvent.setup()
       const store = makeFakeStore({
         selectedNodeIds: [],
@@ -329,51 +287,44 @@ describe("RightSidebar", () => {
       })
       harness(store)
 
-      // 0 → 1 flips us to inspector (auto).
+      // 0 → 1 reveals the inspector (auto).
       act(() => setSelectionCount(store, 1))
-      const inspectorTrigger = screen.getByTestId("workflow-right-sidebar-tab-inspector")
-      expect(inspectorTrigger).toHaveAttribute("data-state", "active")
+      expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
 
-      // User manually moves to Chat while still having a node selected.
-      const chatTrigger = screen.getByTestId("workflow-right-sidebar-tab-chat")
-      await user.click(chatTrigger)
-      expect(chatTrigger).toHaveAttribute("data-state", "active")
+      // The user moves back to Chat while a node is still selected. A rail
+      // click is an explicit choice, so `smartReveal` records it as pinned.
+      await user.click(screen.getByRole("button", { name: "Chat" }))
+      expect(await screen.findByTestId("mock-chat-tab")).toBeInTheDocument()
 
-      // Selection grows 1 → 2 (e.g. shift-click). MUST stay on the
-      // user's pinned Chat tab — the auto-switch only fires on 0 → ≥1.
+      // Selection grows 1 → 2 (shift-click). The auto-reveal only fires on
+      // 0 → ≥1, and a pinned panel would decline it anyway.
       act(() => setSelectionCount(store, 2))
-      expect(chatTrigger).toHaveAttribute("data-state", "active")
-      expect(inspectorTrigger).not.toHaveAttribute("data-state", "active")
+      expect(screen.getByTestId("mock-chat-tab")).toBeInTheDocument()
     })
 
-    it("still auto-switches on every 0 → 1 cycle when chat was never explicitly pinned", () => {
+    it("still reveals on every 0 → 1 cycle while nothing is pinned", () => {
       const store = makeFakeStore({
         selectedNodeIds: [],
         selectedEdgeIds: [],
         baseWorkflow: { id: "wf_a", name: "Demo" },
       })
       harness(store)
-      const inspectorTrigger = screen.getByTestId("workflow-right-sidebar-tab-inspector")
 
-      // 0 → 1: switches to inspector.
       act(() => setSelectionCount(store, 1))
-      expect(inspectorTrigger).toHaveAttribute("data-state", "active")
+      expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
 
-      // 1 → 0: clear selection (stays on inspector by spec — clearing is
-      // not a signal to switch back to chat).
+      // Clearing is not a signal to go back to chat.
       act(() => setSelectionCount(store, 0))
-      expect(inspectorTrigger).toHaveAttribute("data-state", "active")
+      expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
 
-      // 0 → 1 again: still pre-pin, so the edge re-fires and we stay on
-      // inspector (already there). The key behaviour under test: this
-      // path still runs without erroring on a stale prev ref.
+      // Re-firing the edge must not throw on a stale prev ref.
       act(() => setSelectionCount(store, 1))
-      expect(inspectorTrigger).toHaveAttribute("data-state", "active")
+      expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
     })
   })
 
   describe("edge selection routing", () => {
-    it("auto-switches to Inspector and renders the EdgeInspector when only edges are selected", () => {
+    it("reveals the Inspector and renders the EdgeInspector when only edges are selected", () => {
       const store = makeFakeStore({
         selectedNodeIds: [],
         selectedEdgeIds: [],
@@ -381,8 +332,6 @@ describe("RightSidebar", () => {
       })
       harness(store)
       act(() => setEdgeSelectionCount(store, 1))
-      const inspectorTrigger = screen.getByTestId("workflow-right-sidebar-tab-inspector")
-      expect(inspectorTrigger).toHaveAttribute("data-state", "active")
       expect(screen.getByTestId("mock-edge-inspector")).toBeInTheDocument()
       expect(screen.queryByTestId("mock-inspector-panel")).toBeNull()
     })
@@ -403,8 +352,8 @@ describe("RightSidebar", () => {
     })
   })
 
-  describe("force-mounted chat panel layout", () => {
-    it("removes the chat panel from layout when another tab is active", async () => {
+  describe("retained chat panel", () => {
+    it("keeps the chat panel mounted but inert once another panel is revealed", async () => {
       const user = userEvent.setup()
       const store = makeFakeStore({
         selectedNodeIds: [],
@@ -412,25 +361,25 @@ describe("RightSidebar", () => {
         baseWorkflow: { id: "wf_a", name: "Demo" },
       })
       harness(store)
-      // Chat starts active and lazy-mounts.
       expect(await screen.findByTestId("mock-chat-tab")).toBeInTheDocument()
 
-      await user.click(screen.getByTestId("workflow-right-sidebar-tab-templates"))
+      await user.click(screen.getByRole("button", { name: "Templates" }))
+      expect(await screen.findByTestId("mock-templates-tab")).toBeInTheDocument()
 
-      // The chat panel stays mounted (forceMount + Activity caching) …
-      const chatPanel = screen.getByTestId("workflow-right-sidebar-panel-chat")
-      expect(chatPanel).toHaveAttribute("data-state", "inactive")
-      expect(screen.getByTestId("mock-chat-tab")).toBeInTheDocument()
-      // … but MUST be display-noned while inactive. Radix never sets the
-      // `hidden` attr on force-mounted panels, so without this class the
-      // empty chat panel keeps its `flex-1` share of the column and the
-      // active tab's content gets squeezed into the bottom half.
-      expect(chatPanel.className).toMatch(/data-\[state=inactive\]:hidden/)
+      // `retention: "stateful"` keeps the panel behind `<Activity mode="hidden">`
+      // so an in-flight conversation survives the switch …
+      const chatPanel = document.getElementById("context-workbench-panel-chat")
+      expect(chatPanel).not.toBeNull()
+      // … but it must not be reachable by pointer, focus or a11y while hidden,
+      // or the retained panel would keep answering clicks aimed at the one in
+      // front of it.
+      expect(chatPanel).toHaveAttribute("aria-hidden", "true")
+      expect(chatPanel).toHaveAttribute("inert")
     })
   })
 
-  describe("problems tab badge", () => {
-    it("renders the Problems tab with no badge when the workflow is clean", () => {
+  describe("rail badges", () => {
+    it("shows no badge on the inspect group when the workflow is clean and nothing is selected", () => {
       const store = makeFakeStore({
         selectedNodeIds: [],
         selectedEdgeIds: [],
@@ -438,12 +387,10 @@ describe("RightSidebar", () => {
         diagnostics: { errorCount: 0, warningCount: 0, infoCount: 0 },
       })
       harness(store)
-      expect(screen.getByTestId("workflow-right-sidebar-tab-problems")).toBeInTheDocument()
-      expect(screen.queryByTestId("workflow-problems-badge-error")).toBeNull()
-      expect(screen.queryByTestId("workflow-problems-badge-warning")).toBeNull()
+      expect(inspectRailButton()).toHaveTextContent(/^$/)
     })
 
-    it("shows the error badge with the error count when errors exist", () => {
+    it("sums the diagnostics onto the inspect group's badge", () => {
       const store = makeFakeStore({
         selectedNodeIds: [],
         selectedEdgeIds: [],
@@ -451,12 +398,11 @@ describe("RightSidebar", () => {
         diagnostics: { errorCount: 2, warningCount: 3, infoCount: 0 },
       })
       harness(store)
-      expect(screen.getByTestId("workflow-problems-badge-error")).toHaveTextContent("2")
-      // Error badge takes precedence over the warning badge.
-      expect(screen.queryByTestId("workflow-problems-badge-warning")).toBeNull()
+      // inspector (0 selected) + problems (2 + 3) + settings (0).
+      expect(inspectRailButton()).toHaveTextContent("5")
     })
 
-    it("shows the warning badge when only warnings exist", () => {
+    it("counts the selection alongside the diagnostics", () => {
       const store = makeFakeStore({
         selectedNodeIds: [],
         selectedEdgeIds: [],
@@ -464,12 +410,14 @@ describe("RightSidebar", () => {
         diagnostics: { errorCount: 0, warningCount: 4, infoCount: 0 },
       })
       harness(store)
-      expect(screen.getByTestId("workflow-problems-badge-warning")).toHaveTextContent("4")
+      act(() => setSelectionCount(store, 1))
+      // inspector (1 selected) + problems (0 + 4).
+      expect(inspectRailButton()).toHaveTextContent("5")
     })
   })
 
   describe("problems-panel signal", () => {
-    it("switches to the Problems tab and clears the signal when requestedProblemsPanel is set", () => {
+    it("reveals the Problems panel and clears the signal when requestedProblemsPanel is set", async () => {
       const clearRequestedProblemsPanel = jest.fn()
       const store = makeFakeStore({
         selectedNodeIds: [],
@@ -480,16 +428,13 @@ describe("RightSidebar", () => {
         clearRequestedProblemsPanel,
       })
       harness(store)
-      expect(screen.getByTestId("workflow-right-sidebar-tab-problems")).toHaveAttribute(
-        "data-state",
-        "active"
-      )
+      expect(await screen.findByTestId("mock-problems-tab")).toBeInTheDocument()
       expect(clearRequestedProblemsPanel).toHaveBeenCalled()
     })
   })
 
   describe("inspector-panel signal", () => {
-    it("switches to the Inspector tab over a pinned tab and clears the signal", async () => {
+    it("reveals the Inspector over a pinned panel and clears the signal", async () => {
       const user = userEvent.setup()
       const clearRequestedInspectorPanel = jest.fn()
       const store = makeFakeStore({
@@ -500,34 +445,28 @@ describe("RightSidebar", () => {
       })
       harness(store)
 
-      // Pin the Runs tab manually — a plain selection would now be swallowed.
-      await user.click(screen.getByTestId("workflow-right-sidebar-tab-runs"))
-      expect(screen.getByTestId("workflow-right-sidebar-tab-runs")).toHaveAttribute(
-        "data-state",
-        "active"
-      )
+      // Pin Runs manually — a plain selection change would now be swallowed.
+      await user.click(screen.getByRole("button", { name: "Runs" }))
+      expect(await screen.findByTestId("mock-runs-tab")).toBeInTheDocument()
 
-      // Explicit configure gesture fires the store signal.
+      // The explicit configure gesture fires the store signal, which outranks
+      // the pin.
       act(() => {
         ;(store as unknown as { setState: (s: Partial<FakeState>) => void }).setState({
           selectedNodeIds: ["n1"],
           requestedInspectorPanel: true,
         })
       })
-      expect(screen.getByTestId("workflow-right-sidebar-tab-inspector")).toHaveAttribute(
-        "data-state",
-        "active"
-      )
+      expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
       expect(clearRequestedInspectorPanel).toHaveBeenCalled()
     })
   })
 
   describe("memo", () => {
     it("is wrapped in React.memo so parent re-renders with identical props don't re-run the inner tree", () => {
-      // We can't directly observe React's bail-out, but we can confirm
-      // the exported component is a memo wrapper by inspecting its
-      // type marker. React tags memoized components with $$typeof
-      // === Symbol.for('react.memo').
+      // We can't directly observe React's bail-out, but we can confirm the
+      // exported component is a memo wrapper by inspecting its type marker.
+      // React tags memoized components with $$typeof === Symbol.for('react.memo').
       const memoMarker = Symbol.for("react.memo")
       expect((RightSidebar as { $$typeof?: symbol }).$$typeof).toBe(memoMarker)
     })

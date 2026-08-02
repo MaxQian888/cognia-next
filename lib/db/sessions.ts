@@ -117,6 +117,7 @@ export async function createSession(
     characterId: partial?.characterId,
     teamId: partial?.teamId,
     disabledSkillIds: partial?.disabledSkillIds,
+    trialSkillId: partial?.trialSkillId,
     pinned: partial?.pinned,
     model: partial?.model ?? autoApplied.model,
     systemPrompt: partial?.systemPrompt ?? autoApplied.systemPrompt,

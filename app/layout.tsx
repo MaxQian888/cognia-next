@@ -20,6 +20,7 @@ import { SettingsHydrator } from "@/components/providers/settings-hydrator"
 import { SettingsSyncProvider } from "@/components/providers/settings-sync-provider"
 import { TauriProvider } from "@/components/providers/tauri-provider"
 import { LoggerProvider } from "@/components/providers/logger-provider"
+import { RecoveryBootGate } from "@/components/providers/recovery-boot-gate"
 import { AccountAutoLock } from "@/components/account/account-auto-lock"
 import { AccountGate } from "@/components/account/account-gate"
 import { AccountStoreInitializer } from "@/components/providers/initializers/account-store-initializer"
@@ -82,11 +83,13 @@ import { McpLogProvider } from "@/components/providers/mcp-log-provider"
 import {
   BackgroundApplier,
   ComponentStyleApplier,
+  CursorApplier,
   DensityApplier,
   MotionApplier,
   RadiusApplier,
   TypographyApplier,
 } from "@/lib/appearance"
+import { CursorEffectLayer } from "@/components/appearance/cursor-effect-layer"
 import { CustomThemeApplier } from "@/lib/appearance/custom-theme-applier"
 import { PluginThemeApplier } from "@/lib/appearance/plugin-theme-applier"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
@@ -98,6 +101,7 @@ import { CaptureMount } from "@/components/capture/capture-mount"
 import { PetWindowShell } from "@/components/pet/pet-window-shell"
 import { TtsNowPlayingBar } from "@/components/tts/tts-now-playing-bar"
 import { AskUserDialog } from "@/components/chat/ask-user-dialog"
+import { SkillRecorderRoot } from "@/components/skills/recorder/recorder-root"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -197,190 +201,216 @@ export default async function RootLayout({
                   <TauriProvider>
                     <TooltipProvider>
                       <LoggerProvider>
-                        {/* Boots the plugin platform (manager + built-in plugin
-                         * discovery + onStartup activation). Must run before any
-                         * surface that reads plugin registries or calls
-                         * getPluginManager(). */}
-                        <PluginRuntimeInitializer />
-                        <ChatMiddlewareFlagInitializer />
-                        <BackgroundTaskInitializer />
-                        <ApprovalJournalInitializer />
-                        <SubscriptionInitializer />
-                        {/* Desktop-only boot initializers (Tauri). Consolidated +
-                         * runtime-gated + dynamically imported so the browser dev
-                         * server never compiles their subsystem graphs; the Tauri
-                         * build loads them at runtime. See the component for the
-                         * full rationale. */}
-                        <DesktopOnlyInitializers />
-                        <AutomationPolicyInitializer />
-                        <AuditRetentionInitializer />
-                        <StorageRetentionInitializer />
-                        <StoragePersistenceInitializer />
-                        <AutoModeInitializer />
-                        <ExternalAgentInitializer />
-                        <ProjectStoreInitializer />
-                        <ModelsDevCatalogInitializer />
-                        <OpenRouterCatalogInitializer />
-                        <OcrRuntimeInitializer />
-                        {/* Agent-team, scheduler, workflow-trigger, provider-
-                         * routing, gateway, and connector runtimes — bundled
-                         * behind one dynamic(ssr:false) boundary so their
-                         * subsystem graphs stay out of every route's
-                         * first-paint compile (ADR-0068 C3). Mount order
-                         * inside the bundle preserves the previous document
-                         * order here, incl. Routing-before-Gateway. */}
-                        <DeferredBootInitializers />
-                        <TwinWorkerInitializer />
-                        {/* Keeps each workspace's project-scoped RAG index
-                         * (`projectChunks`) in sync with its `knowledgeBase`.
-                         * No-op when no vector backend is configured. */}
-                        <ProjectKnowledgeWorkerInitializer />
-                        <ProviderCostMirrorInitializer />
-                        <ContextKeysInitializer />
-                        {/* Drops the right rail's conversation-shaped leftovers
-                         * (reveal intents, workspace target, artifact-list
-                         * filters) whenever the focused conversation changes. */}
-                        <SessionFocusInitializer />
-                        {/* Single keydown listener for all rebindable in-app
-                         * (renderer-scope) shortcuts. Reads the context-key
-                         * store, so it mounts after ContextKeysInitializer. */}
-                        <AppShortcutDispatcher />
-                        <WindowTitleInitializer />
-                        <BackupSchedulerProvider>
-                          <WebDavStartupPromptProvider>
-                            <WebDavMobileAutosyncProvider>
-                              <CompanionEventBridgeProvider>
-                                <CanvasBridgeProvider>
-                                  <HookTrustSyncProvider>
-                                    <A2UIDispatchProvider>
-                                      {/* Global, single-instance built-in A2UI action handling
+                        {/* ADR-0102 §4 — the recovery boot gate. Sits here, and
+                         * only here: after account unlock, locale, logging and
+                         * Tauri IPC (the diagnostics shell needs all four), and
+                         * ABOVE every plugin/background initializer below,
+                         * because holding those back is what safe mode is.
+                         * Renders its children unchanged on a healthy boot and
+                         * synchronously on web/mobile, where there is no safe
+                         * mode to enter. */}
+                        <RecoveryBootGate>
+                          {/* Boots the plugin platform (manager + built-in plugin
+                           * discovery + onStartup activation). Must run before any
+                           * surface that reads plugin registries or calls
+                           * getPluginManager(). */}
+                          <PluginRuntimeInitializer />
+                          <ChatMiddlewareFlagInitializer />
+                          <BackgroundTaskInitializer />
+                          <ApprovalJournalInitializer />
+                          <SubscriptionInitializer />
+                          {/* Desktop-only boot initializers (Tauri). Consolidated +
+                           * runtime-gated + dynamically imported so the browser dev
+                           * server never compiles their subsystem graphs; the Tauri
+                           * build loads them at runtime. See the component for the
+                           * full rationale. */}
+                          <DesktopOnlyInitializers />
+                          <AutomationPolicyInitializer />
+                          <AuditRetentionInitializer />
+                          <StorageRetentionInitializer />
+                          <StoragePersistenceInitializer />
+                          <AutoModeInitializer />
+                          <ExternalAgentInitializer />
+                          <ProjectStoreInitializer />
+                          <ModelsDevCatalogInitializer />
+                          <OpenRouterCatalogInitializer />
+                          <OcrRuntimeInitializer />
+                          {/* Agent-team, scheduler, workflow-trigger, provider-
+                           * routing, gateway, and connector runtimes — bundled
+                           * behind one dynamic(ssr:false) boundary so their
+                           * subsystem graphs stay out of every route's
+                           * first-paint compile (ADR-0068 C3). Mount order
+                           * inside the bundle preserves the previous document
+                           * order here, incl. Routing-before-Gateway. */}
+                          <DeferredBootInitializers />
+                          <TwinWorkerInitializer />
+                          {/* Keeps each workspace's project-scoped RAG index
+                           * (`projectChunks`) in sync with its `knowledgeBase`.
+                           * No-op when no vector backend is configured. */}
+                          <ProjectKnowledgeWorkerInitializer />
+                          <ProviderCostMirrorInitializer />
+                          <ContextKeysInitializer />
+                          {/* Drops the right rail's conversation-shaped leftovers
+                           * (reveal intents, workspace target, artifact-list
+                           * filters) whenever the focused conversation changes. */}
+                          <SessionFocusInitializer />
+                          {/* Single keydown listener for all rebindable in-app
+                           * (renderer-scope) shortcuts. Reads the context-key
+                           * store, so it mounts after ContextKeysInitializer. */}
+                          <AppShortcutDispatcher />
+                          <WindowTitleInitializer />
+                          <BackupSchedulerProvider>
+                            <WebDavStartupPromptProvider>
+                              <WebDavMobileAutosyncProvider>
+                                <CompanionEventBridgeProvider>
+                                  <CanvasBridgeProvider>
+                                    <HookTrustSyncProvider>
+                                      <A2UIDispatchProvider>
+                                        {/* Global, single-instance built-in A2UI action handling
                                           (calculator/timer/todo/…). Renders null — mounted here
                                           so every route's surfaces are interactive. */}
-                                      <A2UIBuiltInActionsProvider />
-                                      <PluginToolDispatchProvider>
-                                        <DataAdapterProvider adapter={dexieAdapter}>
-                                          {/* Appearance v47 — Typography / density / radius
+                                        <A2UIBuiltInActionsProvider />
+                                        <PluginToolDispatchProvider>
+                                          <DataAdapterProvider adapter={dexieAdapter}>
+                                            {/* Appearance v47 — Typography / density / radius
                                   / motion run before color appliers so the
                                   colorblind & high-contrast transforms in
                                   CustomThemeApplier see stable base values. */}
-                                          <TypographyApplier />
-                                          <DensityApplier />
-                                          <RadiusApplier />
-                                          <MotionApplier />
-                                          {/* Keeps body[data-bg-*] + the cognia user-css */}
-                                          {/* style tag in sync with the appearance store. */}
-                                          <BackgroundApplier />
-                                          <ComponentStyleApplier />
-                                          <CustomThemeApplier />
-                                          {/* Applies a directly-activated plugin theme as a
+                                            <TypographyApplier />
+                                            <DensityApplier />
+                                            <RadiusApplier />
+                                            <MotionApplier />
+                                            {/* Pointer art. After MotionApplier so
+                                  the reduce-motion class is already settled
+                                  when the effect layer reads it, and before
+                                  the color appliers because the "follow the
+                                  accent" mode resolves the palette from the
+                                  store rather than from the DOM. */}
+                                            <CursorApplier />
+                                            {/* Keeps body[data-bg-*] + the cognia user-css */}
+                                            {/* style tag in sync with the appearance store. */}
+                                            <BackgroundApplier />
+                                            <ComponentStyleApplier />
+                                            <CustomThemeApplier />
+                                            {/* Applies a directly-activated plugin theme as a
                                   <style data-plugin-theme> block. Mutually
                                   exclusive with CustomThemeApplier's inline
                                   vars (see plugin-theme-applier.tsx). */}
-                                          <PluginThemeApplier />
-                                          <ConnectorDeepLinkRouter>
-                                            <SubscriptionUsageProvider>
-                                              <McpLogProvider>
-                                                <CompanionBootProvider>
-                                                  <WebCompanionBootProvider>
-                                                    <DesktopSyncSourceProvider>
-                                                      <DesktopMessageSourceProvider>
-                                                        {/* Subscribes the renderer to the remote-control axum
+                                            <PluginThemeApplier />
+                                            <ConnectorDeepLinkRouter>
+                                              <SubscriptionUsageProvider>
+                                                <McpLogProvider>
+                                                  <CompanionBootProvider>
+                                                    <WebCompanionBootProvider>
+                                                      <DesktopSyncSourceProvider>
+                                                        <DesktopMessageSourceProvider>
+                                                          {/* Subscribes the renderer to the remote-control axum
                                                     server's Tauri events so inbound HTTP triggers
                                                     actually dispatch. No-op off Tauri. */}
-                                                        <RemoteControlReceiver>
-                                                          {/* id="app" is the scope root for user
+                                                          <RemoteControlReceiver>
+                                                            {/* id="app" is the scope root for user
                                                         custom CSS when `customCssScope` is
                                                         "app" (see lib/appearance/custom-css/apply).
                                                         display:contents keeps it box-less but
                                                         still a valid @scope (#app) root. */}
-                                                          <div
-                                                            id="app"
-                                                            data-bg-target="global"
-                                                            className="contents"
-                                                          >
-                                                            <MobileShellWrapper>
-                                                              <DesktopAppShell>
-                                                                <SurfaceAvailabilityBoundary>
-                                                                  {children}
-                                                                </SurfaceAvailabilityBoundary>
-                                                              </DesktopAppShell>
-                                                            </MobileShellWrapper>
-                                                          </div>
-                                                        </RemoteControlReceiver>
-                                                      </DesktopMessageSourceProvider>
-                                                    </DesktopSyncSourceProvider>
-                                                  </WebCompanionBootProvider>
-                                                </CompanionBootProvider>
-                                              </McpLogProvider>
-                                            </SubscriptionUsageProvider>
-                                          </ConnectorDeepLinkRouter>
-                                        </DataAdapterProvider>
-                                      </PluginToolDispatchProvider>
-                                    </A2UIDispatchProvider>
-                                  </HookTrustSyncProvider>
-                                </CanvasBridgeProvider>
-                              </CompanionEventBridgeProvider>
-                            </WebDavMobileAutosyncProvider>
-                          </WebDavStartupPromptProvider>
-                        </BackupSchedulerProvider>
-                        {/* Renders any modal a plugin opens via ctx.modal.openModal(). */}
-                        {/* See ADR-0026 §3 §A. */}
-                        <PluginModalRoot />
-                        {/* Per-call consent overlay for tier-"confirm" plugin permissions. */}
-                        {/* Listens for `plugin:consent-request` CustomEvents from the broker. */}
-                        <PluginConsentOverlay />
-                        {/* Toast surface for plugin enable failures fired by
-                         * `manager.enablePlugin` rollback path. Translates +
-                         * renders so `lib/plugin/core/manager.ts` can stay
-                         * decoupled from next-intl. */}
-                        <PluginEnableFailureToaster />
-                        {/* Generic toast surface for `plugin:error` CustomEvents
-                         * dispatched by the rest of the plugin pipeline (install,
-                         * config, WASM preload, hot-reload, etc.) via
-                         * `lib/plugin/error-bus.ts`. Coexists with the narrower
-                         * enable-failure toaster above. */}
-                        <PluginErrorToaster />
-                        {/* Sink for diagnostics raised outside React (storage,
-                         * Tauri transport, health probes). Resolves the code to
-                         * localized text and files it through the notification
-                         * center. Additive — it does not intercept the paths
-                         * that already surface their own errors. */}
-                        <DiagnosticNotifier />
-                        {/* Global live progress for workflow runs started outside
-                         * the editor (library Run button, /workflow chat command,
-                         * IM/API). Editor/run-list runs keep their own inline
-                         * toasts. */}
-                        <WorkflowRunToaster />
-                        {/* Thread D4 — bounces sidecar/external-agent orchestration
-                         *  calls (agent_dispatch / team_run / plugin_tool_invoke)
-                         *  to the renderer entry points. No-op in web. */}
-                        <OrchestrationDispatchProvider />
-                        {/* Dev-only perf HUD. In production it returns null
-                         * unless `localStorage.cogniaPerfHud === "1"`. */}
-                        <PerfHud />
-                        {/* Floating virtual-pet widget — gates itself on the pet
-                         * setting and degrades on mobile / reduced motion. */}
-                        <PetMount />
-                        {/* Content-capture confirm bubble + clipboard watcher —
-                         * self-gates on the capture setting (disabled by default). */}
-                        <CaptureMount />
-                        {/* Global TTS "now playing" bar — self-hides when idle. */}
-                        <TtsNowPlayingBar />
-                        {/* Modal for the agent's `ask_user` tool — self-hides when
-                         * no prompt is pending. */}
-                        <AskUserDialog />
-                        {/* Persistent notice when `settings.load()` fell back to
-                         * DEFAULTS. Self-hides unless the store's `loadFailed`
-                         * flag is set, so it costs one selector in the normal
-                         * case. Above <Toaster /> so a transient toast never
-                         * paints over a condition that lasts the whole session. */}
-                        <SettingsLoadFailedBanner />
-                        <Toaster />
-                        {/* Capacitor-only boot surfaces (splash). Consolidated +
-                         * runtime-gated + dynamically imported; the browser/Tauri
-                         * dev server never compiles them, the mobile build loads
-                         * them at runtime. */}
-                        <MobileOnlyInitializers />
+                                                            <div
+                                                              id="app"
+                                                              data-bg-target="global"
+                                                              className="contents"
+                                                            >
+                                                              <MobileShellWrapper>
+                                                                <DesktopAppShell>
+                                                                  <SurfaceAvailabilityBoundary>
+                                                                    {children}
+                                                                  </SurfaceAvailabilityBoundary>
+                                                                </DesktopAppShell>
+                                                              </MobileShellWrapper>
+                                                            </div>
+                                                          </RemoteControlReceiver>
+                                                        </DesktopMessageSourceProvider>
+                                                      </DesktopSyncSourceProvider>
+                                                    </WebCompanionBootProvider>
+                                                  </CompanionBootProvider>
+                                                </McpLogProvider>
+                                              </SubscriptionUsageProvider>
+                                            </ConnectorDeepLinkRouter>
+                                          </DataAdapterProvider>
+                                        </PluginToolDispatchProvider>
+                                      </A2UIDispatchProvider>
+                                    </HookTrustSyncProvider>
+                                  </CanvasBridgeProvider>
+                                </CompanionEventBridgeProvider>
+                              </WebDavMobileAutosyncProvider>
+                            </WebDavStartupPromptProvider>
+                          </BackupSchedulerProvider>
+                          {/* Renders any modal a plugin opens via ctx.modal.openModal(). */}
+                          {/* See ADR-0026 §3 §A. */}
+                          <PluginModalRoot />
+                          {/* Per-call consent overlay for tier-"confirm" plugin permissions. */}
+                          {/* Listens for `plugin:consent-request` CustomEvents from the broker. */}
+                          <PluginConsentOverlay />
+                          {/* Toast surface for plugin enable failures fired by
+                           * `manager.enablePlugin` rollback path. Translates +
+                           * renders so `lib/plugin/core/manager.ts` can stay
+                           * decoupled from next-intl. */}
+                          <PluginEnableFailureToaster />
+                          {/* Generic toast surface for `plugin:error` CustomEvents
+                           * dispatched by the rest of the plugin pipeline (install,
+                           * config, WASM preload, hot-reload, etc.) via
+                           * `lib/plugin/error-bus.ts`. Coexists with the narrower
+                           * enable-failure toaster above. */}
+                          <PluginErrorToaster />
+                          {/* Sink for diagnostics raised outside React (storage,
+                           * Tauri transport, health probes). Resolves the code to
+                           * localized text and files it through the notification
+                           * center. Additive — it does not intercept the paths
+                           * that already surface their own errors. */}
+                          <DiagnosticNotifier />
+                          {/* Global live progress for workflow runs started outside
+                           * the editor (library Run button, /workflow chat command,
+                           * IM/API). Editor/run-list runs keep their own inline
+                           * toasts. */}
+                          <WorkflowRunToaster />
+                          {/* Thread D4 — bounces sidecar/external-agent orchestration
+                           *  calls (agent_dispatch / team_run / plugin_tool_invoke)
+                           *  to the renderer entry points. No-op in web. */}
+                          <OrchestrationDispatchProvider />
+                          {/* Dev-only perf HUD. In production it returns null
+                           * unless `localStorage.cogniaPerfHud === "1"`. */}
+                          <PerfHud />
+                          {/* Floating virtual-pet widget — gates itself on the pet
+                           * setting and degrades on mobile / reduced motion. */}
+                          <PetMount />
+                          {/* Pointer particle/trail overlay — renders null unless
+                           * an effect is selected, and stands down under reduced
+                           * motion or on a coarse (touch) pointer. */}
+                          <CursorEffectLayer />
+                          {/* Content-capture confirm bubble + clipboard watcher —
+                           * self-gates on the capture setting (disabled by default). */}
+                          <CaptureMount />
+                          {/* Global TTS "now playing" bar — self-hides when idle. */}
+                          <TtsNowPlayingBar />
+                          {/* Modal for the agent's `ask_user` tool — self-hides when
+                           * no prompt is pending. */}
+                          <AskUserDialog />
+                          {/* ADR-0106 — mounted at the root, not in the Skills panel:
+                            the command palette, the `skills.record` shortcut and
+                            `/record-skill` all fire on any route. Renders null
+                            unless a recording flow is open. */}
+                          <SkillRecorderRoot />
+                          {/* Persistent notice when `settings.load()` fell back to
+                           * DEFAULTS. Self-hides unless the store's `loadFailed`
+                           * flag is set, so it costs one selector in the normal
+                           * case. Above <Toaster /> so a transient toast never
+                           * paints over a condition that lasts the whole session. */}
+                          <SettingsLoadFailedBanner />
+                          <Toaster />
+                          {/* Capacitor-only boot surfaces (splash). Consolidated +
+                           * runtime-gated + dynamically imported; the browser/Tauri
+                           * dev server never compiles them, the mobile build loads
+                           * them at runtime. */}
+                          <MobileOnlyInitializers />
+                        </RecoveryBootGate>
                       </LoggerProvider>
                     </TooltipProvider>
                   </TauriProvider>

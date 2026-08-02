@@ -8,9 +8,12 @@
 //
 //   - filled  Shield      / emerald — sandbox enabled, OS tier
 //   - dashed  Shield      / sky     — sandbox enabled, microvm tier
+//   - monitor MonitorCheck/ violet  — sandbox enabled, cua-desktop tier: shell,
+//                                     file AND GUI work run inside a bound
+//                                     sandbox connection (Epic 5)
 //   - crossed ShieldOff   / muted   — sandbox disabled (today's default)
 
-import { Shield, ShieldOff } from "lucide-react"
+import { MonitorCheck, Shield, ShieldOff } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -20,8 +23,9 @@ import { cn } from "@/lib/utils"
 import { getCharacter } from "@/lib/db/characters"
 import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@cognia/agent-config-types"
+import type { SandboxShellTier } from "@/types/sandbox"
 
-export type ShieldState = "os" | "microvm" | "off"
+export type ShieldState = "os" | "microvm" | "cua-desktop" | "off"
 
 export interface SandboxShieldProps {
   session: ChatSession | null
@@ -34,15 +38,16 @@ export interface SandboxShieldProps {
 export function resolveShieldState(args: {
   session: ChatSession | null | undefined
   characterSandboxEnabled?: boolean
-  characterSandboxTier?: "os" | "microvm"
+  characterSandboxTier?: SandboxShellTier
   defaultEnabled?: boolean
   defaultTier?: "os" | "microvm"
 }): ShieldState {
   const enabled =
     args.session?.sandboxEnabled ?? args.characterSandboxEnabled ?? args.defaultEnabled ?? false
   if (!enabled) return "off"
-  const tier = args.characterSandboxTier ?? args.defaultTier ?? "os"
-  return tier
+  // Same ladder `lib/sandbox/binding.ts` uses, so the badge and the actual
+  // routing decision can never disagree.
+  return args.session?.sandboxTier ?? args.characterSandboxTier ?? args.defaultTier ?? "os"
 }
 
 export function SandboxShield({ session, forceState, className }: SandboxShieldProps) {
@@ -78,6 +83,11 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
   const icon =
     state === "off" ? (
       <ShieldOff className={cn("size-3.5 text-muted-foreground", className)} aria-hidden="true" />
+    ) : state === "cua-desktop" ? (
+      // A distinct glyph, not a differently-coloured shield: this tier moves
+      // execution onto another machine entirely, which is a bigger claim than
+      // "isolated here" and should not be mistaken for one at a glance.
+      <MonitorCheck className={cn("size-3.5 text-violet-500", className)} aria-hidden="true" />
     ) : (
       <Shield
         className={cn(

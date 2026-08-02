@@ -268,4 +268,32 @@ describe("CommitBox", () => {
     expect(actions.stage).toHaveBeenCalledWith(["a.ts", "b.ts"])
     expect(actions.commit).toHaveBeenCalledWith("feat: all", { amend: false, signoff: false })
   })
+
+  it("does not commit or clear the draft when smart staging fails", async () => {
+    setPanelPrefs({ smartCommit: true })
+    act(() => {
+      useGitStore.getState().setStatus({
+        branch: "main",
+        upstream: null,
+        ahead: 0,
+        behind: 0,
+        staged: [],
+        changes: [{ path: "a.ts", status: "modified" }],
+        merge: [],
+        isRebasing: false,
+        isMerging: false,
+      } as never)
+    })
+    const actions = makeActions()
+    actions.stage.mockResolvedValue({ kind: "lockHeld", detail: "index.lock exists" })
+    render(<CommitBox rootDir="/r" stagedCount={0} committing={false} actions={actions} />)
+    fireEvent.change(screen.getByTestId("commit-message"), { target: { value: "feat: keep me" } })
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("commit-button"))
+    })
+
+    expect(actions.commit).not.toHaveBeenCalled()
+    expect(useGitStore.getState().commitDraft["/r"]).toBe("feat: keep me")
+  })
 })

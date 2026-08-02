@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cognia.dev/schemas/observability-event-v1.schema.json",
+  "title": "ObservabilityEventV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "occurredAt",
+    "kind",
+    "severity",
+    "name",
+    "code",
+    "scope",
+    "correlation",
+    "privacy",
+    "delivery",
+    "payload"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "eventId": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "kind": { "enum": ["log", "span", "crash", "lifecycle", "metric"] },
+    "severity": { "enum": ["trace", "debug", "info", "warn", "error", "fatal"] },
+    "name": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "code": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "scope": { "$ref": "#/$defs/scope" },
+    "correlation": { "$ref": "#/$defs/correlation" },
+    "privacy": { "$ref": "#/$defs/privacy" },
+    "delivery": { "$ref": "#/$defs/delivery" },
+    "payload": { "$ref": "#/$defs/payload" }
+  },
+  "$defs": {
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenantId",
+        "installationId",
+        "runtime",
+        "processId",
+        "module",
+        "buildId",
+        "appVersion"
+      ],
+      "properties": {
+        "tenantId": { "type": "string", "minLength": 1 },
+        "installationId": { "type": "string", "minLength": 1 },
+        "runtime": {
+          "enum": [
+            "browser",
+            "server",
+            "tauri",
+            "sidecar",
+            "cli",
+            "plugin",
+            "companion",
+            "capacitor-ios",
+            "capacitor-android",
+            "mcp",
+            "internal",
+            "unknown"
+          ]
+        },
+        "processId": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "pluginId": { "type": "string", "minLength": 1 },
+        "buildId": { "type": "string", "minLength": 1 },
+        "appVersion": { "type": "string", "minLength": 1 },
+        "origin": { "type": "string", "minLength": 1 }
+      }
+    },
+    "correlation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "traceparent": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$"
+        },
+        "tracestate": { "type": "string", "maxLength": 512 },
+        "traceId": { "type": "string", "minLength": 1 },
+        "spanId": { "type": "string", "minLength": 1 },
+        "parentSpanId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "requestId": { "type": "string", "minLength": 1 },
+        "executionId": { "type": "string", "minLength": 1 },
+        "workflowId": { "type": "string", "minLength": 1 },
+        "stepId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["redactionVersion", "capturePolicy", "contentCaptured", "removedFields"],
+      "properties": {
+        "redactionVersion": { "type": "string", "minLength": 1 },
+        "capturePolicy": { "enum": ["metadata-only", "debug-session"] },
+        "contentCaptured": { "type": "boolean" },
+        "removedFields": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spoolSequence", "flushWatermark"],
+      "properties": {
+        "spoolSequence": { "type": "integer", "minimum": 0 },
+        "flushWatermark": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["message"],
+      "properties": {
+        "message": { "type": "string" },
+        "data": { "type": "object" },
+        "stack": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "phase": { "type": "string" },
+        "attempt": { "type": "number" },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "source": { "type": "object" },
+        "legacyEventId": { "type": "string" }
+      }
+    }
+  }
+}

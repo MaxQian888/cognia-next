@@ -135,6 +135,9 @@ mod tests {
             alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             replay: Arc::new(ReplayBuffer::new()),
             channel_slot: session::detached_desk_channel(),
+            // No reader thread here, so the gate is inert — it exists only so
+            // `Drop` has something coherent to close.
+            flow: session::FlowGate::new(),
         };
         Arc::new(session)
     }

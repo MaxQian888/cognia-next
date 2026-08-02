@@ -16,18 +16,28 @@
  * projects hides — but does NOT kill — the previous project's tabs.
  * Visibility is purely a render-time filter on the store snapshot.
  *
- * Mounted inside `components/desktop/desktop-app-shell.tsx` (task #11),
- * which wraps the page in a vertical `ResizablePanelGroup` and gates
- * mount behind `isTauri()`.
+ * Mounted by `components/terminal/terminal-dock-region.tsx`, which owns the
+ * animated shell slot and the bottom/right sizing. The dock itself only knows
+ * which edge it is on (to flip its border and its resize separator) — not how
+ * that edge is laid out.
  */
 
 import { useCallback, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { Columns2Icon, EraserIcon, Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react"
+import {
+  Columns2Icon,
+  EraserIcon,
+  Maximize2Icon,
+  Minimize2Icon,
+  PanelBottomIcon,
+  PanelRightIcon,
+  XIcon,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,22 +48,31 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { findProfile, profileToSpawnFields, type TerminalProfile } from "@/lib/terminal/profiles"
-import { resolveDefaultShell } from "@/lib/terminal/shell-detect"
-import { selectTerminalTransport } from "@/lib/terminal/pick-transport"
+import { type TerminalProfile } from "@/lib/terminal/profiles"
+import { nextDockPosition } from "@/lib/terminal/dock-position"
+import { spawnDefaultTerminal } from "@/lib/terminal/spawn-default"
 import {
   detachFromDock,
   killFromDock,
   restartFromDock,
-  spawnFromDock,
+  type SpawnOutcome,
 } from "@/lib/terminal/spawn-orchestrator"
 import { getLiveSession } from "@/lib/terminal/session-registry"
+import { useEdgeResize } from "@/hooks/ui/use-edge-resize"
+import { useTerminalTransport } from "@/hooks/terminal/use-terminal-transport"
+import { usePlatform } from "@/hooks/use-platform"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
-import { useTerminalStore, type TerminalSessionRow } from "@/stores/terminal/terminal-store"
+import {
+  orderTabRows,
+  TERMINAL_LAYOUT_BOUNDS,
+  useTerminalStore,
+  type TerminalSessionRow,
+} from "@/stores/terminal/terminal-store"
 
 import { FileViewerDialog } from "./file-viewer-dialog"
+import { TerminalDockGrip } from "./terminal-dock-grip"
 import { TerminalEmptyState } from "./terminal-empty-state"
 import { TerminalHistoryPanel } from "./terminal-history-panel"
 import { TerminalHostStateBanner } from "./terminal-host-state-banner"
@@ -78,25 +97,22 @@ export function TerminalDock() {
   const setAgentTrusted = useTerminalStore((s) => s.setAgentTrusted)
   const addPaneToGroup = useTerminalStore((s) => s.addPaneToGroup)
 
-  const setPanelHeight = useTerminalStore((s) => s.setPanelHeight)
+  const setPanelSize = useTerminalStore((s) => s.setPanelSize)
+  const panelPosition = useTerminalStore((s) => s.panelPosition)
+  const setPanelPosition = useTerminalStore((s) => s.setPanelPosition)
+  const panelHeightPct = useTerminalStore((s) => s.panelHeightPct)
+  const panelWidthPct = useTerminalStore((s) => s.panelWidthPct)
   const maximized = useTerminalStore((s) => s.maximized)
   const toggleMaximized = useTerminalStore((s) => s.toggleMaximized)
+  const tabOrder = useTerminalStore((s) => s.tabOrder)
+  const setTabOrder = useTerminalStore((s) => s.setTabOrder)
+  const outputThrottled = useTerminalStore((s) => s.outputThrottled)
 
+  // Only the id: shell / cwd / env resolution moved into `spawnDefaultTerminal`,
+  // so subscribing to the whole project row here would re-render the dock on
+  // every unrelated project edit.
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
-  const project = useProjectStore((s) =>
-    s.activeProjectId ? (s.projects.find((p) => p.id === s.activeProjectId) ?? null) : null
-  )
 
-  const settingsTerminalShell = useSettingsStore(
-    (s) => (s.settings?.terminal as { defaultShell?: string } | undefined)?.defaultShell
-  )
-  const settingsForceUtf8 = useSettingsStore(
-    (s) => (s.settings?.terminal as { forceUtf8?: boolean } | undefined)?.forceUtf8 ?? true
-  )
-  // ADR-0028 Phase 3 (P4.1) — opt-in sandboxed terminal. Off by default.
-  const settingsSandboxed = useSettingsStore(
-    (s) => (s.settings?.terminal as { sandboxed?: boolean } | undefined)?.sandboxed ?? false
-  )
   // Confirm before killing a tab that's still running a command. On by default
   // (VS Code parity) — guards against an accidental × losing an in-flight run.
   const confirmOnClose = useSettingsStore(
@@ -106,9 +122,6 @@ export function TerminalDock() {
   const settingsProfiles = useSettingsStore(
     (s) => (s.settings?.terminal as { profiles?: TerminalProfile[] } | undefined)?.profiles
   )
-  const settingsDefaultProfileId = useSettingsStore(
-    (s) => (s.settings?.terminal as { defaultProfileId?: string } | undefined)?.defaultProfileId
-  )
 
   const projectKey = activeProjectId ?? ""
   const tabs = useMemo<TerminalSessionRow[]>(() => {
@@ -116,11 +129,20 @@ export function TerminalDock() {
     // (they render inside their anchor's TerminalPaneGroup).
     const isGroupMember = (id: string) =>
       Object.values(splitPanes).some((members) => members.includes(id))
-    return Object.values(sessions)
-      .filter((row) => (row.projectId ?? "") === projectKey)
-      .filter((row) => !isGroupMember(row.id))
-      .sort((a, b) => a.createdAt - b.createdAt)
-  }, [sessions, splitPanes, projectKey])
+    // Same ordering helper `tabsForProject()` uses, so the strip and every
+    // action that walks the tab list cannot disagree about the order.
+    return orderTabRows(
+      Object.values(sessions)
+        .filter((row) => (row.projectId ?? "") === projectKey)
+        .filter((row) => !isGroupMember(row.id)),
+      tabOrder[projectKey]
+    )
+  }, [sessions, splitPanes, projectKey, tabOrder])
+
+  const throttledIds = useMemo(
+    () => new Set(Object.keys(outputThrottled).filter((id) => outputThrottled[id])),
+    [outputThrottled]
+  )
 
   const activeId = activeByProject[projectKey] ?? null
   const activeRow = activeId ? sessions[activeId] : undefined
@@ -145,9 +167,17 @@ export function TerminalDock() {
   // dropped silently — the user clicked "+ New" and nothing happened, no
   // toast. Now every spawn path reports why it failed (incl. the spawn
   // timeout that guards against a wedged backend).
+  // Spawn + surface failures. Without this, an `error`/`denied` outcome was
+  // dropped silently — the user clicked "+ New" and nothing happened, no
+  // toast. Now every spawn path reports why it failed (incl. the spawn
+  // timeout that guards against a wedged backend).
+  //
+  // The shell/profile/cwd precedence itself lives in
+  // `lib/terminal/spawn-default.ts` so the title bar's Terminal → New resolves
+  // it identically instead of re-deriving it.
   const spawnWithFeedback = useCallback(
-    async (input: Parameters<typeof spawnFromDock>[0]) => {
-      const outcome = await spawnFromDock(input)
+    async (opts?: Parameters<typeof spawnDefaultTerminal>[0]): Promise<SpawnOutcome> => {
+      const outcome = await spawnDefaultTerminal(opts)
       if (outcome.kind === "error") {
         toast.error(t("spawnError", { message: outcome.message }))
       } else if (outcome.kind === "denied") {
@@ -159,85 +189,23 @@ export function TerminalDock() {
   )
 
   const handleNewWithShell = useCallback(
-    async (shellOverride?: string) => {
-      // An explicit override (from the new-tab shell picker) wins over the
-      // resolved default; otherwise fall back to project / settings / platform.
-      const shell =
-        shellOverride && shellOverride.trim().length > 0
-          ? shellOverride
-          : resolveDefaultShell({
-              projectShell: project?.terminalConfig?.shell,
-              settingShell: settingsTerminalShell,
-            })
-      const cwd = project?.terminalConfig?.cwd?.trim() || project?.rootDir?.trim() || undefined
-      const env = project?.terminalConfig?.env
-      await spawnWithFeedback({
-        req: {
-          shell,
-          rows: 24,
-          cols: 80,
-          cwd,
-          env,
-          projectId: activeProjectId ?? undefined,
-          enableShellIntegration: true,
-          forceUtf8: settingsForceUtf8,
-          sandboxed: settingsSandboxed,
-        },
-        store: useTerminalStore.getState(),
-      })
+    (shellOverride?: string) => {
+      void spawnWithFeedback({ shellOverride })
     },
-    [
-      project,
-      activeProjectId,
-      settingsTerminalShell,
-      settingsForceUtf8,
-      settingsSandboxed,
-      spawnWithFeedback,
-    ]
+    [spawnWithFeedback]
   )
 
   const handleNewFromProfile = useCallback(
-    async (profileId: string) => {
-      const profile = findProfile(settingsProfiles, profileId)
-      const fields = profile ? profileToSpawnFields(profile) : null
-      if (!fields) {
-        // Profile gone or shell blank — fall back to the resolved default.
-        await handleNewWithShell()
-        return
-      }
-      await spawnWithFeedback({
-        req: {
-          ...fields,
-          profileId,
-          rows: 24,
-          cols: 80,
-          projectId: activeProjectId ?? undefined,
-          enableShellIntegration: true,
-          forceUtf8: settingsForceUtf8,
-          sandboxed: settingsSandboxed,
-        },
-        store: useTerminalStore.getState(),
-      })
+    (profileId: string) => {
+      void spawnWithFeedback({ profileId })
     },
-    [
-      settingsProfiles,
-      activeProjectId,
-      settingsForceUtf8,
-      settingsSandboxed,
-      handleNewWithShell,
-      spawnWithFeedback,
-    ]
+    [spawnWithFeedback]
   )
 
-  // Plain "+ New": launch the default profile when one is set, else resolve
-  // the default shell (project → settings → platform).
+  /** Plain "+ New": the configured default profile, else the resolved shell. */
   const handleNew = useCallback(() => {
-    if (settingsDefaultProfileId && findProfile(settingsProfiles, settingsDefaultProfileId)) {
-      void handleNewFromProfile(settingsDefaultProfileId)
-    } else {
-      void handleNewWithShell()
-    }
-  }, [settingsDefaultProfileId, settingsProfiles, handleNewFromProfile, handleNewWithShell])
+    void spawnWithFeedback()
+  }, [spawnWithFeedback])
 
   // Close a single split pane by detaching this renderer. The host-owned
   // process remains available to other viewers and for later reattachment.
@@ -333,42 +301,14 @@ export function TerminalDock() {
   // stacked (mirrors the whole group's orientation).
   const handleSplit = useCallback(
     async (direction: "row" | "col") => {
-      const state = useTerminalStore.getState()
-      const anchor = state.activeSessionIdByProject[projectKey] ?? null
+      const anchor = useTerminalStore.getState().activeSessionIdByProject[projectKey] ?? null
       if (!anchor) return
-      const shell = resolveDefaultShell({
-        projectShell: project?.terminalConfig?.shell,
-        settingShell: settingsTerminalShell,
-      })
-      const cwd = project?.terminalConfig?.cwd?.trim() || project?.rootDir?.trim() || undefined
-      const outcome = await spawnWithFeedback({
-        req: {
-          shell,
-          rows: 24,
-          cols: 80,
-          cwd,
-          env: project?.terminalConfig?.env,
-          projectId: activeProjectId ?? undefined,
-          enableShellIntegration: true,
-          forceUtf8: settingsForceUtf8,
-          sandboxed: settingsSandboxed,
-        },
-        store: useTerminalStore.getState(),
-      })
+      const outcome = await spawnWithFeedback()
       if (outcome.kind === "spawned") {
         addPaneToGroup(anchor, outcome.sessionId, direction)
       }
     },
-    [
-      project,
-      activeProjectId,
-      settingsTerminalShell,
-      settingsForceUtf8,
-      settingsSandboxed,
-      projectKey,
-      addPaneToGroup,
-      spawnWithFeedback,
-    ]
+    [projectKey, addPaneToGroup, spawnWithFeedback]
   )
 
   // Alt+Arrow cycles focus through the panes of the active group.
@@ -425,45 +365,138 @@ export function TerminalDock() {
     [renameSession]
   )
 
+  const handleReorder = useCallback(
+    (orderedIds: string[]) => setTabOrder(activeProjectId, orderedIds),
+    [activeProjectId, setTabOrder]
+  )
+
+  // Per-tab context menu. Wrapping the tab (rather than the dock body) is what
+  // makes rename / restart / close-others reachable for a tab that is not the
+  // active one — the body menu can only ever target the active row.
+  //
+  // No edit group here: copy/paste/clear/find act on the *focused pane*, which
+  // only the body menu knows about. `TerminalTabContextMenu` drops that group
+  // when its handlers are absent.
+  const renderTabWrapper = useCallback(
+    (row: TerminalSessionRow, tab: React.ReactNode) => (
+      <TerminalTabContextMenu
+        key={row.id}
+        row={row}
+        onRename={handleRename}
+        onRestart={handleRestart}
+        onClose={requestCloseTab}
+        onCloseOthers={handleCloseOthers}
+        onToggleAgentTrust={handleToggleTrust}
+        onLocateInChat={handleLocateInChat}
+      >
+        {tab}
+      </TerminalTabContextMenu>
+    ),
+    [
+      handleRename,
+      handleRestart,
+      requestCloseTab,
+      handleCloseOthers,
+      handleToggleTrust,
+      handleLocateInChat,
+    ]
+  )
+
+  // Reactive transport: activating a remote Cognia host mid-session must move
+  // the dock's affordances with it, and `canSpawn` — not "is this the local
+  // PTY" — is what a spawn button should key off.
+  const { kind: transport, canSpawn } = useTerminalTransport()
+  const platform = usePlatform()
+
+  // Percent-per-CSS-pixel for the axis this dock resizes along, so a pointer
+  // delta converts into the same unit the store holds.
+  const viewport =
+    typeof window === "undefined"
+      ? 800
+      : panelPosition === "right"
+        ? window.innerWidth
+        : window.innerHeight
+  const axis =
+    panelPosition === "right"
+      ? {
+          min: TERMINAL_LAYOUT_BOUNDS.panelMinWidthPct,
+          max: TERMINAL_LAYOUT_BOUNDS.panelMaxWidthPct,
+          size: panelWidthPct,
+          edge: "left" as const,
+        }
+      : {
+          min: TERMINAL_LAYOUT_BOUNDS.panelMinPct,
+          max: TERMINAL_LAYOUT_BOUNDS.panelMaxPct,
+          size: panelHeightPct,
+          edge: "top" as const,
+        }
+  const resize = useEdgeResize({
+    width: axis.size,
+    min: axis.min,
+    max: axis.max,
+    onChange: setPanelSize,
+    onReset: toggleMaximized,
+    step: 2,
+    edge: axis.edge,
+    scale: viewport > 0 ? 100 / viewport : 1,
+  })
+
   if (!panelOpen) return null
 
-  const transport = selectTerminalTransport()
-  const emptyVariant: "desktop" | "mobile" | "unsupported" =
-    transport === "tauri-channel" ? "desktop" : transport === "ws" ? "mobile" : "unsupported"
+  const right = panelPosition === "right"
+  // The empty state's action depends on whether a session *can* be created,
+  // not on which transport would create it — a desktop driving a remote host
+  // spawns over `ws` exactly like the mobile screen does.
+  const emptyVariant: "desktop" | "remote" | "mobile" | "unsupported" =
+    transport === "tauri-channel"
+      ? "desktop"
+      : transport === "ws" || transport === "webrtc"
+        ? platform === "tauri"
+          ? "remote"
+          : "mobile"
+        : "unsupported"
 
   return (
     <div
-      className="relative flex h-full w-full flex-col border-t bg-background"
+      className={cn(
+        "relative flex h-full w-full flex-col bg-background",
+        right ? "border-l" : "border-t"
+      )}
       data-testid="terminal-dock"
+      data-position={panelPosition}
       data-project-id={activeProjectId ?? "none"}
     >
-      {/* Wave 4 — drag-resize handle. Pinned to the top edge so
-          dragging up grows the dock at the expense of the editor
-          area above. Keyboard-accessible via arrow keys when
-          focused (the focus ring shows up via focus-visible:bg). */}
+      {/* Drag-resize separator, pinned to whichever edge faces the rest of the
+          workspace: the top edge when docked bottom, the left edge when docked
+          right. Dragging away from that edge grows the dock. Keyboard-
+          accessible via the axis's arrow keys; double-click toggles maximize
+          (both come from `useEdgeResize`). */}
       <div
         role="separator"
-        aria-orientation="horizontal"
+        aria-orientation={right ? "vertical" : "horizontal"}
         tabIndex={0}
-        aria-label={t("resize")}
+        aria-label={right ? t("resizeVertical") : t("resize")}
         data-testid="terminal-dock-resize-handle"
         // 10px transparent hit zone (was a 4px sliver — too small to grab,
         // especially by touch) with a 2px visible line centred on the border.
-        className="group absolute -top-1 left-0 right-0 z-10 flex h-2.5 cursor-row-resize items-center focus-visible:outline-none"
-        onPointerDown={(e) => beginResize(e, setPanelHeight)}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowUp") {
-            e.preventDefault()
-            adjustPanelHeight(useTerminalStore.getState().panelHeightPct, -2, setPanelHeight)
-          } else if (e.key === "ArrowDown") {
-            e.preventDefault()
-            adjustPanelHeight(useTerminalStore.getState().panelHeightPct, 2, setPanelHeight)
-          }
-        }}
+        className={cn(
+          "group absolute z-10 flex items-center focus-visible:outline-none",
+          right
+            ? "-left-1 bottom-0 top-0 w-2.5 cursor-col-resize justify-center"
+            : "-top-1 left-0 right-0 h-2.5 cursor-row-resize"
+        )}
+        onPointerDown={resize.onPointerDown}
+        onPointerMove={resize.onPointerMove}
+        onPointerUp={resize.onPointerUp}
+        onKeyDown={resize.onKeyDown}
+        onDoubleClick={resize.onDoubleClick}
       >
         <span
           aria-hidden
-          className="h-0.5 w-full bg-transparent transition-colors group-hover:bg-primary/50 group-focus-visible:bg-primary"
+          className={cn(
+            "bg-transparent transition-colors group-hover:bg-primary/50 group-focus-visible:bg-primary",
+            right ? "h-full w-0.5" : "h-0.5 w-full"
+          )}
         />
       </div>
       <TerminalTabStrip
@@ -472,6 +505,10 @@ export function TerminalDock() {
         onSelect={handleSelect}
         onClose={requestCloseTab}
         testId="terminal-dock-tabs"
+        throttledIds={throttledIds}
+        onReorder={handleReorder}
+        leading={<TerminalDockGrip />}
+        renderTabWrapper={renderTabWrapper}
         trailing={
           <>
             <PluginExtensionSlot
@@ -479,31 +516,44 @@ export function TerminalDock() {
               className="flex items-center gap-1"
               context={{ sessionId: activeId, transport }}
             />
-            {transport === "tauri-channel" ? (
+            {canSpawn ? (
               <TerminalShellPicker
                 onNew={handleNewWithShell}
                 profiles={settingsProfiles}
                 onNewProfile={handleNewFromProfile}
               />
             ) : null}
-            {transport === "tauri-channel" && activeRow ? (
-              <>
-                <DockToolbarButton
-                  label={t("splitRight")}
-                  testId="terminal-dock-split"
-                  onClick={() => void handleSplit("row")}
-                >
-                  <Columns2Icon className="h-3 w-3" />
-                </DockToolbarButton>
-                <DockToolbarButton
-                  label={t("clear")}
-                  testId="terminal-dock-clear"
-                  onClick={() => focusedHandleRef.current?.clearScreen()}
-                >
-                  <EraserIcon className="h-3 w-3" />
-                </DockToolbarButton>
-              </>
+            {canSpawn && activeRow ? (
+              <DockToolbarButton
+                label={t("splitRight")}
+                testId="terminal-dock-split"
+                onClick={() => void handleSplit("row")}
+              >
+                <Columns2Icon className="h-3 w-3" />
+              </DockToolbarButton>
             ) : null}
+            {/* Clearing is pure xterm — no transport gate. A remote-host user
+                could not clear their own screen while this was gated. */}
+            {activeRow ? (
+              <DockToolbarButton
+                label={t("clear")}
+                testId="terminal-dock-clear"
+                onClick={() => focusedHandleRef.current?.clearScreen()}
+              >
+                <EraserIcon className="h-3 w-3" />
+              </DockToolbarButton>
+            ) : null}
+            <DockToolbarButton
+              label={right ? t("moveToBottom") : t("moveToRight")}
+              testId="terminal-dock-move"
+              onClick={() => setPanelPosition(nextDockPosition(panelPosition))}
+            >
+              {right ? (
+                <PanelBottomIcon className="h-3 w-3" />
+              ) : (
+                <PanelRightIcon className="h-3 w-3" />
+              )}
+            </DockToolbarButton>
             <DockToolbarButton
               label={maximized ? t("restore") : t("maximize")}
               testId="terminal-dock-maximize"
@@ -600,16 +650,16 @@ export function TerminalDock() {
               }
               onLocateInChat={handleLocateInChat}
             />
-            {renameTarget === activeRow.id ? (
+            {renameTarget && sessions[renameTarget] ? (
               <DockRenameOverlay
-                row={activeRow}
-                onCommit={(v) => commitRename(activeRow.id, v)}
+                row={sessions[renameTarget]}
+                onCommit={(v) => commitRename(renameTarget, v)}
                 onCancel={() => setRenameTarget(null)}
               />
             ) : null}
           </>
         ) : (
-          <TerminalEmptyState variant={emptyVariant} onNew={handleNew} />
+          <TerminalEmptyState variant={emptyVariant} onNew={canSpawn ? handleNew : undefined} />
         )}
       </div>
       {/* Read-only viewer for clicked terminal file links (1D). */}
@@ -735,52 +785,3 @@ function DockRenameOverlay({
 }
 
 export default TerminalDock
-
-/**
- * Begin a pointer-drag resize of the dock height. Captures pointer move
- * events on the window so the cursor doesn't have to stay glued to the
- * handle; clamps to TERMINAL_LAYOUT_BOUNDS via the store.
- *
- * The handle sits at the TOP of the dock — dragging up grows it, down
- * shrinks it. We translate the deltaY into a pct of the viewport so the
- * stored value survives a resize / different display.
- */
-function beginResize(
-  startEvent: React.PointerEvent<HTMLDivElement>,
-  setPanelHeight: (pct: number) => void
-): void {
-  startEvent.preventDefault()
-  const viewportH = typeof window !== "undefined" ? window.innerHeight : 800
-  if (viewportH <= 0) return
-  const startY = startEvent.clientY
-  const startPct = useTerminalStore.getState().panelHeightPct
-  let lastPct = startPct
-
-  function onMove(e: PointerEvent) {
-    const deltaY = e.clientY - startY
-    const deltaPct = (deltaY / viewportH) * 100
-    // Drag up (negative deltaY) → bigger panel. Subtract so the dock
-    // grows toward the cursor.
-    const next = startPct - deltaPct
-    if (Math.abs(next - lastPct) < 0.25) return
-    lastPct = next
-    setPanelHeight(next)
-  }
-  function onUp() {
-    window.removeEventListener("pointermove", onMove)
-    window.removeEventListener("pointerup", onUp)
-    window.removeEventListener("pointercancel", onUp)
-  }
-  window.addEventListener("pointermove", onMove)
-  window.addEventListener("pointerup", onUp)
-  window.addEventListener("pointercancel", onUp)
-}
-
-/** Keyboard-driven height adjustment for the resize separator (2% per press). */
-function adjustPanelHeight(
-  currentPct: number,
-  delta: number,
-  setPanelHeight: (pct: number) => void
-): void {
-  setPanelHeight(currentPct + delta)
-}

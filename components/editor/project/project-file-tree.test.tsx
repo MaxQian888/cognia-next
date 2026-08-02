@@ -132,7 +132,29 @@ describe("ProjectFileTree", () => {
     )
     await waitFor(() => expect(screen.getByTestId("tree-row-readme.md")).toBeInTheDocument())
     fireEvent.click(screen.getByTestId("tree-row-readme.md"))
-    expect(onOpenFile).toHaveBeenCalledWith("readme.md")
+    expect(onOpenFile).toHaveBeenCalledWith("readme.md", { mode: "preview" })
+  })
+
+  it("double-clicking a file asks for a pinned tab", async () => {
+    const deps = makeDeps()
+    const onOpenFile = jest.fn()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={onOpenFile} deps={deps} />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-readme.md")).toBeInTheDocument())
+    fireEvent.doubleClick(screen.getByTestId("tree-row-readme.md"))
+    expect(onOpenFile).toHaveBeenLastCalledWith("readme.md", { mode: "pinned" })
+  })
+
+  it("double-clicking a directory toggles it instead of opening a tab", async () => {
+    const deps = makeDeps()
+    const onOpenFile = jest.fn()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={onOpenFile} deps={deps} />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-src")).toBeInTheDocument())
+    fireEvent.doubleClick(screen.getByTestId("tree-row-src"))
+    expect(onOpenFile).not.toHaveBeenCalled()
   })
 
   it("expands a directory to lazily load its children", async () => {
@@ -350,5 +372,36 @@ describe("ProjectFileTree", () => {
     act(() => mockIconThemeSubscribers().forEach((notify) => notify()))
     expect(mockConvertFileSrc).toHaveBeenCalled()
     mockActiveIconTheme = null
+  })
+  it("swallows a create error without leaving the inline input stuck", async () => {
+    const deps = makeDeps()
+    ;(deps.writeFile as jest.Mock).mockRejectedValue(new Error("EACCES"))
+    const onOpenFile = jest.fn()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={onOpenFile} deps={deps} />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-src")).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText("newFile"))
+    const input = await screen.findByPlaceholderText("newFile")
+    fireEvent.change(input, { target: { value: "new.ts" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() => expect(screen.queryByPlaceholderText("newFile")).toBeNull())
+    expect(onOpenFile).not.toHaveBeenCalled()
+    expect(screen.getByTestId("project-file-tree")).toBeInTheDocument()
+  })
+
+  it("swallows a rename error without leaving the row in edit mode", async () => {
+    const deps = makeDeps()
+    ;(deps.renameEntry as jest.Mock).mockRejectedValue(new Error("EPERM"))
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-readme.md")).toBeInTheDocument())
+    fireEvent.click(screen.getAllByText("rename")[1])
+    const input = await screen.findByLabelText("rename")
+    fireEvent.change(input, { target: { value: "README2.md" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() => expect(screen.queryByLabelText("rename")).toBeNull())
+    expect(screen.getByTestId("project-file-tree")).toBeInTheDocument()
   })
 })

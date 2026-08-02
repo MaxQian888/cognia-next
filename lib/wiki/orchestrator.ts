@@ -42,6 +42,7 @@ import {
 import { bulkCreateWikiSections } from "@/lib/db/wiki-sections"
 import { diffManifest, getWikiManifest, upsertWikiManifest } from "@/lib/db/wiki-manifest"
 import type { WikiArticle, WikiScope, WikiSourceRef } from "@/types/wiki"
+import { SELF_CORPUS_ID } from "@/types/wiki"
 import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 
 /** Inversion-of-control surface for the host filesystem. */
@@ -70,6 +71,13 @@ export interface WikiOrchestratorDeps {
 
 export interface RebuildOptions {
   scope: WikiScope
+  /**
+   * Owning corpus (v142). Defaults to the scope-derived corpus, which is what
+   * every pre-corpus caller meant. A `user-repo` rebuild must pass the concrete
+   * `WikiCorpus.id` — two repos share module paths, and `[corpusId+slug]` is
+   * what keeps their articles apart.
+   */
+  corpusId?: string
   rootDir: string
   generatorVersion: string
   /** When true, ignore the existing manifest and re-process every file. */
@@ -123,6 +131,11 @@ export async function rebuildWiki(
   const currentHashes = await buildMerkleMap(
     Array.from(fileContents, ([path, content]) => ({ path, content }))
   )
+
+  // Resolve the owning corpus once. Pre-corpus callers pass only `scope`, and
+  // for them the scope name IS the corpus id — that is exactly the mapping the
+  // v142 upgrade used to backfill their existing rows.
+  const corpusId = opts.corpusId ?? (opts.scope === "cognia-self" ? SELF_CORPUS_ID : opts.scope)
 
   // 3. Diff against the persisted manifest.
   const previousManifest = opts.force ? undefined : await getWikiManifest(opts.scope)
@@ -220,7 +233,14 @@ export async function rebuildWiki(
   }
 
   // 8. Persist articles + sections.
-  const persisted = await persistDrafts(drafts, opts.scope, opts.generatorVersion, embed, stats)
+  const persisted = await persistDrafts(
+    drafts,
+    opts.scope,
+    corpusId,
+    opts.generatorVersion,
+    embed,
+    stats
+  )
 
   // 9. IndexPageAgent — re-generate top-level index over the full article set.
   let indexPage: IndexPageDraft | undefined
@@ -360,6 +380,7 @@ async function collectExistingArticleStubsForScope(
 async function persistDrafts(
   drafts: readonly ModuleArticleDraft[],
   scope: WikiScope,
+  corpusId: string,
   generatorVersion: string,
   embed: EmbedFn,
   stats: readonly ModuleStat[]
@@ -368,12 +389,14 @@ async function persistDrafts(
   const statByModule = new Map(stats.map((s) => [s.module, s]))
 
   // Remove any existing article for the slugs we're about to write — the
-  // `wikiArticles.&slug` unique index would otherwise reject the bulkAdd.
-  // The cascade-delete also clears each article's sections so we don't
-  // strand orphan rows.
+  // `wikiArticles.&[corpusId+slug]` unique index would otherwise reject the
+  // bulkAdd. The lookup is corpus-scoped (v142): before corpora, a bare slug
+  // match would have deleted another repo's article that happened to share a
+  // module path. The cascade-delete also clears each article's sections so we
+  // don't strand orphan rows.
   const { deleteWikiArticle, getWikiArticleBySlug } = await import("@/lib/db/wiki-articles")
   for (const draft of drafts) {
-    const existing = await getWikiArticleBySlug(draft.slug)
+    const existing = await getWikiArticleBySlug(corpusId, draft.slug)
     if (existing) await deleteWikiArticle(existing.id)
   }
   const articleDrafts: Parameters<typeof bulkCreateWikiArticles>[0] = []
@@ -388,6 +411,7 @@ async function persistDrafts(
       title: draft.title,
       module: draft.module,
       scope,
+      corpusId,
       pageRank,
       summary: draft.summary,
       sectionIds: [],
@@ -412,6 +436,8 @@ async function persistDrafts(
     for (const section of draft.sections) {
       sectionsToPersist.push({
         articleId: article.id,
+        // Denormalized from the parent so a corpus teardown is one range delete.
+        corpusId: article.corpusId,
         sectionIndex: section.sectionIndex,
         headingPath: section.headingPath,
         bodyMd: section.bodyMd,

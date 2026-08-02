@@ -204,4 +204,79 @@ describe("ProjectEditorTabs", () => {
     expect(screen.getByLabelText("closeTab")).toHaveClass("size-11")
     expect(screen.getByTestId("editor-save-all")).toHaveClass("h-10")
   })
+  describe("preview tabs", () => {
+    it("marks only the preview tab italic and offers a pin affordance", () => {
+      render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts"), file("src/b.ts")]}
+          activePath="src/a.ts"
+          previewPath="src/b.ts"
+          dirtyCount={0}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+          onPin={jest.fn()}
+          onSaveAll={jest.fn()}
+        />
+      )
+      expect(screen.getByTestId("editor-tab-src/b.ts")).toHaveClass("italic")
+      expect(screen.getByTestId("editor-tab-src/a.ts")).not.toHaveClass("italic")
+      expect(screen.getByTestId("editor-tab-pin-src/b.ts")).toBeInTheDocument()
+      expect(screen.queryByTestId("editor-tab-pin-src/a.ts")).toBeNull()
+    })
+
+    it("pins from the pin button without also selecting the tab", () => {
+      const onPin = jest.fn()
+      const onSelect = jest.fn()
+      render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts")]}
+          activePath="src/a.ts"
+          previewPath="src/a.ts"
+          dirtyCount={0}
+          onSelect={onSelect}
+          onClose={jest.fn()}
+          onPin={onPin}
+          onSaveAll={jest.fn()}
+        />
+      )
+      fireEvent.click(screen.getByTestId("editor-tab-pin-src/a.ts"))
+      expect(onPin).toHaveBeenCalledWith("src/a.ts")
+      expect(onSelect).not.toHaveBeenCalled()
+    })
+
+    it("pins on double-click", () => {
+      const onPin = jest.fn()
+      render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts")]}
+          activePath="src/a.ts"
+          previewPath="src/a.ts"
+          dirtyCount={0}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+          onPin={onPin}
+          onSaveAll={jest.fn()}
+        />
+      )
+      fireEvent.doubleClick(screen.getByTestId("editor-tab-src/a.ts"))
+      expect(onPin).toHaveBeenCalledWith("src/a.ts")
+    })
+
+    it("renders no pin affordance for a host that does not track preview tabs", () => {
+      render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts")]}
+          activePath="src/a.ts"
+          dirtyCount={0}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+          onSaveAll={jest.fn()}
+        />
+      )
+      expect(screen.queryByTestId("editor-tab-pin-src/a.ts")).toBeNull()
+      expect(screen.getByTestId("editor-tab-src/a.ts")).not.toHaveClass("italic")
+      // Double-clicking must be inert rather than throwing when `onPin` is absent.
+      fireEvent.doubleClick(screen.getByTestId("editor-tab-src/a.ts"))
+    })
+  })
 })

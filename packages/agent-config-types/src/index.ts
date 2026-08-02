@@ -520,6 +520,29 @@ export interface SendOptions {
   permissionRuleset?: import("@/lib/claude/permissions/ruleset").Ruleset
 
   /**
+   * Tool names that must ALWAYS reach the renderer as a `permission_request`,
+   * whatever else says otherwise (ADR-0102).
+   *
+   * This closes a hole the unified action-review layer cannot close on its own.
+   * {@link suppressApprovalForTools}, {@link alwaysAllowTools}, and the
+   * connector `yolo` mode all resolve `{ behavior: "allow" }` *inside the
+   * sidecar*, before any event is emitted — so the renderer-side policy engine
+   * physically cannot escalate a call it never sees. A tool listed here makes
+   * both sidecar `canUseTool` gates ignore those bypasses and emit the
+   * round-trip anyway.
+   *
+   * Computed by `resolveSendOptions` from the risk tables: the tool-id sets
+   * `classifyRisk` uses for the surfaces `RISK_SURFACES` marks `high`
+   * (external-send, computer-use, native-command, data-destructive). Serialized
+   * alongside {@link permissionRuleset}.
+   *
+   * This raises friction on purpose, and only for surfaces whose effects escape
+   * the app and cannot be undone by closing it. It does not override a `deny`:
+   * a denied tool is still denied without asking.
+   */
+  alwaysExplicitTools?: string[]
+
+  /**
    * Workspace confinement policy (ADR-0028 "lite") consulted by the sidecar
    * `canUseTool` gates. When set, the built-in file/bash tools are confined to
    * `roots`: a mutator call whose target escapes every root escalates to the
@@ -1075,6 +1098,8 @@ export interface FeatureCallRequest {
   providerId?: string
   model?: string
   credentials: FeatureCallCredentials
+  /** Same protocol-adapter descriptor used by ordinary provider execution. */
+  protocolAdapterSpec?: SendOptions["protocolAdapterSpec"]
   options?: Record<string, unknown>
 }
 
@@ -1443,6 +1468,17 @@ export interface ChatSession {
   teamId?: string
   /** Skills the user has temporarily disabled for this session only. */
   disabledSkillIds?: string[]
+  /**
+   * The skill recorder's controlled trial: the one skill this session exists to
+   * exercise (ADR-0106).
+   *
+   * It is loaded by id, bypassing the enabled-status filter, because a
+   * just-recorded skill is deliberately saved `disabled` — enabling it is the
+   * user's separate act *after* the trial convinces them. Without this the
+   * trial opened a chat with no skill in it at all and could not verify
+   * anything. Non-indexed optional column — no Dexie schema bump.
+   */
+  trialSkillId?: string
   /** Per-chat learned-memory recall override. */
   memoryUse?: boolean
   /** Per-chat automatic learned-memory write override. */
@@ -1517,6 +1553,13 @@ export interface ChatSession {
    * local (`lib/automation/sandbox-target.ts`).
    */
   computerUseTarget?: import("@/lib/automation/sandbox-target").ComputerUseTargetSetting
+  /**
+   * Per-session override of the sandbox tier (Epic 5). Beats
+   * `Character.sandboxTier`, which beats `AppSettings.sandboxTier`.
+   * `undefined` inherits. Resolved together with `computerUseTarget` into a
+   * single `SandboxSessionBinding` by `lib/sandbox/binding.ts`.
+   */
+  sandboxTier?: import("@/types/sandbox").SandboxShellTier
   systemPrompt?: string
   /**
    * Identity of the system-prompt preset this session was last configured
@@ -1591,7 +1634,35 @@ export interface ChatSession {
    * fresh id instead of clobbering it. Non-indexed optional column — no Dexie
    * schema bump.
    */
-  handoffSource?: "cli"
+  handoffSource?: "cli" | "thread-handoff"
+  /**
+   * Cross-host handoff lock (ADR-0103). **PRESENCE MEANS THIS ROW IS READ-ONLY.**
+   *
+   * Deliberately distinct from {@link importFrozen}, which means "stop
+   * mirroring the on-disk source" (ADR-0062) and is read only by the fs-watch
+   * re-import guard. Reusing that flag here would make the guard skip rows for
+   * the wrong reason. This one means "another host owns, or is about to own,
+   * the writable copy of this thread", and is enforced by
+   * `lib/chat/session-lock.ts` at every message/session mutation.
+   *
+   * `state: "frozen"` — a handoff is in flight; aborting clears the field and
+   * the thread is writable again. `state: "committed"` — permanent; the row
+   * stays read-only forever and links to `targetHostRef`/`targetSessionId`.
+   *
+   * Organizational operations (archive, folder, delete) are deliberately NOT
+   * blocked by this lock: a lock that prevents cleanup is a trap. Branching is
+   * also allowed — it creates a *new* writable thread, which does not violate
+   * the one-writable-copy invariant.
+   *
+   * Non-indexed optional column — no Dexie schema bump.
+   */
+  handoffLock?: {
+    ticketId: string
+    state: "frozen" | "committed"
+    targetHostRef?: string
+    targetSessionId?: string
+    at: number
+  }
   /** Per-session override for `--bare` (skip on-disk auto-discovery). */
   bareMode?: boolean
   /** Per-session override for `--debug` (verbose logging). */
@@ -2149,6 +2220,14 @@ export interface AppSettings {
      * Default false.
      */
     teamCollaboration?: boolean
+    /**
+     * Expose the project-scoped vector-memory tools (`vector_search`,
+     * `vector_add_document`, `vector_delete_document`) to the agent. Default
+     * false. Desktop only — they run against the native sqlite-vec store and
+     * are refused off the Tauri shell. Collections are scoped to the session's
+     * linked project; a session with no project cannot use them.
+     */
+    vector?: boolean
   }
   /**
    * Desktop → cognia CLI storage sync (ADR: CLI ↔ APP storage unification).
@@ -3054,10 +3133,15 @@ export interface AppSettings {
    *    "Try a prompt" starters, the flag keeps it hidden across reloads.
    *    (Stale `quickStart` flags from before the capability grid was removed
    *    are ignored.)
+   *  - `welcomeStats`: the usage dashboard's layout — on/off, trailing window,
+   *    active face (stat grid vs. per-model), which tiles are shown, and whether
+   *    the calendar heatmap is drawn. Partial; unset fields fall back to
+   *    `DEFAULT_WELCOME_STATS_PREFS`. See `@/lib/chat/welcome-stats-prefs`.
    */
   userName?: string
   welcomeStyle?: "rich" | "minimal"
   welcomeHidden?: { tryPrompt?: boolean }
+  welcomeStats?: import("@/lib/chat/welcome-stats-prefs").StoredWelcomeStatsPrefs
   /**
    * Persisted view preferences for the MCP servers management panel
    * (`/settings?section=mcp`). Lives in settings JSON (same pattern as
@@ -3384,9 +3468,14 @@ export interface AppSettings {
    * routes Bash / Edit / Write through the per-platform OS sandbox
    * (sandbox-exec / bwrap / windows-codex). `"microvm"` routes them
    * through the existing `plugins/e2b-sandbox/` Firecracker workspace
-   * backend for the strongest isolation. Beaten by `Character.sandboxTier`
-   * when both are set. Only consulted when `sandboxDefaultEnabled` /
-   * `sandboxEnabled` resolves true.
+   * backend for the strongest isolation. Beaten by `Character.sandboxTier`,
+   * which is beaten by `ChatSession.sandboxTier`. Only consulted when
+   * `sandboxDefaultEnabled` / `sandboxEnabled` resolves true. Resolution lives
+   * in `lib/sandbox/binding.ts`.
+   *
+   * Deliberately NOT widened to `"cua-desktop"` (Epic 5): that tier needs a
+   * bound sandbox connection, which only exists on a character or session, so
+   * an app-wide default of it could never resolve to a valid binding.
    */
   sandboxTier?: "os" | "microvm"
   /**
@@ -3455,6 +3544,8 @@ export interface AppSettings {
   >
   /** UI preferences for the providers settings page (filter, sort, view mode). */
   providerUIPreferences?: import("@cognia/provider-types/provider").ProviderUIPreferences
+  /** Provider diagnostic limits, retention, refresh, and primary-source preferences. */
+  providerDiagnostics?: import("@cognia/provider-types").ProviderDiagnosticsPreferences
   /** Whether the user dismissed the first-time providers onboarding banner. */
   providerOnboardingDismissed?: boolean
   /**
@@ -3547,6 +3638,8 @@ export interface AppSettings {
   customCssScope?: "app" | "global"
   /** Per-component surface customization (tonality / elevation / radius). */
   componentStyles?: import("@/types/appearance").ComponentStyles
+  /** Mouse-pointer art (pack / size / tint) and the pointer effect layer. */
+  cursor?: import("@/types/appearance").CursorSettings
 
   // ---- WebRTC WAN transport (ADR-0021) ----
   /**
@@ -4082,10 +4175,13 @@ export interface Character {
    * Sandbox tier (ADR-0028 T4). `"os"` (default) routes Bash / Edit / Write
    * through the per-platform OS sandbox (sandbox-exec / bwrap / windows-codex).
    * `"microvm"` routes them through the existing `plugins/e2b-sandbox/`
-   * Firecracker workspace backend for the strongest isolation. Only relevant
-   * when `sandboxEnabled` resolves true.
+   * Firecracker workspace backend for the strongest isolation. `"cua-desktop"`
+   * (Epic 5) routes them into the bound sandbox connection alongside Computer
+   * Use — it requires a `computerUseTarget` connection and forces Computer Use
+   * onto that same connection. Only relevant when `sandboxEnabled` resolves
+   * true. Beaten by `ChatSession.sandboxTier`.
    */
-  sandboxTier?: "os" | "microvm"
+  sandboxTier?: import("@/types/sandbox").SandboxShellTier
   /**
    * Per-character sandbox resource + network ceiling (ADR-0028). Beats
    * `AppSettings.sandboxPolicy`. Only relevant when `sandboxEnabled` is true.

@@ -10,6 +10,11 @@
  * Wave 3D: adds a "Run in dock" affordance that lets the user send the
  * same command into a selected dock tab. The tab picker is anchored
  * inside this part so the action lives next to the command preview.
+ *
+ * The body is exported separately as {@link TerminalToolBody} so the simplified
+ * display mode's `ToolCallRow` can expand into the *same* terminal view instead
+ * of a stringified fallback — the card chrome is the only thing that differs
+ * between the two modes.
  */
 
 import { memo, useCallback, useMemo, useState } from "react"
@@ -31,6 +36,16 @@ import { useSettingsStore } from "@/stores/settings"
 import { useChatStore } from "@/stores/chat/chat-store"
 
 interface TerminalToolPartProps {
+  part: ToolUIPart
+  /**
+   * Overrides the "open while running" default. Set by the activity group's
+   * expand-all / collapse-all and by `detailed` mode, which force every card in
+   * a run open regardless of its state.
+   */
+  defaultOpen?: boolean
+}
+
+interface TerminalToolBodyProps {
   part: ToolUIPart
 }
 
@@ -54,7 +69,7 @@ function extractRunningOutput(output: unknown): string | undefined {
   return undefined
 }
 
-export const TerminalToolPart = memo(function TerminalToolPart({ part }: TerminalToolPartProps) {
+export const TerminalToolBody = memo(function TerminalToolBody({ part }: TerminalToolBodyProps) {
   const t = useTranslations("chat.terminalTool")
   const running = part.state === "input-available"
   const command = useMemo(() => extractCommand(part.input), [part.input])
@@ -116,40 +131,54 @@ export const TerminalToolPart = memo(function TerminalToolPart({ part }: Termina
   )
 
   return (
-    <Tool defaultOpen={running} data-testid="terminal-tool-part">
+    <>
+      {running ? (
+        <div className="space-y-2" data-testid="terminal-tool-running">
+          {command && <ToolInput input={{ command }} />}
+          <div className="h-40 w-full">
+            <Terminal isStreaming output={liveOutput ?? ""}>
+              <TerminalHeader>
+                <span>{t("bashLabel")}</span>
+                <TerminalStatus status="running">{t("runningStatus")}</TerminalStatus>
+              </TerminalHeader>
+            </Terminal>
+          </div>
+        </div>
+      ) : (
+        <ToolBody part={part} />
+      )}
+      {canRun ? (
+        <div className="mt-2 flex justify-end">
+          <TerminalTabPicker open={pickerOpen} onOpenChange={setPickerOpen} onPick={handlePick}>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 gap-1 text-xs"
+              disabled={busy}
+              data-testid="terminal-tool-part-run-in-dock"
+            >
+              <TerminalSquareIcon className="h-3 w-3" />
+              {t("runInDock.label")}
+            </Button>
+          </TerminalTabPicker>
+        </div>
+      ) : null}
+    </>
+  )
+})
+
+export const TerminalToolPart = memo(function TerminalToolPart({
+  part,
+  defaultOpen,
+}: TerminalToolPartProps) {
+  return (
+    <Tool
+      defaultOpen={defaultOpen ?? part.state === "input-available"}
+      data-testid="terminal-tool-part"
+    >
       <ToolHeader type={part.type} state={part.state} />
       <ToolContent>
-        {running ? (
-          <div className="space-y-2" data-testid="terminal-tool-running">
-            {command && <ToolInput input={{ command }} />}
-            <div className="h-40 w-full">
-              <Terminal isStreaming output={liveOutput ?? ""}>
-                <TerminalHeader>
-                  <span>{t("bashLabel")}</span>
-                  <TerminalStatus status="running">{t("runningStatus")}</TerminalStatus>
-                </TerminalHeader>
-              </Terminal>
-            </div>
-          </div>
-        ) : (
-          <ToolBody part={part} />
-        )}
-        {canRun ? (
-          <div className="mt-2 flex justify-end">
-            <TerminalTabPicker open={pickerOpen} onOpenChange={setPickerOpen} onPick={handlePick}>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 gap-1 text-xs"
-                disabled={busy}
-                data-testid="terminal-tool-part-run-in-dock"
-              >
-                <TerminalSquareIcon className="h-3 w-3" />
-                {t("runInDock.label")}
-              </Button>
-            </TerminalTabPicker>
-          </div>
-        ) : null}
+        <TerminalToolBody part={part} />
       </ToolContent>
     </Tool>
   )

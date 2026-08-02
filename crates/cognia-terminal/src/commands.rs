@@ -102,16 +102,37 @@ fn managed_dirs_snapshot() -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
-pub(super) fn build_cli_path_injection<R: Runtime>(app: &AppHandle<R>) -> PathInjection {
-    let mut prepend = managed_dirs_snapshot();
-    if let Some(dir) = resolve_cli_dir(app) {
+/// Pure assembly half of [`build_cli_path_injection`], split out because an
+/// `AppHandle` cannot be constructed in a unit test and the ordering
+/// (managed → bundled/dev → `~/.cargo/bin`) is the part that actually matters.
+pub(super) fn assemble_path_injection(
+    managed: Vec<PathBuf>,
+    cli_dir: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> PathInjection {
+    let mut prepend = managed;
+    if let Some(dir) = cli_dir {
         prepend.push(dir);
     }
     let mut append = Vec::new();
-    if let Ok(home) = app.path().home_dir() {
+    if let Some(home) = home {
         append.push(home.join(".cargo").join("bin"));
     }
     PathInjection { prepend, append }
+}
+
+/// The app's current view of where `cognia` can be found.
+///
+/// `pub` (not `pub(super)`) because `src-tauri` is a separate crate and has to
+/// forward this to the out-of-process terminal host — the host cannot derive it
+/// on its own, since the managed-CLI registry is an in-process static owned by
+/// `cli_bridge::detect`.
+pub fn build_cli_path_injection<R: Runtime>(app: &AppHandle<R>) -> PathInjection {
+    assemble_path_injection(
+        managed_dirs_snapshot(),
+        resolve_cli_dir(app),
+        app.path().home_dir().ok(),
+    )
 }
 
 #[derive(Debug, Serialize)]
@@ -317,8 +338,36 @@ fn kill_pid(pid: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_lsof_pids, parse_netstat_pids};
-    use std::path::Path;
+    use super::{assemble_path_injection, parse_lsof_pids, parse_netstat_pids};
+    use std::path::{Path, PathBuf};
+
+    /// Ordering is the whole contract: an explicitly installed (managed) copy
+    /// beats the bundled/dev one, and a `cargo install`ed copy is only a
+    /// last-resort fallback. This is the regression the durable-host migration
+    /// introduced by dropping the injection entirely.
+    #[test]
+    fn assemble_path_injection_orders_managed_then_cli_then_cargo_bin() {
+        let injection = assemble_path_injection(
+            vec![PathBuf::from("/managed/one"), PathBuf::from("/managed/two")],
+            Some(PathBuf::from("/app/cli")),
+            Some(PathBuf::from("/home/dev")),
+        );
+        assert_eq!(
+            injection.prepend,
+            vec![
+                PathBuf::from("/managed/one"),
+                PathBuf::from("/managed/two"),
+                PathBuf::from("/app/cli"),
+            ]
+        );
+        assert_eq!(injection.append, vec![PathBuf::from("/home/dev/.cargo/bin")]);
+    }
+
+    #[test]
+    fn assemble_path_injection_is_empty_when_nothing_is_resolvable() {
+        let injection = assemble_path_injection(Vec::new(), None, None);
+        assert!(injection.is_empty());
+    }
 
     #[test]
     fn parse_netstat_extracts_listening_pid_for_port() {

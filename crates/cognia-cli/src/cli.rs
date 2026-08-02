@@ -6,7 +6,7 @@
 //! flag, emits a `-v` trace line, and calls the matching `commands::*::run`.
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 use crate::commands;
@@ -48,6 +48,16 @@ pub(crate) enum TopCommand {
     /// JetBrains) can drive cognia. Configure your editor with
     /// `{"command": "cognia", "args": ["acp"]}`.
     Acp,
+    /// Inspect, query, follow, diagnose, and export local structured logs.
+    Logs {
+        #[command(subcommand)]
+        command: LogsCommand,
+    },
+    /// Inspect, package, submit, track, and delete crash reports.
+    Crash {
+        #[command(subcommand)]
+        command: CrashCommand,
+    },
     /// Inspect the embedded public key used to verify downloaded cognia CLI releases.
     ReleaseKey {
         /// Emit a machine-readable JSON report instead of human prose.
@@ -71,6 +81,136 @@ pub(crate) enum TopCommand {
         /// Emit a machine-readable JSON report instead of human prose.
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum OutputFormat {
+    Human,
+    Json,
+    Ndjson,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum LogsCommand {
+    /// Print the newest matching records; optionally keep following the file.
+    Tail {
+        #[arg(long)]
+        follow: bool,
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        format: OutputFormat,
+        #[arg(long)]
+        log_dir: Option<PathBuf>,
+    },
+    /// Query local logs with bounded severity, module, text, and time filters.
+    Query {
+        #[arg(long)]
+        min_level: Option<String>,
+        #[arg(long)]
+        target: Option<String>,
+        #[arg(long)]
+        contains: Option<String>,
+        #[arg(long)]
+        since_ms: Option<i64>,
+        #[arg(long, default_value_t = 200)]
+        limit: usize,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        format: OutputFormat,
+        #[arg(long)]
+        log_dir: Option<PathBuf>,
+    },
+    /// Report local logging paths, sizes, parseability, and retention status.
+    Doctor {
+        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        format: OutputFormat,
+        #[arg(long)]
+        log_dir: Option<PathBuf>,
+    },
+    /// Export matching logs as a signed .cognia-diagnostic package.
+    Export {
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long, default_value_t = 50_000)]
+        limit: usize,
+        #[arg(long)]
+        log_dir: Option<PathBuf>,
+        #[arg(long)]
+        signing_key: Option<PathBuf>,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        format: OutputFormat,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum CrashCommand {
+    /// List locally retained crash reports.
+    List {
+        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        format: OutputFormat,
+        #[arg(long)]
+        crash_dir: Option<PathBuf>,
+    },
+    /// Show one redacted local crash report.
+    Show {
+        stem: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        format: OutputFormat,
+        #[arg(long)]
+        crash_dir: Option<PathBuf>,
+    },
+    /// Build a signed offline diagnostic package from a local crash report.
+    Package {
+        stem: String,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        include_minidump: bool,
+        #[arg(long)]
+        screenshot: Option<PathBuf>,
+        #[arg(long)]
+        description: Option<PathBuf>,
+        #[arg(long)]
+        crash_dir: Option<PathBuf>,
+        #[arg(long)]
+        signing_key: Option<PathBuf>,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        format: OutputFormat,
+    },
+    /// Preview, consent to, and resumably submit a diagnostic package.
+    Submit {
+        package: PathBuf,
+        #[arg(long, env = "COGNIA_DIAGNOSTIC_URL")]
+        server: String,
+        #[arg(long, env = "COGNIA_DIAGNOSTIC_GRANT")]
+        grant: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        format: OutputFormat,
+    },
+    /// Poll a remote incident receipt.
+    Status {
+        incident_id: String,
+        #[arg(long, env = "COGNIA_DIAGNOSTIC_URL")]
+        server: String,
+        #[arg(long, env = "COGNIA_DIAGNOSTIC_GRANT")]
+        grant: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        format: OutputFormat,
+    },
+    /// Delete a local report or a remotely submitted incident.
+    Delete {
+        target: String,
+        #[arg(long)]
+        remote: bool,
+        #[arg(long, env = "COGNIA_DIAGNOSTIC_URL", requires = "remote")]
+        server: Option<String>,
+        #[arg(long, env = "COGNIA_DIAGNOSTIC_GRANT", requires = "remote")]
+        grant: Option<String>,
+        #[arg(long)]
+        crash_dir: Option<PathBuf>,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        format: OutputFormat,
     },
 }
 
@@ -184,6 +324,30 @@ pub(crate) enum PluginCommand {
         #[arg(long)]
         dir: Option<PathBuf>,
         /// Emit a machine-readable JSON report instead of human prose.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect the canonical plugin authoring contract without changing files.
+    Contract {
+        /// Select a capability by canonical id. Repeat to select more than one.
+        #[arg(long, value_name = "ID")]
+        capability: Vec<String>,
+        /// Select a manifest contribution by canonical field. Repeatable.
+        #[arg(long, value_name = "FIELD")]
+        contribution: Vec<String>,
+        /// Select a plugin runtime type. Repeatable.
+        #[arg(long = "plugin-type", value_name = "TYPE")]
+        plugin_type: Vec<String>,
+        /// Select a canonical UI, hook, activation, or runtime point. Repeatable.
+        #[arg(long, value_name = "ID")]
+        point: Vec<String>,
+        /// Select plugin points by kind: ui-slot, hook, activation, or runtime. Repeatable.
+        #[arg(long = "point-kind", value_name = "KIND")]
+        point_kind: Vec<String>,
+        /// Select a canonical manifest permission. Repeatable.
+        #[arg(long, value_name = "PERMISSION")]
+        permission: Vec<String>,
+        /// Emit a versioned machine-readable JSON envelope.
         #[arg(long)]
         json: bool,
     },
@@ -477,6 +641,38 @@ pub(crate) fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Res
                     to: Some(to),
                     dir,
                     ..Default::default()
+                },
+                json,
+                ui,
+            )
+        }
+        PluginCommand::Contract {
+            capability,
+            contribution,
+            plugin_type,
+            point,
+            point_kind,
+            permission,
+            json,
+        } => {
+            ui.flags.json = json;
+            ui.verbose(format!(
+                "running plugin contract capabilities={} contributions={} plugin_types={} points={} point_kinds={} permissions={} json={json}",
+                capability.join(","),
+                contribution.join(","),
+                plugin_type.join(","),
+                point.join(","),
+                point_kind.join(","),
+                permission.join(","),
+            ));
+            commands::contract::run(
+                commands::contract::ContractFilters {
+                    capabilities: capability,
+                    contributions: contribution,
+                    plugin_types: plugin_type,
+                    points: point,
+                    point_kinds: point_kind,
+                    permissions: permission,
                 },
                 json,
                 ui,

@@ -44,6 +44,7 @@
     "theme:read",
     "theme:write",
     "extension:ui",
+    "extension:workflow",
     "media:image:read",
     "media:image:write",
     "media:video:read",

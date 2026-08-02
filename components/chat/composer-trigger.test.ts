@@ -30,6 +30,115 @@ describe("detectTrigger — slash mode", () => {
     expect(detectTrigger("hello\n#note", 11)).toBeNull()
   })
 
+  it("matches `/` even with an empty query", () => {
+    expect(detectTrigger("/", 1)).toMatchObject({ kind: "slash", query: "" })
+  })
+
+  it("does NOT match `/` mid-line (file paths, URLs)", () => {
+    expect(detectTrigger("read src/page.tsx", 17)).toBeNull()
+    expect(detectTrigger("see /api/foo", 12)).toBeNull()
+  })
+
+  it("truncates the query at the caret so the popover filters on partial input", () => {
+    expect(detectTrigger("/clear now", 4)).toMatchObject({ kind: "slash", query: "cle" })
+  })
+
+  // ── Same-line chaining (parse-segments rule 2b) ────────────────────────
+  const hasPrefix = (names: string[]) => (q: string) => names.some((n) => n.startsWith(q))
+
+  it("anchors to the SECOND token when the caret is inside it", () => {
+    const value = "/compact /cl"
+    expect(detectTrigger(value, value.length)).toEqual({
+      kind: "slash",
+      tokenStart: 9,
+      tokenEnd: 12,
+      query: "cl",
+    })
+  })
+
+  it("anchors to a freshly typed second slash (empty query)", () => {
+    expect(detectTrigger("/help /", 7)).toMatchObject({
+      kind: "slash",
+      tokenStart: 6,
+      query: "",
+    })
+  })
+
+  it("keeps the first-token anchor while the caret is still in the first token", () => {
+    expect(detectTrigger("/compact /clear", 5)).toMatchObject({
+      kind: "slash",
+      tokenStart: 0,
+      query: "comp",
+    })
+  })
+
+  it("does not let a trailing ordinary token drag the anchor back", () => {
+    // `/help /model opus` — caret in `/model` must still anchor there, otherwise
+    // picking a command would overwrite `/help`.
+    expect(detectTrigger("/help /model opus", 12)).toMatchObject({
+      kind: "slash",
+      tokenStart: 6,
+      query: "model",
+    })
+  })
+
+  it("treats a path argument as an argument, not a chained command", () => {
+    // With the prefix predicate, `/usr/loc` matches no command name, so the
+    // anchor stays on `/add-dir` and argument completion takes over.
+    const value = "/add-dir /usr/loc"
+    const tg = detectTrigger(value, value.length, {
+      hasCommandPrefix: hasPrefix(["add-dir", "help", "clear"]),
+    })
+    expect(tg).toMatchObject({ kind: "slash", tokenStart: 0, query: "add-dir" })
+    expect(tg?.argumentStart).toBe(9)
+    expect(tg?.argumentQuery).toBe("/usr/loc")
+  })
+
+  it("still chains when the second token matches a real command prefix", () => {
+    const value = "/compact /cle"
+    expect(
+      detectTrigger(value, value.length, { hasCommandPrefix: hasPrefix(["clear", "compact"]) })
+    ).toMatchObject({ kind: "slash", tokenStart: 9, query: "cle" })
+  })
+})
+
+describe("detectTrigger — `!` / `#` first-line modes", () => {
+  it("matches `!` only at the very start", () => {
+    expect(detectTrigger("!ls -la", 7)).toMatchObject({ kind: "bash", query: "ls -la" })
+    expect(detectTrigger("hi !ls", 6)).toBeNull()
+  })
+
+  it("matches `#` only at the very start", () => {
+    expect(detectTrigger("#prefer 4-space tabs", 20)).toMatchObject({ kind: "memory" })
+    expect(detectTrigger("issue #123", 10)).toBeNull()
+  })
+
+  it("covers the whole first line", () => {
+    expect(detectTrigger("!cmd\nmore", 4)).toMatchObject({ kind: "bash", tokenEnd: 4 })
+  })
+
+  it("falls through to the slash rule on a later line", () => {
+    // Regression: this used to return null, killing the `/` popover for the
+    // entire rest of the message.
+    expect(detectTrigger("#note\n/he", 9)).toMatchObject({
+      kind: "slash",
+      tokenStart: 6,
+      query: "he",
+    })
+    expect(detectTrigger("!ls\n/cl", 7)).toMatchObject({ kind: "slash", query: "cl" })
+  })
+
+  it("falls through to the mention rule on a later line", () => {
+    expect(detectTrigger("#note\nping @bo", 14)).toMatchObject({
+      kind: "file",
+      query: "bo",
+    })
+  })
+
+  it("still yields nothing on a later line with no trigger char", () => {
+    expect(detectTrigger("!cmd\nmore", 9)).toBeNull()
+  })
+
   it("exposes the first argument fragment for inline command completion", () => {
     const value = "/permission-mode pl"
     const tg = detectTrigger(value, value.length)
@@ -83,6 +192,10 @@ describe("detectTrigger — @file mode (default)", () => {
     const tg = detectTrigger("look @src/foo", 13)
     expect(tg?.kind).toBe("file")
     expect(tg?.query).toBe("src/foo")
+  })
+
+  it("detects an @file token at the very start of the input", () => {
+    expect(detectTrigger("@app/page", 9)).toMatchObject({ kind: "file", query: "app/page" })
   })
 
   it("ignores @ inside an email address", () => {
@@ -222,5 +335,17 @@ describe("spliceToken", () => {
   it("does not double-add a trailing space when one is already present", () => {
     const result = spliceToken("hi @co rest", 3, 6, "@codex")
     expect(result.value).toBe("hi @codex rest")
+  })
+
+  it("replaces a slash token with the chosen command + trailing space", () => {
+    const result = spliceToken("/cle", 0, 4, "/clear")
+    expect(result.value).toBe("/clear ")
+    expect(result.caret).toBe("/clear ".length)
+  })
+
+  it("keeps existing trailing text when the token ends before it", () => {
+    const result = spliceToken("/cl x", 0, 3, "/clear")
+    expect(result.value).toBe("/clear x")
+    expect(result.caret).toBe("/clear".length)
   })
 })

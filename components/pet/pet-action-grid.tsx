@@ -9,16 +9,15 @@
 
 import type { ComponentType } from "react"
 import { useTranslations } from "next-intl"
+import { CookieIcon, DropletsIcon, Gamepad2Icon, GiftIcon, HeartIcon, MoonIcon } from "lucide-react"
 import {
-  CookieIcon,
-  DropletsIcon,
-  Gamepad2Icon,
-  GiftIcon,
-  HeartIcon,
-  MessageCircleIcon,
-  MoonIcon,
-} from "lucide-react"
+  AnimatedActionIcon,
+  type AnimatedIconComponent,
+} from "@/components/shared/animated-action-icon"
 import { Button } from "@/components/ui/button"
+import { HeartIcon as AnimatedHeartIcon } from "@/components/ui/heart"
+import { MessageCircleIcon as AnimatedMessageCircleIcon } from "@/components/ui/message-circle"
+import { MoonIcon as AnimatedMoonIcon } from "@/components/ui/moon"
 import { cn } from "@/lib/utils"
 import { useActionCooldown } from "@/hooks/pet/use-action-cooldown"
 
@@ -41,6 +40,11 @@ interface ActionDef {
   Icon: ComponentType<{ className?: string }>
   run: () => void
   cooldownMs: number
+}
+
+const ANIMATED_ACTION_ICONS: Partial<Record<string, AnimatedIconComponent>> = {
+  petted: AnimatedHeartIcon,
+  slept: AnimatedMoonIcon,
 }
 
 export function PetActionGrid({
@@ -66,8 +70,20 @@ export function PetActionGrid({
   const actions: ActionDef[] = [
     { kind: "fed", labelKey: "actions.feed", Icon: CookieIcon, run: onFeed, cooldownMs: 1500 },
     { kind: "played", labelKey: "actions.play", Icon: Gamepad2Icon, run: onPlay, cooldownMs: 1500 },
-    { kind: "petted", labelKey: "actions.pet", Icon: HeartIcon, run: onPet, cooldownMs: 1500 },
-    { kind: "slept", labelKey: "actions.sleep", Icon: MoonIcon, run: onSleep, cooldownMs: 5000 },
+    {
+      kind: "petted",
+      labelKey: "actions.pet",
+      Icon: HeartIcon,
+      run: onPet,
+      cooldownMs: 1500,
+    },
+    {
+      kind: "slept",
+      labelKey: "actions.sleep",
+      Icon: MoonIcon,
+      run: onSleep,
+      cooldownMs: 5000,
+    },
     {
       kind: "cleaned",
       labelKey: "actions.clean",
@@ -83,6 +99,7 @@ export function PetActionGrid({
       {actions.map((a) => {
         const rem = remaining(a.kind)
         const cooling = rem > 0
+        const AnimatedIcon = ANIMATED_ACTION_ICONS[a.kind]
         return (
           <Button
             key={a.kind}
@@ -104,6 +121,8 @@ export function PetActionGrid({
               >
                 {Math.ceil(rem / 1000)}
               </span>
+            ) : AnimatedIcon ? (
+              <AnimatedActionIcon icon={AnimatedIcon} size={16} />
             ) : (
               <a.Icon className="size-4" />
             )}
@@ -118,7 +137,7 @@ export function PetActionGrid({
         className="h-auto flex-col gap-1 py-2"
         onClick={onToggleTalk}
       >
-        <MessageCircleIcon className="size-4" />
+        <AnimatedActionIcon icon={AnimatedMessageCircleIcon} size={16} animateOnChange={talkOpen} />
         <span className="text-[10px] leading-none">{t("actions.talk")}</span>
       </Button>
     </div>

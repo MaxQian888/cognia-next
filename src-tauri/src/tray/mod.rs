@@ -18,6 +18,8 @@
 pub mod commands;
 pub mod defaults;
 pub mod dto;
+/// The quick-panel popover window opened by a tray click.
+pub mod panel;
 
 // Desktop-only sub-modules. Mobile builds rely on the stub commands in
 // `commands.rs` and never construct a menu / set an icon.
@@ -138,8 +140,11 @@ pub fn install(app: &App) -> tauri::Result<()> {
     // commands, and the renderer-driven menu rebuilds.
     let menu_state = Arc::new(TrayMenuStateStore::default());
     let icon_state = Arc::new(TrayIconStateStore::default());
+    // Last reported tray-icon rectangle — the quick panel's placement anchor.
+    let anchor_state = Arc::new(panel::TrayPanelAnchorStore::default());
     app.manage(menu_state.clone());
     app.manage(icon_state.clone());
+    app.manage(anchor_state);
 
     let bootstrap = defaults::bootstrap_items();
     let BuiltMenu { menu, index } = build_menu(handle, &bootstrap).map_err(|e| {
@@ -169,20 +174,71 @@ pub fn install(app: &App) -> tauri::Result<()> {
             dispatch_click(app, id, &menu_state_for_menu);
         })
         .on_tray_icon_event(|tray, event| {
-            // Left-click toggles the main window — same UX as
-            // Ctrl+Shift+Space (see lib.rs global-shortcut handler).
+            let app = tray.app_handle();
+
+            // Record the icon's screen rectangle from EVERY event that carries
+            // one, not just the left-click we act on. A right-click (menu) or
+            // a hover still tells us where the icon sits, so a panel opened
+            // later from a menu item or a shortcut lands under the icon rather
+            // than in the fallback corner.
+            if let Some((rect, point)) = tray_event_geometry(&event) {
+                let scale = app
+                    .monitor_from_point(point.x, point.y)
+                    .ok()
+                    .flatten()
+                    .or_else(|| app.primary_monitor().ok().flatten())
+                    .map(|m| m.scale_factor())
+                    .unwrap_or(1.0);
+                panel::record_anchor(app, panel::anchor_from_tray_rect(rect, scale));
+            }
+
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
             } = event
             {
-                toggle_main_window(tray.app_handle());
+                // What a left-click does is a user preference, read straight
+                // from disk: this handler runs with no renderer involvement at
+                // all (the main window may be hidden, booting, or closed to
+                // the tray), so there is nothing to ask.
+                match panel::load_config().left_click {
+                    panel::TrayLeftClickAction::Panel => {
+                        if let Err(error) = panel::toggle_panel_inner(app) {
+                            log::warn!("tray: quick panel toggle failed: {error}");
+                            // Never leave a click dead: fall back to the
+                            // pre-panel behaviour so the icon still does
+                            // something the user recognises.
+                            toggle_main_window(app);
+                        }
+                    }
+                    panel::TrayLeftClickAction::ToggleWindow => toggle_main_window(app),
+                    panel::TrayLeftClickAction::None => {}
+                }
             }
         })
         .build(app)?;
 
     Ok(())
+}
+
+/// The icon rectangle carried by every positional tray event. `Leave` is
+/// deliberately included: its rect is still the icon's, and taking it costs
+/// nothing while covering platforms that fire it without a preceding `Enter`.
+#[cfg(desktop)]
+fn tray_event_geometry(
+    event: &TrayIconEvent,
+) -> Option<(&tauri::Rect, tauri::PhysicalPosition<f64>)> {
+    match event {
+        TrayIconEvent::Click { rect, position, .. }
+        | TrayIconEvent::DoubleClick { rect, position, .. }
+        | TrayIconEvent::Enter { rect, position, .. }
+        | TrayIconEvent::Move { rect, position, .. }
+        | TrayIconEvent::Leave { rect, position, .. } => Some((rect, *position)),
+        // `TrayIconEvent` is `#[non_exhaustive]`; a future variant without a
+        // rect simply leaves the previous anchor in place.
+        _ => None,
+    }
 }
 
 #[cfg(desktop)]
@@ -229,6 +285,26 @@ fn toggle_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+/// Run a native tray action by name, from somewhere other than the OS menu.
+///
+/// The quick panel offers the same native actions the menu does, and routing
+/// them here rather than reimplementing them renderer-side means "Open Cognia"
+/// from the panel and from the menu are literally the same code — including the
+/// legacy `tray://*` events existing listeners depend on. Rejects anything
+/// outside [`dto::NATIVE_ACTIONS`] so a malformed stored action can't reach an
+/// arbitrary branch.
+#[cfg(desktop)]
+pub fn run_native_action<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    action: &str,
+) -> Result<(), String> {
+    if !dto::NATIVE_ACTIONS.contains(&action) {
+        return Err(format!("unknown native tray action: {action}"));
+    }
+    apply_native(app, action);
+    Ok(())
+}
+
 #[cfg(desktop)]
 fn apply_native<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
     match action {
@@ -242,6 +318,14 @@ fn apply_native<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
         }
         "toggle-window" => {
             toggle_main_window(app);
+        }
+        "tray-panel-toggle" => {
+            // Same entry point as the left-click, exposed as a menu row so the
+            // panel is still reachable when the user has rebound left-click to
+            // "toggle window" or "do nothing".
+            if let Err(error) = panel::toggle_panel_inner(app) {
+                log::warn!("tray: quick panel toggle failed: {error}");
+            }
         }
         // Renderer-handled actions: Rust just emits the matching legacy event
         // (mirroring the `settings` / `open-logs` pattern) so the existing
@@ -287,9 +371,15 @@ fn apply_native<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
             let _ = app.emit("tray://open-logs", serde_json::Value::Null);
         }
         "automation-kill" => {
+            // Was the least complete of the three triggers: engine flag + event
+            // only, leaving consent grants, a screen-off virtual display and a
+            // live recording all running.
             let state = app.state::<crate::automation::commands::AutomationState>();
-            state.gate.engage_kill_switch();
-            let _ = app.emit("automation:kill-switch", serde_json::Value::Null);
+            crate::automation::kill_switch::engage(
+                app,
+                &state,
+                crate::automation::kill_switch::KillSwitchCause::Tray,
+            );
         }
         "pet-toggle" => {
             // Toggle the desktop pet: hide if visible, otherwise open with
@@ -339,6 +429,22 @@ fn apply_native<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
 #[cfg(all(test, desktop))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tray_event_geometry_keeps_the_physical_monitor_lookup_point() {
+        let event = TrayIconEvent::Move {
+            id: tauri::tray::TrayIconId::new("test"),
+            position: tauri::PhysicalPosition::new(3200.0, 120.0),
+            rect: tauri::Rect {
+                position: tauri::Position::Logical(tauri::LogicalPosition::new(1600.0, 60.0)),
+                size: tauri::Size::Logical(tauri::LogicalSize::new(24.0, 24.0)),
+            },
+        };
+
+        let (_, point) = tray_event_geometry(&event).expect("move events carry tray geometry");
+
+        assert_eq!(point, tauri::PhysicalPosition::new(3200.0, 120.0));
+    }
 
     #[test]
     fn menu_state_store_round_trips_layout_and_index() {

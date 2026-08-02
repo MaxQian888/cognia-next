@@ -41,6 +41,7 @@
 //! by ref) remain unsupported: a stable, re-resolvable element ref is the harder
 //! follow-on.
 
+mod locator;
 mod observer;
 mod raw;
 mod screen_capture;
@@ -59,6 +60,7 @@ use once_cell::sync::Lazy;
 use crate::automation::backend::{ApplicationScreenshot, AutomationBackend, SelectionPreflight};
 use crate::automation::platform::shared::keymap::{parse_chord, KeyToken, Modifier, NamedKey};
 use crate::automation::platform::shared::screenshot;
+use crate::automation::platform::shared::element_locator;
 use crate::automation::platform::shared::tree_shape::{self, TreeBudget};
 use crate::automation::selection::{build_text_selection, TextSelectionSnapshot};
 use crate::automation::session::{AppLocator, ResolvedApplication};
@@ -96,33 +98,68 @@ impl AxBackend {
         }
         let root = raw::resolve_window_root(&app);
         self.elements.lock().map_err(poisoned)?.clear();
+        // The live-handle map stays as a same-process fast path (a ref acted on
+        // right after the tree read skips the replay), but it is no longer the
+        // ONLY way to resolve a ref: `resolve_element` falls back to replaying
+        // the locator recipe, so a ref survives the next `read_tree` clearing
+        // this map.
         let to_info = |element: &AXUIElement| {
-            let key = format!(
+            let mut info = ax_element_to_info(element, Some(pid), process_name);
+            let handle_key = format!(
                 "macos|pid={pid}|element={:x}",
                 raw::element_identity(element)
             );
             if let Ok(mut elements) = self.elements.lock() {
-                elements.insert(key.clone(), element.clone());
+                elements.insert(handle_key.clone(), element.clone());
             }
-            let mut info = ax_element_to_info(element, Some(pid), process_name);
-            info.element_ref = ElementRef(key);
+            info.element_ref = ElementRef(handle_key);
             info
         };
         let children = |element: &AXUIElement, limit: usize| -> Vec<AXUIElement> {
             raw::read_children_page(element, 0, limit)
         };
-        Ok(vec![tree_shape::walk_tree(
-            &root, budget, &to_info, &children,
-        )])
+        let mut tree = tree_shape::walk_tree(&root, budget, &to_info, &children);
+
+        // Stamp re-resolvable locators over the materialized tree. Derived from
+        // the already-read fields, so this costs zero extra AX round-trips —
+        // building each locator by walking up `AXParent` would be
+        // O(nodes x depth) cross-process messages on a 25 000-node budget.
+        // The live handles keep their old keys in `self.elements`, keyed by the
+        // pointer identity, so both resolution paths stay available.
+        let base = locator::locator_for_window_root(pid, process_name, None);
+        element_locator::assign_locators(&mut tree, &base);
+        Ok(vec![tree])
     }
 
+    /// Resolve a ref to a live element.
+    ///
+    /// Two paths, in order:
+    ///   1. **Live-handle cache** — a pointer-keyed handle from the most recent
+    ///      `read_tree`. Free, but only valid until the next tree read clears
+    ///      the map.
+    ///   2. **Locator replay** — decode the ancestry recipe and walk it against
+    ///      the live tree. This is what makes a ref outlive the cache, and what
+    ///      makes refs from `find` / `pick_at_point` / `get_focus` actionable at
+    ///      all; before Epic 5 those minted strings that were never cached and
+    ///      so could only ever return `StaleElement`.
+    ///
+    /// A ref that is neither cached nor a decodable locator is stale — legacy
+    /// `macos|pid=…` strings from a previous build land here and are refused
+    /// rather than guessed at.
     fn resolve_element(&self, element_ref: &ElementRef) -> Result<AXUIElement> {
-        self.elements
+        if let Some(cached) = self
+            .elements
             .lock()
             .map_err(poisoned)?
             .get(&element_ref.0)
             .cloned()
-            .ok_or(AutomationError::StaleElement)
+        {
+            return Ok(cached);
+        }
+        match element_locator::ElementLocator::decode(&element_ref.0) {
+            Some(loc) => locator::resolve_locator(&loc),
+            None => Err(AutomationError::StaleElement),
+        }
     }
 }
 
@@ -522,7 +559,16 @@ impl AutomationBackend for AxBackend {
             .as_ref()
             .filter(|snap| pid.is_some() && snap.pid == pid)
             .and_then(|snap| snap.process_name.as_deref());
-        Ok(ax_element_to_info(&element, pid, process_name))
+        let mut info = ax_element_to_info(&element, pid, process_name);
+        // Before Epic 5 this handed back `macos|role=…|title=…`, which was never
+        // in the handle cache and so could not be clicked, typed into, or
+        // measured — picking an element produced a ref you could only look at.
+        if let Some(pid) = pid {
+            if let Some(loc) = locator::locator_for_element(&element, pid, process_name, None) {
+                info.element_ref = ElementRef(loc.encode());
+            }
+        }
+        Ok(info)
     }
 
     fn read_text_selection(&self) -> Result<Option<TextSelectionSnapshot>> {
@@ -827,6 +873,14 @@ fn read_focused_window() -> Result<FocusedSnapshot> {
     Ok(snap)
 }
 
+/// Whether this process holds the macOS Accessibility grant.
+///
+/// Narrow re-export of `raw::is_trusted` so the recorder's preflight can report
+/// the grant without opening the whole `raw` FFI module up.
+pub(crate) fn accessibility_trusted() -> bool {
+    raw::is_trusted()
+}
+
 pub(crate) fn focused_window_credential_signals() -> Option<(Option<String>, Option<String>, bool)>
 {
     if !raw::is_trusted() {
@@ -884,6 +938,20 @@ return procName & "\n" & procPid & "\n" & winName"#;
         window_title,
         pid,
     })
+}
+
+/// Ref for the focused window.
+///
+/// Prefers a re-resolvable locator rooted at the window; falls back to the
+/// legacy observability string only when there is no pid to root it at (the
+/// focused-window probe failed), where any ref would be unresolvable anyway.
+fn focused_element_ref(snap: &FocusedSnapshot) -> ElementRef {
+    match snap.pid {
+        Some(pid) => ElementRef(
+            locator::locator_for_window_root(pid, snap.process_name.as_deref(), None).encode(),
+        ),
+        None => snap_to_element_ref(snap),
+    }
 }
 
 fn snap_to_element_ref(snap: &FocusedSnapshot) -> ElementRef {
@@ -990,7 +1058,7 @@ fn str_attr<S: ToString>(r: std::result::Result<S, accessibility_sys::AXError>) 
 
 fn focused_to_element_info(snap: &FocusedSnapshot) -> ElementInfo {
     ElementInfo {
-        element_ref: snap_to_element_ref(snap),
+        element_ref: focused_element_ref(snap),
         name: snap.window_title.clone(),
         automation_id: None,
         control_type: None,
@@ -1021,6 +1089,67 @@ mod tests {
         assert_eq!(info.process_id, Some(1234));
         assert_eq!(info.window_title.as_deref(), Some("Apple - Start"));
         assert!(info.is_focused);
+    }
+
+    #[test]
+    fn focused_element_ref_is_a_replayable_locator_when_a_pid_is_known() {
+        let snap = FocusedSnapshot {
+            process_name: Some("Example".into()),
+            window_title: Some("Untitled".into()),
+            pid: Some(4242),
+        };
+        let r = focused_element_ref(&snap);
+        let decoded = element_locator::ElementLocator::decode(&r.0)
+            .expect("focus ref must be a decodable locator, not an observability string");
+        assert_eq!(decoded.app.pid, 4242);
+        assert_eq!(decoded.app.process_name.as_deref(), Some("Example"));
+        // Rooted at the window: an empty path IS the window root.
+        assert!(decoded.path.is_empty());
+    }
+
+    #[test]
+    fn focused_element_ref_falls_back_to_the_legacy_marker_without_a_pid() {
+        // No pid means no application to root a recipe at — any locator would
+        // be unresolvable, so the observability string is the honest answer.
+        let snap = FocusedSnapshot {
+            process_name: None,
+            window_title: Some("Untitled".into()),
+            pid: None,
+        };
+        let r = focused_element_ref(&snap);
+        assert!(r.0.starts_with("macos|"));
+        assert!(element_locator::ElementLocator::decode(&r.0).is_none());
+    }
+
+    #[test]
+    fn a_legacy_ref_from_a_previous_build_is_refused_not_guessed_at() {
+        let backend = AxBackend::default();
+        let err = backend
+            .resolve_element(&ElementRef("macos|pid=42|element=7f00".into()))
+            .expect_err("legacy refs must not resolve");
+        assert!(matches!(err, AutomationError::StaleElement));
+    }
+
+    #[test]
+    fn an_uncached_locator_for_a_dead_pid_reports_stale() {
+        let backend = AxBackend::default();
+        let mut loc = element_locator::ElementLocator::new(
+            element_locator::LocatorBackend::Macos,
+            element_locator::AppIdentity {
+                // A pid that owns no accessible windows.
+                pid: 999_999,
+                bundle_id: None,
+                process_name: None,
+            },
+        );
+        loc.path = vec![element_locator::AncestryStep {
+            role: Some("AXButton".into()),
+            ..Default::default()
+        }];
+        let err = backend
+            .resolve_element(&ElementRef(loc.encode()))
+            .expect_err("a recipe that matches nothing must be stale");
+        assert!(matches!(err, AutomationError::StaleElement));
     }
 
     #[test]

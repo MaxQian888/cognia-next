@@ -141,7 +141,8 @@ jest.mock("@/stores/ui/ui-store", () => ({
 let mockPlatform: "tauri" | "web" = "tauri"
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => mockPlatform }))
 
-const barHidden = new Set<string>(["perf"])
+// Mirrors DEFAULT_STATUS_BAR_LAYOUT.hidden — both segments are opt-in.
+const barHidden = new Set<string>(["perf", "terminal"])
 let barOrder: string[] | null = null
 
 // The dialog opened from the bar's context menu has its own suite.
@@ -208,6 +209,7 @@ beforeEach(() => {
   mockPlatform = "tauri"
   barHidden.clear()
   barHidden.add("perf")
+  barHidden.add("terminal")
   barOrder = null
   settingsRef.webviewZoom = 1.0
   settingsRef.language = "en"

@@ -195,6 +195,26 @@ export async function dispatchCommand(
       return hostCapabilities()
     case "host_feature_manifest":
       return hostFeatureManifest(payload)
+    case "provider_diagnostics_status": {
+      const { getRemoteProviderDiagnosticsStatus } =
+        await import("@/lib/provider-diagnostics/companion")
+      return getRemoteProviderDiagnosticsStatus(payload)
+    }
+    case "provider_diagnostics_history": {
+      const { getRemoteProviderDiagnosticsHistory } =
+        await import("@/lib/provider-diagnostics/companion")
+      return getRemoteProviderDiagnosticsHistory(payload)
+    }
+    case "provider_diagnostics_start": {
+      const { startRemoteProviderDiagnostics } =
+        await import("@/lib/provider-diagnostics/companion")
+      return startRemoteProviderDiagnostics(payload)
+    }
+    case "provider_diagnostics_cancel": {
+      const { cancelRemoteProviderDiagnostics } =
+        await import("@/lib/provider-diagnostics/companion")
+      return cancelRemoteProviderDiagnostics(payload)
+    }
     // Mobile outbound-queue commands (Gap 3 reconciliation) — these go
     // through the same generic desktop_writes_bridge but land in
     // subsystem-specific dispatch arms below. Production callers:

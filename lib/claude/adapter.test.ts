@@ -6,6 +6,7 @@ import {
   makeUserMessage,
   mergeMemorySourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
+  resetStreamingToolInputs,
 } from "./adapter"
 import type { SourcesPart, SourcesPartItem } from "./parts-extensions"
 import type {
@@ -1658,6 +1659,188 @@ describe("applySdkEvent — stream_event (token-level streaming)", () => {
       streamEvt({ type: "message_start", message: { id: "m" } })
     ).messages
     expect(applySdkEvent(seeded, streamEvt({ type: "message_stop" })).messages).toBe(seeded)
+  })
+})
+
+describe("applySdkEvent — streaming tool calls (content_block_start/delta/stop)", () => {
+  beforeEach(() => resetStreamingToolInputs())
+
+  function streamEvt(event: Record<string, unknown>, uuid = "se-t") {
+    return {
+      type: "stream_event",
+      event,
+      parent_tool_use_id: null,
+      uuid,
+      session_id: "s1",
+    } as unknown as Parameters<typeof applySdkEvent>[1]
+  }
+
+  /** Seed an assistant message the tool blocks can attach to. */
+  function seeded(id = "m") {
+    return applySdkEvent([], streamEvt({ type: "message_start", message: { id } })).messages
+  }
+
+  function toolStart(index: number, id: string, name: string) {
+    return streamEvt({
+      type: "content_block_start",
+      index,
+      content_block: { type: "tool_use", id, name, input: {} },
+    })
+  }
+
+  function jsonDelta(index: number, partial: string) {
+    return streamEvt({
+      type: "content_block_delta",
+      index,
+      delta: { type: "input_json_delta", partial_json: partial },
+    })
+  }
+
+  it("paints the tool row in input-streaming the moment the block starts", () => {
+    const msgs = applySdkEvent(seeded(), toolStart(0, "tu_1", "Read")).messages
+    expect(msgs[0].parts).toHaveLength(1)
+    const part = msgs[0].parts[0] as { type: string; toolCallId: string; state: string }
+    expect(part).toMatchObject({ type: "tool-Read", toolCallId: "tu_1", state: "input-streaming" })
+    // Arguments have not been generated yet — no fabricated input.
+    expect((part as { input?: unknown }).input).toBeUndefined()
+  })
+
+  it("accumulates input_json_delta without touching the message list", () => {
+    const started = applySdkEvent(seeded(), toolStart(0, "tu_1", "Read")).messages
+    // Identity-stable: a per-chunk copy would re-render the whole transcript.
+    const afterFirst = applySdkEvent(started, jsonDelta(0, '{"file_pa')).messages
+    expect(afterFirst).toBe(started)
+    const afterSecond = applySdkEvent(afterFirst, jsonDelta(0, 'th":"a.ts"}')).messages
+    expect(afterSecond).toBe(started)
+  })
+
+  it("content_block_stop parses the buffer and promotes the part to input-available", () => {
+    let msgs = applySdkEvent(seeded(), toolStart(0, "tu_1", "Read")).messages
+    msgs = applySdkEvent(msgs, jsonDelta(0, '{"file_pa')).messages
+    msgs = applySdkEvent(msgs, jsonDelta(0, 'th":"a.ts"}')).messages
+    msgs = applySdkEvent(msgs, streamEvt({ type: "content_block_stop", index: 0 })).messages
+
+    const part = msgs[0].parts[0] as { state: string; input: { file_path: string } }
+    expect(part.state).toBe("input-available")
+    expect(part.input).toEqual({ file_path: "a.ts" })
+  })
+
+  it("keeps input absent when the buffered JSON is truncated", () => {
+    let msgs = applySdkEvent(seeded(), toolStart(0, "tu_1", "Write")).messages
+    msgs = applySdkEvent(msgs, jsonDelta(0, '{"content":"unterminat')).messages
+    msgs = applySdkEvent(msgs, streamEvt({ type: "content_block_stop", index: 0 })).messages
+
+    const part = msgs[0].parts[0] as { state: string; input?: unknown }
+    expect(part.state).toBe("input-available")
+    expect(part.input).toBeUndefined()
+  })
+
+  it("tracks concurrent blocks by index, not by arrival order", () => {
+    let msgs = applySdkEvent(seeded(), toolStart(0, "tu_a", "Read")).messages
+    msgs = applySdkEvent(msgs, toolStart(1, "tu_b", "Grep")).messages
+    msgs = applySdkEvent(msgs, jsonDelta(1, '{"pattern":"x"}')).messages
+    msgs = applySdkEvent(msgs, jsonDelta(0, '{"file_path":"a.ts"}')).messages
+    msgs = applySdkEvent(msgs, streamEvt({ type: "content_block_stop", index: 1 })).messages
+    msgs = applySdkEvent(msgs, streamEvt({ type: "content_block_stop", index: 0 })).messages
+
+    expect(msgs[0].parts.map((p) => (p as { input?: unknown }).input)).toEqual([
+      { file_path: "a.ts" },
+      { pattern: "x" },
+    ])
+  })
+
+  it("does not re-seed a row for a block id already on the message", () => {
+    const started = applySdkEvent(seeded(), toolStart(0, "tu_1", "Read")).messages
+    const again = applySdkEvent(started, toolStart(0, "tu_1", "Read")).messages
+    expect(again).toBe(started)
+    expect(again[0].parts).toHaveLength(1)
+  })
+
+  it("never grafts a tool block onto the previous turn's finished reply", () => {
+    // message_start was dropped for this turn, so the newest assistant predates
+    // the latest user turn — the same guard the text deltas apply.
+    const base = [
+      { id: "a1", role: "assistant", parts: [{ type: "text", text: "done", state: "done" }] },
+      { id: "u2", role: "user", parts: [{ type: "text", text: "again" }] },
+    ] as unknown as UIMessage[]
+    expect(applySdkEvent(base, toolStart(0, "tu_1", "Read")).messages).toBe(base)
+  })
+
+  it("ignores non-tool_use block starts and stops with no buffered block", () => {
+    const base = seeded()
+    expect(
+      applySdkEvent(
+        base,
+        streamEvt({ type: "content_block_start", index: 0, content_block: { type: "text" } })
+      ).messages
+    ).toBe(base)
+    expect(applySdkEvent(base, streamEvt({ type: "content_block_stop", index: 0 })).messages).toBe(
+      base
+    )
+  })
+
+  it("text streaming after a tool call starts a new block instead of welding", () => {
+    let msgs = applySdkEvent(
+      seeded(),
+      streamEvt({ type: "message_start", message: { id: "m" } })
+    ).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "content_block_delta", delta: { type: "text_delta", text: "before" } })
+    ).messages
+    msgs = applySdkEvent(msgs, toolStart(1, "tu_1", "Read")).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "content_block_delta", delta: { type: "text_delta", text: "after" } })
+    ).messages
+
+    expect(msgs[0].parts.map((p) => (p as { type: string }).type)).toEqual([
+      "text",
+      "tool-Read",
+      "text",
+    ])
+    expect((msgs[0].parts[0] as { text: string }).text).toBe("before")
+    expect((msgs[0].parts[2] as { text: string }).text).toBe("after")
+  })
+
+  it("the canonical assistant message replaces the streamed tool preview", () => {
+    let msgs = applySdkEvent(seeded("asst-t"), toolStart(0, "tu_1", "Read")).messages
+    msgs = applySdkEvent(msgs, jsonDelta(0, '{"file_path":"a.ts"}')).messages
+    msgs = applySdkEvent(msgs, streamEvt({ type: "content_block_stop", index: 0 })).messages
+    msgs = applySdkEvent(
+      msgs,
+      asAssistant({
+        id: "asst-t",
+        content: [{ type: "tool_use", id: "tu_1", name: "Read", input: { file_path: "a.ts" } }],
+      } as unknown as BetaMessage)
+    ).messages
+
+    expect(msgs).toHaveLength(1)
+    expect(msgs[0].parts).toHaveLength(1)
+    expect(msgs[0].parts[0]).toMatchObject({
+      type: "tool-Read",
+      toolCallId: "tu_1",
+      state: "input-available",
+      input: { file_path: "a.ts" },
+    })
+  })
+
+  it("evicts live buffers past the cap instead of leaking on aborted turns", () => {
+    // 128 blocks opened and never stopped (the abort case), then one more.
+    let msgs = seeded("m-cap")
+    for (let i = 0; i < 129; i++) {
+      msgs = applySdkEvent(msgs, toolStart(i, `tu_${i}`, "Read")).messages
+    }
+    // The cap cleared the map right before the last start, so only that block's
+    // buffer survives — earlier indices no longer resolve at stop.
+    const stale = applySdkEvent(msgs, jsonDelta(0, '{"file_path":"a.ts"}')).messages
+    expect((stale[0].parts[0] as { input?: unknown }).input).toBeUndefined()
+    const fresh = applySdkEvent(msgs, jsonDelta(128, '{"file_path":"z.ts"}')).messages
+    const stopped = applySdkEvent(
+      fresh,
+      streamEvt({ type: "content_block_stop", index: 128 })
+    ).messages
+    expect((stopped[0].parts[128] as { input?: unknown }).input).toEqual({ file_path: "z.ts" })
   })
 })
 

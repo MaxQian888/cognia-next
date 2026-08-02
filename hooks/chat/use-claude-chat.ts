@@ -40,6 +40,7 @@ import { gateLoopContinuation } from "@/lib/loop/pacing"
 import { renderLoopIterationMessage } from "@/lib/loop/prompts"
 import type { LoopStatus } from "@/types/loop"
 import type { GoalStatus } from "@/types/goal"
+import type { AgentPlan, PlanStatus } from "@/types/agent/plan"
 import { attemptRoutingFallback } from "@/lib/claude/routing-fallback"
 import { notifyDroppedCapabilityOnce } from "@/lib/claude/dropped-capability-toast"
 import { notifyOverBudgetOnce } from "@/lib/claude/over-budget-toast"
@@ -588,6 +589,21 @@ function renderLoopExitCard(resultingStatus: LoopStatus, reason: string): string
   }
   const title = head[resultingStatus] ?? `🔁 **Loop ${resultingStatus}**`
   return reason ? `${title}\n\n> ${reason}` : title
+}
+
+/**
+ * System card for a plan that finished under the in-session driver. Hard-coded
+ * English, consistent with the goal / loop exit cards above and the
+ * slash-command cards in `lib/slash-commands/actions/plan.ts`.
+ */
+function renderPlanExitCard(title: string, status: PlanStatus, reason: string): string {
+  const head =
+    status === "completed"
+      ? "📋 **Plan completed**"
+      : status === "failed"
+        ? "🛑 **Plan stopped — a step failed**"
+        : `📋 **Plan ${status}**`
+  return `${head} — ${title}\n\n_${reason}_`
 }
 
 /**
@@ -2189,6 +2205,23 @@ async function buildSendOptions(
     ? ((await getGoalRuntime().getActiveGoalForSession(session.id)) ?? null)
     : null
 
+  // ADR-0045 — same contract for an EXECUTING plan: hand it to the resolver so
+  // `appendPlanContext` appends the plan's checklist + current-step callout to
+  // this turn. `getExecutingPlanForSession` already filters by status, and the
+  // resolver re-checks, so a paused / awaiting-approval plan never injects.
+  // Lazy import (like the other plan touchpoints in this file) keeps the plan
+  // runtime + its Dexie tables off the eager module graph; best-effort, since a
+  // read hiccup must not block the send.
+  let activePlan: AgentPlan | null = null
+  try {
+    if (session?.id) {
+      const { getPlanRuntime } = await import("@/lib/agent/plan/runtime")
+      activePlan = (await getPlanRuntime().getExecutingPlanForSession(session.id)) ?? null
+    }
+  } catch {
+    activePlan = null
+  }
+
   // When a `/loop` run is driving this session, flag it so the surface-aware
   // goal/loop guidance skill activates (parallel to `activeGoal` above; the
   // loop has no per-turn Dexie context block of its own). Best-effort.
@@ -2253,6 +2286,7 @@ async function buildSendOptions(
     routingSurface: "chat",
     ephemeralSkillIds,
     activeGoal,
+    activePlan,
     activeLoop,
     // Open this turn's agent-trace ROOT span here (one mint per turn). The hook
     // owns `endSpan` (result / error branches of `handleEvent`, keyed off the
@@ -3294,6 +3328,9 @@ async function handleEvent(
         // the next turn's events; the generationId guard + AbortController
         // make a mid-turn pause/stop/update return `stale`/`aborted`.
         if (useChatStore.getState().pendingApprovals.length === 0) {
+          // Set once a self-driving mechanism has queued the next turn, so the
+          // plan driver below stands down instead of dispatching a second one.
+          let selfDrivenContinuation = false
           // Self-paced /loop driver — mutually exclusive with an active goal
           // (enforced at create on both sides), so this only runs when the
           // goal block below finds nothing.
@@ -3332,6 +3369,7 @@ async function handleEvent(
                 })
                 await persistMessages(sessionId, useChatStore.getState().messages).catch(() => {})
               } else if (outcome.kind === "continue") {
+                selfDrivenContinuation = true
                 scheduleLoopContinuation(
                   activeLoop.id,
                   sessionId,
@@ -3426,6 +3464,7 @@ async function handleEvent(
                   const suggested = goal.config.adaptivePacing
                     ? parseSuggestedDelay(lastResponse)
                     : null
+                  selfDrivenContinuation = true
                   scheduleGoalContinuation(
                     goal.id,
                     sessionId,
@@ -3441,6 +3480,74 @@ async function handleEvent(
             }
           } catch (err) {
             console.warn("goal turn-driver failed", err)
+          }
+
+          // ── ADR-0045: drive an in-session plan forward ────────────────────
+          // Same contract as the goal/loop drivers above: `handlePlanTurnComplete`
+          // decides (marks the finished step done, picks the next runnable one)
+          // and we dispatch. Skipped when a goal/loop already queued a
+          // continuation for this turn — two drivers dispatching would double the
+          // next turn. The strategy re-check is what keeps this off an
+          // ORCHESTRATED plan: such a plan also sits at `executing` while the
+          // workflow runtime owns its steps, and advancing it here would race
+          // the orchestrator writing the same rows.
+          if (!selfDrivenContinuation) {
+            try {
+              const { getPlanRuntime } = await import("@/lib/agent/plan/runtime")
+              const activePlan = await getPlanRuntime().getExecutingPlanForSession(sessionId)
+              if (activePlan) {
+                const { resolvePlanStrategy } = await import("@/lib/agent/plan/strategy")
+                if (resolvePlanStrategy(activePlan) === "in_session") {
+                  const { handlePlanTurnComplete } = await import("@/lib/agent/plan/turn-driver")
+                  const lastAssistant = [...nextMessages]
+                    .reverse()
+                    .find((m) => m.role === "assistant")
+                  const ac = new AbortController()
+                  const unregister = getPlanRuntime().registerAbortController(activePlan.id, ac)
+                  let outcome: Awaited<ReturnType<typeof handlePlanTurnComplete>>
+                  try {
+                    outcome = await handlePlanTurnComplete({
+                      planId: activePlan.id,
+                      lastResponse: extractAssistantText(lastAssistant),
+                      capturedGenerationId: activePlan.generationId,
+                      signal: ac.signal,
+                    })
+                  } finally {
+                    unregister()
+                  }
+                  if (outcome.kind === "exit") {
+                    useChatStore.getState().appendMessage({
+                      id: `sys-plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                      role: "system",
+                      parts: [
+                        {
+                          type: "text",
+                          text: renderPlanExitCard(
+                            activePlan.title,
+                            outcome.status,
+                            outcome.reason
+                          ),
+                        },
+                      ],
+                    })
+                    await persistMessages(sessionId, useChatStore.getState().messages).catch(
+                      () => {}
+                    )
+                  } else if (outcome.kind === "continue" && sessionId === activeRef.current) {
+                    // No pacing gate: a plan has a finite step list, so the next
+                    // step follows immediately (the user pauses via the tracker
+                    // dock, which rotates the generation and makes this `stale`).
+                    void sendRef.current?.(outcome.userMessage, undefined, {
+                      skipUserAppend: true,
+                    })
+                  }
+                  // aborted | stale | no_plan → no-op: a pause/cancel/refine owns
+                  // the next step and the tracker dock reflects the status.
+                }
+              }
+            } catch (err) {
+              console.warn("plan turn-driver failed", err)
+            }
           }
         }
       }

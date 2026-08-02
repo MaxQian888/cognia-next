@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "tray-panel-window",
+  "description": "Least-privilege capabilities for the tray quick-panel popover window.",
+  "windows": ["tray-panel"],
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:webview:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-inner-size",
+    "core:window:allow-set-size",
+    "core:window:allow-set-resizable",
+    "allow-tray-panel-app-commands",
+    "store:allow-load",
+    "store:allow-get",
+    "store:allow-set",
+    "store:allow-save"
+  ]
+}

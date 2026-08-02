@@ -63,6 +63,26 @@ export const BUILTIN_GRADIENT_PRESETS: Wallpaper[] = [
     kind: "gradient",
     css: "linear-gradient(135deg, #134e5e 0%, #71b280 100%)",
   }),
+  // ── 二次元 backgrounds ────────────────────────────────────────────────────
+  // Companions to the anime themes in `lib/themes/built-in-themes.ts`. Each is
+  // keyed to one theme's surfaces so "pick Sakura, pick Sakura Sky" reads as
+  // one look rather than two decisions; they stand on their own too.
+  preset("gradient-sakura-sky", "Sakura Sky", {
+    kind: "gradient",
+    css: "radial-gradient(circle at 20% 15%, #ffd7e6 0%, transparent 45%), radial-gradient(circle at 85% 25%, #ffe9c9 0%, transparent 40%), linear-gradient(160deg, #fff5f8 0%, #ffc9dd 100%)",
+  }),
+  preset("gradient-neon-city", "Neon City", {
+    kind: "gradient",
+    css: "radial-gradient(ellipse at 25% 85%, #ff2d95 0%, transparent 45%), radial-gradient(ellipse at 78% 20%, #22d3ee 0%, transparent 42%), linear-gradient(180deg, #0b0a12 0%, #1a1730 100%)",
+  }),
+  preset("gradient-mahou", "Mahou", {
+    kind: "gradient",
+    css: "radial-gradient(circle at 70% 25%, #a78bfa 0%, transparent 45%), radial-gradient(circle at 20% 80%, #67e8f9 0%, transparent 40%), linear-gradient(150deg, #14102a 0%, #2b1f5c 100%)",
+  }),
+  preset("gradient-yozora", "Yozora", {
+    kind: "gradient",
+    css: "radial-gradient(circle at 80% 12%, #ffd166 0%, transparent 22%), radial-gradient(circle at 30% 40%, #3b5bb5 0%, transparent 50%), linear-gradient(180deg, #0d1330 0%, #060a1e 100%)",
+  }),
 ]
 
 /** Solid colors — handy for unobtrusive monochrome backgrounds. */

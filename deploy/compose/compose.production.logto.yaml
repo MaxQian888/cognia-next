@@ -1,0 +1,48 @@
+services:
+  logto-postgres:
+    image: ${POSTGRES_IMAGE:?set a digest-pinned POSTGRES_IMAGE}
+    environment:
+      POSTGRES_PASSWORD: ""
+      POSTGRES_PASSWORD_FILE: /run/secrets/logto_db_password
+    secrets: [logto_db_password]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 256
+    cpus: 2.0
+    mem_limit: 2g
+    logging: &production-logging
+      driver: json-file
+      options: { max-size: 10m, max-file: "5", compress: "true" }
+
+  logto-redis:
+    image: ${REDIS_IMAGE:?set a digest-pinned REDIS_IMAGE}
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 128
+    cpus: 1.0
+    mem_limit: 1g
+    logging: *production-logging
+
+  logto:
+    image: ${LOGTO_IMAGE:?set a digest-pinned LOGTO_IMAGE}
+    entrypoint:
+      - sh
+      - -ec
+      - export DB_URL="postgres://postgres:$(cat /run/secrets/logto_db_password)@logto-postgres:5432/logto"; npm run cli db seed -- --swe; exec npm start
+    environment:
+      DB_URL: ""
+    secrets: [logto_db_password]
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,nosuid,nodev
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 512
+    cpus: 2.0
+    mem_limit: 2g
+    logging: *production-logging
+
+secrets:
+  logto_db_password:
+    file: ${LOGTO_DB_PASSWORD_FILE:?set LOGTO_DB_PASSWORD_FILE}

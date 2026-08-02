@@ -271,15 +271,97 @@ Two implementation notes worth keeping:
   next number free costs nothing and removes the chance of two branches shipping
   different definitions of one version.
 
+### D13 — Pairings live in a credential book, split public/secret (2026-08-02)
+
+D12 made switching hosts *safe*; it did not make it possible. `CompanionConfig`
+was one record — one `baseUrl`, one device JWT, one TLS pin — so a client could
+only ever hold one pairing, and everything that needed per-host separation had
+to reconstruct it from whichever field happened to be unique.
+
+That record is now split along its two real seams:
+
+- **`CompanionHostRecord`** — the public half: label, endpoints, TLS pin, the
+  device id the host issued, and a `cursorNamespace`. Plain storage on purpose:
+  Settings must be able to list every paired host while the Vault is locked, and
+  a locked Vault must not look like "no hosts paired".
+- **`CompanionHostCredential`** — the secret half: device JWT and signaling
+  private key. Browser Vault (PBKDF2/AES-GCM) or the platform keystore only, and
+  never part of a record listing.
+- **`CompanionCredentialBook`** — list/get/upsert/remove/set-active over both.
+
+Pairings are addressed by `{hostId, accountNamespace}`. Both halves are required
+because the same physical desktop can be paired from two local accounts, and
+those pairings must never share a token, a watermark, or a mirrored row.
+
+Three invariants the implementation exists to hold:
+
+- **`cursorNamespace` is assigned once and never moves.** It is what sync
+  cursors, outbound-queue rows and the runtime-target database are filed under;
+  a namespace that shifted on a re-pair or a label edit would orphan all three.
+- **`remove` drops the secret before the record.** The record is the only thing
+  that can address the credential, so the reverse order would strand an
+  unreachable device JWT in the keystore.
+- **Connection updates are generation-guarded.** Probes race — a slow "offline"
+  from the LAN prober can land after a fast "online" from the tunnel prober — so
+  an update carrying a stale generation is rejected rather than applied.
+
+`CompanionConfig` itself is unchanged and remains the shape every downstream
+consumer reads; the book ships behind that interface, answering for the
+account's *active* host. Multi-host callers talk to the book directly.
+
+Existing pairings migrate once, ordered so an interrupted migration is
+re-runnable rather than destructive: record → credential → re-file the persisted
+cursors onto the new namespace → **read both halves back and compare** → only
+then remove the legacy record. A verification failure keeps the legacy record
+and reports why; losing a pairing would force a physical re-pair.
+
+### D14 — The mirror wipe is decided by the database, not by the switch (2026-08-02)
+
+D12 keyed cursors by the **device id** the host issued and wiped the mirrored
+tables whenever that key changed. Both halves were too blunt.
+
+`deviceId` is minted per *pairing*, not per host. Re-pairing to the same desktop
+therefore read as a different host: a full re-pull of every mirrored table plus
+a mirror wipe, for a machine whose state had not changed at all. Cursors are now
+keyed by the host's **`cursorNamespace`** (`{accountNamespace}:{hostId}`, D13),
+which is stable across re-pairs and distinct per account — the pair the mirror
+actually belongs to. Rows written by a pre-namespace build are adopted on first
+run rather than left to look foreign; without that step the upgrade itself would
+wipe the mirror of the host the client is still paired to.
+
+The wipe now answers one question, asked of the database rather than of memory:
+**does this database already hold cursors for a host other than this one?**
+Cursors are written per host into the same database as the mirrored rows, so a
+foreign key there means that host's rows are in these very tables, and nothing
+else does.
+
+That single rule is what makes host switching non-destructive. Once an account
+has runtime targets, each host's mirror lives in its own Dexie database
+(`activateAccountDatabase(accountId, targetId)`), so switching activates the
+other host's database and the scan finds nothing foreign: both hosts keep their
+mirror and their watermark, and switching back re-pulls nothing. When two hosts
+*do* share one database — an install with no runtime target, or the legacy
+account-level database — the scan finds the foreign key and the wipe fires
+exactly as it did before. The previous in-memory host-change check is gone; it
+could not tell those two worlds apart, and it also missed every switch that
+happened while the process was not running (routine on iOS, which kills the app
+between the `CompanionConfig` write and the next sync tick).
+
+The credential-book migration re-files the same legacy keys. A sync tick can
+beat it, so both paths agree on which watermark survives — a row already under
+the namespaced key wins — otherwise whichever ran second would rewind the
+other's.
+
 ## Not done
 
-- **Multi-credential book on the phone.** A client still holds exactly one
-  `CompanionConfig`, so moving between a home desktop and a cloud server means
-  re-pairing. D12 makes that *safe* — which is what made it a bug rather than
-  merely inconvenient — but not convenient. Storing several hosts' credentials
-  and switching between them is a separate change; the isolation had to land
-  first, because fast switching without it would have turned a rare corruption
-  into an everyday one.
+- ~~**Multi-credential book on the phone.**~~ **Storage done (2026-08-02)** —
+  see D13, and D14 for the switching path. One thing is deliberately still
+  open, and it is visible from the book's own API: **no UI reaches `list()` /
+  `setActive()` yet.** The book holds several hosts, but every current caller
+  goes through the `CompanionConfig` adapter, which answers for the active host
+  only. The host list and switcher land with the Companion Settings
+  master/detail work; until then the multi-host half of the book is reachable
+  but not exercised in the product.
 - **Workflow placement (ADR-0061 P5 proper).** Nothing chooses *where* a run
   executes. A cron or webhook trigger fires in whichever process received it —
   `trigger-bridge` calls `runWorkflow()` in place — and there is no

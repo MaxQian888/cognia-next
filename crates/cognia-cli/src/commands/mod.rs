@@ -5,7 +5,10 @@
 
 pub(crate) mod acp;
 pub(crate) mod build;
+pub(crate) mod contract;
+pub(crate) mod crash;
 pub(crate) mod dev;
+pub(crate) mod diagnostic_common;
 pub(crate) mod doctor;
 pub(crate) mod embed_version;
 pub(crate) mod import;
@@ -14,6 +17,7 @@ pub(crate) mod install;
 pub(crate) mod keygen;
 pub(crate) mod lint;
 pub(crate) mod list;
+pub(crate) mod logs;
 pub(crate) mod new;
 pub(crate) mod release_key;
 pub(crate) mod release_verify;

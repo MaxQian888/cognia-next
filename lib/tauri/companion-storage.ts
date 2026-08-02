@@ -23,6 +23,9 @@
  */
 
 import { makeDefaultLoader } from "@/lib/capacitor/_shared"
+// The credential book imports this module for its TYPES only (`import type`),
+// so this is a one-way runtime edge, not a cycle.
+import { MigratingCompanionStorage } from "@/lib/companion/credential-book"
 import { isCapacitor } from "@/lib/platform/detect"
 import { getActiveBrowserVault, type EncryptedVaultSecret } from "@/lib/runtime/browser-vault"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
@@ -451,8 +454,28 @@ export class SecureStorageCompanionStorage implements CompanionConfigStorage {
 // Selection
 // ---------------------------------------------------------------------------
 
-export function pickCompanionStorage(): CompanionConfigStorage {
+/**
+ * The pre-book storage for this platform.
+ *
+ * Still exported and still the only writer of the legacy records: it is what
+ * the credential-book migration reads from, and keeping it whole is what makes
+ * an interrupted migration re-runnable rather than destructive (ADR-0097).
+ */
+export function pickLegacyCompanionStorage(): CompanionConfigStorage {
   return isCapacitor() ? new SecureStorageCompanionStorage() : new LocalStorageCompanionStorage()
+}
+
+/**
+ * The active storage: the multi-host credential book, fronted by the one-shot
+ * migration off {@link pickLegacyCompanionStorage}.
+ *
+ * The `CompanionConfig` shape is unchanged — every downstream consumer
+ * (transport, connectivity, sync, endpoint refresh) still reads and writes the
+ * same flat record for the account's *active* host. Multi-host callers talk to
+ * `companionCredentialBook()` directly.
+ */
+export function pickCompanionStorage(): CompanionConfigStorage {
+  return new MigratingCompanionStorage({ legacy: pickLegacyCompanionStorage() })
 }
 
 // Module-scope singleton — picked once at first import.

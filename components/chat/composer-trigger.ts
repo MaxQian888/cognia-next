@@ -8,12 +8,19 @@
 //   - `/cmd` counts at the start of any line. `!shell` and `#mem` only count
 //     when they are the **first** non-whitespace characters of the textarea —
 //     anywhere else they are regular characters (URLs, paths, math, hashtags).
+//     `!`/`#` claim only their FIRST LINE: with the caret on a later line the
+//     `/` and `@` rules take over again (they used to be suppressed for the
+//     whole rest of the message, which silently killed both popovers).
+//   - Same-line command chaining (`/compact /clear`, see `parse-segments.ts`
+//     rule 2b) anchors the popover to the token the caret is in, as long as
+//     every token before it also starts with `/`.
 //   - `@path` triggers anywhere as long as the `@` follows whitespace or the
 //     line start. This skips email addresses (`user@host`).
 //   - The token ends at the next whitespace; backspacing over the trigger
 //     char dismisses the popover.
 
 import { findTokenEnd, isMentionStart } from "@/lib/slash-commands/mention-boundary"
+import { tokenizeLine } from "@/lib/slash-commands/parse-segments"
 
 export type TriggerKind =
   "slash" | "file" | "bash" | "memory" | "agent" | "skill" | "preset" | "wfNode" | "wfEdge"
@@ -70,6 +77,15 @@ export interface DetectTriggerOptions {
    * trigger differs.
    */
   mentionMode?: MentionMode
+  /**
+   * True when at least one command name starts with `query` — used ONLY to
+   * decide whether a SECOND `/token` on the line is a chained command or just a
+   * path argument (`/add-dir /usr/local`). Optional: without it every
+   * `/`-prefixed later token anchors, which is the purely syntactic behaviour.
+   * Never consulted for the line's first token, so argument completion for
+   * commands that take args is unaffected.
+   */
+  hasCommandPrefix?: (query: string) => boolean
 }
 
 const SLASH_TRIGGER: TriggerKind = "slash"
@@ -105,6 +121,51 @@ function namespacePrefixesFor(
 }
 
 /**
+ * Start of the `/` token the popover should complete on the caret's line, or
+ * null when the line has none.
+ *
+ * Base rule (unchanged): the line's FIRST token, and only when it starts with
+ * `/` — a mid-line slash stays inert so URLs and paths are safe.
+ *
+ * Chaining (mirrors `parse-segments.ts` rule 2b): when the caret sits inside a
+ * later token that itself starts with `/`, and every token before it also
+ * starts with `/`, that token becomes the anchor instead — so `/compact /cl`
+ * completes `cl` rather than treating it as `/compact`'s argument.
+ *
+ * Two deliberate limits:
+ *   - The caret's own token must literally start with `/`. A caret in empty
+ *     space after `/pet ` belongs to no token, so it falls back to the first
+ *     token and the argument-completion branch keeps working.
+ *   - Only tokens BEFORE the caret's token are checked. Requiring the whole
+ *     line would break `/help /model opus` (the trailing `opus` would drag the
+ *     anchor back to `/help`, and picking would then overwrite the wrong token).
+ */
+function slashAnchor(
+  value: string,
+  lineStart: number,
+  lineEnd: number,
+  caret: number,
+  hasCommandPrefix?: (query: string) => boolean
+): number | null {
+  const tokens = tokenizeLine(value, lineStart, lineEnd)
+  if (tokens.length === 0 || value[tokens[0].start] !== "/") return null
+
+  const index = tokens.findIndex((tok) => caret >= tok.start && caret <= tok.end)
+  if (index < 0) return tokens[0].start
+  for (let j = 1; j <= index; j++) {
+    if (value[tokens[j].start] !== "/") return tokens[0].start
+  }
+  if (index > 0 && hasCommandPrefix) {
+    // Distinguish a chained command from a path argument: `/add-dir /usr/loc`
+    // matches no command name, so keep the first-token anchor and let the
+    // argument-completion branch handle it.
+    const query = value.slice(tokens[index].start + 1, Math.min(caret, tokens[index].end))
+    if (!hasCommandPrefix(query)) return tokens[0].start
+  }
+  return tokens[index].start
+}
+
+/**
  * Detect whether the caret in `value` is inside an autocomplete trigger token.
  * Returns null when no trigger applies.
  */
@@ -115,22 +176,26 @@ export function detectTrigger(
 ): ComposerTrigger | null {
   if (caret < 0 || caret > value.length) return null
 
-  // `!shell` / `#memory` remain whole-textarea MODES: they short-circuit the
-  // entire submit, so they only count when they are the very first character
-  // (no newline between start and caret).
+  // `!shell` / `#memory` are FIRST-LINE modes: they only count when the trigger
+  // char is the very first character of the textarea, and they claim only that
+  // first line. With the caret on a later line we deliberately fall THROUGH to
+  // the `/` and `@` rules below rather than returning null — returning null is
+  // what used to leave both popovers dead for the whole rest of the message.
   const firstChar = value[0]
   if (firstChar === "!" || firstChar === "#") {
     const firstNewline = value.indexOf("\n")
-    const lineEnd = firstNewline === -1 ? value.length : firstNewline
-    if (caret > lineEnd) return null
-    const kind: TriggerKind = firstChar === "!" ? BASH_TRIGGER : MEMORY_TRIGGER
-    // `!` and `#` treat the whole rest of the line as the query.
-    return {
-      kind: kind,
-      tokenStart: 0,
-      tokenEnd: lineEnd,
-      query: value.slice(1, Math.min(caret, lineEnd)),
+    const modeLineEnd = firstNewline === -1 ? value.length : firstNewline
+    if (caret <= modeLineEnd) {
+      const kind: TriggerKind = firstChar === "!" ? BASH_TRIGGER : MEMORY_TRIGGER
+      // `!` and `#` treat the whole rest of the line as the query.
+      return {
+        kind: kind,
+        tokenStart: 0,
+        tokenEnd: modeLineEnd,
+        query: value.slice(1, Math.min(caret, modeLineEnd)),
+      }
     }
+    // caret is past the first line → fall through.
   }
 
   // `/command` triggers at the start of ANY line (allowing leading whitespace),
@@ -138,13 +203,10 @@ export function detectTrigger(
   // the caret's current line.
   {
     const lineStart = value.lastIndexOf("\n", caret - 1) + 1
-    let slashPos = lineStart
-    while (slashPos < value.length && value[slashPos] !== "\n" && /\s/.test(value[slashPos])) {
-      slashPos++
-    }
-    if (value[slashPos] === "/" && caret >= slashPos) {
-      const nextNewline = value.indexOf("\n", lineStart)
-      const lineEnd = nextNewline === -1 ? value.length : nextNewline
+    const nextNewline = value.indexOf("\n", lineStart)
+    const lineEnd = nextNewline === -1 ? value.length : nextNewline
+    const slashPos = slashAnchor(value, lineStart, lineEnd, caret, opts?.hasCommandPrefix)
+    if (slashPos !== null && caret >= slashPos) {
       const tokenEnd = findTokenEnd(value, slashPos + 1, lineEnd)
       let argumentFields: Pick<ComposerTrigger, "argumentStart" | "argumentEnd" | "argumentQuery"> =
         {}

@@ -76,15 +76,31 @@ export const TEXT_EXTS = new Set([
   ".less",
 ])
 
-/** Any `@token` ending in a `.<alnum>` extension. */
-const FILE_REF = /@([^\s]+\.[A-Za-z0-9]+)/g
+/**
+ * Two accepted reference forms:
+ *
+ *   - `@path/to/file.png` — the bare form. Requires a `.<alnum>` extension,
+ *     because without one every `@mention` in ordinary prose would be read as a
+ *     file. Cannot express a path containing a space.
+ *   - `@"path/to/file"` — the quoted form. Delimited, so it needs no extension
+ *     heuristic and accepts spaces. This is what the SDK emits for structured
+ *     attachments, where the path is data rather than something a human typed.
+ *
+ * The bare form is listed first and matched first, so existing prompts are
+ * unaffected. "Screen Shot 2026-01-01 at 10.14.32.png" and extension-less files
+ * like `Makefile` are reachable only through the quoted form.
+ */
+const FILE_REF = /@"([^"\n]+)"|@([^\s"]+\.[A-Za-z0-9]+)/g
 const SKILL_OR_AGENT = /^(skill|agent):/
 
 export function extractFileRefs(prompt: string): string[] {
   const refs: string[] = []
   for (const m of prompt.matchAll(FILE_REF)) {
-    const p = m[1]
-    if (SKILL_OR_AGENT.test(p)) continue
+    // Exactly one alternative matched, so exactly one group is filled: the
+    // quoted form fills group 1, the bare form group 2.
+    const p = (m[1] ?? m[2] ?? "").trim()
+    // Reachable via `@"   "` — quoted whitespace is a ref to nothing.
+    if (!p || SKILL_OR_AGENT.test(p)) continue
     refs.push(p)
   }
   return refs

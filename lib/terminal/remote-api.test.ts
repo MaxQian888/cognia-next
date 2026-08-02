@@ -4,14 +4,7 @@ jest.mock("@/lib/tauri", () => ({
 
 import { transport } from "@/lib/tauri"
 
-import {
-  completeTerminalPaths,
-  execTerminalCommand,
-  killTerminalPort,
-  killTerminalSession,
-  listTerminalSessions,
-  listTerminalSessionsForProject,
-} from "./remote-api"
+import { completeTerminalPaths, execTerminalCommand, killTerminalPort } from "./remote-api"
 
 const callMock = transport.call as jest.Mock
 
@@ -20,24 +13,6 @@ beforeEach(() => {
 })
 
 describe("terminal remote-api", () => {
-  it("listTerminalSessions calls terminal_list_all with no args", async () => {
-    callMock.mockResolvedValue([{ id: "s-1" }])
-    const sessions = await listTerminalSessions()
-    expect(callMock).toHaveBeenCalledWith("terminal_list_all")
-    expect(sessions).toEqual([{ id: "s-1" }])
-  })
-
-  it("listTerminalSessionsForProject passes projectId", async () => {
-    callMock.mockResolvedValue([])
-    await listTerminalSessionsForProject("p-1")
-    expect(callMock).toHaveBeenCalledWith("terminal_list_for_project", { projectId: "p-1" })
-  })
-
-  it("killTerminalSession passes the session id", async () => {
-    await killTerminalSession("s-9")
-    expect(callMock).toHaveBeenCalledWith("terminal_kill", { id: "s-9" })
-  })
-
   it("execTerminalCommand maps the full request shape", async () => {
     const result = { stdout: "ok", stderr: "", exitCode: 0, timedOut: false }
     callMock.mockResolvedValue(result)
@@ -110,6 +85,8 @@ describe("terminal remote-api", () => {
 
   it("propagates transport rejections (e.g. 403 remote-control denial)", async () => {
     callMock.mockRejectedValue(new Error("remote control not allowed"))
-    await expect(listTerminalSessions()).rejects.toThrow("remote control not allowed")
+    await expect(execTerminalCommand({ command: "true" })).rejects.toThrow(
+      "remote control not allowed"
+    )
   })
 })

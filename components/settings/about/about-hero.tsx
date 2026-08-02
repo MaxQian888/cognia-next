@@ -40,32 +40,50 @@ export function AboutHero() {
 
   return (
     <div
-      className="flex items-center gap-4 rounded-xl border bg-card p-5 text-card-foreground shadow-sm"
+      className="relative isolate overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-sm"
       data-testid="about-hero"
     >
-      <Image
-        src="/icons/icon-512.png"
-        alt={t("iconAlt", { name })}
-        width={56}
-        height={56}
-        className="size-14 rounded-2xl shadow-sm"
-        unoptimized
-        priority
+      {/* Ambient wash — two blurred primary orbs behind the identity block. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-24 -left-20 -z-10 size-64 rounded-full bg-primary/15 blur-3xl"
       />
-      <div className="min-w-0 space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="truncate text-lg font-semibold">{name}</h2>
-          <Badge variant={CHANNEL_VARIANT[channel]}>{t(`channel.${channel}`)}</Badge>
-          {isWeb && (
-            <Badge variant="outline" data-testid="about-web-badge">
-              {t("webBadge")}
-            </Badge>
-          )}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-24 -bottom-28 -z-10 size-72 rounded-full bg-primary/10 blur-3xl"
+      />
+
+      <div className="flex flex-col items-center gap-4 p-6 text-center sm:flex-row sm:items-center sm:gap-5 sm:p-7 sm:text-left">
+        <Image
+          src="/icons/icon-512.png"
+          alt={t("iconAlt", { name })}
+          width={72}
+          height={72}
+          className="size-16 shrink-0 rounded-2xl shadow-md ring-1 ring-border sm:size-[72px]"
+          unoptimized
+          priority
+        />
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+            <h2 className="min-w-0 truncate text-xl font-semibold tracking-tight sm:text-2xl">
+              {name}
+            </h2>
+            <Badge variant={CHANNEL_VARIANT[channel]}>{t(`channel.${channel}`)}</Badge>
+            {isWeb && (
+              <Badge variant="outline" data-testid="about-web-badge">
+                {t("webBadge")}
+              </Badge>
+            )}
+          </div>
+          <p className="text-sm text-pretty text-muted-foreground">{t("tagline")}</p>
+          <div className="flex flex-wrap items-center justify-center gap-2 pt-0.5 sm:justify-start">
+            <span className="inline-flex items-center gap-1.5 rounded-full border bg-background/70 px-2.5 py-1 text-xs text-muted-foreground">
+              <span aria-hidden className="size-1.5 rounded-full bg-primary" />
+              {t("versionLine")}
+              <span className="font-mono text-foreground">{APP_VERSION}</span>
+            </span>
+          </div>
         </div>
-        <p className="text-xs text-muted-foreground">{t("tagline")}</p>
-        <p className="text-xs text-muted-foreground">
-          {t("versionLine")} <span className="font-mono">{APP_VERSION}</span>
-        </p>
       </div>
     </div>
   )

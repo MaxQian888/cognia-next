@@ -117,6 +117,98 @@ describe("parseSegments", () => {
     expect(cursor).toBe(input.length)
   })
 
+  // ── Rule 2b: same-line chaining ────────────────────────────────────────
+  // A line that is NOTHING BUT known commands runs all of them. Any ordinary
+  // token on the line falls back to rule 2 (first token = command, rest = args).
+
+  it("chains multiple known commands on one line", () => {
+    expect(shape(parseSegments("/help /model", isKnown))).toEqual([
+      { k: "cmd", name: "help", args: "", raw: "/help", start: 0, end: 5 },
+      { k: "txt", value: " ", start: 5, end: 6 },
+      { k: "cmd", name: "model", args: "", raw: "/model", start: 6, end: 12 },
+    ])
+  })
+
+  it("keeps chained segments contiguous across odd spacing", () => {
+    const input = "  /help   /model  "
+    const segs = parseSegments(input, isKnown)
+    let cursor = 0
+    for (const s of segs) {
+      expect(s.start).toBe(cursor)
+      cursor = s.end
+    }
+    expect(cursor).toBe(input.length)
+    expect(segs.filter((s) => s.kind === "command")).toHaveLength(2)
+  })
+
+  it("does NOT chain when any token is not a slash command (args win)", () => {
+    // The motivating false positive: a path argument must stay an argument.
+    expect(shape(parseSegments("/review src/a.ts", isKnown))).toEqual([
+      { k: "cmd", name: "review", args: "src/a.ts", raw: "/review src/a.ts", start: 0, end: 16 },
+    ])
+  })
+
+  it("does NOT chain when a slash token is not a known command", () => {
+    expect(shape(parseSegments("/help /nonexistent", isKnown))).toEqual([
+      {
+        k: "cmd",
+        name: "help",
+        args: "/nonexistent",
+        raw: "/help /nonexistent",
+        start: 0,
+        end: 18,
+      },
+    ])
+  })
+
+  it("does NOT chain an absolute path argument", () => {
+    expect(shape(parseSegments("/review /usr/local", isKnown))).toEqual([
+      {
+        k: "cmd",
+        name: "review",
+        args: "/usr/local",
+        raw: "/review /usr/local",
+        start: 0,
+        end: 18,
+      },
+    ])
+  })
+
+  it("leaves a one-token line on the rule-2 path (trailing space stays in raw)", () => {
+    // Guard for the `tokens.length >= 2` requirement: the single-command case
+    // must keep `end: contentEnd`, not the token end.
+    expect(shape(parseSegments("/clear   ", isKnown))).toEqual([
+      { k: "cmd", name: "clear", args: "", raw: "/clear   ", start: 0, end: 9 },
+    ])
+  })
+
+  it("does not treat a lone slash as a chainable token", () => {
+    expect(shape(parseSegments("/ /help", isKnown))).toEqual([
+      { k: "txt", value: "/ /help", start: 0, end: 7 },
+    ])
+  })
+
+  it("chains nested command names", () => {
+    expect(shape(parseSegments("/foo/bar /help", isKnown))).toEqual([
+      { k: "cmd", name: "foo/bar", args: "", raw: "/foo/bar", start: 0, end: 8 },
+      { k: "txt", value: " ", start: 8, end: 9 },
+      { k: "cmd", name: "help", args: "", raw: "/help", start: 9, end: 14 },
+    ])
+  })
+
+  it("chains on a later line and keeps CRLF out of raw", () => {
+    const input = "intro\r\n/help /clear\r\ntail"
+    const segs = parseSegments(input, isKnown)
+    const cmds = segs.filter((s) => s.kind === "command")
+    expect(cmds.map((c) => (c.kind === "command" ? c.raw : ""))).toEqual(["/help", "/clear"])
+    let cursor = 0
+    for (const s of segs) {
+      expect(s.start).toBe(cursor)
+      cursor = s.end
+    }
+    expect(cursor).toBe(input.length)
+  })
+
   it("preserves positional arg spacing inside args", () => {
     const out = shape(parseSegments("/model   opus   fast", isKnown))
     expect(out[0]).toMatchObject({ k: "cmd", name: "model", args: "opus   fast" })

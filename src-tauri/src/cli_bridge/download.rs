@@ -300,6 +300,12 @@ async fn download_inner(
     detect::register_managed_dir(install_dir.clone());
     detect::invalidate("cognia");
 
+    // The durable terminal host is a separate process and cannot see the
+    // in-process managed-dir registry, so push the new PATH view across. Only
+    // shells spawned from here on pick it up — a live PTY's environment was
+    // fixed at `execve`.
+    crate::terminal_host_bridge::resync_terminal_host_path(app).await;
+
     emit_progress(app, "done", Some(1.0), "Installed");
     Ok(DownloadResult {
         version: version_label,

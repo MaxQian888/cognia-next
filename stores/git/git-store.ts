@@ -94,6 +94,7 @@ export interface GitState {
   // --- status ---
   status: GitStatus | null
   loadingStatus: boolean
+  loadError: string | null
 
   // --- selection ---
   selectedPath: string | null
@@ -131,6 +132,7 @@ export interface GitState {
   setRepoState: (state: GitRepoState | null) => void
   setStatus: (status: GitStatus | null) => void
   setLoadingStatus: (loading: boolean) => void
+  setLoadError: (message: string | null) => void
   selectFile: (path: string | null, staged: boolean) => void
   selectCommit: (sha: string | null) => void
   cacheDiff: (key: string, diff: GitDiff) => void
@@ -158,6 +160,7 @@ export const useGitStore = create<GitState>()(
       repoState: null,
       status: null,
       loadingStatus: false,
+      loadError: null,
       selectedPath: null,
       selectedStaged: false,
       selectedCommit: null,
@@ -183,6 +186,8 @@ export const useGitStore = create<GitState>()(
           rootDir,
           repoState: null,
           status: null,
+          loadingStatus: false,
+          loadError: null,
           selectedPath: null,
           selectedCommit: null,
           diffCache: {},
@@ -201,6 +206,7 @@ export const useGitStore = create<GitState>()(
       setRepoState: (repoState) => set({ repoState }),
       setStatus: (status) => set({ status }),
       setLoadingStatus: (loadingStatus) => set({ loadingStatus }),
+      setLoadError: (loadError) => set({ loadError }),
 
       selectFile: (path, staged) =>
         set({ selectedPath: path, selectedStaged: staged, selectedCommit: null }),
@@ -257,6 +263,8 @@ export const useGitStore = create<GitState>()(
         set({
           repoState: null,
           status: null,
+          loadingStatus: false,
+          loadError: null,
           selectedPath: null,
           selectedCommit: null,
           diffCache: {},

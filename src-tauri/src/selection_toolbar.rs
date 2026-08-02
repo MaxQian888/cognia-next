@@ -711,7 +711,7 @@ pub async fn selection_toolbar_start(
                         InputEvent::Scroll { .. } => {
                             dismiss(&app_handle, &coordinator, DismissReason::Interrupted)
                         }
-                        InputEvent::KeyDown { vk, ts_ms } => {
+                        InputEvent::KeyDown { vk, ts_ms, .. } => {
                             handle_key_down(
                                 &app_handle,
                                 &coordinator,
@@ -1745,23 +1745,9 @@ fn ensure_window<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, Str
         return Err(format!("selection toolbar NSPanel setup failed: {error}"));
     }
     #[cfg(target_os = "windows")]
-    apply_windows_no_activate(&window)?;
+    crate::window_utils::apply_windows_no_activate(&window)?;
 
     Ok(window)
-}
-
-#[cfg(target_os = "windows")]
-fn apply_windows_no_activate(window: &WebviewWindow) -> Result<(), String> {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongW, SetWindowLongW, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    };
-    let hwnd = window.hwnd().map_err(|error| error.to_string())?;
-    let current = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) };
-    let next = current | WS_EX_NOACTIVATE.0 as i32 | WS_EX_TOOLWINDOW.0 as i32;
-    unsafe {
-        SetWindowLongW(hwnd, GWL_EXSTYLE, next);
-    }
-    Ok(())
 }
 
 #[cfg(target_os = "windows")]

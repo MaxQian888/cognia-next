@@ -33,7 +33,7 @@ describe("AppearanceNav", () => {
 
   it("renders one entry per panel", () => {
     renderNav()
-    expect(screen.getAllByRole("listitem")).toHaveLength(11)
+    expect(screen.getAllByRole("listitem")).toHaveLength(12)
   })
 
   it("marks the active entry for assistive tech, not just visually", () => {
@@ -54,7 +54,7 @@ describe("AppearanceNav", () => {
   it("omits hidden entries", () => {
     renderNav({ hiddenIds: ["plugins"] })
     expect(screen.queryByTestId("appearance-nav-item-plugins")).not.toBeInTheDocument()
-    expect(screen.getAllByRole("listitem")).toHaveLength(10)
+    expect(screen.getAllByRole("listitem")).toHaveLength(11)
   })
 
   // Hiding the only member of a group must not leave a dangling header.

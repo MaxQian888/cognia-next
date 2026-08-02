@@ -1,0 +1,19 @@
+services:
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:?set a digest-pinned PROMETHEUS_IMAGE}
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid,nodev
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 256
+    cpus: 1.0
+    mem_limit: 1g
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "5", compress: "true" }
+    secrets: [metrics_operator_token]
+
+secrets:
+  metrics_operator_token:
+    file: ${METRICS_OPERATOR_TOKEN_FILE:?set METRICS_OPERATOR_TOKEN_FILE}

@@ -18,10 +18,13 @@
 import { useMemo, useState } from "react"
 import { useFormatter, useNow, useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { CopyIcon, PlayIcon, SearchIcon, TerminalSquareIcon } from "lucide-react"
+import { SearchIcon, TerminalSquareIcon } from "lucide-react"
 
 import { MeSection } from "@/components/mobile/me/me-section"
+import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
 import { Button } from "@/components/ui/button"
+import { CopyIcon as AnimatedCopyIcon } from "@/components/ui/copy"
+import { PlayIcon as AnimatedPlayIcon } from "@/components/ui/play"
 import {
   Dialog,
   DialogContent,
@@ -199,7 +202,11 @@ export function MobileCommandHistory() {
                       {format.relativeTime(new Date(row.ts), now)}
                     </span>
                   </span>
-                  <CopyIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <AnimatedActionIcon
+                    icon={AnimatedCopyIcon}
+                    size={16}
+                    className="text-muted-foreground"
+                  />
                 </button>
                 <button
                   type="button"
@@ -208,7 +215,7 @@ export function MobileCommandHistory() {
                   data-testid={`command-history-run-${row.id}`}
                   className="flex shrink-0 items-center px-3 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground active:bg-accent"
                 >
-                  <PlayIcon className="size-4" aria-hidden />
+                  <AnimatedActionIcon icon={AnimatedPlayIcon} size={16} />
                 </button>
               </div>
             ))}

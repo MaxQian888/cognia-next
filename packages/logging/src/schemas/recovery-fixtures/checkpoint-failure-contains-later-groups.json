@@ -1,0 +1,109 @@
+{
+  "name": "a plugins checkpoint failure skips every later group and names the suspect",
+  "buildId": "build-2026-08-01-01",
+  "steps": [
+    {
+      "at": 0,
+      "op": "unhealthyStart"
+    },
+    {
+      "at": 60000,
+      "op": "unhealthyStart"
+    },
+    {
+      "at": 120000,
+      "op": "heartbeat"
+    },
+    {
+      "at": 121000,
+      "op": "checkpoint",
+      "subsystem": "database",
+      "success": true
+    },
+    {
+      "at": 122000,
+      "op": "checkpoint",
+      "reasonCode": "plugins.probe_failed",
+      "subsystem": "plugins",
+      "success": false
+    }
+  ],
+  "expected": {
+    "schemaVersion": 1,
+    "buildId": "build-2026-08-01-01",
+    "mode": "safe",
+    "unhealthyStarts": [1785000000000, 1785000060000],
+    "checkpoints": [
+      {
+        "subsystem": "database",
+        "status": "passed",
+        "at": 1785000121000
+      },
+      {
+        "subsystem": "plugins",
+        "status": "failed",
+        "reasonCode": "plugins.probe_failed",
+        "at": 1785000122000
+      },
+      {
+        "subsystem": "sidecar",
+        "status": "skipped",
+        "reasonCode": "blocked_by.plugins",
+        "at": 1785000122000
+      },
+      {
+        "subsystem": "connectors",
+        "status": "skipped",
+        "reasonCode": "blocked_by.plugins",
+        "at": 1785000122000
+      },
+      {
+        "subsystem": "workflow",
+        "status": "skipped",
+        "reasonCode": "blocked_by.plugins",
+        "at": 1785000122000
+      },
+      {
+        "subsystem": "external-agent",
+        "status": "skipped",
+        "reasonCode": "blocked_by.plugins",
+        "at": 1785000122000
+      }
+    ],
+    "suspectSubsystem": "plugins",
+    "suspectReasonCode": "plugins.probe_failed",
+    "rendererReload": {
+      "automaticReloadsDisabled": false
+    },
+    "childRestarts": {},
+    "disabledSubsystems": [],
+    "rendererAlive": true,
+    "audit": [
+      {
+        "at": 1785000000000,
+        "code": "recovery.start.unhealthy",
+        "success": false,
+        "reasonCode": "start.first_failure"
+      },
+      {
+        "at": 1785000060000,
+        "code": "recovery.start.unhealthy",
+        "success": false,
+        "reasonCode": "start.second_failure_in_window"
+      },
+      {
+        "at": 1785000121000,
+        "code": "recovery.checkpoint.passed",
+        "subsystem": "database",
+        "success": true
+      },
+      {
+        "at": 1785000122000,
+        "code": "recovery.checkpoint.failed",
+        "subsystem": "plugins",
+        "success": false,
+        "reasonCode": "plugins.probe_failed"
+      }
+    ]
+  }
+}

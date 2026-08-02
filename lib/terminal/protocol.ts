@@ -1,4 +1,11 @@
-/** Canonical terminal framing shared by local socket, LAN WebSocket, and WebRTC. */
+/**
+ * Canonical terminal framing shared by local socket, LAN WebSocket, and WebRTC.
+ *
+ * Mirrors `crates/cognia-terminal/src/protocol.rs` by *number*, not by name —
+ * `decodeTerminalFrame` throws on an unmapped discriminant, which is why the
+ * Rust side holds the invariant that the host never pushes a frame kind the
+ * client did not solicit. Keep both enums in lockstep.
+ */
 
 export const TERMINAL_PROTOCOL_MAGIC = "CGTH"
 export const TERMINAL_FRAME_HEADER_BYTES = 35
@@ -26,6 +33,12 @@ export enum TerminalFrameKind {
   TransportState = 18,
   Exit = 19,
   Error = 20,
+  /** Client→host: park/unpark a session's reader. Answered with `Ack`. */
+  FlowControl = 21,
+  /** Client→host: ask for a session's command ring and/or the host audit log. */
+  HistoryQuery = 22,
+  /** Host→client: answer to `HistoryQuery`. Never pushed unsolicited. */
+  HistorySnapshot = 23,
 }
 
 export const TerminalFrameFlag = {
@@ -177,8 +190,12 @@ export function splitTerminalStreamFrames(
 }
 
 function isFrameKind(value: number): value is TerminalFrameKind {
+  // Bounded by the highest assigned discriminant, not by `Error` — the range
+  // has to grow with the enum or newly added kinds decode as "unknown".
   return (
-    Number.isInteger(value) && value >= TerminalFrameKind.Hello && value <= TerminalFrameKind.Error
+    Number.isInteger(value) &&
+    value >= TerminalFrameKind.Hello &&
+    value <= TerminalFrameKind.HistorySnapshot
   )
 }
 

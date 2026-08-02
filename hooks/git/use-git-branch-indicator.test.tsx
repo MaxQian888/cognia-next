@@ -182,6 +182,32 @@ describe("useGitBranchIndicator", () => {
     expect(refreshGitStatusMock).not.toHaveBeenCalled()
   })
 
+  it("starts the watcher even when the initial repository load fails", async () => {
+    loadGitRepoMock.mockRejectedValueOnce(new Error("load failed"))
+    act(() => useGitStore.setState({ rootDir: "/repo" }))
+
+    renderHook(() => useGitBranchIndicator())
+
+    await waitFor(() => expect(loadGitRepoMock).toHaveBeenCalledWith("/repo"))
+    await waitFor(() => expect(watchStartMock).toHaveBeenCalledWith("/repo"))
+  })
+
+  it("keeps the controller live when watcher start or event refresh rejects", async () => {
+    watchStartMock.mockRejectedValueOnce(new Error("watch unavailable"))
+    refreshGitStatusMock.mockRejectedValueOnce(new Error("refresh failed"))
+    act(() => useGitStore.setState({ rootDir: "/repo" }))
+
+    renderHook(() => useGitBranchIndicator())
+    await waitFor(() => expect(watchStartMock).toHaveBeenCalledWith("/repo"))
+
+    act(() => eventHandler?.({ rootDir: "/repo" }))
+    await waitFor(() => expect(refreshGitStatusMock).toHaveBeenCalledWith("/repo"))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(subscribeMock).toHaveBeenCalledTimes(1)
+  })
+
   it("stops the watcher on unmount", async () => {
     act(() => useGitStore.setState({ rootDir: "/repo" }))
     const { unmount } = renderHook(() => useGitBranchIndicator())

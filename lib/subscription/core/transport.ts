@@ -215,6 +215,45 @@ export async function authedGet(
   return await transport.call<string>("subscription_authed_get", { url, headers: entries })
 }
 
+export interface AuthedHttpRequest {
+  url: string
+  method?: "GET" | "POST"
+  headers?: Record<string, string>
+  body?: string
+  timeoutMs?: number
+  maxBodyBytes?: number
+}
+
+export interface AuthedHttpHeader {
+  name: string
+  value: string
+}
+
+export interface AuthedHttpResponse {
+  status: number
+  headers: AuthedHttpHeader[]
+  body: string
+}
+
+/**
+ * Typed CORS-free transport for balance and quota sources. Unlike the legacy
+ * GET wrapper, non-2xx responses are returned intact so adapters can classify
+ * authentication, quota, and rate-limit failures without parsing error text.
+ */
+export async function authedRequest(request: AuthedHttpRequest): Promise<AuthedHttpResponse> {
+  const headers = Object.entries(request.headers ?? {}).map(([name, value]) => ({ name, value }))
+  return await transport.call<AuthedHttpResponse>("subscription_authed_request", {
+    request: {
+      url: request.url,
+      method: request.method ?? "GET",
+      headers,
+      body: request.body,
+      timeoutMs: request.timeoutMs ?? 15_000,
+      maxBodyBytes: request.maxBodyBytes ?? 1_048_576,
+    },
+  })
+}
+
 /** One usage window returned by `subscription_volcengine_usage`. */
 export interface VolcengineUsageTier {
   /** cognia meter id: "session" | "weekly" | "monthly". */

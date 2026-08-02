@@ -9,6 +9,9 @@ import {
   TERMINAL_HISTORY_RING_SIZE,
   TERMINAL_PROMPT_RING_SIZE,
   displayTitle,
+  orderTabRows,
+  snapPanelPct,
+  type TerminalSessionRow,
   type TerminalStoreState,
 } from "./terminal-store"
 import type { SessionInfo } from "@/lib/terminal/types"
@@ -71,6 +74,8 @@ describe("dock layout state", () => {
     const persisted = partialize?.({ ...useTerminalStore.getState(), panelOpen: true })
     expect(persisted).toEqual({
       panelHeightPct: useTerminalStore.getState().panelHeightPct,
+      panelWidthPct: useTerminalStore.getState().panelWidthPct,
+      panelPosition: useTerminalStore.getState().panelPosition,
       pendingReloadLayout: {
         splitPanes: { a: ["b"] },
         focusedPaneByAnchor: { a: "a" },
@@ -79,6 +84,7 @@ describe("dock layout state", () => {
         customTitles: { b: "Tests" },
         stableHostSessionIds: [],
         controllerBySession: {},
+        tabOrder: {},
       },
     })
   })
@@ -111,6 +117,221 @@ describe("dock layout state", () => {
     const migrated = migrate?.({ panelHeightPct: "junk" }, 1) as { panelHeightPct: number }
     expect(migrated.panelHeightPct).toBe(TERMINAL_LAYOUT_DEFAULTS.panelHeightPct)
   })
+
+  it("migrate v4 → v5 fills in the dock edge and width", () => {
+    const { migrate } = useTerminalStore.persist.getOptions()
+    const migrated = migrate?.({ panelHeightPct: 40 }, 4) as {
+      panelPosition: string
+      panelWidthPct: number
+    }
+    expect(migrated.panelPosition).toBe("bottom")
+    expect(migrated.panelWidthPct).toBe(TERMINAL_LAYOUT_DEFAULTS.panelWidthPct)
+  })
+
+  it("migrate v5 keeps a valid dock edge and clamps an out-of-range width", () => {
+    const { migrate } = useTerminalStore.persist.getOptions()
+    const migrated = migrate?.({ panelPosition: "right", panelWidthPct: 500 }, 5) as {
+      panelPosition: string
+      panelWidthPct: number
+    }
+    expect(migrated.panelPosition).toBe("right")
+    expect(migrated.panelWidthPct).toBe(TERMINAL_LAYOUT_BOUNDS.panelMaxWidthPct)
+  })
+
+  it("migrate rejects a garbage dock edge rather than trusting localStorage", () => {
+    const { migrate } = useTerminalStore.persist.getOptions()
+    const migrated = migrate?.({ panelPosition: "sideways", panelWidthPct: "wide" }, 5) as {
+      panelPosition: string
+      panelWidthPct: number
+    }
+    expect(migrated.panelPosition).toBe(TERMINAL_LAYOUT_DEFAULTS.panelPosition)
+    expect(migrated.panelWidthPct).toBe(TERMINAL_LAYOUT_DEFAULTS.panelWidthPct)
+  })
+})
+
+describe("dock position", () => {
+  it("starts docked at the bottom", () => {
+    expect(useTerminalStore.getState().panelPosition).toBe("bottom")
+    expect(useTerminalStore.getState().panelWidthPct).toBe(TERMINAL_LAYOUT_DEFAULTS.panelWidthPct)
+  })
+
+  it("moving the dock leaves the other axis's size untouched", () => {
+    useTerminalStore.getState().setPanelHeight(44)
+    useTerminalStore.getState().setPanelPosition("right")
+    expect(useTerminalStore.getState().panelHeightPct).toBe(44)
+    expect(useTerminalStore.getState().panelWidthPct).toBe(TERMINAL_LAYOUT_DEFAULTS.panelWidthPct)
+  })
+
+  it("moving the dock exits maximize so the other axis's max is not inherited", () => {
+    useTerminalStore.getState().toggleMaximized()
+    expect(useTerminalStore.getState().maximized).toBe(true)
+    useTerminalStore.getState().setPanelPosition("right")
+    expect(useTerminalStore.getState().maximized).toBe(false)
+  })
+
+  it("setting the position it already has is a no-op", () => {
+    useTerminalStore.getState().toggleMaximized()
+    useTerminalStore.getState().setPanelPosition("bottom")
+    expect(useTerminalStore.getState().maximized).toBe(true)
+  })
+
+  it("setPanelSize routes to the axis the dock currently occupies", () => {
+    useTerminalStore.getState().setPanelSize(40)
+    expect(useTerminalStore.getState().panelHeightPct).toBe(40)
+    expect(useTerminalStore.getState().panelSizePct()).toBe(40)
+
+    useTerminalStore.getState().setPanelPosition("right")
+    useTerminalStore.getState().setPanelSize(45)
+    expect(useTerminalStore.getState().panelWidthPct).toBe(45)
+    expect(useTerminalStore.getState().panelHeightPct).toBe(40)
+    expect(useTerminalStore.getState().panelSizePct()).toBe(45)
+  })
+
+  it("clamps the width to its own, narrower bounds", () => {
+    useTerminalStore.getState().setPanelPosition("right")
+    useTerminalStore.getState().setPanelSize(99)
+    expect(useTerminalStore.getState().panelWidthPct).toBe(TERMINAL_LAYOUT_BOUNDS.panelMaxWidthPct)
+    useTerminalStore.getState().setPanelSize(1)
+    expect(useTerminalStore.getState().panelWidthPct).toBe(TERMINAL_LAYOUT_BOUNDS.panelMinWidthPct)
+  })
+
+  it("setPanelHeight still tunes the height while docked right", () => {
+    useTerminalStore.getState().setPanelPosition("right")
+    useTerminalStore.getState().setPanelHeight(41)
+    expect(useTerminalStore.getState().panelHeightPct).toBe(41)
+    expect(useTerminalStore.getState().panelWidthPct).toBe(TERMINAL_LAYOUT_DEFAULTS.panelWidthPct)
+  })
+
+  it("maximize round-trips on the width axis", () => {
+    useTerminalStore.getState().setPanelPosition("right")
+    useTerminalStore.getState().setPanelSize(40)
+    useTerminalStore.getState().toggleMaximized()
+    expect(useTerminalStore.getState().panelWidthPct).toBe(TERMINAL_LAYOUT_BOUNDS.panelMaxWidthPct)
+    expect(useTerminalStore.getState().preMaxWidthPct).toBe(40)
+    useTerminalStore.getState().toggleMaximized()
+    expect(useTerminalStore.getState().panelWidthPct).toBe(40)
+    expect(useTerminalStore.getState().maximized).toBe(false)
+  })
+})
+
+describe("snapPanelPct", () => {
+  it("settles onto a nearby snap point", () => {
+    expect(snapPanelPct(24.3)).toBe(25)
+    expect(snapPanelPct(50.9)).toBe(50)
+  })
+
+  it("leaves a value outside the tolerance alone", () => {
+    expect(snapPanelPct(40)).toBe(40)
+    expect(snapPanelPct(28)).toBe(28)
+  })
+
+  it("picks the closest snap when two are in range", () => {
+    expect(snapPanelPct(32.4, [32, 33], 2)).toBe(32)
+    expect(snapPanelPct(32.6, [32, 33], 2)).toBe(33)
+  })
+
+  it("is a no-op with no snap points or a non-finite value", () => {
+    expect(snapPanelPct(24.3, [])).toBe(24.3)
+    expect(snapPanelPct(Number.NaN)).toBeNaN()
+  })
+
+  it("drag and arrow-key resizes both land on a snap point", () => {
+    useTerminalStore.getState().setPanelSize(33.4)
+    expect(useTerminalStore.getState().panelHeightPct).toBe(33)
+  })
+})
+
+describe("tab order", () => {
+  function row(id: string, createdAt: number): TerminalSessionRow {
+    return { id, createdAt } as TerminalSessionRow
+  }
+
+  it("orderTabRows falls back to creation order without an order list", () => {
+    const rows = [row("b", 2), row("a", 1)]
+    expect(orderTabRows(rows, undefined).map((r) => r.id)).toEqual(["a", "b"])
+    expect(orderTabRows(rows, []).map((r) => r.id)).toEqual(["a", "b"])
+  })
+
+  it("orderTabRows honours the order and appends unranked rows by createdAt", () => {
+    const rows = [row("a", 1), row("b", 2), row("c", 3), row("d", 4)]
+    expect(orderTabRows(rows, ["c", "a"]).map((r) => r.id)).toEqual(["c", "a", "b", "d"])
+  })
+
+  it("setTabOrder drops foreign and unknown ids and appends the leftovers", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().registerSession(baseInfo({ id: "b" }))
+    useTerminalStore.getState().registerSession(baseInfo({ id: "x", projectId: "proj-b" }))
+
+    useTerminalStore.getState().setTabOrder("proj-a", ["b", "x", "ghost", "b"])
+    expect(useTerminalStore.getState().tabOrder["proj-a"]).toEqual(["b", "a"])
+  })
+
+  it("tabsForProject reflects the user order", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().registerSession(baseInfo({ id: "b" }))
+    useTerminalStore.getState().setTabOrder("proj-a", ["b", "a"])
+    expect(
+      useTerminalStore
+        .getState()
+        .tabsForProject("proj-a")
+        .map((r) => r.id)
+    ).toEqual(["b", "a"])
+  })
+
+  it("removeSession prunes the order and the throttle flag", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().registerSession(baseInfo({ id: "b" }))
+    useTerminalStore.getState().setTabOrder("proj-a", ["b", "a"])
+    useTerminalStore.getState().setOutputThrottled("b", true)
+
+    useTerminalStore.getState().removeSession("b")
+    expect(useTerminalStore.getState().tabOrder["proj-a"]).toEqual(["a"])
+    expect(useTerminalStore.getState().outputThrottled).toEqual({})
+  })
+
+  it("rides the reload channel and drops ids that did not come back", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().registerSession(baseInfo({ id: "b" }))
+    useTerminalStore.getState().setTabOrder("proj-a", ["b", "a"])
+
+    const { partialize } = useTerminalStore.persist.getOptions()
+    const snapshot = partialize?.(useTerminalStore.getState())
+    expect(snapshot?.pendingReloadLayout?.tabOrder).toEqual({ "proj-a": ["b", "a"] })
+
+    // Only `a` survives the reload; the stale `b` must not pin a phantom slot.
+    useTerminalStore.getState().reset()
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.setState({ pendingReloadLayout: snapshot!.pendingReloadLayout })
+    useTerminalStore.getState().restorePersistedLayout()
+    expect(useTerminalStore.getState().tabOrder["proj-a"]).toEqual(["a"])
+  })
+
+  it("normalizes a malformed persisted tab order", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.setState({
+      pendingReloadLayout: {
+        tabOrder: { "proj-a": ["a", 7, null] },
+      } as never,
+    })
+    useTerminalStore.getState().restorePersistedLayout()
+    expect(useTerminalStore.getState().tabOrder["proj-a"]).toEqual(["a"])
+  })
+})
+
+describe("renderer backpressure flag", () => {
+  it("sets and clears the throttled flag", () => {
+    useTerminalStore.getState().setOutputThrottled("s-1", true)
+    expect(useTerminalStore.getState().outputThrottled).toEqual({ "s-1": true })
+    useTerminalStore.getState().setOutputThrottled("s-1", false)
+    expect(useTerminalStore.getState().outputThrottled).toEqual({})
+  })
+
+  it("is a no-op when the flag is already in the requested state", () => {
+    useTerminalStore.getState().setOutputThrottled("s-1", true)
+    const before = useTerminalStore.getState().outputThrottled
+    useTerminalStore.getState().setOutputThrottled("s-1", true)
+    expect(useTerminalStore.getState().outputThrottled).toBe(before)
+  })
 })
 
 describe("maximize toggle", () => {
@@ -130,7 +351,12 @@ describe("maximize toggle", () => {
   it("supports continuous dock resizing through the complete 15–85 percent range", () => {
     useTerminalStore.getState().setPanelHeight(84.5)
     expect(useTerminalStore.getState().panelHeightPct).toBe(84.5)
-    expect(TERMINAL_LAYOUT_BOUNDS).toEqual({ panelMinPct: 15, panelMaxPct: 85 })
+    expect(TERMINAL_LAYOUT_BOUNDS).toEqual({
+      panelMinPct: 15,
+      panelMaxPct: 85,
+      panelMinWidthPct: 15,
+      panelMaxWidthPct: 70,
+    })
   })
 
   it("toggling again restores the pre-maximize height", () => {
@@ -557,6 +783,7 @@ describe("split panes (1A)", () => {
         customTitles: { a: "Server", b: "Tests" },
         stableHostSessionIds: [],
         controllerBySession: {},
+        tabOrder: { "proj-a": ["b", "a"] },
       },
     })
     twoSessions()
@@ -571,6 +798,7 @@ describe("split panes (1A)", () => {
     expect(state.getActiveSession("proj-a")).toBe("a")
     expect(state.sessions["a"]?.customTitle).toBe("Server")
     expect(state.sessions["b"]?.customTitle).toBe("Tests")
+    expect(state.tabOrder["proj-a"]).toEqual(["b", "a"])
   })
 
   it("drops stale and cross-project pane references during restore", () => {
@@ -583,6 +811,9 @@ describe("split panes (1A)", () => {
         customTitles: { missing: "Gone", b: "Restored", other: "Other" },
         stableHostSessionIds: [],
         controllerBySession: {},
+        // `missing` never re-registers, and `other` belongs to proj-b — both
+        // must be pruned rather than pinning phantom slots in the strip.
+        tabOrder: { "proj-a": ["missing", "b", "other"], "proj-b": ["other"] },
       },
     })
     twoSessions()
@@ -597,6 +828,7 @@ describe("split panes (1A)", () => {
     expect(state.getActiveSession("proj-b")).toBe("other")
     expect(state.sessions["b"]?.customTitle).toBe("Restored")
     expect(state.sessions["other"]?.customTitle).toBe("Other")
+    expect(state.tabOrder).toEqual({ "proj-a": ["b"], "proj-b": ["other"] })
   })
 
   it("clears a persisted layout when no PTY sessions survived", () => {
@@ -609,6 +841,7 @@ describe("split panes (1A)", () => {
         customTitles: { gone: "Old" },
         stableHostSessionIds: [],
         controllerBySession: {},
+        tabOrder: { "proj-a": ["gone"] },
       },
     })
 
@@ -618,6 +851,7 @@ describe("split panes (1A)", () => {
     expect(state.pendingReloadLayout).toBeNull()
     expect(state.splitPanes).toEqual({})
     expect(state.activeSessionIdByProject).toEqual({})
+    expect(state.tabOrder).toEqual({})
   })
 
   it("normalizes malformed persisted metadata instead of trusting localStorage", () => {

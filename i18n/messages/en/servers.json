@@ -1,0 +1,203 @@
+{
+  "actions": {
+    "backup": "Create backup",
+    "deploy": "Deploy server",
+    "refresh": "Refresh",
+    "restore": "Restore",
+    "rollback": "Rollback",
+    "rotateKey": "Rotate key"
+  },
+  "backups": {
+    "empty": "No recovery points are available yet."
+  },
+  "certified": "Production certified",
+  "confirm": {
+    "cancel": "Cancel",
+    "confirm": "Request admin lease and continue",
+    "description": "This protected operation requires a short-lived, user-bound admin lease and will be recorded in the audit log.",
+    "title": "Confirm protected server operation"
+  },
+  "connection": {
+    "accessToken": "OIDC access token",
+    "connect": "Connect",
+    "connected": "Operations Controller connected",
+    "connecting": "Connecting…",
+    "controllerPlaceholder": "https://ops.example.com",
+    "controllerUrl": "Controller URL",
+    "description": "Connect to the cloud-neutral Operations Controller. Credentials stay in memory and are never persisted by this page.",
+    "failed": "Could not connect to the Operations Controller",
+    "targetId": "Default target ID",
+    "title": "Connect Operations Controller",
+    "tokenNotice": "Use a short-lived OIDC token with servers:read. Operate and admin permissions are checked again for every mutation.",
+    "unlockAccount": "Unlock the active account before connecting to a server target."
+  },
+  "description": "Deploy, observe, back up, restore, and secure Compose or Kubernetes targets from one cloud-neutral workspace.",
+  "errors": {
+    "authenticationRequired": "Your OIDC session is missing or expired. Sign in again and reconnect.",
+    "detail": "Could not load server details",
+    "networkUnavailable": "The controller is unavailable. Check its URL, TLS certificate, and network route.",
+    "operation": "The server operation could not be queued",
+    "recovery": "Retry the operation. If it still fails, inspect the controller audit log with an operator identity.",
+    "refresh": "Could not refresh the server fleet"
+  },
+  "fields": {
+    "certification": "Certification",
+    "id": "Target ID",
+    "keyVersion": "Pre-provisioned key version",
+    "lastSeen": "Last seen",
+    "release": "Release digest",
+    "revision": "Configuration revision",
+    "secretProviders": "Secret providers",
+    "snapshotProviders": "Snapshot providers",
+    "topology": "Topology"
+  },
+  "filters": {
+    "all": "All servers",
+    "description": "Filter the fleet by its latest reported health.",
+    "title": "Filter servers"
+  },
+  "health": {
+    "degraded": "Degraded",
+    "healthy": "Healthy",
+    "unavailable": "Unavailable",
+    "unknown": "Unknown"
+  },
+  "healthSummary": "Health summary for {label}",
+  "instances": {
+    "title": "Server instances"
+  },
+  "kpi": {
+    "certified": "Certified",
+    "healthy": "Healthy",
+    "operations": "Active operations",
+    "total": "Targets"
+  },
+  "logs": {
+    "empty": "No server logs are available."
+  },
+  "notAvailable": "Not available",
+  "notCertified": "Not certified",
+  "offline": "Offline cache",
+  "operationKinds": {
+    "backup": "Backup",
+    "collect-logs": "Collect logs",
+    "collect-status": "Collect status",
+    "deploy": "Deploy",
+    "preflight": "Preflight",
+    "restore": "Restore",
+    "rollback": "Rollback",
+    "rotate-key": "Rotate key",
+    "upgrade": "Upgrade"
+  },
+  "operationStates": {
+    "cancelled": "Cancelled",
+    "executing": "Executing",
+    "failed": "Failed",
+    "preparing": "Preparing",
+    "queued": "Queued",
+    "rollback_failed": "Rollback failed",
+    "rolled_back": "Rolled back",
+    "succeeded": "Succeeded",
+    "validating": "Validating",
+    "verifying": "Verifying"
+  },
+  "operations": {
+    "ariaLabel": "Server operation history",
+    "queued": "Operation queued",
+    "title": "Operations"
+  },
+  "options": {
+    "acme-dns01": "ACME DNS-01",
+    "acme-http01": "ACME HTTP-01",
+    "aws-secrets-manager": "AWS Secrets Manager",
+    "compose": "Docker Compose",
+    "existing": "Existing certificate",
+    "external-command": "External snapshot adapter",
+    "file": "Secret files",
+    "ingress": "Ingress TLS",
+    "kubernetes": "Kubernetes",
+    "kubernetes-csi": "Kubernetes CSI",
+    "vault": "Vault"
+  },
+  "overview": {
+    "health": "Current health",
+    "issues": "Certification issues",
+    "latestRecoveryPoint": "Latest recovery point",
+    "production": "Production readiness"
+  },
+  "selectServer": "Select a server target to inspect it.",
+  "tabs": {
+    "backups": "Backups",
+    "deployments": "Deployments",
+    "instances": "Instances",
+    "logs": "Logs",
+    "overview": "Overview",
+    "security": "Security"
+  },
+  "title": "Servers",
+  "topology": {
+    "compose": "Docker Compose",
+    "kubernetes": "Kubernetes"
+  },
+  "wizard": {
+    "cancel": "Cancel",
+    "controllerUrl": "Controller URL",
+    "credentialsNotice": "Only credential references are stored. Cloud keys, kubeconfig files, SSH keys, object-store secrets, and enrollment tokens never enter this configuration or the browser cache.",
+    "deploymentRoot": "Deployment root",
+    "description": "Configure a versioned DeploymentTarget. Provider presets are normalized to the same cloud-neutral contract.",
+    "identitySection": "OIDC identity",
+    "imagesSection": "Immutable images",
+    "ingressClass": "Ingress class",
+    "label": "Display label",
+    "namespace": "Namespace",
+    "objectStoreBucket": "Bucket",
+    "objectStoreCredentialRef": "Object-store credential reference",
+    "objectStoreEndpoint": "S3-compatible endpoint",
+    "objectStoreRegion": "Object-store region",
+    "oidcAudience": "OIDC audience",
+    "oidcIssuer": "OIDC issuer",
+    "platformSection": "Platform settings",
+    "placeholders": {
+      "controllerUrl": "https://ops.example.com",
+      "keyVersion": "key-2026-08",
+      "label": "Staging",
+      "objectStoreBucket": "cognia-backups",
+      "objectStoreCredentialRef": "backups/staging",
+      "objectStoreEndpoint": "https://s3.example.com",
+      "objectStoreRegion": "auto",
+      "oidcAudience": "https://server.example.com/api",
+      "oidcIssuer": "https://auth.example.com/oidc",
+      "publicUrl": "https://server.example.com",
+      "runnerImage": "ghcr.io/owner/cognia-runner@sha256:…",
+      "secretRootRef": "cognia/staging",
+      "serverImage": "ghcr.io/owner/cognia-server@sha256:…",
+      "snapshotRef": "cognia-snapshots",
+      "targetId": "staging",
+      "tenantClaim": "organization_id",
+      "tlsRef": "cognia-server-tls",
+      "workspaceRuntimeImage": "ghcr.io/owner/cognia-workspace-runtime@sha256:…"
+    },
+    "projectName": "Compose project name",
+    "publicUrl": "Public URL",
+    "runnerImage": "Runner image digest",
+    "runtimeClass": "Runtime class",
+    "secretProvider": "Secret provider",
+    "secretRootRef": "Secret root reference",
+    "serverImage": "Server image digest",
+    "snapshotProvider": "Snapshot provider",
+    "snapshotRef": "Snapshot class or adapter reference",
+    "storageClass": "Storage class",
+    "storageSection": "Backup, snapshots, secrets, and TLS",
+    "targetId": "Target ID",
+    "targetSection": "Deployment target",
+    "tenantClaim": "Tenant claim",
+    "title": "Deploy a server target",
+    "tlsProvider": "TLS provider",
+    "tlsRef": "TLS secret or credential reference",
+    "topology": "Topology",
+    "validate": "Register and deploy",
+    "valid": "Deployment registered and queued",
+    "validating": "Registering…",
+    "workspaceRuntimeImage": "Workspace runtime image digest"
+  }
+}

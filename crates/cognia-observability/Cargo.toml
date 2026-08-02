@@ -1,0 +1,23 @@
+[package]
+name = "cognia-observability"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+ed25519-dalek = "2"
+hex = "0.4"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+zstd = "0.13"
+
+[dev-dependencies]
+tempfile = "3"

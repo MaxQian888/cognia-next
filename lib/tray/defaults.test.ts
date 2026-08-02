@@ -1,4 +1,5 @@
 import { DEFAULT_TRAY_DISPLAY, DEFAULT_TRAY_ITEMS } from "./defaults"
+import { NATIVE_TRAY_ACTIONS } from "./native-actions"
 
 describe("DEFAULT_TRAY_ITEMS", () => {
   it("matches the locked layout shape from the system-tray plan", () => {
@@ -7,6 +8,7 @@ describe("DEFAULT_TRAY_ITEMS", () => {
       "tray.status",
       "tray.sep-0",
       "tray.show",
+      "tray.panel-toggle",
       "tray.pet-toggle",
       "tray.pet-disable-click-through",
       "tray.island-toggle",
@@ -29,26 +31,10 @@ describe("DEFAULT_TRAY_ITEMS", () => {
   })
 
   it("references only valid native action ids", () => {
-    const validNatives = new Set([
-      "show",
-      "hide",
-      "toggle-window",
-      "new-chat",
-      "settings",
-      "open-logs",
-      "open-data-folder",
-      "copy-diagnostics",
-      "open-docs",
-      "report-issue",
-      "check-updates",
-      "toggle-autostart",
-      "automation-kill",
-      "pet-toggle",
-      "pet-disable-click-through",
-      "island-toggle",
-      "noop",
-      "quit",
-    ])
+    // Read from the shared table rather than a second hand-maintained copy:
+    // `native-actions.ts` is itself pinned against the Rust whitelist, so an
+    // action added there can never silently drift out of sync here.
+    const validNatives = new Set<string>(NATIVE_TRAY_ACTIONS)
     for (const item of DEFAULT_TRAY_ITEMS) {
       if (item.kind !== "action") continue
       if (item.payload.kind === "native") {

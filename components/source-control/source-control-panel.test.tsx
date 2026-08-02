@@ -36,17 +36,23 @@ jest.mock("@/lib/workspace/open-folder", () => ({
 jest.mock("@/hooks/ui/use-resizable-layout", () => ({
   useResizableLayout: () => ({ defaultLayout: undefined, onLayoutChanged: jest.fn() }),
 }))
+const useMediaQueryMock = jest.fn().mockReturnValue(false)
+jest.mock("@/hooks/ui/use-media-query", () => ({
+  useMediaQuery: (...args: unknown[]) => useMediaQueryMock(...args),
+}))
 // Stub the resizable wrapper — the real Group measures the DOM, which jsdom
 // can't satisfy. Expose size props as data attributes for unit assertions.
 jest.mock("@/components/ui/resizable", () => ({
   ResizablePanelGroup: ({
     children,
     className,
+    orientation,
   }: {
     children: React.ReactNode
     className?: string
+    orientation?: string
   }) => (
-    <div data-testid="resizable-group" className={className}>
+    <div data-testid="resizable-group" className={className} data-orientation={orientation}>
       {children}
     </div>
   ),
@@ -324,8 +330,9 @@ beforeEach(() => {
   repoCfg.rootDir = "/repo"
   repoCfg.openFolder.mockReset()
   repoCfg.refresh.mockClear()
+  useMediaQueryMock.mockReset().mockReturnValue(false)
   openPathAsWorkspace.mockReset()
-  Object.values(actionCfg).forEach((mock) => mock.mockReset())
+  Object.values(actionCfg).forEach((mock) => mock.mockReset().mockResolvedValue(null))
   act(() => {
     useGitStore.getState().reset()
     useGitStore.setState({ rootDir: "/repo" })
@@ -420,6 +427,33 @@ describe("SourceControlPanel", () => {
     expect(screen.getByTestId("diff-pane-empty")).toBeInTheDocument()
   })
 
+  it("shows a repository loading state before the first status arrives", () => {
+    act(() => {
+      useGitStore.getState().setStatus(null)
+      useGitStore.getState().setLoadingStatus(true)
+    })
+    render(<SourceControlPanel />)
+    expect(screen.getByTestId("sc-loading")).toBeInTheDocument()
+  })
+
+  it("surfaces repository load errors and retries in place", () => {
+    act(() => {
+      useGitStore.getState().setStatus(null)
+      useGitStore.getState().setLoadError("credential helper unavailable")
+    })
+    render(<SourceControlPanel />)
+    expect(screen.getByText("credential helper unavailable")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("sc-load-retry"))
+    expect(repoCfg.refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps stale repository data visible with a non-blocking refresh error", () => {
+    act(() => useGitStore.getState().setLoadError("network changed"))
+    render(<SourceControlPanel />)
+    expect(screen.getByTestId("sc-load-error-banner")).toBeInTheDocument()
+    expect(screen.getByTestId("changes-view-stub")).toBeInTheDocument()
+  })
+
   // react-resizable-panels v4 interprets bare numbers as PIXELS; sizes must
   // be percent strings or the changes/diff split collapses to px-wide slivers.
   it("passes percent-string sizes to the changes and diff panels", () => {
@@ -431,6 +465,20 @@ describe("SourceControlPanel", () => {
       expect(panel.dataset.defaultSize).toMatch(percent)
       expect(panel.dataset.minSize).toMatch(percent)
     }
+  })
+
+  it("stacks the changes and diff panes in narrow desktop windows", () => {
+    useMediaQueryMock.mockReturnValue(true)
+    render(<SourceControlPanel />)
+    expect(screen.getByTestId("resizable-group")).toHaveAttribute("data-orientation", "vertical")
+    expect(screen.getByTestId("resizable-panel-sc-changes")).toHaveAttribute(
+      "data-default-size",
+      "42%"
+    )
+    expect(screen.getByTestId("resizable-panel-sc-diff")).toHaveAttribute(
+      "data-default-size",
+      "58%"
+    )
   })
 
   it("shows the sequencer banner when an operation is in progress", () => {
@@ -514,7 +562,7 @@ describe("SourceControlPanel", () => {
     }
   })
 
-  it("wires changes, history, blame, restore, and conflict resolution callbacks", () => {
+  it("wires changes, history, blame, restore, and conflict resolution callbacks", async () => {
     render(<SourceControlPanel />)
     fireEvent.click(screen.getByTestId("changes-select"))
     expect(screen.getByTestId("diff-pane-stub")).toBeInTheDocument()
@@ -532,8 +580,25 @@ describe("SourceControlPanel", () => {
     fireEvent.click(screen.getByTestId("restore-dialog-stub"))
 
     act(() => useGitStore.getState().selectFile("conf.ts", false))
-    fireEvent.click(screen.getByTestId("conflict-stub"))
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("conflict-stub"))
+    })
     expect(actionCfg.resolveConflict).toHaveBeenCalledWith("conf.ts", "ours")
+  })
+
+  it("keeps a conflict selected when resolution fails", async () => {
+    actionCfg.resolveConflict.mockResolvedValue({
+      kind: "commandFailed",
+      detail: "file changed while resolving",
+    })
+    act(() => useGitStore.getState().selectFile("conf.ts", false))
+    render(<SourceControlPanel />)
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("conflict-stub"))
+    })
+
+    expect(useGitStore.getState().selectedPath).toBe("conf.ts")
   })
 
   it("wires commit detail blame and interactive rebase callbacks", () => {

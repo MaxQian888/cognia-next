@@ -16,11 +16,16 @@ jest.mock("@/lib/native/utils", () => ({
   isTauri: () => isTauriMock(),
 }))
 
-let mockPetRole: "main" | "web" | "overlay" | "popup" | "island" | "selection-toolbar" = "main"
+let mockPetRole:
+  "main" | "web" | "overlay" | "popup" | "island" | "selection-toolbar" | "tray-panel" = "main"
 jest.mock("@/lib/pet/window-role", () => ({
   getPetWindowRole: () => mockPetRole,
   isSecondaryOverlayRole: (role: string) =>
-    role === "overlay" || role === "popup" || role === "island" || role === "selection-toolbar",
+    role === "overlay" ||
+    role === "popup" ||
+    role === "island" ||
+    role === "selection-toolbar" ||
+    role === "tray-panel",
 }))
 
 describe("DesktopOnlyInitializers", () => {
@@ -47,10 +52,10 @@ describe("DesktopOnlyInitializers", () => {
     // Mirrors the count of gated children in the component — a guard against
     // silently dropping one when the list changes. (WindowShowInitializer +
     // WebviewHeartbeatInitializer moved up to WindowLivenessInitializers.)
-    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(16)
+    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(18)
   })
 
-  it.each(["overlay", "popup", "island", "selection-toolbar"] as const)(
+  it.each(["overlay", "popup", "island", "selection-toolbar", "tray-panel"] as const)(
     "renders nothing in the %s pet window even on Tauri",
     async (role) => {
       isTauriMock.mockReturnValue(true)

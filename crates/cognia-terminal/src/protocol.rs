@@ -1,6 +1,22 @@
 //! Canonical binary protocol shared by local, LAN, and WAN terminal
 //! transports. Payloads are opaque to the framing layer: stream frames carry
 //! raw bytes while command/event frames carry UTF-8 JSON.
+//!
+//! # Compatibility invariant
+//!
+//! **The host never volunteers a frame kind the client did not solicit.**
+//! Clients reject unknown discriminants outright (`lib/terminal/protocol.ts`
+//! throws on one), so a newer host serving an older mobile client would break
+//! the session the moment it pushed a kind that client had never heard of.
+//! Concretely: [`FrameKind::FlowControl`] is client→host only,
+//! [`FrameKind::HistorySnapshot`] only ever answers a
+//! [`FrameKind::HistoryQuery`], and [`FrameKind::TransportState`] has been in
+//! both enums since the first release. Adding a *pushed* kind in the future
+//! requires negotiating it through the `Hello` ack's `protocolFeatures` first.
+//!
+//! Discriminants are frozen — `frame_kind_discriminants_are_frozen` pins every
+//! one of them, because the TypeScript mirror and the on-disk wire fixture both
+//! encode the numbers rather than the names.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -34,6 +50,15 @@ pub enum FrameKind {
     TransportState = 18,
     Exit = 19,
     Error = 20,
+    /// Client→host only. Asks the host to park (or unpark) a session's reader
+    /// so a renderer that cannot keep up stops the producer instead of being
+    /// dropped for queue overflow. Answered with [`FrameKind::Ack`].
+    FlowControl = 21,
+    /// Client→host request for a session's command ring and/or the host audit
+    /// log. Answered with [`FrameKind::HistorySnapshot`].
+    HistoryQuery = 22,
+    /// Host→client response to [`FrameKind::HistoryQuery`]. Never pushed.
+    HistorySnapshot = 23,
 }
 
 impl TryFrom<u8> for FrameKind {
@@ -61,6 +86,9 @@ impl TryFrom<u8> for FrameKind {
             18 => Self::TransportState,
             19 => Self::Exit,
             20 => Self::Error,
+            21 => Self::FlowControl,
+            22 => Self::HistoryQuery,
+            23 => Self::HistorySnapshot,
             other => return Err(ProtocolError::UnknownFrameKind(other)),
         })
     }
@@ -255,6 +283,56 @@ mod tests {
         let bytes = decode_hex(&fixture.encoded_hex);
         assert_eq!(frame.encode().unwrap(), bytes);
         assert_eq!(TerminalFrame::decode(&bytes).unwrap(), frame);
+    }
+
+    /// Every discriminant in 1..=23 must survive the `u8` round trip, and the
+    /// first unassigned value must be rejected rather than silently accepted —
+    /// `decode` relies on this to reject a frame from a newer peer.
+    #[test]
+    fn every_frame_kind_round_trips_through_its_discriminant() {
+        for value in 1u8..=23 {
+            let kind = FrameKind::try_from(value)
+                .unwrap_or_else(|error| panic!("discriminant {value} is unmapped: {error}"));
+            assert_eq!(kind as u8, value);
+        }
+        assert_eq!(
+            FrameKind::try_from(24),
+            Err(ProtocolError::UnknownFrameKind(24))
+        );
+        assert_eq!(
+            FrameKind::try_from(0),
+            Err(ProtocolError::UnknownFrameKind(0))
+        );
+    }
+
+    /// The TypeScript mirror (`lib/terminal/protocol.ts`) and the shared wire
+    /// fixture both encode numbers, so renumbering here would break every
+    /// already-installed client. Pin each value explicitly.
+    #[test]
+    fn frame_kind_discriminants_are_frozen() {
+        assert_eq!(FrameKind::Hello as u8, 1);
+        assert_eq!(FrameKind::List as u8, 2);
+        assert_eq!(FrameKind::Spawn as u8, 3);
+        assert_eq!(FrameKind::Attach as u8, 4);
+        assert_eq!(FrameKind::Detach as u8, 5);
+        assert_eq!(FrameKind::TakeControl as u8, 6);
+        assert_eq!(FrameKind::ReleaseControl as u8, 7);
+        assert_eq!(FrameKind::Resize as u8, 8);
+        assert_eq!(FrameKind::Kill as u8, 9);
+        assert_eq!(FrameKind::Ack as u8, 10);
+        assert_eq!(FrameKind::Stdin as u8, 11);
+        assert_eq!(FrameKind::Stdout as u8, 12);
+        assert_eq!(FrameKind::HostSnapshot as u8, 13);
+        assert_eq!(FrameKind::SessionSnapshot as u8, 14);
+        assert_eq!(FrameKind::Integration as u8, 15);
+        assert_eq!(FrameKind::ControllerChanged as u8, 16);
+        assert_eq!(FrameKind::ReplayGap as u8, 17);
+        assert_eq!(FrameKind::TransportState as u8, 18);
+        assert_eq!(FrameKind::Exit as u8, 19);
+        assert_eq!(FrameKind::Error as u8, 20);
+        assert_eq!(FrameKind::FlowControl as u8, 21);
+        assert_eq!(FrameKind::HistoryQuery as u8, 22);
+        assert_eq!(FrameKind::HistorySnapshot as u8, 23);
     }
 
     #[test]

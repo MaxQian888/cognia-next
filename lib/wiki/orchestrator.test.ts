@@ -18,6 +18,7 @@ import {
   listWikiArticlesByScope,
 } from "@/lib/db/wiki-articles"
 import { listWikiSectionsByArticle } from "@/lib/db/wiki-sections"
+import { SELF_CORPUS_ID } from "@/types/wiki"
 import { getWikiManifest } from "@/lib/db/wiki-manifest"
 
 beforeEach(async () => {
@@ -100,7 +101,7 @@ describe("rebuildWiki — first build", () => {
       { fs, llm: makeStubLlm() },
       { scope: "cognia-self", rootDir: ".", generatorVersion: "v1" }
     )
-    const article = await getWikiArticleBySlug("lib-foo")
+    const article = await getWikiArticleBySlug(SELF_CORPUS_ID, "lib-foo")
     expect(article).toBeDefined()
     expect(article?.sectionIds.length).toBeGreaterThan(0)
     const sections = await listWikiSectionsByArticle(article!.id)
@@ -132,7 +133,7 @@ describe("rebuildWiki — first build", () => {
       { scope: "cognia-self", rootDir: ".", generatorVersion: "v1" }
     )
     expect(embedCalls.length).toBeGreaterThan(0)
-    const article = await getWikiArticleBySlug("lib-foo")
+    const article = await getWikiArticleBySlug(SELF_CORPUS_ID, "lib-foo")
     expect(article?.embedding).toEqual([0.1, 0.2])
   })
 
@@ -142,7 +143,7 @@ describe("rebuildWiki — first build", () => {
       { fs, llm: makeStubLlm() },
       { scope: "cognia-self", rootDir: ".", generatorVersion: "v1" }
     )
-    const article = await getWikiArticleBySlug("lib-foo")
+    const article = await getWikiArticleBySlug(SELF_CORPUS_ID, "lib-foo")
     expect(article?.embedding).toEqual(ZERO_EMBEDDING)
   })
 

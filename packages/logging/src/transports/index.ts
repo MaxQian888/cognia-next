@@ -31,3 +31,12 @@ export {
   type RemoteRetryQueueLimits,
   type RemoteRetryQueueEnqueueResult,
 } from "./remote-retry-queue-store"
+export {
+  IndexedDBObservabilitySpoolStore,
+  type IndexedDBObservabilitySpoolStoreOptions,
+} from "./indexeddb-spool-store"
+export {
+  ObservabilitySpoolTransport,
+  createObservabilitySpoolTransport,
+  type ObservabilitySpoolTransportOptions,
+} from "./observability-spool-transport"

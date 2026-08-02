@@ -53,10 +53,10 @@ use app_lib::companion_api::{
     tls, CompanionState, SharedState,
 };
 use app_lib::headless::{
-    brain, exec_backend_from_env, generate_master_key, headless_services, init_secret_store,
-    install_headless_services, kill_sidecar, parse_master_key, resolve_master_key_from_env,
-    rotate_master_key, ApiKeyState, HeadlessServices, HeadlessSidecarHost, SpawnPolicy,
-    MASTER_KEY_ENV, SIDECAR_SCRIPT_ENV,
+    backup, brain, exec_backend_from_env, generate_master_key, headless_services,
+    init_secret_store, install_headless_services, kill_sidecar, parse_master_key,
+    resolve_master_key_from_env, rotate_master_key, spawn_sidecar, ApiKeyState, HeadlessServices,
+    HeadlessSidecarHost, SpawnPolicy, MASTER_KEY_ENV, SIDECAR_SCRIPT_ENV,
 };
 use parking_lot::RwLock;
 
@@ -121,6 +121,32 @@ enum CliCommand {
         /// The new 64-hex-char key. Omit to generate one (printed to stdout).
         #[arg(long)]
         new_key: Option<String>,
+    },
+    /// Create a consistent, encrypted recovery point and upload it to the
+    /// configured S3-compatible object store.
+    Backup {
+        #[arg(long)]
+        id: String,
+    },
+    /// Restore a recovery point into a new directory. Existing/live data is
+    /// never overwritten.
+    Restore {
+        #[arg(long)]
+        recovery_point: String,
+        #[arg(long)]
+        destination_volume: PathBuf,
+        #[arg(long, default_value_t = false)]
+        read_only_smoke: bool,
+    },
+    /// Rotate to a master-key version already provisioned by SecretProvider.
+    RotateKey {
+        #[arg(long)]
+        version: String,
+    },
+    /// Verify a newly restored volume without starting the server.
+    VerifyRestore {
+        #[arg(long)]
+        data_dir: PathBuf,
     },
     /// Print a service-scope JWT (24h) for the local account. Service tokens
     /// are honored ONLY from loopback, so the value is useless off-host;
@@ -320,6 +346,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = data_dir();
     std::fs::create_dir_all(&dir)?;
 
+    // Maintenance commands run before normal service initialization so they
+    // do not create new state while producing or verifying a recovery point.
+    match &cli.command {
+        CliCommand::Backup { id } => {
+            let result = backup::create_backup(&dir, id)
+                .await
+                .map_err(std::io::Error::other)?;
+            println!("{}", serde_json::to_string(&result)?);
+            return Ok(());
+        }
+        CliCommand::Restore {
+            recovery_point,
+            destination_volume,
+            read_only_smoke,
+        } => {
+            let result =
+                backup::restore_backup(&dir, recovery_point, destination_volume, *read_only_smoke)
+                    .await
+                    .map_err(std::io::Error::other)?;
+            println!("{}", serde_json::to_string(&result)?);
+            return Ok(());
+        }
+        CliCommand::RotateKey { version } => {
+            let key_dir = std::env::var("COGNIA_MASTER_KEY_DIR")
+                .map(PathBuf::from)
+                .map_err(|_| {
+                    std::io::Error::other(
+                        "COGNIA_MASTER_KEY_DIR is required for versioned key rotation",
+                    )
+                })?;
+            let key_path = key_dir.join(format!("{version}.key"));
+            let new_key = std::fs::read_to_string(&key_path)
+                .map_err(|error| format!("read master key {}: {error}", key_path.display()))?;
+            return run_rotate_master_key(&dir, Some(new_key.trim()));
+        }
+        CliCommand::VerifyRestore { data_dir } => {
+            let result = backup::verify_data_directory(data_dir).map_err(std::io::Error::other)?;
+            println!("{}", serde_json::to_string(&result)?);
+            return Ok(());
+        }
+        _ => {}
+    }
+
     // Key rotation runs BEFORE the strict init (it re-opens the store file
     // itself with the explicit old key) and exits.
     if let CliCommand::RotateMasterKey { new_key } = &cli.command {
@@ -379,7 +448,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         CliCommand::Gateway { command } => run_gateway_admin(command),
         CliCommand::Devices { command } => run_devices_admin(command),
         CliCommand::DesktopHost { .. } => unreachable!("handled before headless initialization"),
-        CliCommand::RotateMasterKey { .. } => unreachable!("handled above"),
+        CliCommand::RotateMasterKey { .. }
+        | CliCommand::Backup { .. }
+        | CliCommand::Restore { .. }
+        | CliCommand::RotateKey { .. }
+        | CliCommand::VerifyRestore { .. } => unreachable!("handled above"),
     }
 }
 
@@ -796,6 +869,11 @@ async fn run_serve(
         )
         .map_err(|error| format!("headless services: {error}"))?,
     ));
+    if let Some(services) = headless_services() {
+        spawn_sidecar(Arc::clone(&services.sidecar_host), services.sidecar.clone())
+            .await
+            .map_err(|error| format!("headless sidecar startup: {error}"))?;
+    }
 
     // Audit trail for the RCE-grade external-agent arms (ADR-0059 R11) —
     // append-only JSONL beside the SQLite store.
@@ -927,6 +1005,7 @@ async fn run_serve(
         .await
         .map_err(|e| format!("ctrl-c handler: {e}"))?;
     println!("[cognia-server] shutting down…");
+    app_lib::companion_api::server::begin_draining();
     if let Some(supervisor) = brain_supervisor {
         supervisor.shutdown();
     }
@@ -940,10 +1019,19 @@ async fn run_serve(
             log::warn!("jobs: headless shutdown failed: {error}");
         }
     }
+    let mut terminated = handle.terminated.clone();
     let _ = handle.shutdown.send(());
-    // Brief grace period so axum-server's graceful_shutdown(Some(10s)) has
-    // time to drain in-flight requests and the children observe their kills.
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let drained = tokio::time::timeout(std::time::Duration::from_secs(300), async {
+        while !*terminated.borrow() {
+            if terminated.changed().await.is_err() {
+                break;
+            }
+        }
+    })
+    .await;
+    if drained.is_err() {
+        log::warn!("companion API drain exceeded 300 seconds; forcing shutdown");
+    }
     Ok(())
 }
 
@@ -1001,6 +1089,34 @@ mod tests {
             cli.command,
             CliCommand::Serve {
                 allow_remote_terminal: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn maintenance_commands_accept_only_typed_paths_and_identifiers() {
+        let backup = Cli::try_parse_from(["cognia-server", "backup", "--id", "backup-1"])
+            .expect("backup arguments");
+        assert!(matches!(
+            backup.command,
+            CliCommand::Backup { id } if id == "backup-1"
+        ));
+
+        let restore = Cli::try_parse_from([
+            "cognia-server",
+            "restore",
+            "--recovery-point",
+            "backup-1",
+            "--destination-volume",
+            "/restore/tenant-1",
+            "--read-only-smoke",
+        ])
+        .expect("restore arguments");
+        assert!(matches!(
+            restore.command,
+            CliCommand::Restore {
+                read_only_smoke: true,
                 ..
             }
         ));

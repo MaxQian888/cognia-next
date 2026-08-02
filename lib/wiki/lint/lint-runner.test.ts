@@ -15,6 +15,7 @@ function article(slug: string, contentMd: string): WikiArticle {
     slug,
     title: slug,
     module: `lib/${slug}`,
+    corpusId: "cognia-self",
     scope: "cognia-self",
     pageRank: 0,
     summary: "",

@@ -19,7 +19,8 @@
 
 import { useEffect, useId, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { DownloadIcon, CopyIcon, CheckIcon } from "lucide-react"
+import { AnimatedActionIcon, CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
+import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
 import { cn } from "@/lib/utils"
 import { downloadBlob, copyBlobToClipboard } from "@/lib/files/download"
 import { useA2UIStore } from "@/stores/a2ui"
@@ -288,7 +289,7 @@ function ImageView({
           onClick={() => downloadBlob(blob, filename)}
           className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted"
         >
-          <DownloadIcon className="size-3.5" />
+          <AnimatedActionIcon icon={AnimatedDownloadIcon} size={14} />
           {t("downloadImage")}
         </button>
         <button
@@ -296,7 +297,7 @@ function ImageView({
           onClick={() => void onCopy()}
           className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted"
         >
-          {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+          <CopyFeedbackIcon copied={copied} size={14} />
           {copied ? t("copyImageDone") : t("copyImage")}
         </button>
       </div>

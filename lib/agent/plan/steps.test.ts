@@ -4,7 +4,7 @@ import {
   type CreatePlanStepInput,
   type PlanStep,
 } from "@/types/agent/plan"
-import { allStepsTerminal, applyStepStatus, materializeSteps } from "./steps"
+import { allStepsTerminal, applyStepStatus, materializeSteps, nextRunnableStep } from "./steps"
 
 function input(over: Partial<CreatePlanStepInput> = {}): CreatePlanStepInput {
   return { title: over.title ?? "step", kind: over.kind ?? "agent_turn", ...over }
@@ -118,5 +118,69 @@ describe("type helpers", () => {
       "repair",
       "simplify",
     ])
+  })
+})
+
+describe("nextRunnableStep", () => {
+  function s(id: string, over: Partial<PlanStep> = {}): PlanStep {
+    return {
+      id,
+      title: id,
+      kind: "agent_turn",
+      status: "pending",
+      order: 0,
+      dependencies: [],
+      ...over,
+    }
+  }
+
+  it("returns the first non-terminal step in order", () => {
+    const steps = [
+      s("b", { order: 1 }),
+      s("a", { order: 0, status: "completed" }),
+      s("c", { order: 2 }),
+    ]
+    expect(nextRunnableStep(steps)?.id).toBe("b")
+  })
+
+  it("skips steps whose dependency has not completed", () => {
+    const steps = [
+      s("a", { order: 0, status: "in_progress" }),
+      s("b", { order: 1, dependencies: ["a"] }),
+    ]
+    expect(nextRunnableStep(steps)?.id).toBe("a")
+  })
+
+  it("returns undefined when a dependency failed", () => {
+    const steps = [
+      s("a", { order: 0, status: "failed" }),
+      s("b", { order: 1, dependencies: ["a"] }),
+    ]
+    expect(nextRunnableStep(steps)).toBeUndefined()
+  })
+
+  it("treats a skipped dependency as unmet (does not jump the broken link)", () => {
+    const steps = [
+      s("a", { order: 0, status: "skipped" }),
+      s("b", { order: 1, dependencies: ["a"] }),
+    ]
+    expect(nextRunnableStep(steps)).toBeUndefined()
+  })
+
+  it("returns undefined when every step is terminal", () => {
+    expect(nextRunnableStep([s("a", { status: "completed" })])).toBeUndefined()
+  })
+
+  it("returns undefined for an empty plan", () => {
+    expect(nextRunnableStep([])).toBeUndefined()
+  })
+
+  it("runs a step whose dependencies have all completed", () => {
+    const steps = [
+      s("a", { order: 0, status: "completed" }),
+      s("b", { order: 1, status: "completed" }),
+      s("c", { order: 2, dependencies: ["a", "b"] }),
+    ]
+    expect(nextRunnableStep(steps)?.id).toBe("c")
   })
 })

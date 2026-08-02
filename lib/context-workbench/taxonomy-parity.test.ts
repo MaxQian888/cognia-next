@@ -53,9 +53,13 @@ function producibleCapabilities(): Set<ContextCapability> {
  */
 function firstPartyActivities(): Set<string> {
   const sources = [
-    "components/artifacts/artifact-dock.tsx",
+    // The chat dock's own definitions live beside it, not in the host — it is
+    // the only first-party source that claims `workspace`, so leaving it out
+    // reported that activity as orphaned.
+    "components/artifacts/chat-dock-panels.tsx",
     "components/canvas/canvas-side-panels.tsx",
     "components/editor/project/project-context-workbench.tsx",
+    "components/workflow/editor/right-sidebar/index.tsx",
   ]
   const found = new Set<string>()
   for (const relative of sources) {

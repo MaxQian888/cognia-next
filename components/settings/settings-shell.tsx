@@ -308,6 +308,14 @@ const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>([
   // detail pane fighting over 1024px.
   "gateway",
   "external-bridge",
+  // Same conversion, same reason. Left out of this set they still *rendered* —
+  // `h-full` collapsed to content height inside the ScrollArea, so the rail and
+  // the pane grew unbounded and the whole page scrolled instead of the pane.
+  // That is the visible difference from Providers: capped width, wasted page,
+  // outer scrollbar.
+  "agent-modes",
+  "agent-runtime",
+  "memory",
 ])
 
 function isSection(value: string | null): value is SettingsSectionId {

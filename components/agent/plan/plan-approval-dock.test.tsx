@@ -27,8 +27,16 @@ const rejectPlan = jest.fn().mockResolvedValue(null)
 const refinePlan = jest.fn().mockResolvedValue(null)
 const keepPlanning = jest.fn().mockResolvedValue(null)
 const updatePlanDraft = jest.fn().mockResolvedValue(null)
+const startPlan = jest.fn().mockResolvedValue(null)
 jest.mock("@/lib/agent/plan/runtime", () => ({
-  getPlanRuntime: () => ({ approvePlan, rejectPlan, refinePlan, keepPlanning, updatePlanDraft }),
+  getPlanRuntime: () => ({
+    approvePlan,
+    rejectPlan,
+    refinePlan,
+    keepPlanning,
+    updatePlanDraft,
+    startPlan,
+  }),
 }))
 
 const mockPlan = jest.fn()
@@ -138,6 +146,53 @@ describe("PlanApprovalDock", () => {
     await userEvent.click(screen.getByTestId("plan-approval-more"))
     await userEvent.click(await screen.findByTestId("plan-approval-approve-full-auto"))
     await waitFor(() => expect(onResume).toHaveBeenCalledWith(PLAN_APPROVED_PROMPT, "auto"))
+  })
+
+  // Strategy routing (ADR-0045 §2). The fixture above is `exit_plan_mode`, which
+  // the resolver keeps on the orchestrated/parity path — those are the three
+  // tests above. A hand-authored linear plan takes the in-session path instead.
+  describe("in-session strategy", () => {
+    const linear = () =>
+      plan({
+        source: "manual",
+        steps: [step("s0", "first", 0), step("s1", "second", 1)],
+      })
+
+    it("starts the plan and resumes with the FIRST STEP's turn text", async () => {
+      mockPlan.mockReturnValue(linear())
+      startPlan.mockResolvedValue({
+        strategy: "in_session",
+        status: "executing",
+        stepId: "s0",
+        userMessage: "Step 1 of 2 …",
+      })
+      const onResume = jest.fn()
+      render(<PlanApprovalDock sessionId="ses" onResume={onResume} />)
+      await userEvent.click(screen.getByTestId("plan-approval-approve-auto"))
+      await waitFor(() => expect(startPlan).toHaveBeenCalledWith("p1"))
+      expect(approvePlan).toHaveBeenCalledWith("p1")
+      expect(onResume).toHaveBeenCalledWith("Step 1 of 2 …", "acceptEdits")
+      expect(onResume).not.toHaveBeenCalledWith(PLAN_APPROVED_PROMPT, expect.anything())
+    })
+
+    it("falls back to the implementing turn when there is no runnable step", async () => {
+      mockPlan.mockReturnValue(linear())
+      startPlan.mockResolvedValue({ strategy: "in_session", status: "completed" })
+      const onResume = jest.fn()
+      render(<PlanApprovalDock sessionId="ses" onResume={onResume} />)
+      await userEvent.click(screen.getByTestId("plan-approval-approve-auto"))
+      await waitFor(() =>
+        expect(onResume).toHaveBeenCalledWith(PLAN_APPROVED_PROMPT, "acceptEdits")
+      )
+    })
+
+    it("never calls startPlan for an orchestrated plan (no double execution)", async () => {
+      mockPlan.mockReturnValue(plan({ steps: [step("s0", "first", 0)] }))
+      render(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
+      await userEvent.click(screen.getByTestId("plan-approval-approve-auto"))
+      await waitFor(() => expect(approvePlan).toHaveBeenCalled())
+      expect(startPlan).not.toHaveBeenCalled()
+    })
   })
 
   it("keep planning without feedback → keepPlanning only, no send", async () => {

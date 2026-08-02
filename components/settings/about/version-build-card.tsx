@@ -2,12 +2,8 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ChevronsUpDownIcon, TagIcon } from "lucide-react"
+import { TagIcon } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { Separator } from "@/components/ui/separator"
 import {
   APP_VERSION,
   getBuildInfo,
@@ -16,7 +12,25 @@ import {
   type RuntimeVersions,
 } from "@/lib/app-metadata"
 
+import { AboutCard } from "./about-card"
 import { InfoRow } from "./info-row"
+
+/**
+ * One runtime-version chip. Chips live on a single wrapping strip so the card
+ * body has a fixed shape — nothing here expands or collapses, which is what
+ * keeps the About grid from reflowing while the user reads it.
+ */
+function RuntimeChip({ label, value, testid }: { label: string; value: string; testid: string }) {
+  return (
+    <span
+      data-testid={testid}
+      className="inline-flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-[11px] leading-none"
+    >
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-mono text-foreground">{value}</span>
+    </span>
+  )
+}
 
 /** Format an ISO build timestamp for display; passthrough on parse failure. */
 function formatBuildTime(iso: string): string {
@@ -39,7 +53,6 @@ export function VersionBuildCard({ nativeBuildLoader }: VersionBuildCardProps = 
   const t = useTranslations("settings.about")
   const [nativeBuild, setNativeBuild] = useState<string | null>(null)
   const [runtime, setRuntime] = useState<RuntimeVersions | null>(null)
-  const [open, setOpen] = useState(false)
   const build = getBuildInfo()
 
   useEffect(() => {
@@ -58,64 +71,40 @@ export function VersionBuildCard({ nativeBuildLoader }: VersionBuildCardProps = 
   const buildTime = formatBuildTime(build.buildTime)
 
   return (
-    <Card data-testid="about-version-card">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <TagIcon className="size-4" />
-          {t("versionCard.title")}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <InfoRow label={t("versionCard.version")} value={APP_VERSION} mono testid="row-version" />
-        {nativeBuild && (
-          <InfoRow
-            label={t("versionCard.build")}
-            value={nativeBuild}
-            mono
-            testid="row-native-build"
-          />
-        )}
-        {build.commit && (
-          <InfoRow label={t("versionCard.commit")} value={build.commit} mono testid="row-commit" />
-        )}
-        {buildTime && (
-          <InfoRow label={t("versionCard.builtAt")} value={buildTime} testid="row-build-time" />
-        )}
+    <AboutCard icon={TagIcon} title={t("versionCard.title")} testid="about-version-card">
+      <InfoRow label={t("versionCard.version")} value={APP_VERSION} mono testid="row-version" />
+      {nativeBuild && (
+        <InfoRow
+          label={t("versionCard.build")}
+          value={nativeBuild}
+          mono
+          testid="row-native-build"
+        />
+      )}
+      {build.commit && (
+        <InfoRow label={t("versionCard.commit")} value={build.commit} mono testid="row-commit" />
+      )}
+      {buildTime && (
+        <InfoRow label={t("versionCard.builtAt")} value={buildTime} testid="row-build-time" />
+      )}
 
-        <Collapsible open={open} onOpenChange={setOpen} className="mt-2">
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" className="-ml-2 h-8" data-testid="advanced-toggle">
-              <ChevronsUpDownIcon className="mr-2 size-4" />
-              {open ? t("versionCard.hideAdvanced") : t("versionCard.showAdvanced")}
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <Separator className="my-2" />
-            {runtime?.tauri && (
-              <InfoRow
-                label={t("versionCard.tauri")}
-                value={runtime.tauri}
-                mono
-                testid="row-tauri"
-              />
-            )}
-            <InfoRow
-              label={t("versionCard.react")}
-              value={runtime?.react ?? "—"}
-              mono
-              testid="row-react"
-            />
-            {runtime?.engine && (
-              <InfoRow
-                label={t("versionCard.engine")}
-                value={runtime.engine}
-                mono
-                testid="row-engine"
-              />
-            )}
-          </CollapsibleContent>
-        </Collapsible>
-      </CardContent>
-    </Card>
+      <div className="mt-3 flex items-center gap-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+        {t("versionCard.runtime")}
+        <span aria-hidden className="h-px flex-1 bg-border" />
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5" data-testid="runtime-versions">
+        {runtime?.tauri && (
+          <RuntimeChip label={t("versionCard.tauri")} value={runtime.tauri} testid="row-tauri" />
+        )}
+        <RuntimeChip
+          label={t("versionCard.react")}
+          value={runtime?.react ?? "—"}
+          testid="row-react"
+        />
+        {runtime?.engine && (
+          <RuntimeChip label={t("versionCard.engine")} value={runtime.engine} testid="row-engine" />
+        )}
+      </div>
+    </AboutCard>
   )
 }

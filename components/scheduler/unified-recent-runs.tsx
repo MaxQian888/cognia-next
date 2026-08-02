@@ -25,9 +25,14 @@ export interface UnifiedRecentRunsProps {
   limit?: number
   /** Click handler — usually opens `RunDetailSheet`. */
   onSelectRun?: (run: UnifiedExecutionRun) => void
+  /**
+   * Merged onto the outer `Card`. The scheduler overview passes a flattening
+   * class set so the widget reads as a page section rather than a nested box.
+   */
+  className?: string
 }
 
-export function UnifiedRecentRuns({ limit = 5, onSelectRun }: UnifiedRecentRunsProps) {
+export function UnifiedRecentRuns({ limit = 5, onSelectRun, className }: UnifiedRecentRunsProps) {
   const t = useTranslations("scheduler")
   const { runs, isLoading } = useUnifiedRecentRuns({ limit: limit * 4 })
 
@@ -35,11 +40,11 @@ export function UnifiedRecentRuns({ limit = 5, onSelectRun }: UnifiedRecentRunsP
   const displayed = runs.slice(0, limit)
 
   return (
-    <Card className="border-border/50 bg-card/80">
+    <Card className={cn("border-border/50 bg-card/80", className)}>
       <CardContent className="p-4">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
           <Activity className="h-4 w-4 text-purple-500" aria-hidden="true" />
-          {t("recentExecutions") || "Recent Executions"}
+          {t("recentExecutions")}
         </h3>
 
         {isLoading ? (
@@ -47,14 +52,14 @@ export function UnifiedRecentRuns({ limit = 5, onSelectRun }: UnifiedRecentRunsP
             className="py-4 text-center text-xs text-muted-foreground"
             data-testid="unified-runs-loading"
           >
-            {t("loading") || "Loading…"}
+            {t("loading")}
           </p>
         ) : displayed.length === 0 ? (
           <p
             className="py-4 text-center text-xs text-muted-foreground"
             data-testid="unified-runs-empty"
           >
-            {t("noRecentExecutions") || "No recent executions"}
+            {t("noRecentExecutions")}
           </p>
         ) : (
           <ul className="space-y-0.5" data-testid="unified-runs-list">

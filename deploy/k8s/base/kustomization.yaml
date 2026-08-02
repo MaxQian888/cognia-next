@@ -5,3 +5,5 @@ resources:
   - cognia-server-rbac.yaml
   - services.yaml
   - guardrails.yaml
+  - ingress.yaml
+  - pdb.yaml

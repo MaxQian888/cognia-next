@@ -173,17 +173,17 @@ impl ShortcutRegistry {
             }
             "tray.automation-kill" => {
                 use tauri::Manager;
+                // Parity with every other trigger is structural now rather than
+                // maintained by hand: this path used to flip the engine and
+                // clear grants, but skipped persisting the disabled state,
+                // releasing a screen-off virtual display, and stopping an
+                // in-flight recording.
                 let state = app.state::<crate::automation::commands::AutomationState>();
-                state.gate.engage_kill_switch();
-                // ADR-0020 W3 — parity with the `automation_kill_switch`
-                // Tauri command (which is what the renderer's Settings →
-                // Automation kill button calls): engaging the switch
-                // drops every Rust-side per-session consent grant. The
-                // shortcut path used to only flip the engine; now it
-                // matches the renderer path so the operator-facing
-                // semantics are the same regardless of trigger.
-                state.consent.clear_session_grants();
-                let _ = app.emit("automation:kill-switch", serde_json::Value::Null);
+                crate::automation::kill_switch::engage(
+                    app,
+                    &state,
+                    crate::automation::kill_switch::KillSwitchCause::Shortcut,
+                );
             }
             "selection.captureClipboard" => {
                 crate::selection_toolbar::spawn_clipboard_capture(app);

@@ -70,6 +70,7 @@ import { useChatStore } from "@/stores/chat/chat-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui/ui-store"
 import { MaximizeIcon, MenuIcon, MinimizeIcon, MinusIcon, XIcon } from "lucide-react"
+import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { useTheme } from "next-themes"
 import { usePathname, useRouter } from "next/navigation"
@@ -79,6 +80,7 @@ import { TitleBarZone, type TitleBarItemContext } from "@/components/desktop/tit
 import { ShellLayoutDialog } from "@/components/shell/shell-layout-dialog"
 import { useBarLayout } from "@/components/shell/use-bar-layout"
 import { recordNavigation } from "@/hooks/desktop/use-nav-history"
+import { spawnDefaultTerminal } from "@/lib/terminal/spawn-default"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 
 const log = loggers.ui
@@ -426,8 +428,15 @@ export function TitleBar() {
 
   const handleNewTerminal = () => {
     log.info("title-bar terminal new")
-    // Open the dock; the dock's own "+" affordance creates project-scoped tabs.
+    // Open the dock AND spawn. "New terminal" that only revealed an empty panel
+    // was the menu item lying about what it does; the shell / profile / cwd
+    // precedence is shared with the dock's own "+" via `spawnDefaultTerminal`.
     setTerminalPanelOpen(true)
+    void spawnDefaultTerminal().then((outcome) => {
+      if (outcome.kind === "error")
+        toast.error(t("terminalSpawnError", { message: outcome.message }))
+      else if (outcome.kind === "denied") toast.error(t("terminalSpawnDenied"))
+    })
   }
   const handleToggleTerminal = () => {
     log.info("title-bar terminal toggle")

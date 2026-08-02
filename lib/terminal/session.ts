@@ -32,11 +32,25 @@ interface SeqEvent {
   event: TerminalEvent
 }
 
+/**
+ * How often an outstanding flow-control pause is re-asserted to the host.
+ *
+ * Must stay comfortably below the host's `FLOW_PAUSE_MAX` (30 s, see
+ * `crates/cognia-terminal/src/host.rs`) so a couple of missed ticks — a busy
+ * main thread, a slow IPC round trip — still cannot let the lease lapse under a
+ * client that is genuinely still throttled.
+ */
+export const FLOW_PAUSE_RENEW_MS = 10_000
+
 export class TerminalSession extends BaseTerminalSession {
   readonly info: SessionInfo
 
   private readonly channel: Channel<SeqEvent>
   private lastSeqValue = 0
+  /** Latched once the host has rejected `terminal_set_flow_control`. */
+  private flowControlUnsupported = false
+  /** Timer renewing an outstanding pause; see {@link FLOW_PAUSE_RENEW_MS}. */
+  private flowRenewTimer: ReturnType<typeof setInterval> | null = null
 
   private constructor(info: SessionInfo, channel: Channel<SeqEvent>) {
     super()
@@ -103,6 +117,9 @@ export class TerminalSession extends BaseTerminalSession {
   }
 
   async detach(): Promise<void> {
+    // Detaching drops the host-side claim with the attachment, so renewing it
+    // afterwards would only log failures.
+    this.stopFlowRenewal()
     await invoke<void>("terminal_detach", { id: this.info.id })
   }
 
@@ -116,7 +133,66 @@ export class TerminalSession extends BaseTerminalSession {
     this.dispatchControlState({ role: "viewer", controllerId: null, reason: "released" })
   }
 
+  /**
+   * The only transport with real flow control today: the host parks the PTY's
+   * reader thread, so unread bytes stay in the kernel buffer and the child
+   * blocks on write. Nothing is dropped and nothing accumulates in user space.
+   *
+   * A pause is a *lease*, not a latch: `TerminalHost::reap_flow_pauses` drops
+   * any claim older than `FLOW_PAUSE_MAX` (30 s) so a wedged client cannot park
+   * someone's PTY forever. The renderer only reports the false→true watermark
+   * crossing once, so without renewal a genuinely slow consumer would be
+   * force-resumed mid-flood and never re-pause. Renewing on a timer keeps the
+   * backstop aimed at clients that actually stopped running.
+   */
+  override async setFlowControl(paused: boolean): Promise<boolean> {
+    if (this.flowControlUnsupported) return false
+    const applied = await this.sendFlowControl(paused)
+    if (!applied) {
+      this.stopFlowRenewal()
+      return false
+    }
+    if (paused) this.startFlowRenewal()
+    else this.stopFlowRenewal()
+    return true
+  }
+
+  private async sendFlowControl(paused: boolean): Promise<boolean> {
+    try {
+      await invoke<void>("terminal_set_flow_control", { id: this.info.id, paused })
+      return true
+    } catch {
+      // An older durable host (a login service installed before this build)
+      // rejects the command. Latch it off rather than re-issuing an IPC call
+      // on every watermark crossing.
+      this.flowControlUnsupported = true
+      return false
+    }
+  }
+
+  private startFlowRenewal(): void {
+    if (this.flowRenewTimer) return
+    this.flowRenewTimer = setInterval(() => {
+      if (this.isExited || this.flowControlUnsupported) {
+        this.stopFlowRenewal()
+        return
+      }
+      void this.sendFlowControl(true)
+    }, FLOW_PAUSE_RENEW_MS)
+  }
+
+  private stopFlowRenewal(): void {
+    if (!this.flowRenewTimer) return
+    clearInterval(this.flowRenewTimer)
+    this.flowRenewTimer = null
+  }
+
+  override get supportsFlowControl(): boolean {
+    return !this.flowControlUnsupported
+  }
+
   async kill(): Promise<void> {
+    this.stopFlowRenewal()
     if (this.isExited) return
     await invoke<void>("terminal_kill", { id: this.info.id })
   }
@@ -132,6 +208,8 @@ export class TerminalSession extends BaseTerminalSession {
         break
       }
       case "exit": {
+        // The session is gone; there is no lease left to renew.
+        this.stopFlowRenewal()
         this.handleExit(event.code ?? null)
         break
       }

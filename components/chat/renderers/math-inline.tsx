@@ -4,7 +4,7 @@ import { useMemo, useState, useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Check, Copy } from "lucide-react"
+import { CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import { renderMathSafe } from "@cognia/latex"
 import { withMathErrorBoundary } from "./math-error-boundary"
 import { useCopy } from "@/hooks/ui/use-copy"
@@ -107,7 +107,11 @@ function MathInlineBase({
           <span dangerouslySetInnerHTML={{ __html: result.html }} />
           {showCopyOnHover && isHovered && (
             <span className="inline-flex items-center text-muted-foreground ml-0.5">
-              {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+              <CopyFeedbackIcon
+                copied={copied}
+                size={12}
+                className={copied ? "text-green-500" : undefined}
+              />
             </span>
           )}
         </span>

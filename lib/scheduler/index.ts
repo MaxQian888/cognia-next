@@ -117,6 +117,9 @@ export {
 export async function initSchedulerSystem(driver?: SchedulerTimingDriver): Promise<void> {
   registerBuiltInExecutors()
   await initTaskScheduler(driver)
+  const { installProviderDiagnosticsRefreshSchedule } =
+    await import("@/lib/provider-diagnostics/refresh")
+  await installProviderDiagnosticsRefreshSchedule()
   log.info("[Scheduler] Scheduler system initialized")
 }
 

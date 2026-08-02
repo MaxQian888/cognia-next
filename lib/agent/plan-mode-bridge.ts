@@ -93,7 +93,7 @@ export function parseTodos(input: unknown, key: "todos" | "tasks" = "todos"): To
  * directly rather than `createTeam` to avoid spinning up a Lead teammate
  * and the consequent UI noise — the synthetic team is task-only.
  */
-function ensureSoloTeam(teamId: string): void {
+export function ensureSoloTeam(teamId: string): void {
   const store = useAgentTeamStore.getState()
   if (store.teams[teamId]) return
   if (!teamId.startsWith(SOLO_TEAM_PREFIX)) return

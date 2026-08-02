@@ -21,10 +21,19 @@ interface ComposerCommandState {
   recentCommands: string[]
   /** Pinned command names, in pin order (newest pin last). */
   pinnedCommands: string[]
+  /**
+   * {@link memoryTargetKey} of the last `#` capture destination, so a bare
+   * `#note` + Enter can repeat it instead of forcing a popover pick every time.
+   * Stored as the KEY, not the object, so an unrecognised persisted value
+   * degrades to "ask again" via `parseMemoryTargetKey`.
+   */
+  lastMemoryTargetKey: string | null
   /** Record a command as just-used (dedupe-prepend, cap at RECENT_LIMIT). */
   noteCommandUsed: (name: string) => void
   /** Toggle a command's pinned state. */
   togglePin: (name: string) => void
+  /** Remember the destination of the most recent `#` capture. */
+  noteMemoryTargetUsed: (key: string) => void
 }
 
 export const useComposerCommandStore = create<ComposerCommandState>()(
@@ -32,6 +41,8 @@ export const useComposerCommandStore = create<ComposerCommandState>()(
     (set) => ({
       recentCommands: [],
       pinnedCommands: [],
+      lastMemoryTargetKey: null,
+      noteMemoryTargetUsed: (key) => set(() => (key ? { lastMemoryTargetKey: key } : {})),
       noteCommandUsed: (name) =>
         set((s) =>
           name ? { recentCommands: pushRecent(s.recentCommands, name, RECENT_LIMIT) } : s
@@ -45,6 +56,7 @@ export const useComposerCommandStore = create<ComposerCommandState>()(
       partialize: (s) => ({
         recentCommands: s.recentCommands,
         pinnedCommands: s.pinnedCommands,
+        lastMemoryTargetKey: s.lastMemoryTargetKey,
       }),
     }
   )

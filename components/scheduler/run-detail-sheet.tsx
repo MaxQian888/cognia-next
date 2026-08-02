@@ -19,6 +19,13 @@ import { InspectRow } from "./details/_shared/inspect-row"
 import { RunStatusPill } from "@/components/workflow/runs/run-status-pill"
 import { toRunStatusPill, type UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 
+/**
+ * Payload / result dumps are arbitrarily large. Bounded height + in-place
+ * scrolling keeps one big blob from turning the sheet into an endless scroll.
+ */
+const PRE_BLOCK =
+  "max-h-64 overflow-auto rounded bg-muted px-3 py-2 text-[11px] font-mono text-muted-foreground"
+
 export interface RunDetailSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -53,13 +60,13 @@ export function RunDetailSheet({ open, onOpenChange, run }: RunDetailSheetProps)
                 {run.itemName}
               </SheetTitle>
               <p className="text-xs text-muted-foreground mt-1">
-                {t(`kindFilter.${run.kind}`) || run.kind} · {run.origin.tableName}
+                {t(`kindFilter.${run.kind}`)} · {run.origin.tableName}
                 {run.triggerSource && (
                   <span
                     className="ml-1.5 inline-flex items-center rounded-full border border-border/50 px-1.5 text-[10px]"
                     data-testid="run-sheet-trigger-source"
                   >
-                    {t(`triggerSources.${run.triggerSource}`) || run.triggerSource}
+                    {t(`triggerSources.${run.triggerSource}`)}
                   </span>
                 )}
               </p>
@@ -71,22 +78,19 @@ export function RunDetailSheet({ open, onOpenChange, run }: RunDetailSheetProps)
         <div className="flex-1 min-h-0 overflow-auto px-5 py-4 space-y-5">
           <section>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-              {t("timing") || "Timing"}
+              {t("timing")}
             </h3>
-            <InspectRow label={t("startedAt") || "Started at"} value={startedText} />
-            <InspectRow label={t("finishedAt") || "Finished at"} value={finishedText} />
-            <InspectRow label={t("duration") || "Duration"} value={durationText} />
+            <InspectRow label={t("startedAt")} value={startedText} />
+            <InspectRow label={t("finishedAt")} value={finishedText} />
+            <InspectRow label={t("duration")} value={durationText} />
           </section>
 
           {run.payload !== undefined && (
             <section>
               <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-                {t("triggerPayload") || "Trigger payload"}
+                {t("triggerPayload")}
               </h3>
-              <pre
-                className="rounded bg-muted px-3 py-2 text-[11px] font-mono text-muted-foreground overflow-x-auto"
-                data-testid="run-sheet-payload"
-              >
+              <pre className={PRE_BLOCK} data-testid="run-sheet-payload">
                 {safeStringify(run.payload)}
               </pre>
             </section>
@@ -95,12 +99,9 @@ export function RunDetailSheet({ open, onOpenChange, run }: RunDetailSheetProps)
           {run.result !== undefined && run.status !== "failed" && (
             <section>
               <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-                {t("result") || "Result"}
+                {t("result")}
               </h3>
-              <pre
-                className="rounded bg-muted px-3 py-2 text-[11px] font-mono text-muted-foreground overflow-x-auto"
-                data-testid="run-sheet-result"
-              >
+              <pre className={PRE_BLOCK} data-testid="run-sheet-result">
                 {safeStringify(run.result)}
               </pre>
             </section>
@@ -109,17 +110,31 @@ export function RunDetailSheet({ open, onOpenChange, run }: RunDetailSheetProps)
           {run.error && (
             <section data-testid="run-sheet-error">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-red-500 mb-2">
-                {t("error") || "Error"}
+                {t("error")}
               </h3>
               <div className="rounded border border-red-500/20 bg-red-500/5 px-3 py-2 text-[11px]">
-                <p className="font-medium text-red-600">{run.error.message}</p>
+                {/* A single unbroken message (no spaces — common for URLs and
+                    serialized payloads) used to widen the sheet; wrap it. */}
+                <p className="font-medium break-words whitespace-pre-wrap text-red-600">
+                  {run.error.message}
+                </p>
                 {run.error.code && (
-                  <p className="mt-1 text-muted-foreground">code: {run.error.code}</p>
+                  <p className="mt-1 text-muted-foreground">
+                    {t("code")} {run.error.code}
+                  </p>
                 )}
+                {/* Stacks are unbounded — keep them behind a disclosure and
+                    scroll them in place so expanding never buries the logs
+                    section below. */}
                 {run.error.stack && (
-                  <pre className="mt-2 font-mono text-muted-foreground overflow-x-auto whitespace-pre-wrap">
-                    {run.error.stack}
-                  </pre>
+                  <details className="mt-2" data-testid="run-sheet-stack">
+                    <summary className="cursor-pointer select-none text-[10px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground">
+                      {t("stackTrace")}
+                    </summary>
+                    <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-muted-foreground">
+                      {run.error.stack}
+                    </pre>
+                  </details>
                 )}
               </div>
             </section>
@@ -138,7 +153,7 @@ export function RunDetailSheet({ open, onOpenChange, run }: RunDetailSheetProps)
                 ) : (
                   <ChevronRight className="h-3 w-3" />
                 )}
-                {t("logs") || "Logs"} ({run.logs.length})
+                {t("logs")} ({run.logs.length})
               </button>
               {showLogs && (
                 <ul className="mt-2 space-y-1" data-testid="run-sheet-logs">
@@ -162,7 +177,7 @@ export function RunDetailSheet({ open, onOpenChange, run }: RunDetailSheetProps)
 
         <div className="border-t px-5 py-3 flex justify-end">
           <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
-            {t("close") || "Close"}
+            {t("close")}
           </Button>
         </div>
       </SheetContent>

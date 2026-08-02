@@ -10,10 +10,11 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { RELEASES } from "@/lib/constants/release-notes"
 import { RELEASES_URL } from "@/lib/constants/external-urls"
 import { openExternal } from "@/lib/tauri/opener"
+
+import { AboutCard } from "./about-card"
 
 /** Format an ISO date (YYYY-MM-DD) for display; passthrough on failure. */
 function formatDate(iso: string): string {
@@ -31,46 +32,43 @@ export function WhatsNewCard() {
   const latest = RELEASES[0]?.version
 
   return (
-    <Card data-testid="about-whatsnew-card">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <SparklesIcon className="size-4" />
-          {t("whatsNew.title")}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <Accordion type="single" collapsible defaultValue={latest}>
-          {RELEASES.map((release) => (
-            <AccordionItem key={release.version} value={release.version}>
-              <AccordionTrigger data-testid={`whatsnew-trigger-${release.version}`}>
-                <span className="flex items-center gap-2">
-                  <span className="font-mono">{release.version}</span>
-                  <span className="text-xs font-normal text-muted-foreground">
-                    {formatDate(release.date)}
-                  </span>
+    <AboutCard icon={SparklesIcon} title={t("whatsNew.title")} testid="about-whatsnew-card">
+      <Accordion type="single" collapsible defaultValue={latest}>
+        {RELEASES.map((release) => (
+          <AccordionItem key={release.version} value={release.version}>
+            <AccordionTrigger data-testid={`whatsnew-trigger-${release.version}`}>
+              <span className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="rounded-md border bg-muted/50 px-1.5 py-0.5 font-mono text-xs">
+                  {release.version}
                 </span>
-              </AccordionTrigger>
-              <AccordionContent>
-                <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
-                  {release.highlightKeys.map((key) => (
-                    <li key={key}>{t(`whatsNew.highlights.${key}`)}</li>
-                  ))}
-                </ul>
-              </AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
+                <span className="text-xs font-normal text-muted-foreground">
+                  {formatDate(release.date)}
+                </span>
+              </span>
+            </AccordionTrigger>
+            <AccordionContent>
+              <ul className="space-y-1.5 text-xs text-muted-foreground">
+                {release.highlightKeys.map((key) => (
+                  <li key={key} className="flex gap-2">
+                    <span aria-hidden className="mt-1.5 size-1 shrink-0 rounded-full bg-primary" />
+                    <span className="min-w-0 text-pretty">{t(`whatsNew.highlights.${key}`)}</span>
+                  </li>
+                ))}
+              </ul>
+            </AccordionContent>
+          </AccordionItem>
+        ))}
+      </Accordion>
 
-        <Button
-          variant="link"
-          size="sm"
-          className="mt-1 h-8 px-0"
-          onClick={() => void openExternal(RELEASES_URL)}
-          data-testid="whatsnew-view-all"
-        >
-          {t("whatsNew.viewAll")}
-        </Button>
-      </CardContent>
-    </Card>
+      <Button
+        variant="link"
+        size="sm"
+        className="mt-1 h-8 px-0 text-xs"
+        onClick={() => void openExternal(RELEASES_URL)}
+        data-testid="whatsnew-view-all"
+      >
+        {t("whatsNew.viewAll")}
+      </Button>
+    </AboutCard>
   )
 }

@@ -126,7 +126,7 @@ describe("span context", () => {
     logContext.withSpan(() => {
       inside = logContext.spanId
     })
-    expect(inside).toMatch(/^[a-f0-9]{32}$/)
+    expect(inside).toMatch(/^[a-f0-9]{16}$/)
     expect(logContext.spanId).toBeUndefined()
   })
 
@@ -161,7 +161,7 @@ describe("span context", () => {
     await logContext.withSpanAsync(async () => {
       inside = logContext.spanId
     })
-    expect(inside).toMatch(/^[a-f0-9]{32}$/)
+    expect(inside).toMatch(/^[a-f0-9]{16}$/)
     expect(logContext.spanId).toBeUndefined()
 
     await expect(

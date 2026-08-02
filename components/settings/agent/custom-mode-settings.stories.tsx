@@ -4,10 +4,11 @@ import { CustomModeSettings } from "./custom-mode-settings"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 
-// `CustomModeSettings` manages custom agent modes from `useCustomModeStore`
-// (search / filter / sort / bulk-select / import-export). Reset between stories
-// so seeded modes don't leak; `Populated` seeds a couple of modes to show the
-// list + per-row actions.
+// `CustomModeSettings` is the master/detail surface over `useCustomModeStore`:
+// a filterable rail (search / category / sort / bulk-select) beside a pane
+// showing the selected mode's prompt, tools, tags and overrides. Reset between
+// stories so seeded modes don't leak; `Populated` seeds two modes so the rail
+// and the pane both have something to show.
 const now = new Date("2026-06-01T12:00:00Z")
 
 const sampleModes = {
@@ -48,7 +49,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="max-w-3xl">
+      <div className="h-[720px] max-w-5xl">
         <Story />
       </div>
     ),
@@ -61,7 +62,7 @@ type Story = StoryObj<typeof meta>
 // No custom modes yet — the create-first-mode empty state.
 export const Empty: Story = {}
 
-// A couple of user-defined modes with the filter/sort toolbar.
+// A couple of user-defined modes; the first is auto-selected in the pane.
 export const Populated: Story = {
   beforeEach: () => {
     resetStore(useCustomModeStore)

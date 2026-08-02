@@ -77,6 +77,28 @@ describe("InteractiveRebaseDialog", () => {
     ])
   })
 
+  it("stays open when starting the rebase fails", async () => {
+    const actions = makeActions()
+    actions.interactiveRebase.mockResolvedValue({ kind: "dirtyWorkingTree", detail: "stash first" })
+    const onOpenChange = jest.fn()
+    render(
+      <InteractiveRebaseDialog
+        rootDir="/r"
+        base="HEAD~2"
+        onOpenChange={onOpenChange}
+        actions={actions}
+      />
+    )
+    await screen.findByTestId("irebase-row-aaaaaaa1")
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("irebase-apply"))
+    })
+
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    expect(screen.getByTestId("interactive-rebase-dialog")).toBeInTheDocument()
+  })
+
   it("reorders rows before applying", async () => {
     const actions = makeActions()
     render(

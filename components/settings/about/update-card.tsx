@@ -7,7 +7,6 @@ import { DownloadIcon, RefreshCwIcon, RocketIcon, RotateCcwIcon } from "lucide-r
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import {
@@ -37,6 +36,7 @@ import {
 } from "@/lib/tauri/updater"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
+import { AboutCard } from "./about-card"
 import { InfoRow } from "./info-row"
 
 const CHECK_INTERVALS = [15, 60, 360, 720, 1440, 10080] as const
@@ -218,217 +218,212 @@ export function UpdateCard() {
   const busy = checking || downloading || installing
 
   return (
-    <Card data-testid="about-update-card">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <RocketIcon className="size-4" />
-          {t("updates.title")}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {!desktop && (
-          <p className="mb-3 text-xs text-muted-foreground" data-testid="updates-desktop-only">
-            {t("updates.desktopOnly")}
-          </p>
-        )}
-        {lastChecked && (
-          <InfoRow label={t("updates.lastChecked")} value={lastChecked} testid="row-last-checked" />
-        )}
+    <AboutCard icon={RocketIcon} title={t("updates.title")} testid="about-update-card">
+      {!desktop && (
+        <p
+          className="mb-3 rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-xs text-pretty text-muted-foreground"
+          data-testid="updates-desktop-only"
+        >
+          {t("updates.desktopOnly")}
+        </p>
+      )}
+      {lastChecked && (
+        <InfoRow label={t("updates.lastChecked")} value={lastChecked} testid="row-last-checked" />
+      )}
 
-        <div className="mt-2 flex flex-wrap gap-2">
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Button
+          onClick={handleCheck}
+          disabled={busy || !desktop || restartRequired}
+          data-testid="check-updates"
+        >
+          <RefreshCwIcon className={`mr-2 size-4 ${checking ? "animate-spin" : ""}`} />
+          {checking ? t("updates.checking") : t("updates.checkUpdates")}
+        </Button>
+        {available && !downloaded && (
           <Button
-            onClick={handleCheck}
-            disabled={busy || !desktop || restartRequired}
-            data-testid="check-updates"
+            variant="outline"
+            onClick={() => void runDownload()}
+            disabled={busy}
+            data-testid="download-update"
           >
-            <RefreshCwIcon className={`mr-2 size-4 ${checking ? "animate-spin" : ""}`} />
-            {checking ? t("updates.checking") : t("updates.checkUpdates")}
+            <DownloadIcon className={`mr-2 size-4 ${downloading ? "animate-pulse" : ""}`} />
+            {downloading ? t("updates.downloading") : t("updates.download")}
           </Button>
-          {available && !downloaded && (
-            <Button
-              variant="outline"
-              onClick={() => void runDownload()}
-              disabled={busy}
-              data-testid="download-update"
-            >
-              <DownloadIcon className={`mr-2 size-4 ${downloading ? "animate-pulse" : ""}`} />
-              {downloading ? t("updates.downloading") : t("updates.download")}
-            </Button>
-          )}
-          {available && (
-            <Button onClick={handleInstall} disabled={busy} data-testid="install-update">
-              <DownloadIcon className={`mr-2 size-4 ${installing ? "animate-pulse" : ""}`} />
-              {installing
-                ? t("updates.installing")
-                : t("updates.install", { version: available.version })}
-            </Button>
-          )}
-          {restartRequired && (
-            <Button onClick={handleRestart} data-testid="restart-update">
-              <RotateCcwIcon className="mr-2 size-4" />
-              {t("updates.restartNow")}
-            </Button>
-          )}
-        </div>
-
-        {(downloading || installing) && (
-          <div className="mt-3 space-y-1.5" data-testid="install-progress">
-            <Progress
-              value={percent ?? 0}
-              aria-label={downloading ? t("updates.downloading") : t("updates.installing")}
-            />
-            <p className="text-xs text-muted-foreground">
-              {percent !== null
-                ? t("updates.downloadingPercent", { percent })
-                : downloading
-                  ? t("updates.downloading")
-                  : t("updates.installing")}
-            </p>
-          </div>
         )}
-
-        {downloaded && (
-          <p className="mt-3 text-xs text-muted-foreground" data-testid="update-downloaded">
-            {t("updates.downloadedReady")}
-          </p>
-        )}
-
         {available && (
-          <Alert className="mt-3" data-testid="update-alert">
-            <AlertTitle className="text-sm">
-              {t("updates.updateAvailable", { version: available.version })}
-            </AlertTitle>
-            {available.body && (
-              <AlertDescription className="whitespace-pre-wrap text-xs">
-                {available.body}
-              </AlertDescription>
-            )}
-          </Alert>
+          <Button onClick={handleInstall} disabled={busy} data-testid="install-update">
+            <DownloadIcon className={`mr-2 size-4 ${installing ? "animate-pulse" : ""}`} />
+            {installing
+              ? t("updates.installing")
+              : t("updates.install", { version: available.version })}
+          </Button>
         )}
+        {restartRequired && (
+          <Button onClick={handleRestart} data-testid="restart-update">
+            <RotateCcwIcon className="mr-2 size-4" />
+            {t("updates.restartNow")}
+          </Button>
+        )}
+      </div>
 
-        {desktop && (
-          <>
-            <Separator className="my-4" />
-            <div className="divide-y">
-              <PreferenceRow
-                htmlFor="settings-auto-check-updates"
-                label={t("updates.autoCheckLabel")}
-                description={t("updates.autoCheckDescription")}
+      {(downloading || installing) && (
+        <div className="mt-3 space-y-1.5" data-testid="install-progress">
+          <Progress
+            value={percent ?? 0}
+            aria-label={downloading ? t("updates.downloading") : t("updates.installing")}
+          />
+          <p className="text-xs text-muted-foreground">
+            {percent !== null
+              ? t("updates.downloadingPercent", { percent })
+              : downloading
+                ? t("updates.downloading")
+                : t("updates.installing")}
+          </p>
+        </div>
+      )}
+
+      {downloaded && (
+        <p className="mt-3 text-xs text-muted-foreground" data-testid="update-downloaded">
+          {t("updates.downloadedReady")}
+        </p>
+      )}
+
+      {available && (
+        <Alert className="mt-3" data-testid="update-alert">
+          <AlertTitle className="text-sm">
+            {t("updates.updateAvailable", { version: available.version })}
+          </AlertTitle>
+          {available.body && (
+            <AlertDescription className="whitespace-pre-wrap text-xs">
+              {available.body}
+            </AlertDescription>
+          )}
+        </Alert>
+      )}
+
+      {desktop && (
+        <>
+          <Separator className="my-4" />
+          <div className="divide-y">
+            <PreferenceRow
+              htmlFor="settings-auto-check-updates"
+              label={t("updates.autoCheckLabel")}
+              description={t("updates.autoCheckDescription")}
+            >
+              <Switch
+                id="settings-auto-check-updates"
+                checked={updateSettings.autoCheck}
+                onCheckedChange={(autoCheck) => void persistUpdateSettings({ autoCheck })}
+                aria-label={t("updates.autoCheckLabel")}
+                data-testid="auto-check-updates-toggle"
+              />
+            </PreferenceRow>
+            <PreferenceRow
+              htmlFor="settings-update-check-interval"
+              label={t("updates.checkIntervalLabel")}
+              description={t("updates.checkIntervalDescription")}
+            >
+              <Select
+                value={String(updateSettings.checkIntervalMinutes)}
+                onValueChange={(value) =>
+                  void persistUpdateSettings({ checkIntervalMinutes: Number(value) })
+                }
+                disabled={!updateSettings.autoCheck}
               >
-                <Switch
-                  id="settings-auto-check-updates"
-                  checked={updateSettings.autoCheck}
-                  onCheckedChange={(autoCheck) => void persistUpdateSettings({ autoCheck })}
-                  aria-label={t("updates.autoCheckLabel")}
-                  data-testid="auto-check-updates-toggle"
-                />
-              </PreferenceRow>
-              <PreferenceRow
-                htmlFor="settings-update-check-interval"
-                label={t("updates.checkIntervalLabel")}
-                description={t("updates.checkIntervalDescription")}
-              >
-                <Select
-                  value={String(updateSettings.checkIntervalMinutes)}
-                  onValueChange={(value) =>
-                    void persistUpdateSettings({ checkIntervalMinutes: Number(value) })
-                  }
-                  disabled={!updateSettings.autoCheck}
+                <SelectTrigger
+                  id="settings-update-check-interval"
+                  className="w-40"
+                  aria-label={t("updates.checkIntervalLabel")}
+                  data-testid="update-check-interval"
                 >
-                  <SelectTrigger
-                    id="settings-update-check-interval"
-                    className="w-40"
-                    aria-label={t("updates.checkIntervalLabel")}
-                    data-testid="update-check-interval"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {CHECK_INTERVALS.map((minutes) => (
-                        <SelectItem key={minutes} value={String(minutes)}>
-                          {t(`updates.intervals.${minutes}`)}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </PreferenceRow>
-              <PreferenceRow
-                htmlFor="settings-auto-download-updates"
-                label={t("updates.autoDownloadLabel")}
-                description={t("updates.autoDownloadDescription")}
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {CHECK_INTERVALS.map((minutes) => (
+                      <SelectItem key={minutes} value={String(minutes)}>
+                        {t(`updates.intervals.${minutes}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </PreferenceRow>
+            <PreferenceRow
+              htmlFor="settings-auto-download-updates"
+              label={t("updates.autoDownloadLabel")}
+              description={t("updates.autoDownloadDescription")}
+            >
+              <Switch
+                id="settings-auto-download-updates"
+                checked={updateSettings.autoDownload}
+                onCheckedChange={(autoDownload) => void persistUpdateSettings({ autoDownload })}
+                aria-label={t("updates.autoDownloadLabel")}
+                data-testid="auto-download-updates-toggle"
+              />
+            </PreferenceRow>
+            <PreferenceRow
+              htmlFor="settings-relaunch-after-update"
+              label={t("updates.relaunchAfterInstallLabel")}
+              description={t("updates.relaunchAfterInstallDescription")}
+            >
+              <Switch
+                id="settings-relaunch-after-update"
+                checked={updateSettings.relaunchAfterInstall}
+                onCheckedChange={(relaunchAfterInstall) =>
+                  void persistUpdateSettings({ relaunchAfterInstall })
+                }
+                aria-label={t("updates.relaunchAfterInstallLabel")}
+                data-testid="relaunch-after-update-toggle"
+              />
+            </PreferenceRow>
+            <PreferenceRow
+              htmlFor="settings-update-timeout"
+              label={t("updates.requestTimeoutLabel")}
+              description={t("updates.requestTimeoutDescription")}
+            >
+              <Select
+                value={String(updateSettings.requestTimeoutSeconds)}
+                onValueChange={(value) =>
+                  void persistUpdateSettings({ requestTimeoutSeconds: Number(value) })
+                }
               >
-                <Switch
-                  id="settings-auto-download-updates"
-                  checked={updateSettings.autoDownload}
-                  onCheckedChange={(autoDownload) => void persistUpdateSettings({ autoDownload })}
-                  aria-label={t("updates.autoDownloadLabel")}
-                  data-testid="auto-download-updates-toggle"
-                />
-              </PreferenceRow>
-              <PreferenceRow
-                htmlFor="settings-relaunch-after-update"
-                label={t("updates.relaunchAfterInstallLabel")}
-                description={t("updates.relaunchAfterInstallDescription")}
-              >
-                <Switch
-                  id="settings-relaunch-after-update"
-                  checked={updateSettings.relaunchAfterInstall}
-                  onCheckedChange={(relaunchAfterInstall) =>
-                    void persistUpdateSettings({ relaunchAfterInstall })
-                  }
-                  aria-label={t("updates.relaunchAfterInstallLabel")}
-                  data-testid="relaunch-after-update-toggle"
-                />
-              </PreferenceRow>
-              <PreferenceRow
-                htmlFor="settings-update-timeout"
-                label={t("updates.requestTimeoutLabel")}
-                description={t("updates.requestTimeoutDescription")}
-              >
-                <Select
-                  value={String(updateSettings.requestTimeoutSeconds)}
-                  onValueChange={(value) =>
-                    void persistUpdateSettings({ requestTimeoutSeconds: Number(value) })
-                  }
+                <SelectTrigger
+                  id="settings-update-timeout"
+                  className="w-40"
+                  aria-label={t("updates.requestTimeoutLabel")}
+                  data-testid="update-request-timeout"
                 >
-                  <SelectTrigger
-                    id="settings-update-timeout"
-                    className="w-40"
-                    aria-label={t("updates.requestTimeoutLabel")}
-                    data-testid="update-request-timeout"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {REQUEST_TIMEOUTS.map((seconds) => (
-                        <SelectItem key={seconds} value={String(seconds)}>
-                          {t("updates.timeoutSeconds", { seconds })}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </PreferenceRow>
-              <PreferenceRow
-                htmlFor="settings-update-use-proxy"
-                label={t("updates.useProxyLabel")}
-                description={t("updates.useProxyDescription")}
-              >
-                <Switch
-                  id="settings-update-use-proxy"
-                  checked={updateSettings.useProxy}
-                  onCheckedChange={(useProxy) => void persistUpdateSettings({ useProxy })}
-                  aria-label={t("updates.useProxyLabel")}
-                  data-testid="update-use-proxy-toggle"
-                />
-              </PreferenceRow>
-            </div>
-          </>
-        )}
-      </CardContent>
-    </Card>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {REQUEST_TIMEOUTS.map((seconds) => (
+                      <SelectItem key={seconds} value={String(seconds)}>
+                        {t("updates.timeoutSeconds", { seconds })}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </PreferenceRow>
+            <PreferenceRow
+              htmlFor="settings-update-use-proxy"
+              label={t("updates.useProxyLabel")}
+              description={t("updates.useProxyDescription")}
+            >
+              <Switch
+                id="settings-update-use-proxy"
+                checked={updateSettings.useProxy}
+                onCheckedChange={(useProxy) => void persistUpdateSettings({ useProxy })}
+                aria-label={t("updates.useProxyLabel")}
+                data-testid="update-use-proxy-toggle"
+              />
+            </PreferenceRow>
+          </div>
+        </>
+      )}
+    </AboutCard>
   )
 }

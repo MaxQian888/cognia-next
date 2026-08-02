@@ -9,6 +9,7 @@
 // Zero-dependency hand-written guards, matching the rest of this package.
 
 import type { AgentRuntimeAdapterId } from "./agent-execution"
+import { absolutePathViolation, isNonEmptyString, refViolation } from "./ref-safety"
 
 /** Delegation execution binding carried on the envelope — refs only. */
 export interface HandoffExecutionBinding {
@@ -63,21 +64,6 @@ export interface HandoffEnvelope {
 }
 
 // ---- Validation --------------------------------------------------------------
-
-/** Secret-shaped values that must never appear in a ref position. */
-const SECRET_SHAPE = /sk-[A-Za-z0-9]|api[_-]?key|bearer\s|(^|[^a-z])token[=:]/i
-/** URL-shaped values — endpoints resolve from the deployment profile, not here. */
-const URL_SHAPE = /^[a-z][a-z0-9+.-]*:\/\//i
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0
-}
-
-function refViolation(value: string): string | null {
-  if (SECRET_SHAPE.test(value)) return "secret-shaped value in a ref position"
-  if (URL_SHAPE.test(value)) return "URL-shaped value in a ref position"
-  return null
-}
 
 /**
  * Validate an envelope. Returns a list of violations (empty = valid). Ref
@@ -140,9 +126,8 @@ export function validateHandoffEnvelope(value: unknown): string[] {
     const violation = refViolation(res.ref)
     if (violation) errors.push(`resources[${i}].ref: ${violation}`)
     // Machine-local absolute paths do not survive a host boundary.
-    if (res.ref.startsWith("/") || /^[A-Za-z]:[\\/]/.test(res.ref)) {
-      errors.push(`resources[${i}].ref: machine-local absolute path is not a stable ref`)
-    }
+    const pathViolation = absolutePathViolation(res.ref)
+    if (pathViolation) errors.push(`resources[${i}].ref: ${pathViolation}`)
   }
 
   if (!isNonEmptyString(env.createdAt) || Number.isNaN(Date.parse(env.createdAt))) {

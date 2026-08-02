@@ -26,7 +26,7 @@ const meta = {
   beforeEach: seed(),
   decorators: [
     (Story) => (
-      <div className="w-[640px] max-w-full">
+      <div className="h-[680px] w-[900px] max-w-full">
         <Story />
       </div>
     ),

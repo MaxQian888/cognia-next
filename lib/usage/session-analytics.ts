@@ -157,14 +157,64 @@ export function aggregateByModel(
   )
 }
 
-/** Bucket rows by UTC day, ascending by date. Reuses the `DailyUsage` shape. */
+/**
+ * Format an epoch-ms timestamp as the user's LOCAL "YYYY-MM-DD" day.
+ *
+ * Same semantics as `lib/db/provider-cost-daily.ts:localDayString`, restated
+ * here on purpose: that module imports `getDb` (Dexie) at the top level, and
+ * this one is consumed by the CLI (`cli/src/tui/runtime/agent-stats-model.ts`),
+ * which must not pull the browser database into its module graph.
+ *
+ * Exported so every surface that buckets usage by day — the Usage tab's
+ * heatmap, the share card's "active days", and the welcome dashboard — agrees
+ * on which calendar day a turn belongs to. A second (UTC) definition is exactly
+ * how "active days" drifted between two views of the same rows.
+ */
+export function localDay(at: number): string {
+  const d = new Date(at)
+  const month = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${d.getFullYear()}-${month}-${day}`
+}
+
+/**
+ * Inverse of {@link localDay}: read a "YYYY-MM-DD" key back as that day's LOCAL
+ * midnight. Shared by the heatmap's cell labels and the streak walk so a day key
+ * round-trips through exactly one definition.
+ *
+ * `||` rather than `??` on the fallbacks: a non-numeric segment parses to NaN,
+ * which `??` would pass straight through and turn every derived label into
+ * "Invalid Date".
+ */
+export function parseLocalDay(date: string): Date {
+  const [y, m, d] = date.split("-").map(Number)
+  return new Date(y || 1970, (m || 1) - 1, d || 1)
+}
+
+/** Midnight (local) of the day `daysBack` calendar days before `now`. */
+function startOfLocalDay(now: number, daysBack = 0): number {
+  const d = new Date(now)
+  d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() - daysBack)
+  return d.getTime()
+}
+
+/**
+ * Bucket rows by the user's LOCAL calendar day, ascending by date. Reuses the
+ * `DailyUsage` shape. Local (not UTC) so a turn at 23:00 lands on the day the
+ * user remembers spending it, matching the daily cost rollup in
+ * `lib/db/provider-cost-daily.ts`.
+ *
+ * Only days that actually carry usage are emitted — see {@link fillDailyRange}
+ * for the gap-filled variant the calendar heatmap needs.
+ */
 export function aggregateByDay(
   rows: readonly SessionUsageRow[],
   resolve: PricingResolver = resolveModelPricingUsd
 ): DailyUsage[] {
   const map = new Map<string, DailyUsage>()
   for (const r of rows) {
-    const date = new Date(r.at).toISOString().slice(0, 10)
+    const date = localDay(r.at)
     const slot = map.get(date) ?? { date, tokens: 0, cost: 0, requests: 0 }
     slot.tokens += r.inputTokens + r.outputTokens + r.cacheReadTokens
     slot.cost += effectiveCostUsd(r, resolve)
@@ -172,6 +222,55 @@ export function aggregateByDay(
     map.set(date, slot)
   }
   return [...map.values()].sort((a, b) => a.date.localeCompare(b.date))
+}
+
+/**
+ * Pad a sparse {@link aggregateByDay} result out to every local calendar day in
+ * the trailing `days`-day window ending today (today counts as one day, so
+ * `days: 7` yields today plus the previous six). Days without usage become
+ * zero-valued cells.
+ *
+ * The calendar heatmap needs a dense, strictly-ordered grid — a missing day is
+ * a rendered "no spend" square, not a gap — so this always returns exactly
+ * `days` entries. Days outside the window are dropped. Pure; `now` injectable.
+ */
+export function fillDailyRange(
+  daily: readonly DailyUsage[],
+  days: number,
+  now: number = Date.now()
+): DailyUsage[] {
+  if (!Number.isFinite(days) || days <= 0) return []
+  const total = Math.floor(days)
+  const byDate = new Map(daily.map((d) => [d.date, d]))
+  const cursor = new Date(startOfLocalDay(now, total - 1))
+  const out: DailyUsage[] = []
+  for (let i = 0; i < total; i += 1) {
+    const date = localDay(cursor.getTime())
+    out.push(byDate.get(date) ?? { date, tokens: 0, cost: 0, requests: 0 })
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return out
+}
+
+/**
+ * The model that moved the most tokens in `rows`, or `null` when there are
+ * none. Volume — not cost — on purpose: this answers "what did I actually work
+ * with", which a single expensive turn on a premium model should not win.
+ *
+ * Shared by the usage share card and the welcome dashboard so both name the
+ * same "top model" for the same rows.
+ */
+export function topModelByTokens(
+  rows: readonly SessionUsageRow[],
+  resolve: PricingResolver = resolveModelPricingUsd
+): string | null {
+  const byModel = aggregateByModel(rows, resolve)
+  if (byModel.length === 0) return null
+  return [...byModel].sort(
+    (a, b) =>
+      b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens) ||
+      a.model.localeCompare(b.model)
+  )[0].model
 }
 
 export interface SessionUsageSummary {
@@ -283,14 +382,20 @@ export function analyzeUsageContributors(
   return { turns, contributors }
 }
 
-/** Keep rows whose `at` falls within the last `rangeDays`. `null` keeps all. */
+/**
+ * Keep rows inside the trailing `rangeDays`-day LOCAL calendar window ending
+ * today — today counts as one day, so `7` means today plus the previous six,
+ * cut at local midnight rather than at "now minus 168 hours". This is the same
+ * window {@link fillDailyRange} paints, so the filtered rows and the heatmap
+ * cells can never disagree about which days are in range. `null` keeps all.
+ */
 export function filterByRange(
   rows: readonly SessionUsageRow[],
   rangeDays: number | null,
   now: number = Date.now()
 ): SessionUsageRow[] {
   if (rangeDays == null) return [...rows]
-  const cutoff = now - rangeDays * DAY_MS
+  const cutoff = startOfLocalDay(now, Math.max(0, Math.floor(rangeDays) - 1))
   return rows.filter((r) => r.at >= cutoff)
 }
 

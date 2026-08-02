@@ -18,6 +18,7 @@ jest.mock("@/lib/db/characters", () => ({
 
 jest.mock("@/lib/db/skills", () => ({
   listEnabledSkillsByIds: jest.fn(),
+  listSkillsByIds: jest.fn(),
   recordSkillUsage: jest.fn(),
   renderSkillsSection: jest.fn(),
   renderSkillsCatalog: jest.fn(),
@@ -138,6 +139,15 @@ jest.mock("@/lib/skills/surface-activation", () => {
   return { ...actual, selectSurfaceSkills: jest.fn(actual.selectSurfaceSkills) }
 })
 
+// Desktop probe. Defaults to `false` — the same value the real `isTauri()`
+// returns under Jest — so every pre-existing expectation is unchanged; the
+// desktop-only vector tools flip it per-test.
+jest.mock("@/lib/tauri", () => ({
+  ...jest.requireActual("@/lib/tauri"),
+  isTauri: jest.fn(() => false),
+}))
+
+import { isTauri } from "@/lib/tauri"
 import { buildAgentModeSessionUpdate } from "@/lib/agent"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import {
@@ -148,6 +158,7 @@ import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import {
   listEnabledSkillsByIds,
+  listSkillsByIds,
   recordSkillUsage,
   renderSkillsCatalog,
   renderSkillsSection,
@@ -189,6 +200,7 @@ import type { Project } from "@/types"
 const mGetCharacter = resolveCharacterById as jest.Mock
 const mListCharsByIds = listCharactersByIds as jest.Mock
 const mListSkills = listEnabledSkillsByIds as jest.Mock
+const mListSkillsByIds = listSkillsByIds as jest.Mock
 const mRecordUsage = recordSkillUsage as jest.Mock
 const mRender = renderSkillsSection as jest.Mock
 const mRenderCatalog = renderSkillsCatalog as jest.Mock
@@ -251,6 +263,7 @@ beforeEach(() => {
   // Sane defaults so the function doesn't error when a test forgets to set
   // an expectation.
   mListSkills.mockResolvedValue([])
+  mListSkillsByIds.mockResolvedValue([])
   mRecordUsage.mockResolvedValue(undefined)
   mRender.mockReturnValue("")
   mListMcp.mockResolvedValue([])
@@ -1631,6 +1644,64 @@ describe("resolveSendOptions — character + skills", () => {
     mRender.mockReturnValueOnce("body")
 
     await expect(resolveSendOptions({ character: ch })).resolves.toBeDefined()
+  })
+
+  it("loads the recorder's trial skill by id, past the enabled-status filter", async () => {
+    // ADR-0106: the recording is saved `disabled` on purpose — enabling it is
+    // the user's separate act after the trial. Resolving it through the normal
+    // path would honour that flag and inject nothing, leaving the trial unable
+    // to verify the skill it exists to verify.
+    mListSkillsByIds.mockResolvedValueOnce([
+      { id: "rec-1", name: "Recorded", content: "body", allowedTools: ["X"] } as unknown as Skill,
+    ])
+    mRender.mockReturnValueOnce("## Recorded\n\nbody")
+
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", trialSkillId: "rec-1" }),
+    })
+
+    expect(mListSkillsByIds).toHaveBeenCalledWith(["rec-1"])
+    expect(opts.systemPrompt).toContain("Recorded")
+    expect(opts.allowedTools).toEqual(expect.arrayContaining(["X"]))
+  })
+
+  it("makes the trial skill the whole set, so nothing else can explain the result", async () => {
+    const ch = makeChar({ id: "c1", skillIds: ["sk1"] })
+    mListSkills.mockResolvedValueOnce([
+      { id: "sk1", name: "Other", content: "other body", allowedTools: [] } as unknown as Skill,
+    ])
+    mListSkillsByIds.mockResolvedValueOnce([
+      { id: "rec-1", name: "Recorded", content: "body", allowedTools: [] } as unknown as Skill,
+    ])
+
+    await resolveSendOptions({
+      character: ch,
+      session: makeSession({ id: "s1", trialSkillId: "rec-1" }),
+    })
+
+    expect(mRender).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: "rec-1" })])
+    )
+    expect(mRender).not.toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: "sk1" })])
+    )
+  })
+
+  it("injects nothing when the trial skill row has gone", async () => {
+    mListSkillsByIds.mockResolvedValueOnce([])
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", trialSkillId: "rec-1" }),
+    })
+    expect(opts.systemPrompt).toBeUndefined()
+  })
+
+  it("leaves ordinary sessions on the enabled-status path", async () => {
+    const ch = makeChar({ id: "c1", skillIds: ["sk1"] })
+    mListSkills.mockResolvedValueOnce([
+      { id: "sk1", name: "Skill 1", content: "body", allowedTools: [] } as unknown as Skill,
+    ])
+    await resolveSendOptions({ character: ch, session: makeSession({ id: "s1" }) })
+    expect(mListSkillsByIds).not.toHaveBeenCalled()
   })
 
   it("skips skills altogether when the character has no skillIds", async () => {
@@ -4089,6 +4160,65 @@ describe("agent self-invocation tools (Skill / SlashCommand)", () => {
       appSettings: { selfInvokeTools: { slashCommand: true } } as AppSettings,
     })
     expect(toolNames(opts)).toContain("SlashCommand")
+  })
+
+  describe("project-scoped vector memory", () => {
+    const VECTOR_TOOLS = ["vector_search", "vector_add_document", "vector_delete_document"]
+    const isTauriMock = isTauri as jest.Mock
+
+    afterEach(() => {
+      isTauriMock.mockReturnValue(false)
+    })
+
+    it("does not surface the vector tools by default (opt-in)", async () => {
+      isTauriMock.mockReturnValue(true)
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1", characterId: "c1", projectId: "p1" }),
+        character: makeChar({ id: "c1" }),
+      })
+      for (const tool of VECTOR_TOOLS) expect(toolNames(opts)).not.toContain(tool)
+    })
+
+    it("appends all three tools on desktop with a linked project", async () => {
+      isTauriMock.mockReturnValue(true)
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1", characterId: "c1", projectId: "p1" }),
+        character: makeChar({ id: "c1" }),
+        appSettings: { selfInvokeTools: { vector: true } } as AppSettings,
+      })
+      for (const tool of VECTOR_TOOLS) expect(toolNames(opts)).toContain(tool)
+    })
+
+    it("does NOT append them off the desktop shell — they cannot run there", async () => {
+      isTauriMock.mockReturnValue(false)
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1", characterId: "c1", projectId: "p1" }),
+        character: makeChar({ id: "c1" }),
+        appSettings: { selfInvokeTools: { vector: true } } as AppSettings,
+      })
+      for (const tool of VECTOR_TOOLS) expect(toolNames(opts)).not.toContain(tool)
+    })
+
+    it("does NOT append them without a linked project — collections would be unscoped", async () => {
+      isTauriMock.mockReturnValue(true)
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1", characterId: "c1" }),
+        character: makeChar({ id: "c1" }),
+        appSettings: { selfInvokeTools: { vector: true } } as AppSettings,
+      })
+      for (const tool of VECTOR_TOOLS) expect(toolNames(opts)).not.toContain(tool)
+    })
+
+    it("falls back to the active project when the session has none", async () => {
+      isTauriMock.mockReturnValue(true)
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1", characterId: "c1" }),
+        character: makeChar({ id: "c1" }),
+        appSettings: { selfInvokeTools: { vector: true } } as AppSettings,
+        activeProject: makeProject([{ path: "/tmp/p" }]),
+      })
+      for (const tool of VECTOR_TOOLS) expect(toolNames(opts)).toContain(tool)
+    })
   })
 
   it("appends team-collaboration tools only on a team session with the flag on", async () => {

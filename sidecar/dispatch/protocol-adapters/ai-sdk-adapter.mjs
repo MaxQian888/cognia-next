@@ -16,6 +16,7 @@ import {
   RESPONSES_ONLY_PROVIDERS,
 } from "./provider-protocol.mjs"
 import { buildBedrockProviderOptions } from "../bedrock.mjs"
+import { partitionPrompt } from "../prompt-partition.mjs"
 import { aiSdkTelemetry, withTraceparent } from "../../telemetry.mjs"
 
 export { isGenuineOpenAiEndpoint, isResponsesOnlyEndpoint }
@@ -392,9 +393,14 @@ export function makeAiSdkAdapter(protocol) {
         roleSessionName: creds.roleSessionName,
       })
       const streamTextFn = req.streamTextFn ?? (await import("ai")).streamText
+      // System content must travel in the top-level instructions option — AI SDK
+      // 7 rejects `{ role: "system" }` inside `messages` by default. Splitting
+      // here (rather than in `dispatch/ai-sdk.mjs`, which builds the flat
+      // conversation) keeps compaction and tool-pairing operating on the combined
+      // array. Anthropic cacheControl breakpoints ride along per-message.
       const streamArgs = {
         model: modelInstance,
-        messages: req.messages,
+        ...partitionPrompt(req.messages),
         ...(req.modelParams ?? {}),
       }
       const experimentalTelemetry = aiSdkTelemetry({

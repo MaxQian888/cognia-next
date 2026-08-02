@@ -16,6 +16,8 @@
   "filesTab": "文件",
   "newFile": "新建文件",
   "newFolder": "新建文件夹",
+  "pinTab": "固定 {name}",
+  "previewTab": "{name} —— 预览标签页，双击可固定",
   "proIde": {
     "cancelDownload": "取消",
     "checkingTooltip": "正在检查 Pro IDE 是否可用…",

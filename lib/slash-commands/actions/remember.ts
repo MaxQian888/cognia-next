@@ -3,21 +3,24 @@
 //
 //   /remember <text>   — deliberately store a durable fact about the user.
 //
-// Explicit capture bypasses the salience gate and the extraction LLM (the text
-// IS the memory) but still flows through the SAME consolidator as auto-extracted
-// memories — so it dedupes / updates / supersedes existing memories instead of
-// blindly piling up. Provenance is `explicit` (trusted, so it may become a
-// procedural rule). It respects `memory.enabled` + temporary mode but NOT
-// `autoExtract` (this is a deliberate user action).
+// The actual write (PII gate → consolidator → persist) lives in
+// `lib/memory/write/remember-fact.ts`, shared with the composer's `#` prefix so
+// the two capture surfaces cannot drift. This handler only maps the typed
+// result onto user-facing copy.
 
 import type { SlashContext } from "../builtin"
-import { useSettingsStore } from "@/stores/settings"
-import { getSession } from "@/lib/db/sessions"
-import { resolveMemoryConfig } from "@/types/memory/memory"
-import { hasNoLeakingPii } from "@cognia/redact"
+import type { SlashCommandResultBlock } from "../system-blocks"
+import { rememberFact } from "@/lib/memory/write/remember-fact"
 
 export interface RememberCommandResult {
   system?: string
+  /**
+   * Structured chip. Mutually exclusive with `system`: a successful capture is
+   * a one-line confirmation, and the chip already reads
+   * `/remember <fact> — Saved to <scope> memory`, so also pushing prose would
+   * post two system messages for one action.
+   */
+  block?: SlashCommandResultBlock
   /** When true, the caller should open the Memory settings/panel. */
   openMemory?: boolean
 }
@@ -32,47 +35,34 @@ export async function dispatchRememberCommand(
     }
   }
 
-  const settings = useSettingsStore.getState().settings
-  const config = resolveMemoryConfig(settings?.memory)
-  if (!config.enabled) {
+  const result = await rememberFact({ text, sessionId: ctx.activeSessionId })
+  if (result.ok) {
     return {
-      system: "Long-term memory is turned off. Enable it in Settings → Memory.",
-      openMemory: true,
-    }
-  }
-  if (config.temporary) {
-    return { system: "Temporary mode is on — memory is paused, so nothing was saved." }
-  }
-  if (!hasNoLeakingPii(text)) {
-    return {
-      system:
-        "That looks like it contains sensitive data (an email, key, or similar), so it was **not** saved to memory.",
+      block: {
+        kind: "slash-result",
+        commandId: "remember",
+        args: text,
+        summary: `Saved to ${result.scope} memory`,
+      },
     }
   }
 
-  try {
-    const sessionRow = ctx.activeSessionId
-      ? await getSession(ctx.activeSessionId).catch(() => undefined)
-      : undefined
-
-    const { buildAutoExtractionDeps } = await import("@/lib/memory/write/run-memory-extraction")
-    const deps = await buildAutoExtractionDeps(
-      { session: sessionRow ?? null, appSettings: settings },
-      config
-    )
-    if (!deps) {
+  switch (result.reason) {
+    case "disabled":
+      return {
+        system: "Long-term memory is turned off. Enable it in Settings → Memory.",
+        openMemory: true,
+      }
+    case "temporary":
+      return { system: "Temporary mode is on — memory is paused, so nothing was saved." }
+    case "pii":
+      return {
+        system:
+          "That looks like it contains sensitive data (an email, key, or similar), so it was **not** saved to memory.",
+      }
+    case "unavailable":
       return { system: "Couldn't reach the memory store right now — please try again." }
-    }
-
-    await deps.consolidate({
-      candidates: [{ type: "semantic", text, importance: 7 }],
-      scope: config.scopeDefault,
-      characterId: config.scopeDefault === "character" ? sessionRow?.characterId : undefined,
-      provenance: "explicit",
-      source: { sessionId: ctx.activeSessionId ?? undefined },
-    })
-    return { system: `Got it — I'll remember: _${text}_` }
-  } catch {
-    return { system: "Something went wrong saving that to memory." }
+    default:
+      return { system: "Something went wrong saving that to memory." }
   }
 }

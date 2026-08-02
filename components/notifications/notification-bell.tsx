@@ -7,7 +7,8 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { BellIcon } from "lucide-react"
+import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
+import { BellIcon as AnimatedBellIcon } from "@/components/ui/bell"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useNotifications } from "@/hooks/notifications/use-notifications"
@@ -34,7 +35,7 @@ export function NotificationBell({ className }: { className?: string }) {
             className
           )}
         >
-          <BellIcon aria-hidden className="size-3" />
+          <AnimatedActionIcon icon={AnimatedBellIcon} size={12} />
           {hasDirected && (
             <span
               data-testid="notification-badge-count"

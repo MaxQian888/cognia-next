@@ -61,6 +61,10 @@ members = [
   # agent's `bash(run_in_background)` and for scheduled tasks. Linked by both
   # src-tauri and the headless `cognia-server` binary.
   "crates/cognia-jobs",
+  "crates/cognia-observability",
+  "crates/cognia-deployment",
+  "crates/cognia-ops-controller",
+  "crates/cognia-deploy-agent",
 ]
 exclude = [
   "services/signaling-server",

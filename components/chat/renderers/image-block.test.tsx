@@ -183,7 +183,7 @@ describe("ImageBlock", () => {
 
     expect(screen.getByText("Generated chart")).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Copy URL" }).querySelector(".lucide-check")
+      screen.getByRole("button", { name: "Copy URL" }).querySelector('[data-state="copied"]')
     ).toBeInTheDocument()
   })
 

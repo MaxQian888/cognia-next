@@ -1,13 +1,17 @@
 import {
   AGENT_CAPABILITY_IDS,
+  CANONICAL_AGENT_EVENT_KINDS,
+  RESOLVED_SPEC_VERSION,
   isAgentCapabilityId,
   isAgentEventEnvelope,
+  upgradeResolvedAgentExecutionSpec,
   validateAgentExecutionPolicy,
   validateAgentExecutionSendSpec,
   validateResolvedAgentExecutionSpec,
 } from "./agent-execution"
 import type {
   AgentEventEnvelope,
+  CanonicalAgentEvent,
   AgentExecutionPolicy,
   AgentExecutionSendSpec,
   ResolvedAgentExecutionSpec,
@@ -115,8 +119,12 @@ describe("validateResolvedAgentExecutionSpec", () => {
     })
     expect(noIdentity.ok).toBe(false)
 
-    const badVersion = validateResolvedAgentExecutionSpec({ ...validSpec, specVersion: 2 })
+    // 1 and 2 are both live; 3 is not. (Before contract v2 this case used 2,
+    // which would now pass the version check and fail only on the missing
+    // `capabilities.support` — right answer, wrong reason.)
+    const badVersion = validateResolvedAgentExecutionSpec({ ...validSpec, specVersion: 3 })
     expect(badVersion.ok).toBe(false)
+    if (!badVersion.ok) expect(badVersion.errors.join()).toMatch(/specVersion must be 1 or 2/)
 
     const badRoute = validateResolvedAgentExecutionSpec({
       ...validSpec,
@@ -173,6 +181,7 @@ describe("validateAgentExecutionSendSpec", () => {
 
 describe("isAgentEventEnvelope", () => {
   const envelope: AgentEventEnvelope = {
+    schemaVersion: 1,
     eventId: "s1:a1:0",
     sequence: 0,
     sessionId: "s1",
@@ -215,6 +224,39 @@ describe("isAgentEventEnvelope", () => {
     expect(isAgentEventEnvelope({ ...envelope, event: { kind: "mystery" } })).toBe(false)
     expect(isAgentEventEnvelope({ ...envelope, providerAttemptId: 3 })).toBe(false)
   })
+
+  it("rejects an envelope without schemaVersion 1", () => {
+    const { schemaVersion: _dropped, ...withoutVersion } = envelope
+    expect(isAgentEventEnvelope(withoutVersion)).toBe(false)
+    expect(isAgentEventEnvelope({ ...envelope, schemaVersion: 2 })).toBe(false)
+    expect(isAgentEventEnvelope({ ...envelope, schemaVersion: "1" })).toBe(false)
+  })
+
+  it("accepts the elicitation, retry, queue and resource kinds", () => {
+    const events: CanonicalAgentEvent[] = [
+      { kind: "elicitation-request", requestId: "e1", source: "ask_user", prompt: "which?" },
+      { kind: "elicitation-resolved", requestId: "e1", outcome: "timeout" },
+      { kind: "retry", phase: "scheduled", attempt: 1, maxRetries: 2, code: "provider_error" },
+      { kind: "queue", phase: "accepted", queueId: "q1", delivery: "after-settle" },
+      {
+        kind: "resource",
+        phase: "trusted",
+        resourceKind: "skill",
+        origin: "/repo/.cognia/skills/a.md",
+        digest: "sha256:abc",
+      },
+    ]
+    for (const event of events) {
+      expect(isAgentEventEnvelope({ ...envelope, event })).toBe(true)
+    }
+  })
+
+  it("lists every canonical event kind exactly once", () => {
+    expect(new Set(CANONICAL_AGENT_EVENT_KINDS).size).toBe(CANONICAL_AGENT_EVENT_KINDS.length)
+    for (const kind of CANONICAL_AGENT_EVENT_KINDS) {
+      expect(isAgentEventEnvelope({ ...envelope, event: { kind } })).toBe(true)
+    }
+  })
 })
 
 describe("capability id registry", () => {
@@ -223,5 +265,145 @@ describe("capability id registry", () => {
     expect(isAgentCapabilityId("tools.parallel")).toBe(true)
     expect(isAgentCapabilityId("tools.telepathy")).toBe(false)
     expect(isAgentCapabilityId(42)).toBe(false)
+  })
+
+  it("carries the 16 SDK-parity ids added by contract v2", () => {
+    const sdkParity = [
+      "output.structured",
+      "session.store",
+      "session.manage",
+      "permissions.update-rules",
+      "hooks.lifecycle",
+      "input.elicitation",
+      "input.dialog",
+      "plugins.native",
+      "skills.native",
+      "mcp.dynamic",
+      "subagents.manage",
+      "tasks.background",
+      "commands.dynamic",
+      "sandbox.native",
+      "observability.child",
+      "startup.prewarm",
+    ]
+    for (const id of sdkParity) expect(isAgentCapabilityId(id)).toBe(true)
+    expect(AGENT_CAPABILITY_IDS).toHaveLength(40)
+  })
+})
+
+describe("contract v2: capabilities.support", () => {
+  const v2Spec: ResolvedAgentExecutionSpec = {
+    ...validSpec,
+    specVersion: 2,
+    capabilities: {
+      ...validSpec.capabilities,
+      support: {
+        streaming: { support: "native" },
+        "tools.ordinary": { support: "native" },
+      },
+    },
+  }
+
+  it("accepts a v2 spec carrying verdicts", () => {
+    expect(validateResolvedAgentExecutionSpec(v2Spec).ok).toBe(true)
+  })
+
+  it("requires support on a v2 spec", () => {
+    const result = validateResolvedAgentExecutionSpec({
+      ...validSpec,
+      specVersion: 2,
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.errors.join()).toMatch(/support is required on a v2 spec/)
+  })
+
+  it("rejects support on a v1 spec", () => {
+    const result = validateResolvedAgentExecutionSpec({
+      ...v2Spec,
+      specVersion: 1,
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.errors.join()).toMatch(/not valid on a v1 spec/)
+  })
+
+  it("makes a non-native verdict explain itself", () => {
+    // An `unsupported` with no reason is indistinguishable from a half-written
+    // adapter, which is exactly the ambiguity fail-closed exists to prevent.
+    const result = validateResolvedAgentExecutionSpec({
+      ...v2Spec,
+      capabilities: {
+        ...v2Spec.capabilities,
+        support: { streaming: { support: "unsupported" } },
+      },
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.errors.join()).toMatch(/must carry a reason/)
+  })
+
+  it("accepts `equivalent` when it explains how", () => {
+    const result = validateResolvedAgentExecutionSpec({
+      ...v2Spec,
+      capabilities: {
+        ...v2Spec.capabilities,
+        support: {
+          streaming: { support: "native" },
+          "output.structured": {
+            support: "equivalent",
+            reason: "provider-native JSON schema rather than the SDK outputFormat",
+          },
+        },
+      },
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it("rejects unknown capability ids and unknown support values", () => {
+    const unknownId = validateResolvedAgentExecutionSpec({
+      ...v2Spec,
+      capabilities: {
+        ...v2Spec.capabilities,
+        support: { "tools.telepathy": { support: "native" } },
+      },
+    })
+    expect(unknownId.ok).toBe(false)
+
+    const unknownSupport = validateResolvedAgentExecutionSpec({
+      ...v2Spec,
+      capabilities: { ...v2Spec.capabilities, support: { streaming: { support: "sort-of" } } },
+    })
+    expect(unknownSupport.ok).toBe(false)
+  })
+})
+
+describe("upgradeResolvedAgentExecutionSpec", () => {
+  it("upcasts v1 to v2 and marks the prior effective set native, with a reason", () => {
+    const upgraded = upgradeResolvedAgentExecutionSpec(validSpec)
+    expect(upgraded.specVersion).toBe(2)
+    expect(upgraded.capabilities.support?.streaming?.support).toBe("native")
+    expect(upgraded.capabilities.support?.["tools.ordinary"]?.support).toBe("native")
+    expect(validateResolvedAgentExecutionSpec(upgraded).ok).toBe(true)
+  })
+
+  it("does not invent verdicts for the v2-only capabilities", () => {
+    const upgraded = upgradeResolvedAgentExecutionSpec(validSpec)
+    expect(upgraded.capabilities.support?.["session.store"]).toBeUndefined()
+    expect(upgraded.capabilities.support?.["output.structured"]).toBeUndefined()
+  })
+
+  it("is idempotent", () => {
+    const once = upgradeResolvedAgentExecutionSpec(validSpec)
+    expect(upgradeResolvedAgentExecutionSpec(once)).toBe(once)
+  })
+
+  it("leaves every other field untouched", () => {
+    const upgraded = upgradeResolvedAgentExecutionSpec(validSpec)
+    const { specVersion: _v, capabilities: _c, ...restUpgraded } = upgraded
+    const { specVersion: _v1, capabilities: _c1, ...restOriginal } = validSpec
+    expect(restUpgraded).toEqual(restOriginal)
+    expect(upgraded.capabilities.effective).toEqual(validSpec.capabilities.effective)
+  })
+
+  it("RESOLVED_SPEC_VERSION is what new specs are emitted as", () => {
+    expect(RESOLVED_SPEC_VERSION).toBe(2)
   })
 })

@@ -1,463 +1,261 @@
 /**
  * @jest-environment node
+ *
+ * `runHeadlessTurn` is now a pure adapter over the unified runtime, so this
+ * suite tests exactly that: parameter mapping in, result mapping out, and the
+ * throwing contract legacy callers still rely on.
+ *
+ * The orchestration behaviours this file used to pin — sidecar bootstrap, MCP
+ * and skill resolution, twin grounding, plugin-runtime hydration, unconditional
+ * dispatcher subscription, db degradation, transcript writes, shutdown-on-throw
+ * — moved to `createAgentSession` when the second orchestration was deleted,
+ * and are covered by `session-runner.test.ts` / `session-context.test.ts`.
+ * Re-asserting them here would test the mock, not the code.
  */
-import { runHeadlessTurn, mintSessionId } from "./run"
-import { readTranscript, type TranscriptFs } from "./transcript"
-import { createPermissionGate } from "./permission-gate"
-import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../config/schema"
-import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
-import type { SidecarBootstrap } from "../runtime/bootstrap"
-import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
-import { CliDbSnapshotError } from "../db/bootstrap"
+import type { AgentRunResultV1 } from "@cognia/agent-config-types/agent-run-result"
 
-const HOME = "/home/u/.cognia"
+import { mintSessionId, runHeadlessTurn } from "./run"
+import { runUnifiedTurn } from "./runtime/unified-runtime"
+import type { UnifiedTurnParams } from "./runtime/unified-runtime"
 
-function cfg(p: Partial<ResolvedConfig> = {}): ResolvedConfig {
+jest.mock("./runtime/unified-runtime", () => ({ runUnifiedTurn: jest.fn() }))
+
+const mockedRun = runUnifiedTurn as jest.MockedFunction<typeof runUnifiedTurn>
+
+function result(overrides: Partial<AgentRunResultV1> = {}): AgentRunResultV1 {
   return {
-    ...DEFAULT_RESOLVED_CONFIG,
-    builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
-    providers: { anthropic: { apiKey: "sk" } },
-    cwd: "/work",
-    model: "claude-x",
-    ...p,
+    schemaVersion: 1,
+    type: "result",
+    status: "completed",
+    sessionId: "s1",
+    runId: "run_1",
+    turnId: "run_1:t0",
+    attemptId: "run_1:t0:a0",
+    text: "hello",
+    backend: "builtin",
+    model: "claude-opus-5",
+    capabilities: [],
+    session: { persisted: false },
+    ...overrides,
   }
 }
 
-function memFs() {
-  const files = new Map<string, string>()
-  const fsx: TranscriptFs = {
-    append: (p, line) => files.set(p, (files.get(p) ?? "") + line),
-    read: (p) => (files.has(p) ? files.get(p)! : null),
-    mkdirp: () => undefined,
-  }
-  return { fsx, files }
+const config = { cwd: "/repo", provider: "anthropic" } as never
+const gate = (async () => ({ behavior: "deny", message: "" })) as never
+
+function lastParams(): UnifiedTurnParams {
+  const calls = mockedRun.mock.calls
+  return calls[calls.length - 1]?.[0] as UnifiedTurnParams
 }
 
-function fakeBoot() {
-  const shutdown = jest.fn().mockResolvedValue(undefined)
-  const boot = { transport: {} as never, shutdown } as unknown as SidecarBootstrap
-  return { boot, shutdown }
-}
-
-function captureResult(over: Partial<RunAndCaptureResult> = {}): RunAndCaptureResult {
-  return {
-    text: "the reply",
-    messageId: "m1",
-    a2uiSurfaces: {},
-    a2uiSurfaceOrder: [],
-    usage: { inputTokens: 3, outputTokens: 4 } as RunAndCaptureResult["usage"],
-    sdkSessionId: "sdk-1",
-    ...over,
-  }
-}
+beforeEach(() => {
+  mockedRun.mockReset()
+  mockedRun.mockResolvedValue({ result: result(), envelopes: [] })
+})
 
 describe("mintSessionId", () => {
   it("uses the s_ prefix and is deterministic given inputs", () => {
-    expect(mintSessionId(0, 0.5)).toMatch(/^s_/)
-    expect(mintSessionId(1000, 0.5)).toBe(mintSessionId(1000, 0.5))
+    expect(mintSessionId(1_700_000_000_000, 0.5)).toBe(mintSessionId(1_700_000_000_000, 0.5))
+    expect(mintSessionId(1_700_000_000_000, 0.5)).toMatch(/^s_/)
+    expect(mintSessionId(1, 0.5)).not.toBe(mintSessionId(2, 0.5))
   })
 })
 
-describe("runHeadlessTurn", () => {
-  it("resolves options, captures, persists transcript, and shuts down", async () => {
-    const m = memFs()
-    const fb = fakeBoot()
-    const resolveOptions = jest.fn().mockResolvedValue({ model: "claude-x", provider: "anthropic" })
-    const capture = jest.fn().mockResolvedValue(captureResult())
-
-    const res = await runHeadlessTurn({
-      config: cfg(),
-      prompt: "do it",
-      sessionId: "s_fixed",
-      gate: createPermissionGate({ yes: true }),
-      home: HOME,
-      now: 1234,
-      bootstrap: async () => fb.boot,
-      resolveOptions,
-      capture,
-      transcriptFs: m.fsx,
-    })
-
-    expect(res).toEqual({
-      sessionId: "s_fixed",
-      text: "the reply",
-      usage: { inputTokens: 3, outputTokens: 4 },
-      sdkSessionId: "sdk-1",
-    })
-    // resolveOptions saw a CLI ctx with the anthropic provider.
-    expect(resolveOptions.mock.calls[0][0].session.providerOverride).toBe("anthropic")
-    // capture got the session id, prompt, resolved options + the gate.
-    const [sid, prompt, opts, cap] = capture.mock.calls[0]
-    expect(sid).toBe("s_fixed")
-    expect(prompt).toBe("do it")
-    expect(opts).toMatchObject({ model: "claude-x", provider: "anthropic" })
-    expect(typeof cap.onPermissionRequest).toBe("function")
-    // transcript holds the user + assistant turns.
-    const entries = readTranscript(HOME, "s_fixed", m.fsx)
-    expect(entries.map((e) => e.role)).toEqual(["user", "assistant"])
-    expect(entries[1].content).toBe("the reply")
-    expect(entries[1].meta).toMatchObject({ provider: "anthropic", sdkSessionId: "sdk-1" })
-    expect(fb.shutdown).toHaveBeenCalledTimes(1)
+describe("runHeadlessTurn — parameter mapping", () => {
+  it("forwards the required trio unchanged", async () => {
+    await runHeadlessTurn({ config, prompt: "do it", gate })
+    expect(lastParams()).toMatchObject({ config, prompt: "do it", gate })
   })
 
-  it("patches SendOptions.maxTurns from the --max-turns param", async () => {
-    const fb = fakeBoot()
-    const capture = jest.fn().mockResolvedValue(captureResult())
-    await runHeadlessTurn({
-      config: cfg(),
-      prompt: "x",
-      sessionId: "s1",
-      gate: createPermissionGate({ yes: true }),
-      home: HOME,
-      maxTurns: 5,
-      bootstrap: async () => fb.boot,
-      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
-      capture,
-      transcriptFs: memFs().fsx,
-    })
-    expect(capture.mock.calls[0][2]).toMatchObject({ maxTurns: 5 })
-  })
-
-  it("appends the twin stable+dynamic segments to the system prompt when configured", async () => {
-    const fb = fakeBoot()
-    const capture = jest.fn().mockResolvedValue(captureResult())
-    const fetchTwin = jest.fn().mockResolvedValue({
-      ok: true,
-      applied: { systemPrompt: "SP-FULL", stable: "TWIN-STABLE", dynamic: "TWIN-DYN" },
-      degraded: false,
-      sources: [],
-      styleSampleCount: 0,
-    })
-    await runHeadlessTurn({
-      config: cfg({ twin: { enabled: true, characterId: "char-1" } }),
-      prompt: "ground me",
-      sessionId: "s_twin",
-      gate: createPermissionGate({ yes: true }),
-      home: HOME,
-      bootstrap: async () => fb.boot,
-      resolveOptions: async () =>
-        ({ model: "m", provider: "anthropic", systemPrompt: "BASE" }) as never,
-      capture,
-      transcriptFs: memFs().fsx,
-      fetchTwin: fetchTwin as never,
-    })
-    expect(fetchTwin).toHaveBeenCalledWith({
-      characterId: "char-1",
-      message: "ground me",
-      sessionId: "s_twin",
-    })
-    expect(capture.mock.calls[0][2]).toMatchObject({
-      systemPrompt: "BASE\n\nTWIN-STABLE\n\nTWIN-DYN",
-    })
-  })
-
-  it("proceeds ungrounded when the twin fetch fails", async () => {
-    const fb = fakeBoot()
-    const capture = jest.fn().mockResolvedValue(captureResult())
-    await runHeadlessTurn({
-      config: cfg({ twin: { enabled: true, characterId: "char-1" } }),
-      prompt: "x",
-      sessionId: "s1",
-      gate: createPermissionGate({ yes: true }),
-      home: HOME,
-      bootstrap: async () => fb.boot,
-      resolveOptions: async () =>
-        ({ model: "m", provider: "anthropic", systemPrompt: "BASE" }) as never,
-      capture,
-      transcriptFs: memFs().fsx,
-      fetchTwin: (async () => null) as never,
-    })
-    expect(capture.mock.calls[0][2]).toMatchObject({ systemPrompt: "BASE" })
-  })
-
-  it("hydrates the plugin runtime when devPlugins is on (even without pluginTools)", async () => {
-    const fb = fakeBoot()
-    const loadPluginRuntime = jest.fn(async () => undefined)
-    await runHeadlessTurn({
-      config: cfg({ devPlugins: true }),
-      prompt: "x",
-      sessionId: "s1",
-      gate: createPermissionGate({ yes: true }),
-      home: HOME,
-      devPluginsDir: "/repo/plugins",
-      bootstrap: async () => fb.boot,
-      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
-      capture: async () => captureResult(),
-      loadPluginRuntime,
-      subscribePluginTools: async () => jest.fn(async () => undefined),
-      transcriptFs: memFs().fsx,
-    })
-    expect(loadPluginRuntime).toHaveBeenCalledTimes(1)
-  })
-
-  it("mints a session id when none is provided", async () => {
-    const fb = fakeBoot()
-    const res = await runHeadlessTurn({
-      config: cfg(),
-      prompt: "x",
-      gate: createPermissionGate({ yes: true }),
-      home: HOME,
-      now: 42,
-      bootstrap: async () => fb.boot,
-      resolveOptions: async () => ({}) as never,
-      capture: async () => captureResult({ sdkSessionId: undefined, usage: undefined }),
-      transcriptFs: memFs().fsx,
-    })
-    expect(res.sessionId).toMatch(/^s_/)
-  })
-
-  it("loads the plugin runtime before resolving options and subscribes the dispatcher when pluginTools is on", async () => {
-    const fb = fakeBoot()
-    const order: string[] = []
-    const unsub = jest.fn(async () => void order.push("unsub"))
-    const loadPluginRuntime = jest.fn(async () => void order.push("load"))
-    const subscribePluginTools = jest.fn(async () => {
-      order.push("subscribe")
-      return unsub
-    })
-    const resolveOptions = jest.fn(async () => {
-      order.push("resolve")
-      return { model: "m", provider: "anthropic" } as never
-    })
-    const capture = jest.fn(async () => {
-      order.push("capture")
-      return captureResult()
-    })
-
-    await runHeadlessTurn({
-      config: cfg({ pluginTools: true }),
-      prompt: "x",
-      sessionId: "s1",
-      gate: createPermissionGate({ yes: true }),
-      home: HOME,
-      bootstrap: async () => {
-        order.push("bootstrap")
-        return fb.boot
-      },
-      resolveOptions,
-      capture,
-      loadPluginRuntime,
-      subscribePluginTools,
-      transcriptFs: memFs().fsx,
-    })
-
-    expect(loadPluginRuntime).toHaveBeenCalledTimes(1)
-    expect(subscribePluginTools).toHaveBeenCalledTimes(1)
-    expect(unsub).toHaveBeenCalledTimes(1)
-    // The manifest is built inside resolveOptions, so the runtime must hydrate
-    // first; the dispatcher needs the live transport, so it subscribes after
-    // bootstrap; the unsubscribe runs after the turn completes.
-    expect(order.indexOf("load")).toBeLessThan(order.indexOf("resolve"))
-    expect(order.indexOf("subscribe")).toBeGreaterThan(order.indexOf("bootstrap"))
-    expect(order.indexOf("unsub")).toBeGreaterThan(order.indexOf("capture"))
-  })
-
-  it("threads configured MCP servers and enabled skills into the build context", async () => {
-    const fb = fakeBoot()
-    const resolveOptions = jest.fn().mockResolvedValue({ model: "m", provider: "anthropic" })
-    const ensureDb = jest.fn().mockResolvedValue(undefined)
-    await runHeadlessTurn({
-      config: cfg(),
-      prompt: "x",
-      sessionId: "s1",
-      gate: createPermissionGate({ yes: true }),
-      home: HOME,
-      bootstrap: async () => fb.boot,
-      resolveOptions,
-      capture: async () => captureResult(),
-      resolveMcpServers: () => [
-        {
-          id: "mcp_fs",
-          name: "fs",
-          transport: "stdio",
-          config: {},
-          enabled: true,
-          createdAt: 0,
-          updatedAt: 0,
-        },
-      ],
-      resolveSkillIds: () => ["skill_x"],
-      ensureDb,
-      transcriptFs: memFs().fsx,
-    })
-    const ctx = resolveOptions.mock.calls[0][0]
-    expect(ctx.preloadedMcpServers.map((s: { name: string }) => s.name)).toEqual(["fs"])
-    expect(ctx.ephemeralSkillIds).toEqual(["skill_x"])
-    // Skills are read from Dexie in build-options, so the CLI db is opened first.
-    expect(ensureDb).toHaveBeenCalledTimes(1)
-  })
-
-  it("does not open the db when no skills are enabled", async () => {
-    const fb = fakeBoot()
-    const ensureDb = jest.fn()
-    await runHeadlessTurn({
-      config: cfg(),
-      prompt: "x",
-      sessionId: "s1",
-      gate: createPermissionGate({ yes: true }),
-      home: HOME,
-      bootstrap: async () => fb.boot,
-      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
-      capture: async () => captureResult(),
-      resolveMcpServers: () => [],
-      resolveSkillIds: () => [],
-      ensureDb,
-      transcriptFs: memFs().fsx,
-    })
-    expect(ensureDb).not.toHaveBeenCalled()
-  })
-
-  it("drops skills but still runs the turn when opening the db fails", async () => {
-    const fb = fakeBoot()
-    const resolveOptions = jest.fn().mockResolvedValue({ model: "m", provider: "anthropic" })
-    const onDatabaseError = jest.fn()
-    const res = await runHeadlessTurn({
-      config: cfg(),
-      prompt: "x",
-      sessionId: "s1",
-      gate: createPermissionGate({ yes: true }),
-      home: HOME,
-      bootstrap: async () => fb.boot,
-      resolveOptions,
-      capture: async () => captureResult(),
-      resolveSkillIds: () => ["skill_x"],
-      ensureDb: async () => {
-        throw new Error("db locked")
-      },
-      onDatabaseError,
-      transcriptFs: memFs().fsx,
-    })
-    expect(res.text).toBe("the reply")
-    expect(onDatabaseError).not.toHaveBeenCalled()
-    const ctx = resolveOptions.mock.calls[0][0]
-    expect(ctx.ephemeralSkillIds ?? []).toEqual([])
-  })
-
-  it("reports an unsafe snapshot to stderr and still runs without skills", async () => {
-    const fb = fakeBoot()
-    const resolveOptions = jest.fn().mockResolvedValue({ model: "m", provider: "anthropic" })
-    const write = jest.spyOn(process.stderr, "write").mockImplementation(() => true)
-    const error = new CliDbSnapshotError(
-      "Database snapshot is corrupt (invalid JSON). It was preserved at /home/u/.cognia/db.json.corrupt-1; no data was overwritten.",
-      "/home/u/.cognia/db.json",
-      "/home/u/.cognia/db.json.corrupt-1"
-    )
-    try {
-      const res = await runHeadlessTurn({
-        config: cfg(),
-        prompt: "x",
-        sessionId: "s1",
-        gate: createPermissionGate({ yes: true }),
-        home: HOME,
-        bootstrap: async () => fb.boot,
-        resolveOptions,
-        capture: async () => captureResult(),
-        resolveSkillIds: () => ["skill_x"],
-        ensureDb: async () => {
-          throw error
-        },
-        transcriptFs: memFs().fsx,
-      })
-
-      expect(res.text).toBe("the reply")
-      expect(write).toHaveBeenCalledWith(expect.stringContaining(error.snapshotPath))
-      expect(write).toHaveBeenCalledWith(expect.stringContaining(error.preservedPath!))
-      const ctx = resolveOptions.mock.calls[0][0]
-      expect(ctx.ephemeralSkillIds ?? []).toEqual([])
-    } finally {
-      write.mockRestore()
+  it("omits every optional the caller did not supply", async () => {
+    await runHeadlessTurn({ config, prompt: "p", gate })
+    const params = lastParams()
+    for (const key of [
+      "sessionId",
+      "signal",
+      "timeoutMs",
+      "maxSteps",
+      "home",
+      "resolveOptions",
+      "transcriptFs",
+      "now",
+      "onEnvelope",
+    ] as const) {
+      expect(params[key]).toBeUndefined()
     }
   })
 
-  it("does not touch the plugin runtime when pluginTools is off and no skills are enabled", async () => {
-    const fb = fakeBoot()
-    const loadPluginRuntime = jest.fn()
+  it("forwards session id, home, timeout, signal and transcript effects", async () => {
+    const signal = new AbortController().signal
+    const transcriptFs = { append: jest.fn(), read: jest.fn(), mkdirp: jest.fn() }
+    await runHeadlessTurn({
+      config,
+      prompt: "p",
+      gate,
+      sessionId: "s-existing",
+      home: "/home/u/.cognia",
+      timeoutMs: 1234,
+      signal,
+      transcriptFs,
+    })
+    expect(lastParams()).toMatchObject({
+      sessionId: "s-existing",
+      home: "/home/u/.cognia",
+      timeoutMs: 1234,
+      signal,
+      transcriptFs,
+    })
+  })
+
+  it("maps the deprecated maxTurns onto maxSteps", async () => {
+    await runHeadlessTurn({ config, prompt: "p", gate, maxTurns: 9 })
+    expect(lastParams().maxSteps).toBe(9)
+  })
+
+  it("forwards a narrowing resolveOptions for tool-less text turns", async () => {
+    const resolveOptions = jest.fn()
+    await runHeadlessTurn({ config, prompt: "p", gate, resolveOptions })
+    expect(lastParams().resolveOptions).toBe(resolveOptions)
+  })
+
+  it("pins the clock when the caller supplied one", async () => {
+    await runHeadlessTurn({ config, prompt: "p", gate, now: 42 })
+    expect(lastParams().now?.()).toBe(42)
+  })
+
+  it("accepts — and ignores — the collaborators of the deleted orchestration", async () => {
     const subscribePluginTools = jest.fn()
+    const loadPluginRuntime = jest.fn()
     await runHeadlessTurn({
-      config: cfg(),
-      prompt: "x",
-      sessionId: "s1",
-      gate: createPermissionGate({ yes: true }),
-      home: HOME,
-      bootstrap: async () => fb.boot,
-      resolveOptions: async () => ({}) as never,
-      capture: async () => captureResult(),
-      // No skills enabled → the name-only `load_skill` tool isn't surfaced either,
-      // so the dispatcher stays unsubscribed (the pure pluginTools-off path).
-      resolveSkillIds: () => [],
+      config,
+      prompt: "p",
+      gate,
+      bootstrap: jest.fn(),
+      capture: jest.fn(),
+      subscribePluginTools,
       loadPluginRuntime,
-      subscribePluginTools,
-      transcriptFs: memFs().fsx,
+      resolveMcpServers: jest.fn(),
+      resolveSkillIds: jest.fn(),
+      ensureDb: jest.fn(),
+      onDatabaseError: jest.fn(),
+      fetchTwin: jest.fn(),
+      devPluginsDir: "/repo/plugins",
     })
+    // The session factory owns these now; the adapter must not act on them.
+    expect(subscribePluginTools).not.toHaveBeenCalled()
     expect(loadPluginRuntime).not.toHaveBeenCalled()
-    expect(subscribePluginTools).not.toHaveBeenCalled()
+    const params = lastParams() as unknown as Record<string, unknown>
+    expect(params.subscribePluginTools).toBeUndefined()
+    expect(params.fetchTwin).toBeUndefined()
   })
+})
 
-  it("surfaces the load_skill tool + subscribes the dispatcher in name mode with skills, even when pluginTools is off", async () => {
-    const fb = fakeBoot()
-    const resolveOptions = jest.fn().mockResolvedValue({ model: "m", provider: "anthropic" })
-    const subscribePluginTools = jest.fn().mockResolvedValue(jest.fn())
-    await runHeadlessTurn({
-      config: cfg(),
-      prompt: "x",
+describe("runHeadlessTurn — event bridging", () => {
+  function envelopeWith(event: Record<string, unknown>) {
+    return {
+      schemaVersion: 1 as const,
+      eventId: "e0",
+      sequence: 0,
       sessionId: "s1",
-      gate: createPermissionGate({ yes: true }),
-      home: HOME,
-      bootstrap: async () => fb.boot,
-      resolveOptions,
-      capture: async () => captureResult(),
-      resolveSkillIds: () => ["skill_x"],
-      ensureDb: async () => undefined,
-      subscribePluginTools,
-      transcriptFs: memFs().fsx,
+      runId: "run_1",
+      turnId: "t0",
+      attemptId: "a0",
+      hostRef: "h",
+      runtime: "r",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      event,
+    } as Parameters<NonNullable<UnifiedTurnParams["onEnvelope"]>>[0]
+  }
+
+  it("projects canonical envelopes back onto the legacy capture union", async () => {
+    mockedRun.mockImplementation(async (params) => {
+      params.onEnvelope?.(envelopeWith({ kind: "text-delta", delta: "hi" }))
+      return { result: result(), envelopes: [] }
     })
-    const opts = await resolveOptions.mock.results[0].value
-    expect((opts.pluginTools ?? []).map((t: { name: string }) => t.name)).toContain("load_skill")
-    expect(subscribePluginTools).toHaveBeenCalledTimes(1)
+
+    const seen: unknown[] = []
+    await runHeadlessTurn({ config, prompt: "p", gate, onEvent: (e) => seen.push(e) })
+    expect(seen).toEqual([{ type: "text-delta", delta: "hi" }])
   })
 
-  it("uses full skill loading without the load_skill tool when skillLoadMode is 'full'", async () => {
-    const fb = fakeBoot()
-    const resolveOptions = jest.fn().mockResolvedValue({ model: "m", provider: "anthropic" })
-    const subscribePluginTools = jest.fn().mockResolvedValue(jest.fn())
-    await runHeadlessTurn({
-      config: cfg({ skillLoadMode: "full" }),
-      prompt: "x",
+  it("drops envelope-only kinds that have no capture representation", async () => {
+    mockedRun.mockImplementation(async (params) => {
+      params.onEnvelope?.(envelopeWith({ kind: "lifecycle", phase: "started" }))
+      params.onEnvelope?.(
+        envelopeWith({
+          kind: "retry",
+          phase: "scheduled",
+          attempt: 1,
+          maxRetries: 2,
+          code: "provider_error",
+        })
+      )
+      params.onEnvelope?.(envelopeWith({ kind: "text-delta", delta: "kept" }))
+      return { result: result(), envelopes: [] }
+    })
+
+    const seen: unknown[] = []
+    await runHeadlessTurn({ config, prompt: "p", gate, onEvent: (e) => seen.push(e) })
+    expect(seen).toEqual([{ type: "text-delta", delta: "kept" }])
+  })
+
+  it("subscribes nothing when the caller passed no onEvent", async () => {
+    await runHeadlessTurn({ config, prompt: "p", gate })
+    expect(lastParams().onEnvelope).toBeUndefined()
+  })
+})
+
+describe("runHeadlessTurn — result mapping", () => {
+  it("returns the session id, text, usage and native session handle", async () => {
+    mockedRun.mockResolvedValue({
+      result: result({
+        sessionId: "s-out",
+        text: "the answer",
+        usage: { inputTokens: 7, outputTokens: 2 },
+        nativeSessionId: "sdk-9",
+      }),
+      envelopes: [],
+    })
+    await expect(runHeadlessTurn({ config, prompt: "p", gate })).resolves.toEqual({
+      sessionId: "s-out",
+      text: "the answer",
+      usage: { inputTokens: 7, outputTokens: 2 },
+      sdkSessionId: "sdk-9",
+    })
+  })
+
+  it("omits usage and sdkSessionId when the run reported neither", async () => {
+    await expect(runHeadlessTurn({ config, prompt: "p", gate })).resolves.toEqual({
       sessionId: "s1",
-      gate: createPermissionGate({ yes: true }),
-      home: HOME,
-      bootstrap: async () => fb.boot,
-      resolveOptions,
-      capture: async () => captureResult(),
-      resolveSkillIds: () => ["skill_x"],
-      ensureDb: async () => undefined,
-      subscribePluginTools,
-      transcriptFs: memFs().fsx,
+      text: "hello",
     })
-    const opts = await resolveOptions.mock.results[0].value
-    expect((opts.pluginTools ?? []).map((t: { name: string }) => t.name)).not.toContain(
-      "load_skill"
-    )
-    expect(subscribePluginTools).not.toHaveBeenCalled()
   })
 
-  it("still shuts down the sidecar when capture throws", async () => {
-    const fb = fakeBoot()
-    await expect(
-      runHeadlessTurn({
-        config: cfg(),
-        prompt: "x",
-        sessionId: "s1",
-        gate: createPermissionGate({ yes: true }),
-        home: HOME,
-        bootstrap: async () => fb.boot,
-        resolveOptions: async () => ({}) as never,
-        capture: async () => {
-          throw new Error("turn failed")
-        },
-        transcriptFs: memFs().fsx,
-      })
-    ).rejects.toThrow("turn failed")
-    expect(fb.shutdown).toHaveBeenCalledTimes(1)
+  it("preserves the throwing contract, carrying the error code as the name", async () => {
+    mockedRun.mockResolvedValue({
+      result: result({
+        status: "failed",
+        error: { code: "session_locked", message: "held by pid 12" },
+      }),
+      envelopes: [],
+    })
+    await expect(runHeadlessTurn({ config, prompt: "p", gate })).rejects.toMatchObject({
+      name: "session_locked",
+      message: "held by pid 12",
+    })
+  })
+
+  it("throws for a cancelled run too, rather than returning empty text", async () => {
+    mockedRun.mockResolvedValue({
+      result: result({
+        status: "cancelled",
+        text: "",
+        error: { code: "cancelled", message: "the turn was cancelled" },
+      }),
+      envelopes: [],
+    })
+    await expect(runHeadlessTurn({ config, prompt: "p", gate })).rejects.toMatchObject({
+      name: "cancelled",
+    })
   })
 })

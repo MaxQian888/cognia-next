@@ -1,0 +1,113 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cognia-deploy-agent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cognia-deploy-agent
+rules:
+  - apiGroups: [apps]
+    resources: [statefulsets, deployments]
+    verbs: [get, list, watch, patch, update]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [pods, persistentvolumeclaims]
+    verbs: [get, list, watch, create]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create]
+  - apiGroups: [snapshot.storage.k8s.io]
+    resources: [volumesnapshots]
+    verbs: [create, get, list, watch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cognia-deploy-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cognia-deploy-agent
+subjects:
+  - kind: ServiceAccount
+    name: cognia-deploy-agent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cognia-deploy-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cognia-deploy-agent
+  template:
+    metadata:
+      labels:
+        app: cognia-deploy-agent
+    spec:
+      serviceAccountName: cognia-deploy-agent
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: deploy-agent
+          image: ghcr.io/owner/cognia-deploy-agent@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          args: [--config, /etc/cognia/deploy-agent.yaml, run]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          volumeMounts:
+            - name: config
+              mountPath: /etc/cognia
+              readOnly: true
+            - name: credentials
+              mountPath: /var/lib/cognia-agent/credentials
+            - name: state
+              mountPath: /var/lib/cognia-agent/state
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: cognia-deploy-agent
+        - name: credentials
+          persistentVolumeClaim:
+            claimName: cognia-deploy-agent-credentials
+        - name: state
+          persistentVolumeClaim:
+            claimName: cognia-deploy-agent-state
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cognia-deploy-agent-credentials
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: { storage: 64Mi }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cognia-deploy-agent-state
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: { storage: 1Gi }

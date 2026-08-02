@@ -541,7 +541,7 @@ describe("DockWorkspace", () => {
     expect(closeFile).toHaveBeenCalledWith("src/a.ts")
 
     fireEvent.click(screen.getByTestId("file-tree"))
-    expect(openFile).toHaveBeenCalledWith("src/tree.ts")
+    expect(openFile).toHaveBeenCalledWith("src/tree.ts", undefined)
     fireEvent.click(screen.getByText("searchTab"))
     fireEvent.click(screen.getByTestId("search-panel"))
     expect(openFile).toHaveBeenCalledWith("src/search.ts")

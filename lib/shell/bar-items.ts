@@ -23,6 +23,7 @@ import {
   PanelRightIcon,
   RefreshCwIcon,
   SearchIcon,
+  TerminalIcon,
   SparklesIcon,
   TriangleAlertIcon,
   UserRoundIcon,
@@ -58,6 +59,7 @@ export const BAR_ITEM_ICONS: Record<string, LucideIcon> = {
   layoutControls: LayoutDashboardIcon,
   // Status bar
   connectivity: WifiIcon,
+  terminal: TerminalIcon,
   branch: GitBranchIcon,
   sync: RefreshCwIcon,
   notifications: BellIcon,

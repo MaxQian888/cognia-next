@@ -1,0 +1,28 @@
+[[permission]]
+identifier = "allow-recorder-controller-app-commands"
+description = "Allows the skill recorder's controller strip to drive the recording the user already authorized, and to reposition and collapse itself."
+# Every command the controller window invokes must be listed here. The generated
+# `all-app-commands.toml` grant does NOT cover it: that permission is attached to
+# the `default` capability, which is scoped `windows: ["main"]`, so anything
+# missing below is rejected at runtime with "Command not found" rather than
+# failing to compile.
+#
+# Two deliberate omissions, both load-bearing:
+#
+#   * `record_start` — only the main window may BEGIN a recording. Starting one
+#     needs a scope, a preflight and a consent prompt, none of which the strip
+#     has any business raising.
+#   * the bundle-read surface (`record_load_bundle`, `record_read_asset`,
+#     `record_list_recoverable`, `record_delete_bundle`) — captured frames and
+#     journals belong to the review UI in the main window. The controller shows
+#     a counter, not content.
+commands.allow = [
+  "record_status",
+  "record_pause",
+  "record_resume",
+  "record_undo_last",
+  "record_stop",
+  "record_interrupt",
+  "recorder_controller_set_collapsed",
+  "recorder_controller_begin_drag",
+]

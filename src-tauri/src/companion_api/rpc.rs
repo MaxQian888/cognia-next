@@ -340,6 +340,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     // stays single-sourced in `lib/platform/capabilities.ts`.
     "host_capabilities",
     "host_feature_manifest",
+    "provider_diagnostics_status",
+    "provider_diagnostics_history",
+    "provider_diagnostics_start",
+    "provider_diagnostics_cancel",
     // ADR-0056 Wave 4 — external-agent config (Zustand/localStorage on the
     // desktop, not Dexie). `external_agent_list` is a read-only projection;
     // `external_agent_update` (enable/disable + permission mode) round-trips
@@ -863,6 +867,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "twin_profile_get",
     "host_capabilities",
     "host_feature_manifest",
+    "provider_diagnostics_status",
+    "provider_diagnostics_history",
     "scheduled_task_list",
     "scheduled_task_get",
     "scheduled_task_runs",
@@ -996,6 +1002,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
 /// Command arms are added by their respective milestones; the gate fires for a
 /// name as soon as it appears here (it runs before the dispatch `match`).
 const CONTROL_COMMANDS: &[&str] = &[
+    "provider_diagnostics_start",
+    "provider_diagnostics_cancel",
     "claude_restore",
     "claude_set_mode",
     "claude_plugin_tool_response",
@@ -1291,6 +1299,10 @@ pub(crate) fn device_can_control(device_id: &str) -> bool {
 /// (ADR-0060). The bridge arm injects `callerDeviceId` into the payload for
 /// exactly these names — see [`inject_caller_device_id`].
 const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
+    "provider_diagnostics_status",
+    "provider_diagnostics_history",
+    "provider_diagnostics_start",
+    "provider_diagnostics_cancel",
     "workflow_trigger_manual",
     "device_capabilities_report",
     "workflow_approval_respond",
@@ -3323,6 +3335,10 @@ pub(super) async fn dispatch(
         | "twin_profile_get"
         | "host_capabilities"
         | "host_feature_manifest"
+        | "provider_diagnostics_status"
+        | "provider_diagnostics_history"
+        | "provider_diagnostics_start"
+        | "provider_diagnostics_cancel"
         // Mobile outbound-queue RPCs — same generic bridge, different
         // TS-side dispatch arms in `lib/companion/desktop-write-source.ts`.
         | "connector_send"

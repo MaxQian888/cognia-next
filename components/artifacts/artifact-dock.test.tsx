@@ -173,6 +173,7 @@ import {
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
+import { revealActiveWorkbenchPanel } from "@/lib/context-workbench/active-context"
 
 /** The panel a scope is currently showing, per the workbench's own store. */
 function activePanelId(scope: "artifact:artifact-1" | "session:sess-1") {
@@ -502,6 +503,74 @@ describe("ArtifactDock — converged workbench shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.collapse" }))
 
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  // The dual of collapsing: something asks the active workbench to bring a
+  // panel forward while the container holding it is shut. Opening the panel
+  // inside a container nobody can see is a no-op the caller cannot detect, so
+  // each of the four host paths has to re-open its own container first.
+  describe("re-opening the container for an external reveal", () => {
+    it("re-opens the collapsed dock from the session surface", () => {
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+      render(<ArtifactDock />)
+      act(() => {
+        revealActiveWorkbenchPanel("browser")
+      })
+
+      expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+      expect(activePanelId("session:sess-1")).toBe("browser")
+    })
+
+    it("re-opens the collapsed dock from the artifact surface", () => {
+      activateArtifact()
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+      render(<ArtifactDock />)
+
+      act(() => {
+        revealActiveWorkbenchPanel("preview")
+      })
+
+      expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+      expect(activePanelId("artifact:artifact-1")).toBe("preview")
+    })
+
+    // The Sheet hosts ask to be opened rather than uncollapsed, and they only
+    // hear the request while they are mounted: a dismissed Sheet renders no
+    // content, so there is no workbench registered to reveal into. Reaching a
+    // closed Sheet would mean keeping the whole panel body — Monaco, the
+    // embedded browser — mounted behind it, which is the cost the Sheet exists
+    // to avoid. Within an open one the request still has to land, or the phone
+    // Sheet would be the one host that ignores an external reveal.
+    it("keeps the Sheet open for an external reveal on the artifact surface", () => {
+      activateArtifact()
+      const onOpenChange = jest.fn()
+      render(
+        <ArtifactContextWorkbench
+          artifactId="artifact-1"
+          mobile={{ open: true, onOpenChange, panelMode: "mobile" }}
+        />
+      )
+
+      act(() => {
+        revealActiveWorkbenchPanel("preview")
+      })
+
+      expect(onOpenChange).toHaveBeenCalledWith(true)
+      // …and leaves the separate desktop dock state alone, as the collapse
+      // direction already does.
+      expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+    })
+
+    it("keeps the Sheet open for an external reveal on the session surface", () => {
+      const onOpenChange = jest.fn()
+      render(<SessionContextWorkbench mobile={{ open: true, onOpenChange, panelMode: "mobile" }} />)
+
+      act(() => {
+        revealActiveWorkbenchPanel("browser")
+      })
+
+      expect(onOpenChange).toHaveBeenCalledWith(true)
+    })
   })
 
   // The session surface carried three panels while the artifact and project

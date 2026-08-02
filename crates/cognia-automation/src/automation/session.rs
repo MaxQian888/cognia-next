@@ -26,8 +26,20 @@ pub const INSPECTOR_TREE_MAX_BYTES: usize = 8 * 1024 * 1024;
 pub const EXPANSION_PAGE_MAX_NODES: usize = 250;
 pub const TURN_TOKEN_TTL: Duration = Duration::from_secs(30);
 
+/// How the caller names an application.
+///
+/// `rename_all_fields` is load-bearing, not cosmetic: `rename_all` alone renames
+/// only the *variant* tags, so the payload fields stayed `bundle_id` /
+/// `display_name` while every TypeScript producer — `lib/automation/types.ts`,
+/// the `DesktopAppLocator` zod schema, and the inspector — has always sent
+/// `bundleId` / `displayName`. Those two variants therefore failed to
+/// deserialize; only `path` worked, because it is a single word.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum AppLocator {
     BundleId { bundle_id: String },
     Path { path: String },
@@ -925,6 +937,50 @@ fn element_sort_key(element: &ElementInfo) -> String {
 mod tests {
     use super::*;
     use crate::automation::types::{ElementInfo, ElementRef};
+
+    #[test]
+    fn app_locator_wire_shape_matches_the_typescript_mirror() {
+        // These are the exact payloads `lib/automation/types.ts` declares and the
+        // `DesktopAppLocator` zod schema validates. Before `rename_all_fields`,
+        // `bundleId` and `displayName` failed to deserialize here while `path`
+        // worked, so the mismatch was invisible in the one variant anyone tested.
+        let bundle: AppLocator =
+            serde_json::from_str(r#"{"kind":"bundleId","bundleId":"com.apple.Safari"}"#).unwrap();
+        assert_eq!(
+            bundle,
+            AppLocator::BundleId {
+                bundle_id: "com.apple.Safari".into()
+            }
+        );
+
+        let display: AppLocator =
+            serde_json::from_str(r#"{"kind":"displayName","displayName":"Safari"}"#).unwrap();
+        assert_eq!(
+            display,
+            AppLocator::DisplayName {
+                display_name: "Safari".into()
+            }
+        );
+
+        let path: AppLocator =
+            serde_json::from_str(r#"{"kind":"path","path":"/Applications/Safari.app"}"#).unwrap();
+        assert_eq!(
+            path,
+            AppLocator::Path {
+                path: "/Applications/Safari.app".into()
+            }
+        );
+
+        // And it serializes back into the same shape the renderer stores.
+        assert_eq!(
+            serde_json::to_string(&bundle).unwrap(),
+            r#"{"kind":"bundleId","bundleId":"com.apple.Safari"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&display).unwrap(),
+            r#"{"kind":"displayName","displayName":"Safari"}"#
+        );
+    }
 
     fn root(name: &str) -> ElementInfo {
         ElementInfo {

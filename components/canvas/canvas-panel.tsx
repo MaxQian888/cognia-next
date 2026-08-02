@@ -17,15 +17,7 @@ import type { editor as MonacoEditor } from "monaco-editor"
 import { useTranslations } from "next-intl"
 import {
   Save,
-  Wand2,
-  Bug,
-  Sparkles,
-  HelpCircle,
-  Languages,
   MoreHorizontal,
-  Minimize2,
-  Maximize2,
-  Lightbulb,
   Search,
   Plus,
   FileCode,
@@ -57,15 +49,11 @@ import { useCanvasSuggestions } from "@/hooks/canvas/use-canvas-suggestions"
 import { useAutoSuggestions } from "@/hooks/canvas/use-auto-suggestions"
 import { useCanvasKeyboardShortcuts } from "@/hooks/canvas/use-canvas-keyboard-shortcuts"
 import { useCanvasFeatureFlag } from "@/hooks/canvas/use-canvas-feature-flag"
-import { useContextWorkbenchSurfaceFlag } from "@/hooks/context-workbench/use-context-workbench-surface-flag"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import type { CanvasActionType } from "@/lib/ai/generation/canvas-actions"
 import { RenameDialog } from "./rename-dialog"
-import {
-  DocumentFormatToolbar,
-  type FormatAction,
-} from "@/components/document/document-format-toolbar"
-import { FORMAT_ACTION_MAP, TRANSLATE_LANGUAGES } from "@/lib/canvas/constants"
+import type { FormatAction } from "@/components/document/document-format-toolbar"
+import { FORMAT_ACTION_MAP } from "@/lib/canvas/constants"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { CanvasInlineCommand } from "./canvas-inline-command"
 import { LightCodeEditor } from "@/components/editor/light-code-editor"
@@ -142,7 +130,6 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   // Feature-flag gate: `canvas.aiWorkbench.v1` (env / localStorage override).
   // When off, the AI action toolbar items and the Ctrl+K palette are hidden.
   const aiWorkbenchEnabled = useCanvasFeatureFlag("canvas.aiWorkbench.v1")
-  const contextWorkbenchEnabled = useContextWorkbenchSurfaceFlag("canvas")
   const accessibility = useCanvasSettingsStore((s) => s.settings.accessibility)
   const editorSettings = useCanvasSettingsStore((s) => s.settings.editor)
   // Single-writer Monaco theme id, resolved inside the setup hook (the hook is
@@ -554,7 +541,6 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
       <CanvasToolbar
         documents={documents}
         activeDocumentId={activeId}
-        isText={activeDoc?.type === "text"}
         running={actions.running}
         onSelectDocument={setActive}
         onCloseDocument={(id) => {
@@ -583,15 +569,10 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
           remove(id)
           if (activeId === id) setActive(null)
         }}
-        onAction={runAction}
-        onTriggerSuggestions={triggerSuggestions}
         onSaveVersion={() => activeDoc && saveVersion(activeDoc.id, "manual")}
-        onFormat={handleFormat}
-        aiEnabled={aiWorkbenchEnabled}
         previewable={previewable}
         reviewing={reviewing}
         isMobile={isMobile}
-        contextWorkbenchEnabled={contextWorkbenchEnabled}
       />
 
       <PluginExtensionSlot
@@ -648,7 +629,6 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
 interface CanvasToolbarProps {
   documents: CanvasDocument[]
   activeDocumentId: string | null
-  isText: boolean
   running: boolean
   onSelectDocument: (id: string) => void
   onCloseDocument: (id: string) => void
@@ -656,24 +636,15 @@ interface CanvasToolbarProps {
   onRenameDocument: (id: string, title: string) => void
   onDuplicateDocument: (id: string) => void
   onDeleteDocument: (id: string) => void
-  onAction: (
-    actionType: CanvasActionType,
-    opts?: { targetLanguage?: string; prompt?: string }
-  ) => Promise<void>
-  onTriggerSuggestions: () => void
   onSaveVersion: () => void
-  onFormat: (action: FormatAction) => void
-  aiEnabled: boolean
   previewable: boolean
   reviewing: boolean
   isMobile: boolean
-  contextWorkbenchEnabled: boolean
 }
 
 function CanvasToolbar({
   documents,
   activeDocumentId,
-  isText,
   running,
   onSelectDocument,
   onCloseDocument,
@@ -681,15 +652,10 @@ function CanvasToolbar({
   onRenameDocument,
   onDuplicateDocument,
   onDeleteDocument,
-  onAction,
-  onTriggerSuggestions,
   onSaveVersion,
-  onFormat,
-  aiEnabled,
   previewable,
   reviewing,
   isMobile,
-  contextWorkbenchEnabled,
 }: CanvasToolbarProps) {
   const t = useTranslations("canvas")
   const tActions = useTranslations("canvas.actions")
@@ -833,109 +799,23 @@ function CanvasToolbar({
             </TooltipContent>
           </Tooltip>
 
-          {contextWorkbenchEnabled ? (
-            <Tooltip delayDuration={300}>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7"
-                  onClick={onSaveVersion}
-                  disabled={running}
-                  aria-label={tActions("saveVersion", { default: "Save version" })}
-                >
-                  <Save className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {tActions("saveVersion", { default: "Save version" })}
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7"
-                  disabled={running}
-                  aria-label={tActions("more", { default: "More actions" })}
-                >
-                  <MoreHorizontal className="size-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                {aiEnabled && (
-                  <>
-                    <DropdownMenuItem onClick={() => void onAction("review")} disabled={running}>
-                      <Wand2 className="mr-2 size-3.5" />
-                      {tActions("review")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => void onAction("fix")} disabled={running}>
-                      <Bug className="mr-2 size-3.5" />
-                      {tActions("fix")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => void onAction("improve")} disabled={running}>
-                      <Sparkles className="mr-2 size-3.5" />
-                      {tActions("improve")}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <DropdownMenuItem disabled={running} onSelect={(e) => e.preventDefault()}>
-                          <Languages className="mr-2 size-3.5" />
-                          {tActions("translate")}
-                        </DropdownMenuItem>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start" side="left">
-                        {TRANSLATE_LANGUAGES.map((l) => (
-                          <DropdownMenuItem
-                            key={l.value}
-                            onClick={() => void onAction("translate", { targetLanguage: l.value })}
-                          >
-                            {l.label}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => void onAction("explain")} disabled={running}>
-                      <HelpCircle className="mr-2 size-3.5" />
-                      {tActions("explain")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => void onAction("simplify")} disabled={running}>
-                      <Minimize2 className="mr-2 size-3.5" />
-                      {tActions("simplify")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => void onAction("expand")} disabled={running}>
-                      <Maximize2 className="mr-2 size-3.5" />
-                      {tActions("expand")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={onTriggerSuggestions} disabled={running}>
-                      <Lightbulb className="mr-2 size-3.5" />
-                      {tActions("suggest", { default: "Suggest" })}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                  </>
-                )}
-                <DropdownMenuItem onClick={onSaveVersion} disabled={running}>
-                  <Save className="mr-2 size-3.5" />
-                  {tActions("saveVersion", { default: "Save version" })}
-                </DropdownMenuItem>
-                {isText && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <div className="px-2 py-1.5">
-                      <DocumentFormatToolbar
-                        onAction={onFormat}
-                        className="border-0 bg-transparent p-0 justify-start"
-                      />
-                    </div>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7"
+                onClick={onSaveVersion}
+                disabled={running}
+                aria-label={tActions("saveVersion", { default: "Save version" })}
+              >
+                <Save className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {tActions("saveVersion", { default: "Save version" })}
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
 

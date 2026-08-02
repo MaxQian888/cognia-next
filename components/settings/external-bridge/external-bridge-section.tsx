@@ -38,6 +38,7 @@ import {
 import { BridgeServerPanel } from "./panels/server-panel"
 import { BridgeScopesPanel } from "./panels/scopes-panel"
 import { BridgeWikiPanel } from "./panels/wiki-panel"
+import { BridgeInboundPanel } from "./panels/inbound-panel"
 import { BridgeSetupPanel } from "./panels/setup-panel"
 import { BridgeAuditPanel } from "./panels/audit-panel"
 
@@ -177,6 +178,8 @@ function renderPanel(
       return <BridgeScopesPanel settings={settings} onChange={onChange} />
     case "wiki":
       return <BridgeWikiPanel />
+    case "inbound":
+      return <BridgeInboundPanel />
     case "setup":
       return <BridgeSetupPanel settings={settings} />
     case "audit":

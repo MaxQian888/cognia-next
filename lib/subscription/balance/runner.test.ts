@@ -49,15 +49,19 @@ describe("accessTokenOf", () => {
 
 describe("queryAccountBalance", () => {
   it("resolves account → preset → adapter → authedGet → parsed snapshot", async () => {
-    const authedGet = jest.fn(async () => DEEPSEEK_BODY)
+    const authedRequest = jest.fn(async () => ({ status: 200, headers: [], body: DEEPSEEK_BODY }))
     const snap = await queryAccountBalance("codex", "acc-1", {
-      authedGet,
+      authedRequest,
       getAccount: async () => codexAccount(),
       listPresets: async () => [deepseekPreset],
     })
-    expect(authedGet).toHaveBeenCalledWith("https://api.deepseek.com/user/balance", {
-      Authorization: "Bearer sk-codex",
-      Accept: "application/json",
+    expect(authedRequest).toHaveBeenCalledWith({
+      url: "https://api.deepseek.com/user/balance",
+      method: "GET",
+      headers: {
+        Authorization: "Bearer sk-codex",
+        Accept: "application/json",
+      },
     })
     expect(snap?.remaining).toBe(42)
     expect(snap?.providerKey).toBe("deepseek")
@@ -67,7 +71,7 @@ describe("queryAccountBalance", () => {
     const snap = await queryAccountBalance("codex", "x", {
       getAccount: async () => null,
       listPresets: async () => [],
-      authedGet: async () => "",
+      authedRequest: async () => ({ status: 200, headers: [], body: "" }),
     })
     expect(snap).toBeNull()
   })
@@ -87,7 +91,7 @@ describe("queryAccountBalance", () => {
           },
         }),
       listPresets: async () => [deepseekPreset],
-      authedGet: async () => "",
+      authedRequest: async () => ({ status: 200, headers: [], body: "" }),
     })
     expect(snap).toBeNull()
   })
@@ -96,15 +100,15 @@ describe("queryAccountBalance", () => {
     const snap = await queryAccountBalance("codex", "acc-1", {
       getAccount: async () => codexAccount({ presetId: undefined }),
       listPresets: async () => [],
-      authedGet: async () => "",
+      authedRequest: async () => ({ status: 200, headers: [], body: "" }),
     })
     expect(snap).toBeNull()
   })
 
   it("falls back to the first usable preset when the binding dangles", async () => {
-    const authedGet = jest.fn(async () => DEEPSEEK_BODY)
+    const authedRequest = jest.fn(async () => ({ status: 200, headers: [], body: DEEPSEEK_BODY }))
     const snap = await queryAccountBalance("codex", "acc-1", {
-      authedGet,
+      authedRequest,
       getAccount: async () => codexAccount({ presetId: "missing" }),
       listPresets: async () => [deepseekPreset],
     })
@@ -122,14 +126,14 @@ describe("queryAccountBalance", () => {
           templateId: "groq",
         },
       ],
-      authedGet: async () => "",
+      authedRequest: async () => ({ status: 200, headers: [], body: "" }),
     })
     expect(snap).toBeNull()
   })
 
   it("returns an error snapshot when the transport throws", async () => {
     const snap = await queryAccountBalance("codex", "acc-1", {
-      authedGet: async () => {
+      authedRequest: async () => {
         throw new Error("network down")
       },
       getAccount: async () => codexAccount(),
@@ -141,12 +145,26 @@ describe("queryAccountBalance", () => {
 
   it("stringifies non-Error transport failures", async () => {
     const snap = await queryAccountBalance("codex", "acc-1", {
-      authedGet: async () => {
+      authedRequest: async () => {
         throw "boom"
       },
       getAccount: async () => codexAccount(),
       listPresets: async () => [deepseekPreset],
     })
     expect(snap?.error).toBe("boom")
+  })
+
+  it("passes the real non-success status to the adapter", async () => {
+    const snap = await queryAccountBalance("codex", "acc-1", {
+      authedRequest: async () => ({
+        status: 401,
+        headers: [{ name: "www-authenticate", value: "Bearer" }],
+        body: '{"error":"invalid token"}',
+      }),
+      getAccount: async () => codexAccount(),
+      listPresets: async () => [deepseekPreset],
+    })
+
+    expect(snap?.error).toBe("HTTP 401")
   })
 })

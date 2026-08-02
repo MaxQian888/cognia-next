@@ -12,6 +12,10 @@
 //!     Validate plugin.json against the host's manifest schema. Run by
 //!     `build` implicitly; standalone for editor integration.
 //!
+//!   cognia plugin contract [--capability ID] [--contribution FIELD]
+//!     [--plugin-type TYPE] [--json]
+//!     Inspect the generated canonical authoring contract without writing files.
+//!
 //!   cognia plugin build [--path .] [--out target.zip] [--skip-build] [--json]
 //!     Validate, then run the type-appropriate build/pack path: cargo-component
 //!     for wasm, esbuild for frontend, existing-entry bundle packing for
@@ -115,6 +119,8 @@ fn main() -> eyre::Result<()> {
             ui.verbose("running acp");
             commands::acp::run(&ui)
         }
+        TopCommand::Logs { command } => commands::logs::run(command, &mut ui),
+        TopCommand::Crash { command } => commands::crash::run(command, &mut ui),
         TopCommand::ReleaseKey { json } => {
             ui.flags.json = json;
             ui.verbose(format!("running release-key json={json}"));

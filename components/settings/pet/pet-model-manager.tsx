@@ -9,8 +9,10 @@
 import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { Trash2Icon, UploadIcon, FolderIcon, DownloadIcon, SettingsIcon } from "lucide-react"
+import { Trash2Icon, UploadIcon, FolderIcon, DownloadIcon } from "lucide-react"
+import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
 import { Button } from "@/components/ui/button"
+import { SettingsIcon as AnimatedSettingsIcon } from "@/components/ui/settings"
 import { Label } from "@/components/ui/label"
 import {
   listPetModels,
@@ -162,7 +164,7 @@ export function PetModelManager({ settings, onPatch }: PetModelManagerProps) {
                   data-testid={`pet-model-configure-${m.id}`}
                   onClick={() => setConfigModelId(m.id)}
                 >
-                  <SettingsIcon className="size-4" />
+                  <AnimatedActionIcon icon={AnimatedSettingsIcon} size={16} />
                 </Button>
                 <Button
                   variant="ghost"

@@ -84,6 +84,10 @@ mod process_registry;
 /// renderer's Dexie v121 tables).
 pub mod provider_profiles;
 mod proxy_config;
+mod recorder_window;
+/// ADR-0102 §4 — diagnostics-first safe mode. Owns `RecoveryStateV1`, its
+/// atomic persistence and the typed IPC the renderer's boot gate reads.
+pub mod recovery;
 // ADR-0067 follow-up — extracted to `crates/cognia-remote-control`;
 // re-aliased so `crate::remote_control::…` (gateway, generate_handler!)
 // resolves unchanged.
@@ -112,6 +116,7 @@ mod shutdown;
 // re-aliased so `crate::skills::…` (companion_api rpc + generate_handler!)
 // resolves unchanged.
 pub use cognia_skills as skills;
+mod provider_diagnostics;
 mod subscription;
 mod supervision_backoff;
 pub mod task_workspace;
@@ -317,7 +322,10 @@ pub fn run() {
                     // "island": the fleet overlay recomputes its top-center
                     // placement on every open/resize; persisted coordinates
                     // would fight it (same rationale as the pet).
-                    .with_denylist(&["pet", "pet-popup", "island"])
+                    // The tray panel joins the overlay windows here: its
+                    // position is recomputed from the tray-icon anchor on every
+                    // open, so a restored one would fight the placement math.
+                    .with_denylist(&["pet", "pet-popup", "island", "tray-panel"])
                     .with_state_flags(
                         tauri_plugin_window_state::StateFlags::all()
                             & !tauri_plugin_window_state::StateFlags::FULLSCREEN
@@ -626,6 +634,10 @@ pub fn run() {
             subscription::commands::subscription_delete_preset,
             subscription::commands::subscription_set_default_preset,
             subscription::commands::subscription_authed_get,
+            subscription::commands::subscription_authed_request,
+            provider_diagnostics::provider_diagnostics_migrate_balance_token,
+            provider_diagnostics::provider_diagnostics_clear_balance_token,
+            provider_diagnostics::provider_diagnostics_run_balance_script,
             subscription::volcengine::subscription_volcengine_usage,
             // ADR-0028 — per-`query()` env injection (per-session multi-account).
             subscription::commands::claude_env_for_account,
@@ -734,6 +746,14 @@ pub fn run() {
             tray::commands::tray_get_tooltip,
             tray::commands::tray_get_title,
             tray::commands::tray_register_icon,
+            tray::panel::open_tray_panel,
+            tray::panel::close_tray_panel,
+            tray::panel::toggle_tray_panel,
+            tray::panel::reveal_tray_panel,
+            tray::panel::tray_panel_resize,
+            tray::panel::tray_panel_get_config,
+            tray::panel::tray_panel_set_left_click,
+            tray::panel::tray_run_native_action,
             shortcuts::commands::shortcut_bind,
             shortcuts::commands::shortcut_unbind,
             shortcuts::commands::shortcut_list,
@@ -824,6 +844,7 @@ pub fn run() {
             terminal_host_bridge::terminal_detach,
             terminal_host_bridge::terminal_take_control,
             terminal_host_bridge::terminal_release_control,
+            terminal_host_bridge::terminal_set_flow_control,
             terminal_host_bridge::terminal_kill,
             terminal_host_bridge::terminal_host_service,
             terminal_host_bridge::ssh_terminal_spawn,
@@ -909,6 +930,11 @@ pub fn run() {
             crash::commands::crash_delete_report,
             crash::commands::crash_take_pending,
             crash::commands::crash_logging_diagnostics,
+            recovery::commands::recovery_boot_get,
+            recovery::commands::recovery_state_get,
+            recovery::commands::recovery_checkpoint_record,
+            recovery::commands::recovery_retry,
+            recovery::commands::recovery_heartbeat,
             scheduler::commands::scheduler_get_capabilities,
             scheduler::commands::scheduler_is_available,
             scheduler::commands::scheduler_is_elevated,
@@ -1245,10 +1271,29 @@ pub fn run() {
             automation::commands::automation_drain_init_failure,
             automation::commands::desktop_pick_session_start,
             automation::commands::desktop_pick_session_cancel,
+            automation::record::commands::record_preflight,
+            // Enumerates pickable window / application targets for the setup
+            // screen. Unprivileged: it arms nothing and returns only titles the
+            // user can already see on their own screen.
+            automation::record::commands::record_list_capture_targets,
             automation::record::commands::record_start,
+            automation::record::commands::record_pause,
+            automation::record::commands::record_resume,
+            automation::record::commands::record_undo_last,
             automation::record::commands::record_stop,
+            automation::record::commands::record_interrupt,
             automation::record::commands::record_status,
-            automation::record::commands::record_cancel,
+            // Bundle surface. `record_cancel` deliberately no longer exists: it
+            // used to delete the capture directory, which is exactly what the
+            // append-only journal forbids. Ending a recording keeps the bundle
+            // (`record_stop` / `record_interrupt`); destroying one is a separate,
+            // explicit act (`record_delete_bundle`).
+            automation::record::commands::record_list_recoverable,
+            automation::record::commands::record_load_bundle,
+            automation::record::commands::record_read_asset,
+            automation::record::commands::record_delete_bundle,
+            recorder_window::recorder_controller_set_collapsed,
+            recorder_window::recorder_controller_begin_drag,
             automation::commands::virtual_display_health_probe,
             automation::commands::virtual_display_setup,
             automation::commands::virtual_display_probe,
@@ -1509,6 +1554,42 @@ pub fn run() {
                 crash::install_app_handle(app.handle().clone());
                 let pending = crash::sentinel::take_pending();
                 crash::sentinel::mark_start();
+
+                // ADR-0102 §4 — recovery must see the sentinel verdict BEFORE
+                // any subsystem initializer runs, because its job is to decide
+                // whether they run at all. The sentinel is the sole owner of
+                // "did the previous run crash?"; recovery consumes that answer
+                // rather than forming a second opinion.
+                let controller = match recovery::diagnostics_dir() {
+                    Some(dir) => recovery::RecoveryController::open(
+                        &dir,
+                        recovery::build_id(),
+                        env!("CARGO_PKG_VERSION"),
+                    ),
+                    None => {
+                        log::warn!(
+                            "recovery: no diagnostics dir; safe mode reports unsupported this run"
+                        );
+                        recovery::RecoveryController::detached(recovery::build_id())
+                    }
+                };
+                let controller = std::sync::Arc::new(controller);
+                let boot = controller.record_start(pending.is_some());
+                if boot.requires_safe_shell {
+                    log::warn!(
+                        "recovery: entering the diagnostics shell for build {} (suspect: {:?})",
+                        boot.build_id,
+                        controller.snapshot().suspect_subsystem
+                    );
+                }
+                // Publish before managing: supervised children (the chat
+                // sidecar's detached reader task, the headless services) have
+                // no `AppHandle` to look state up with, and the sidecar can be
+                // spawned by a background job before the webview ever loads.
+                recovery::publish_controller(std::sync::Arc::clone(&controller));
+                app.manage(controller);
+                app.manage(boot);
+
                 app.manage(crash::commands::PendingCrashState::new(pending));
                 crash::context::publish_to_monitor();
             }
@@ -1539,8 +1620,15 @@ pub fn run() {
             // that reports `MissingBinding` so the frontend can fall back.
             {
                 let ocr_state = app.state::<ocr::NativeOcrRegistry>().inner().clone();
+                let recorder_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     ocr::install_default_backends(&ocr_state).await;
+                    // ADR-0106 — the skill recorder's seams, registered AFTER the
+                    // OCR backends so `available_ids` reflects the real set.
+                    // Without this the recorder's preflight reports the plugin as
+                    // not installed and refuses to record: the defaults fail
+                    // closed on purpose, so a missed wiring is loud.
+                    recorder_window::adapters::register(&recorder_handle).await;
                 });
             }
 
@@ -1702,6 +1790,45 @@ pub fn run() {
                             let visible = window.is_visible().unwrap_or(false);
                             match watchdog.poll(std::time::Instant::now(), visible) {
                                 webview_watchdog::WatchdogAction::Recover => {
+                                    // The watchdog owns *detection*; the
+                                    // recovery controller owns *policy*
+                                    // (ADR-0102 §4: one reload per five
+                                    // minutes, the second failure opening the
+                                    // one-shot safe shell, no automatic
+                                    // reloads after that until health
+                                    // recovers).
+                                    let controller = recovery::controller();
+                                    let suspended = controller.is_some_and(|controller| {
+                                        controller
+                                            .snapshot()
+                                            .renderer_reload
+                                            .automatic_reloads_disabled
+                                    });
+                                    if suspended {
+                                        // The shell is already open. Reloading
+                                        // again would flash away the very
+                                        // diagnostics screen the user is
+                                        // trying to read.
+                                        if watchdog.mark_gave_up_logged() {
+                                            log::error!(
+                                                "recovery: automatic reloads are disabled \
+                                                 until health recovers"
+                                            );
+                                        }
+                                        continue;
+                                    }
+                                    if matches!(
+                                        controller
+                                            .map(|controller| controller.record_renderer_failure()),
+                                        Some(
+                                            cognia_observability::recovery::RendererAction::OpenSafeShell
+                                        )
+                                    ) {
+                                        log::error!(
+                                            "recovery: renderer reload budget exhausted; \
+                                             reloading into the diagnostics shell"
+                                        );
+                                    }
                                     let url = watchdog.last_url();
                                     webview_watchdog::recover(&window, url.as_deref());
                                     watchdog.note_recovery(std::time::Instant::now());
@@ -1870,12 +1997,31 @@ pub fn run() {
                     .inner()
                     .clone();
                 tauri::async_runtime::block_on(cua.shutdown_all());
+                // ADR-0106 — a quit mid-recording must leave a recoverable
+                // bundle rather than a half-written one. `interrupt_blocking`
+                // detaches the input hook and stamps the journal `Interrupted`
+                // from this thread; it never deletes.
+                app_handle
+                    .state::<automation::commands::AutomationState>()
+                    .recorder
+                    .interrupt_blocking(
+                        automation::record::journal::InterruptReason::AppShutdown,
+                    );
                 // Stop every cognia-spawned child process — external agents,
                 // ACP terminals, chat sidecar, integrated terminal PTYs, the
                 // MCP server, code-server instances, and the cloudflared
                 // tunnel. `process_registry::teardown` is the single
                 // exhaustive list; do NOT add subsystems here instead.
                 tauri::async_runtime::block_on(process_registry::teardown(app_handle));
+                // Flush the recovery audit spool before the sentinel clears —
+                // a shutdown that loses the audit trail loses the only record
+                // of why this session entered recovery.
+                if let Some(controller) =
+                    app_handle.try_state::<std::sync::Arc<recovery::RecoveryController>>()
+                {
+                    controller.close();
+                }
+
                 // Graceful shutdown — clear the crash sentinel so the next
                 // launch doesn't mistake this clean exit for a crash.
                 crash::sentinel::mark_clean_exit();

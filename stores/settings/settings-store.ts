@@ -149,6 +149,7 @@ interface SettingsState {
   setSkillToolEnabled: (enabled: boolean) => Promise<void>
   setSlashCommandToolEnabled: (enabled: boolean) => Promise<void>
   setTeamCollaborationToolEnabled: (enabled: boolean) => Promise<void>
+  setVectorToolEnabled: (enabled: boolean) => Promise<void>
   /**
    * Persist the API key to Dexie *and* push it down to the Rust process. If
    * the key changed, also tells the sidecar to restart so the SDK re-reads
@@ -326,6 +327,11 @@ interface SettingsState {
 
   setDefaultProvider: (providerId: string) => Promise<void>
   setProviderConfig: (providerId: string, patch: Partial<UserProviderSettings>) => Promise<void>
+  compareAndSwapProviderEndpoint: (
+    providerId: string,
+    expectedEndpoint: string,
+    nextEndpoint: string
+  ) => Promise<boolean>
   /** Cognia-compatible alias for `setProviderConfig`. */
   updateProviderSettings: (
     providerId: string,
@@ -888,6 +894,12 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       set({ settings: next })
     },
 
+    setVectorToolEnabled: async (enabled) => {
+      const current = get().settings?.selfInvokeTools
+      const next = await saveSettings({ selfInvokeTools: { ...current, vector: enabled } })
+      set({ settings: next })
+    },
+
     setApiKey: async (key) => {
       const previous = get().settings?.apiKey ?? undefined
       const trimmed = key && key.trim() ? key.trim() : undefined
@@ -1445,6 +1457,34 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
           }
         }
       }),
+
+    compareAndSwapProviderEndpoint: async (providerId, expectedEndpoint, nextEndpoint) => {
+      let swapped = false
+      await enqueueProviderMutation(async () => {
+        const current = get().settings
+        const existing = current?.providerSettings?.[providerId]
+        if ((existing?.baseURL ?? "") !== expectedEndpoint) return
+        const map = { ...(current?.providerSettings ?? {}) }
+        map[providerId] = {
+          ...(existing ?? { providerId, enabled: false, defaultModel: "" }),
+          providerId,
+          baseURL: nextEndpoint,
+        }
+        const next = await saveSettings({ providerSettings: map })
+        set({ settings: next })
+        swapped = true
+        if (isTauri() && providerId === "anthropic" && next.defaultProvider === providerId) {
+          const config = map[providerId]
+          try {
+            await setProviderEnv(config?.apiKey ?? null, nextEndpoint)
+            scheduleAnthropicSidecarRestart(config?.apiKey ?? null, nextEndpoint)
+          } catch (error) {
+            console.warn("setProviderEnv failed", error)
+          }
+        }
+      })
+      return swapped
+    },
 
     updateProviderSettings: async (providerId, patch) => {
       // Cognia-compatible alias — components written for Cognia call this.

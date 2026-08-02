@@ -104,7 +104,8 @@ export function InteractiveRebaseDialog({
       action: r.action,
       message: r.action === "reword" ? r.message : undefined,
     }))
-    await actions.interactiveRebase(base, entries)
+    const failure = await actions.interactiveRebase(base, entries)
+    if (failure) return
     onOpenChange(false)
   }
 

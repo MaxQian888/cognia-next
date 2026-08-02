@@ -39,6 +39,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { parseStackTrace } from "@/lib/terminal/stack-trace"
 import { cn } from "@/lib/utils"
 import {
   AGENT_TRACE_MODULE,
@@ -69,53 +70,6 @@ export interface LogDetailPanelProps {
   /** 1-based position of this log in the visible list, for the header. */
   navPosition?: { index: number; total: number }
   className?: string
-}
-
-/**
- * Parse a stack trace string into individual frames.
- */
-function parseStackTrace(stack: string): { fn: string; file: string; line: string; col: string }[] {
-  const frames: { fn: string; file: string; line: string; col: string }[] = []
-  const lines = stack.split("\n")
-
-  for (const line of lines) {
-    // Chrome/V8 style: "    at functionName (file:line:col)"
-    const chromeMatch = line.match(/^\s*at\s+(.+?)\s+\((.+?):(\d+):(\d+)\)/)
-    if (chromeMatch) {
-      frames.push({
-        fn: chromeMatch[1],
-        file: chromeMatch[2],
-        line: chromeMatch[3],
-        col: chromeMatch[4],
-      })
-      continue
-    }
-
-    // Chrome/V8 anonymous: "    at file:line:col"
-    const anonMatch = line.match(/^\s*at\s+(.+?):(\d+):(\d+)/)
-    if (anonMatch) {
-      frames.push({
-        fn: "<anonymous>",
-        file: anonMatch[1],
-        line: anonMatch[2],
-        col: anonMatch[3],
-      })
-      continue
-    }
-
-    // Firefox style: "functionName@file:line:col"
-    const ffMatch = line.match(/^(.+?)@(.+?):(\d+):(\d+)/)
-    if (ffMatch) {
-      frames.push({
-        fn: ffMatch[1] || "<anonymous>",
-        file: ffMatch[2],
-        line: ffMatch[3],
-        col: ffMatch[4],
-      })
-    }
-  }
-
-  return frames
 }
 
 function JsonPrimitive({ value }: { value: unknown }) {
@@ -705,7 +659,7 @@ export function LogDetailPanel({
                           <div className="flex items-center gap-1 text-[11px] opacity-75">
                             <ExternalLink className="h-2.5 w-2.5" />
                             <span className="truncate">
-                              {frame.file}:{frame.line}:{frame.col}
+                              {frame.file}:{frame.line ?? "?"}:{frame.col ?? "?"}
                             </span>
                           </div>
                         </div>

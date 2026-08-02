@@ -438,6 +438,7 @@ const globalConfig: Config = {
     "!lib/execution/types.ts",
     "!lib/pet/live2d/types.ts",
     "!lib/a2ui/from-execution/types.ts",
+    "!lib/tray-panel/types.ts",
     "!lib/attention/types.ts",
     "!lib/chat/mentions/types.ts",
     "!lib/claude/agents/subagents/types.ts",

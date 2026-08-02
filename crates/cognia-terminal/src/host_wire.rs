@@ -38,7 +38,39 @@ struct HelloPayload {
     config: Option<TerminalHostConfig>,
     profiles: Option<Vec<ProfilePayload>>,
     ssh_profiles: Option<Vec<SshProfilePayload>>,
+    path_injection: Option<PathInjectionPayload>,
 }
+
+/// Wire form of [`PathInjection`].
+///
+/// Directories travel as `String`, not `PathBuf`: serde's `PathBuf` impl
+/// *errors* on a non-UTF-8 path, which would fail the whole hello — config,
+/// profiles and all — because of one odd `$HOME`. The sender drops
+/// unrepresentable entries instead, so everything else still syncs.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PathInjectionPayload {
+    #[serde(default)]
+    prepend: Vec<String>,
+    #[serde(default)]
+    append: Vec<String>,
+}
+
+impl From<PathInjectionPayload> for PathInjection {
+    fn from(payload: PathInjectionPayload) -> Self {
+        Self {
+            prepend: payload.prepend.into_iter().map(PathBuf::from).collect(),
+            append: payload.append.into_iter().map(PathBuf::from).collect(),
+        }
+    }
+}
+
+/// Capabilities this host build understands, advertised in the hello ack.
+///
+/// The bridge reuses an already-running host, which may be an older binary
+/// installed as a login service — clients check this list before sending a
+/// command that an older host would reject as an unknown frame kind.
+const PROTOCOL_FEATURES: &[&str] = &["pathInjection", "flowControl", "history"];
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,11 +92,25 @@ struct ResizePayload {
     cols: u16,
 }
 
+#[derive(Debug, Deserialize)]
+struct FlowControlPayload {
+    paused: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TransportStatePayload {
+    state: crate::host::HostTransportState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AckPayload {
     ok: bool,
     host_id: String,
+    protocol_features: &'static [&'static str],
 }
 
 #[derive(Debug, Serialize)]
@@ -86,7 +132,6 @@ pub async fn serve_host_stream<S>(
     host: TerminalHost,
     identity: ClientIdentity,
     script_dir: PathBuf,
-    path: PathInjection,
     known_hosts_path: PathBuf,
 ) -> Result<(), String>
 where
@@ -104,7 +149,6 @@ where
                     &client.connection_id,
                     frame,
                     &script_dir,
-                    &path,
                     &known_hosts_path,
                 ).await;
                 match response {
@@ -133,7 +177,6 @@ async fn dispatch_command(
     connection_id: &str,
     frame: TerminalFrame,
     script_dir: &Path,
-    path: &PathInjection,
     known_hosts_path: &Path,
 ) -> Result<Vec<TerminalFrame>, (u64, Uuid, HostError)> {
     let sequence = frame.sequence;
@@ -148,6 +191,9 @@ async fn dispatch_command(
             payload.and_then(|payload| {
                 if let Some(config) = payload.config {
                     host.update_config(connection_id, config)?;
+                }
+                if let Some(path) = payload.path_injection {
+                    host.set_path_injection(connection_id, path.into())?;
                 }
                 if payload.profiles.is_some() || payload.ssh_profiles.is_some() {
                     host.replace_synchronized_profiles(
@@ -184,7 +230,7 @@ async fn dispatch_command(
         FrameKind::Spawn => match parse_json::<SpawnPayload>(&frame.payload) {
             Ok(payload) => match (payload.request, payload.ssh_request) {
                 (Some(request), None) => {
-                    host.spawn_local(connection_id, payload.profile_id, request, script_dir, path)
+                    host.spawn_local(connection_id, payload.profile_id, request, script_dir)
                 }
                 (None, Some(request)) => {
                     match host.sync_ssh_profile(connection_id, payload.profile_id.clone(), request)
@@ -194,7 +240,6 @@ async fn dispatch_command(
                                 connection_id,
                                 payload.profile_id,
                                 script_dir,
-                                path,
                                 known_hosts_path,
                             )
                             .await
@@ -207,7 +252,6 @@ async fn dispatch_command(
                         connection_id,
                         payload.profile_id,
                         script_dir,
-                        path,
                         known_hosts_path,
                     )
                     .await
@@ -258,6 +302,12 @@ async fn dispatch_command(
         FrameKind::Stdin => host
             .write(connection_id, &session_id.to_string(), &frame.payload)
             .and_then(|()| ack_frame(host, session_id, sequence)),
+        FrameKind::FlowControl => {
+            parse_json::<FlowControlPayload>(&frame.payload).and_then(|payload| {
+                host.set_flow_control(connection_id, &session_id.to_string(), payload.paused)
+                    .and_then(|()| ack_frame(host, session_id, sequence))
+            })
+        }
         _ => Err(HostError::InvalidRequest(format!(
             "frame kind {:?} is not a client command",
             frame.kind
@@ -285,6 +335,7 @@ fn ack_frame(
         &AckPayload {
             ok: true,
             host_id: host.host_id().to_string(),
+            protocol_features: PROTOCOL_FEATURES,
         },
     )
     .map_err(HostError::InvalidRequest)
@@ -342,6 +393,16 @@ fn host_event_frame(event: HostEvent) -> Result<TerminalFrame, String> {
             parse_session_id(&session_id)?,
             0,
             &serde_json::json!({ "controller": controller }),
+        ),
+        HostEvent::TransportState {
+            session_id,
+            state,
+            message,
+        } => json_frame(
+            FrameKind::TransportState,
+            parse_session_id(&session_id)?,
+            0,
+            &TransportStatePayload { state, message },
         ),
         HostEvent::ReplayGap {
             session_id,
@@ -441,21 +502,23 @@ mod tests {
     use crate::host::TerminalHostConfig;
     use crate::protocol::FrameKind;
 
-    #[tokio::test]
-    async fn list_round_trip_uses_the_canonical_host_dispatcher() {
-        let config = TerminalHostConfig {
+    fn test_config() -> TerminalHostConfig {
+        TerminalHostConfig {
             replay_bytes_per_session: 64 * 1024,
             total_replay_bytes: 128 * 1024,
             ..TerminalHostConfig::default()
-        };
-        let host = TerminalHost::new("host-test", config).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn list_round_trip_uses_the_canonical_host_dispatcher() {
+        let host = TerminalHost::new("host-test", test_config()).unwrap();
         let (mut client, server) = tokio::io::duplex(16 * 1024);
         let serve = tokio::spawn(serve_host_stream(
             server,
             host,
             ClientIdentity::local("desktop"),
             PathBuf::from("."),
-            PathInjection::default(),
             PathBuf::from("known_hosts"),
         ));
 
@@ -471,6 +534,124 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_slice(&response.payload).unwrap();
         assert_eq!(payload["hostId"], "host-test");
         assert_eq!(payload["sessions"], serde_json::json!([]));
+        drop(client);
+        serve.await.unwrap().unwrap();
+    }
+
+    /// The hello frame is how the app hands the out-of-process host its PATH
+    /// view (which the host cannot derive: the managed-CLI registry is an
+    /// in-process static on the app side) and how the app learns which
+    /// post-1.0 frame kinds this host understands.
+    #[tokio::test]
+    async fn hello_updates_path_injection_and_advertises_protocol_features() {
+        let host = TerminalHost::new("host-test", test_config()).unwrap();
+        let observed = host.clone();
+        let (mut client, server) = tokio::io::duplex(16 * 1024);
+        let serve = tokio::spawn(serve_host_stream(
+            server,
+            host,
+            ClientIdentity::local("desktop"),
+            PathBuf::from("."),
+            PathBuf::from("known_hosts"),
+        ));
+
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "pathInjection": {
+                "prepend": ["/opt/cognia/bin"],
+                "append": ["/home/dev/.cargo/bin"],
+            },
+        }))
+        .unwrap();
+        write_frame(
+            &mut client,
+            &TerminalFrame::command(FrameKind::Hello, Uuid::nil(), 1, payload),
+        )
+        .await
+        .unwrap();
+
+        let response = read_frame(&mut client).await.unwrap().unwrap();
+        assert_eq!(response.kind, FrameKind::Ack);
+        let ack: serde_json::Value = serde_json::from_slice(&response.payload).unwrap();
+        assert_eq!(ack["ok"], true);
+        assert_eq!(
+            ack["protocolFeatures"],
+            serde_json::json!(["pathInjection", "flowControl", "history"])
+        );
+
+        let applied = observed.path_injection();
+        assert_eq!(applied.prepend, vec![PathBuf::from("/opt/cognia/bin")]);
+        assert_eq!(applied.append, vec![PathBuf::from("/home/dev/.cargo/bin")]);
+
+        drop(client);
+        serve.await.unwrap().unwrap();
+    }
+
+    /// Forward compatibility: a client newer than the host sends fields this
+    /// build has never heard of. `HelloPayload` must ignore them rather than
+    /// failing the handshake — otherwise upgrading the app would break every
+    /// already-installed login-service host.
+    #[tokio::test]
+    async fn hello_ignores_unknown_fields_from_a_newer_client() {
+        let host = TerminalHost::new("host-test", test_config()).unwrap();
+        let (mut client, server) = tokio::io::duplex(16 * 1024);
+        let serve = tokio::spawn(serve_host_stream(
+            server,
+            host,
+            ClientIdentity::local("desktop"),
+            PathBuf::from("."),
+            PathBuf::from("known_hosts"),
+        ));
+
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "somethingFromTheFuture": { "nested": [1, 2, 3] },
+            "pathInjection": { "prepend": ["/opt/cognia/bin"] },
+        }))
+        .unwrap();
+        write_frame(
+            &mut client,
+            &TerminalFrame::command(FrameKind::Hello, Uuid::nil(), 4, payload),
+        )
+        .await
+        .unwrap();
+
+        let response = read_frame(&mut client).await.unwrap().unwrap();
+        assert_eq!(response.kind, FrameKind::Ack);
+        assert_eq!(response.sequence, 4);
+
+        drop(client);
+        serve.await.unwrap().unwrap();
+    }
+
+    /// A remote client may not rewrite the host's PATH; the hello must fail
+    /// loudly rather than silently ignoring the field.
+    #[tokio::test]
+    async fn hello_rejects_a_path_injection_from_a_remote_client() {
+        let host = TerminalHost::new("host-test", test_config()).unwrap();
+        let observed = host.clone();
+        let (mut client, server) = tokio::io::duplex(16 * 1024);
+        let serve = tokio::spawn(serve_host_stream(
+            server,
+            host,
+            ClientIdentity::remote("phone", "device-a", true),
+            PathBuf::from("."),
+            PathBuf::from("known_hosts"),
+        ));
+
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "pathInjection": { "prepend": ["/tmp/evil"] },
+        }))
+        .unwrap();
+        write_frame(
+            &mut client,
+            &TerminalFrame::command(FrameKind::Hello, Uuid::nil(), 2, payload),
+        )
+        .await
+        .unwrap();
+
+        let response = read_frame(&mut client).await.unwrap().unwrap();
+        assert_eq!(response.kind, FrameKind::Error);
+        assert!(observed.path_injection().prepend.is_empty());
+
         drop(client);
         serve.await.unwrap().unwrap();
     }

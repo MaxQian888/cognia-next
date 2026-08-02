@@ -8,8 +8,10 @@
 // caller, so it can sit in both surfaces without owning their i18n.
 
 import { memo, type MouseEvent } from "react"
-import { BanIcon, DownloadIcon, XCircleIcon } from "lucide-react"
+import { BanIcon, XCircleIcon } from "lucide-react"
+import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
 import { Button } from "@/components/ui/button"
+import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
 import { cn } from "@/lib/utils"
 
 export interface BackgroundedRunControlsProps {
@@ -83,7 +85,7 @@ export const BackgroundedRunControls = memo(function BackgroundedRunControls({
           data-testid={collectTestId}
           aria-label={collectAria}
         >
-          <DownloadIcon data-icon="inline-start" />
+          <AnimatedActionIcon icon={AnimatedDownloadIcon} size={16} data-icon="inline-start" />
           {collectLabel}
         </Button>
       ) : null}

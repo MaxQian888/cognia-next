@@ -18,6 +18,7 @@
         "input": { "command": "ls" }
       },
       "envelope": {
+        "schemaVersion": 1,
         "eventId": "s1:a1:0",
         "sequence": 0,
         "sessionId": "s1",
@@ -45,6 +46,7 @@
         }
       },
       "envelope": {
+        "schemaVersion": 1,
         "eventId": "s1:a1:1",
         "sequence": 1,
         "sessionId": "s1",
@@ -59,6 +61,7 @@
     {
       "wire": { "type": "session_ended", "sessionId": "s1", "error": "boom" },
       "envelope": {
+        "schemaVersion": 1,
         "eventId": "s1:a1:2",
         "sequence": 2,
         "sessionId": "s1",

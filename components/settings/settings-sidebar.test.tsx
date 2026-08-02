@@ -32,18 +32,21 @@ interface SetupOptions {
   settings?: Partial<AppSettings>
   activeSection?: SettingsSectionId
   searchQuery?: string
+  /** `false` renders the rail in its icon-collapsed state. */
+  defaultOpen?: boolean
 }
 
 async function setup({
   settings = {},
   activeSection = "general",
   searchQuery = "",
+  defaultOpen = true,
 }: SetupOptions = {}) {
   useSettingsStore.setState({ settings: settings as never, save })
   const onSelect = jest.fn()
   const onSearchChange = jest.fn()
   const utils = render(
-    <SidebarProvider>
+    <SidebarProvider defaultOpen={defaultOpen}>
       <SettingsSidebar
         activeSection={activeSection}
         onSelect={onSelect}
@@ -137,5 +140,65 @@ describe("SettingsSidebar group collapse", () => {
     await user.click(screen.getByRole("button", { name: /settings\.groupAi/ }))
     expect(save).toHaveBeenCalledTimes(1)
     expect(save).toHaveBeenCalledWith({ settingsSidebarCollapsedGroups: ["ai"] })
+  })
+})
+
+// The icon rail is only `--sidebar-width-icon` (3rem) wide while the base
+// `SidebarMenuButton` forces `size-8` (2rem). Any horizontal padding or
+// still-laid-out label inside that budget overflows the button's
+// `overflow-hidden` box and clips the icons — these pin the icon-mode escapes.
+describe("SettingsSidebar icon-collapsed rail", () => {
+  async function setupCollapsed(options: SetupOptions = {}) {
+    const utils = await setup({ ...options, defaultOpen: false })
+    const root = utils.container.querySelector('[data-slot="sidebar"]')
+    expect(root).toHaveAttribute("data-collapsible", "icon")
+    return utils
+  }
+
+  it("drops the horizontal padding of the content and every group", async () => {
+    const { container } = await setupCollapsed()
+    expect(container.querySelector('[data-slot="sidebar-content"]')).toHaveClass(
+      "group-data-[collapsible=icon]:px-0"
+    )
+    const groups = container.querySelectorAll('[data-slot="sidebar-group"]')
+    expect(groups.length).toBeGreaterThan(0)
+    for (const group of groups) {
+      expect(group).toHaveClass("group-data-[collapsible=icon]:px-0")
+    }
+  })
+
+  it("hides the item label and centers the icon in every menu button", async () => {
+    const { container } = await setupCollapsed()
+    const buttons = container.querySelectorAll('[data-slot="sidebar-menu-button"]')
+    expect(buttons.length).toBeGreaterThan(0)
+    for (const button of buttons) {
+      expect(button).toHaveClass("group-data-[collapsible=icon]:justify-center")
+      // The label wrapper is a `div`, not the `span:last-child` the base
+      // variant hides, so it needs its own icon-mode escape.
+      const label = button.querySelector("div")
+      expect(label).toHaveClass("group-data-[collapsible=icon]:hidden")
+    }
+  })
+
+  it("makes the invisible group label inert so it cannot swallow item clicks", async () => {
+    const { container } = await setupCollapsed()
+    const labels = container.querySelectorAll('[data-slot="sidebar-group-label"]')
+    expect(labels.length).toBeGreaterThan(0)
+    for (const label of labels) {
+      expect(label).toHaveClass("group-data-[collapsible=icon]:pointer-events-none")
+    }
+  })
+
+  it("hides the search field and keeps every item reachable regardless of group collapse", async () => {
+    await setupCollapsed({ settings: { settingsSidebarCollapsedGroups: ["data"] } })
+    expect(screen.queryByPlaceholderText("settings.searchPlaceholder")).not.toBeInTheDocument()
+    expect(screen.getByText("settings.tabs.data")).toBeInTheDocument()
+  })
+
+  it("ignores group-trigger clicks instead of persisting a collapse", async () => {
+    const user = userEvent.setup()
+    await setupCollapsed()
+    await user.click(screen.getByRole("button", { name: /settings\.groupData/ }))
+    expect(save).not.toHaveBeenCalled()
   })
 })

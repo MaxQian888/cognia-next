@@ -8,9 +8,16 @@
 //   /memory forget <id>   — soft-invalidate one memory (kept in history)
 //
 // Reads respect `memory.enabled`; `forget` uses the shared external mutator
-// (soft-delete only — hard deletes stay in the console UI). Unknown
-// subcommands fall through (`null`) so a user's custom `/memory-foo.md`
-// command still wins.
+// (soft-delete only — hard deletes stay in the console UI).
+//
+// An unknown subcommand MUST return a result, never `null`. This used to fall
+// through on the theory that a user's custom `/memory-foo.md` could then match,
+// but dispatch is keyed on the command NAME (`run-segments.ts` resolves
+// `memory` against the command map, and `/memory bogus` is name `memory` with
+// args `bogus`), so no custom command was ever reachable. What the `null`
+// actually produced was a silent black hole: the builtin handler did nothing,
+// `ranAction` was still true, so no turn was sent AND the input was cleared —
+// the user's text simply vanished.
 
 import type { SlashContext } from "../builtin"
 import { useSettingsStore } from "@/stores/settings"
@@ -99,7 +106,18 @@ export async function dispatchMemorySubcommand(
     }
 
     default:
-      // Unknown subcommand → fall through so custom user commands can match.
-      return null
+      return {
+        system: [
+          `Unknown \`/memory\` subcommand: \`${sub}\`.`,
+          "",
+          "Usage:",
+          "- `/memory` — open the memory console",
+          "- `/memory status` — counts and current mode",
+          "- `/memory list [n]` — newest n memories (default 10, max 50)",
+          "- `/memory forget <id>` — archive one memory",
+          "",
+          "To SAVE a fact, use `/remember <fact>` or start a line with `#`.",
+        ].join("\n"),
+      }
   }
 }

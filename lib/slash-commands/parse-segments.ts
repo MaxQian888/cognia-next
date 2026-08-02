@@ -13,6 +13,16 @@
 //   2. A command consumes the rest of its physical line as `args` (matching
 //      `applyTemplate`'s `$ARGUMENTS` / `$1..$9` model). Multiple commands =
 //      multiple lines.
+//   2b. EXCEPTION — same-line chaining: a line that is NOTHING BUT known
+//      commands (`/compact /clear`) runs all of them, each with empty args.
+//      The test is all-or-nothing over the whole line: every whitespace-
+//      separated token must start with `/` and name a known command. One
+//      ordinary token is enough to fall back to rule 2 verbatim, which is what
+//      keeps `/review src/a.ts` and `/add-dir /usr/local` parsing as a single
+//      command with args. Two guards matter: at least TWO tokens (a one-token
+//      line must keep rule 2's `end: contentEnd`, which includes trailing
+//      whitespace, and `[].every()` is vacuously true for a blank line), and a
+//      non-empty command name (so a lone `/` never reaches `isKnownCommand`).
 //   3. An UNKNOWN line-start `/word` is treated as text (typos and literal
 //      slash content are never silently dropped) — hence the injected
 //      `isKnownCommand` predicate, which keeps this function pure/testable.
@@ -82,6 +92,51 @@ function firstNonWhitespace(value: string, start: number, hardEnd: number): numb
   return -1
 }
 
+/** Absolute `[start, end)` range of one whitespace-separated token. */
+interface LineToken {
+  start: number
+  end: number
+}
+
+/**
+ * Split `[start, hardEnd)` into whitespace-separated tokens with absolute
+ * indices. Uses the shared {@link findTokenEnd} so the boundary rule can't drift
+ * from `detectTrigger`'s.
+ */
+export function tokenizeLine(value: string, start: number, hardEnd: number): LineToken[] {
+  const tokens: LineToken[] = []
+  let i = start
+  while (i < hardEnd) {
+    if (isWhitespace(value[i])) {
+      i++
+      continue
+    }
+    const end = findTokenEnd(value, i, hardEnd)
+    tokens.push({ start: i, end })
+    i = end
+  }
+  return tokens
+}
+
+/**
+ * True when every token in `tokens` is a `/`-prefixed known command — the
+ * all-or-nothing test for same-line chaining (rule 2b). Requires at least two
+ * tokens; see the header for why.
+ */
+export function isCommandChain(
+  value: string,
+  tokens: readonly LineToken[],
+  isKnownCommand: (name: string) => boolean
+): boolean {
+  if (tokens.length < 2) return false
+  return tokens.every(
+    (tok) =>
+      value[tok.start] === "/" &&
+      tok.end > tok.start + 1 &&
+      isKnownCommand(value.slice(tok.start + 1, tok.end))
+  )
+}
+
 /**
  * Parse `input` into an ordered, contiguous list of command / text segments.
  * `isKnownCommand(name)` decides whether a line-start `/word` is a real command
@@ -128,24 +183,46 @@ export function parseSegments(
     const fnw = firstNonWhitespace(input, i, contentEnd)
     let isCommand = false
     if (fnw !== -1 && input[fnw] === "/") {
-      const wordEnd = findTokenEnd(input, fnw + 1, contentEnd)
-      const name = input.slice(fnw + 1, wordEnd)
-      if (name.length > 0 && isKnownCommand(name)) {
+      const tokens = tokenizeLine(input, fnw, contentEnd)
+      if (isCommandChain(input, tokens, isKnownCommand)) {
+        // Rule 2b — one segment per token, empty args. The whitespace BETWEEN
+        // tokens is emitted as text so the segment list stays contiguous (the
+        // chip overlay paints by index).
         isCommand = true
-        // Flush any pending text plus this line's leading whitespace.
         if (pendingStart === null) pendingStart = i
-        pushText(pendingStart, fnw)
-        pendingStart = null
-        segments.push({
-          kind: "command",
-          name,
-          args: input.slice(wordEnd, contentEnd).trim(),
-          raw: input.slice(fnw, contentEnd),
-          start: fnw,
-          end: contentEnd,
-        })
-        // The `\r`/`\n` (and everything after) starts a fresh text run.
-        pendingStart = contentEnd
+        for (const tok of tokens) {
+          pushText(pendingStart, tok.start)
+          segments.push({
+            kind: "command",
+            name: input.slice(tok.start + 1, tok.end),
+            args: "",
+            raw: input.slice(tok.start, tok.end),
+            start: tok.start,
+            end: tok.end,
+          })
+          pendingStart = tok.end
+        }
+        // Trailing whitespace after the last command joins the next text run.
+      } else {
+        const wordEnd = findTokenEnd(input, fnw + 1, contentEnd)
+        const name = input.slice(fnw + 1, wordEnd)
+        if (name.length > 0 && isKnownCommand(name)) {
+          isCommand = true
+          // Flush any pending text plus this line's leading whitespace.
+          if (pendingStart === null) pendingStart = i
+          pushText(pendingStart, fnw)
+          pendingStart = null
+          segments.push({
+            kind: "command",
+            name,
+            args: input.slice(wordEnd, contentEnd).trim(),
+            raw: input.slice(fnw, contentEnd),
+            start: fnw,
+            end: contentEnd,
+          })
+          // The `\r`/`\n` (and everything after) starts a fresh text run.
+          pendingStart = contentEnd
+        }
       }
     }
 

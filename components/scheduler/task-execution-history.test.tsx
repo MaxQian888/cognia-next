@@ -74,4 +74,130 @@ describe("TaskExecutionHistory", () => {
     render(<TaskExecutionHistory executions={executions} />)
     expect(screen.getByTestId("error-message")).toHaveTextContent("boom went wrong")
   })
+
+  it("summarizes a completed run's output from a string, summary, or message", () => {
+    render(
+      <TaskExecutionHistory
+        executions={[
+          // A raw string output is legal at runtime (executors return free-form
+          // values) even though the row type narrows it to an object.
+          makeExecution("s-1", {
+            output: "plain string output" as unknown as TaskExecution["output"],
+          }),
+          makeExecution("s-2", { output: { summary: "from summary" } }),
+          makeExecution("s-3", { output: { message: "from message" } }),
+          makeExecution("s-4", { output: { other: "ignored" } }),
+          makeExecution("s-5", { output: undefined }),
+        ]}
+      />
+    )
+    expect(screen.getByText("plain string output")).toBeInTheDocument()
+    expect(screen.getByText("from summary")).toBeInTheDocument()
+    expect(screen.getByText("from message")).toBeInTheDocument()
+    expect(screen.queryByText("ignored")).toBeNull()
+  })
+
+  it("treats an empty string output as no summary", () => {
+    render(
+      <TaskExecutionHistory
+        executions={[makeExecution("s-0", { output: "" as unknown as TaskExecution["output"] })]}
+      />
+    )
+    expect(screen.getByTestId("execution-row").textContent).not.toContain("undefined")
+  })
+
+  it("spins the icon only while a run is in flight", () => {
+    render(
+      <TaskExecutionHistory
+        executions={[makeExecution("r-1", { status: "running" }), makeExecution("c-1")]}
+      />
+    )
+    const classOf = (testId: string) =>
+      screen.getByTestId(testId).querySelector("svg")!.getAttribute("class") ?? ""
+    expect(classOf("status-icon-running")).toContain("animate-spin")
+    expect(classOf("status-icon-completed")).not.toContain("animate-spin")
+  })
+
+  it("renders the terminal reason when one is recorded", () => {
+    render(
+      <TaskExecutionHistory
+        executions={[makeExecution("t-1", { terminalReason: "overlap-skipped" })]}
+      />
+    )
+    expect(screen.getByText("overlap-skipped")).toBeInTheDocument()
+  })
+
+  it("opens the run sheet from the keyboard on a clickable row", () => {
+    const onSelectExecution = jest.fn()
+    render(
+      <TaskExecutionHistory
+        executions={[makeExecution("k-1")]}
+        onSelectExecution={onSelectExecution}
+      />
+    )
+    const row = screen.getByTestId("execution-row")
+    fireEvent.keyDown(row, { key: "Enter" })
+    fireEvent.keyDown(row, { key: " " })
+    fireEvent.keyDown(row, { key: "a" })
+    expect(onSelectExecution).toHaveBeenCalledTimes(2)
+  })
+
+  describe("error expansion", () => {
+    const longError = `${"a stack frame line ".repeat(10)}\nand a second line`
+
+    function renderFailed(error: string, onSelectExecution?: () => void) {
+      return render(
+        <TaskExecutionHistory
+          executions={[makeExecution("fail-1", { status: "failed", error, output: undefined })]}
+          onSelectExecution={onSelectExecution}
+        />
+      )
+    }
+
+    it("offers no toggle for an error that already fits on one line", () => {
+      renderFailed("boom")
+      expect(screen.queryByTestId("error-toggle")).not.toBeInTheDocument()
+      expect(screen.getByTestId("error-message")).toHaveClass("truncate")
+    })
+
+    it("collapses a long error until the toggle is used", () => {
+      renderFailed(longError)
+      expect(screen.getByTestId("error-message")).toHaveClass("truncate")
+      const toggle = screen.getByTestId("error-toggle")
+      expect(toggle).toHaveAttribute("aria-expanded", "false")
+
+      fireEvent.click(toggle)
+      const message = screen.getByTestId("error-message")
+      expect(message).not.toHaveClass("truncate")
+      // Expanded errors wrap inside a bounded scroll box instead of pushing
+      // every following row down the list.
+      expect(message).toHaveClass("max-h-40", "overflow-y-auto", "whitespace-pre-wrap")
+      expect(screen.getByTestId("error-toggle")).toHaveAttribute("aria-expanded", "true")
+    })
+
+    it("collapses again on a second toggle", () => {
+      renderFailed(longError)
+      fireEvent.click(screen.getByTestId("error-toggle"))
+      fireEvent.click(screen.getByTestId("error-toggle"))
+      expect(screen.getByTestId("error-message")).toHaveClass("truncate")
+    })
+
+    it("does not open the run sheet when the toggle is used", () => {
+      const onSelectExecution = jest.fn()
+      renderFailed(longError, onSelectExecution)
+      fireEvent.click(screen.getByTestId("error-toggle"))
+      expect(onSelectExecution).not.toHaveBeenCalled()
+      // Nor does keying it — the row's Enter/Space handler must not see it.
+      fireEvent.keyDown(screen.getByTestId("error-toggle"), { key: "Enter" })
+      expect(onSelectExecution).not.toHaveBeenCalled()
+      // The row itself still opens it.
+      fireEvent.click(screen.getByTestId("execution-row"))
+      expect(onSelectExecution).toHaveBeenCalledTimes(1)
+    })
+
+    it("keeps the untruncated error available as a tooltip while collapsed", () => {
+      renderFailed(longError)
+      expect(screen.getByTestId("error-message")).toHaveAttribute("title", longError)
+    })
+  })
 })

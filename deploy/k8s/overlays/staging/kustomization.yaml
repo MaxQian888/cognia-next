@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: cognia-staging
+resources:
+  - namespace.yaml
+  - ../../base
+  - ../../components/deploy-agent
+configMapGenerator:
+  - name: cognia-config
+    literals:
+      - publicUrl=https://staging.server.invalid
+  - name: cognia-deploy-agent
+    files:
+      - deploy-agent.yaml
+generatorOptions:
+  disableNameSuffixHash: true
+patches:
+  - target: { kind: Ingress, name: cognia-server }
+    patch: |-
+      - op: replace
+        path: /spec/ingressClassName
+        value: nginx
+      - op: replace
+        path: /spec/rules/0/host
+        value: staging.server.invalid
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: staging.server.invalid

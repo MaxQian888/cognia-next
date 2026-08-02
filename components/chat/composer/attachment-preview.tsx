@@ -47,6 +47,7 @@ import {
   type AttachmentData,
 } from "@/components/ai-elements/attachments"
 import { usePromptInputAttachments } from "@/components/ai-elements/prompt-input"
+import { AnalyzingImage } from "@/components/loading-ui/analyzing-image"
 import { applyOrder, resolveDragEnd } from "@/lib/chat/attachments/reorder"
 import type { RejectReason } from "@/lib/chat/attachments/dispatch"
 import { cn } from "@/lib/utils"
@@ -246,7 +247,7 @@ function SortableChip({
             <AttachmentMediaPreview />
             <AttachmentInfo />
           </button>
-          <StatusBadge state={state} t={t} />
+          <StatusBadge state={state} isImage={(file.mediaType ?? "").startsWith("image/")} t={t} />
           <AttachmentRemove
             label={t("removeAria", { filename: displayName })}
             // Always visible: these chips have room for it in the flex flow, and
@@ -262,12 +263,29 @@ function SortableChip({
 /** Extraction state as a compact trailing badge: spinner → token count → error. */
 function StatusBadge({
   state,
+  isImage,
   t,
 }: {
   state: StagedAttachmentState | undefined
+  isImage: boolean
   t: ChipTranslator
 }) {
   if (!state || state.status === "extracting") {
+    // An image's wait is a different wait: the blob is re-read, decoded and
+    // downscaled rather than parsed for text, and it is the slowest of the two
+    // by far. A generic spinner said nothing about that; the scan animation
+    // names the work while it happens. Documents keep the spinner — the photo
+    // glyph would be a lie on a PDF.
+    if (isImage) {
+      return (
+        <AnalyzingImage
+          label={t("analyzing")}
+          title={t("analyzing")}
+          className="size-4 text-muted-foreground"
+          data-testid="attachment-analyzing-image"
+        />
+      )
+    }
     return (
       <span
         className="shrink-0 text-muted-foreground"

@@ -8,24 +8,42 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
+/**
+ * Which side of the panel the handle sits on. `"left"`/`"right"` resize
+ * horizontally; `"top"`/`"bottom"` resize vertically. In each pair, the handle
+ * on the far edge grows the panel as the pointer moves away from it.
+ */
+export type ResizeEdge = "left" | "right" | "top" | "bottom"
+
 export interface UseEdgeResizeOptions {
-  /** Current (controlled) width in px — owned by the caller (e.g. a store). */
+  /**
+   * Current (controlled) size, in the caller's own unit — px by default, or
+   * percent when {@link UseEdgeResizeOptions.scale} is set. Owned by the caller
+   * (e.g. a store) and passed back in.
+   */
   width: number
-  /** Lower bound in px. */
+  /** Lower bound, same unit as `width`. */
   min: number
-  /** Upper bound in px. */
+  /** Upper bound, same unit as `width`. */
   max: number
-  /** Called with the next clamped width during a drag or arrow-key nudge. */
+  /** Called with the next clamped size during a drag or arrow-key nudge. */
   onChange: (width: number) => void
   /** Called on double-click of the handle — typically resets to a default. */
   onReset?: () => void
-  /** Arrow-key step in px. Defaults to 16. */
+  /** Arrow-key step, same unit as `width`. Defaults to 16. */
   step?: number
   /**
    * Which side the handle sits on. `"right"` (default): dragging right grows the
    * panel. `"left"`: dragging right shrinks it (handle on the panel's left edge).
+   * `"bottom"` / `"top"` are the vertical equivalents.
    */
-  edge?: "left" | "right"
+  edge?: ResizeEdge
+  /**
+   * Caller units per CSS pixel. Defaults to `1` (the size is in px). A panel
+   * sized as a percentage of the viewport passes `100 / window.innerWidth` (or
+   * `innerHeight`) so a pointer delta converts into the same unit as `width`.
+   */
+  scale?: number
 }
 
 export interface UseEdgeResizeResult {
@@ -53,8 +71,13 @@ export function useEdgeResize({
   onReset,
   step = 16,
   edge = "right",
+  scale = 1,
 }: UseEdgeResizeOptions): UseEdgeResizeResult {
-  const startRef = useRef<{ x: number; width: number } | null>(null)
+  const vertical = edge === "top" || edge === "bottom"
+  // `"left"` and `"top"` handles sit on the near edge, so the panel grows as the
+  // pointer moves toward negative coordinates.
+  const inverted = edge === "left" || edge === "top"
+  const startRef = useRef<{ x: number; y: number; width: number } | null>(null)
   const [dragging, setDragging] = useState(false)
 
   const onPointerDown = useCallback(
@@ -68,7 +91,7 @@ export function useEdgeResize({
           // jsdom / unsupported — pointer capture is a best-effort nicety.
         }
       }
-      startRef.current = { x: e.clientX, width }
+      startRef.current = { x: e.clientX, y: e.clientY, width }
       setDragging(true)
     },
     [width]
@@ -78,11 +101,11 @@ export function useEdgeResize({
     (e: ReactPointerEvent) => {
       const start = startRef.current
       if (!start) return
-      const delta = e.clientX - start.x
-      const raw = edge === "left" ? start.width - delta : start.width + delta
+      const delta = (vertical ? e.clientY - start.y : e.clientX - start.x) * scale
+      const raw = inverted ? start.width - delta : start.width + delta
       onChange(clamp(raw, min, max))
     },
-    [edge, min, max, onChange]
+    [vertical, inverted, scale, min, max, onChange]
   )
 
   const endDrag = useCallback((e: ReactPointerEvent) => {
@@ -101,8 +124,13 @@ export function useEdgeResize({
 
   const onKeyDown = useCallback(
     (e: ReactKeyboardEvent) => {
-      const grow = edge === "left" ? "ArrowLeft" : "ArrowRight"
-      const shrink = edge === "left" ? "ArrowRight" : "ArrowLeft"
+      const [grow, shrink] = vertical
+        ? inverted
+          ? (["ArrowUp", "ArrowDown"] as const)
+          : (["ArrowDown", "ArrowUp"] as const)
+        : inverted
+          ? (["ArrowLeft", "ArrowRight"] as const)
+          : (["ArrowRight", "ArrowLeft"] as const)
       if (e.key === grow) {
         e.preventDefault()
         onChange(clamp(width + step, min, max))
@@ -114,7 +142,7 @@ export function useEdgeResize({
         onReset()
       }
     },
-    [edge, width, step, min, max, onChange, onReset]
+    [vertical, inverted, width, step, min, max, onChange, onReset]
   )
 
   const onDoubleClick = useCallback(() => onReset?.(), [onReset])

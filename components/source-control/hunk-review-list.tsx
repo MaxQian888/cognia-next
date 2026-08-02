@@ -23,6 +23,7 @@ import {
   type HunkDecision,
 } from "@/lib/git/hunk-review"
 import { useAiDiffReview } from "@/hooks/git/use-ai-diff-review"
+import type { GitActionResult } from "@/hooks/git/use-git-actions"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { cn } from "@/lib/utils"
 import type { GitDiff, GitFileChange } from "@/types/git"
@@ -33,7 +34,7 @@ interface Props {
   change: GitFileChange
   diff: GitDiff
   /** Stage one hunk patch (existing git stage path). */
-  onStagePatch: (patch: string) => Promise<void>
+  onStagePatch: (patch: string) => Promise<GitActionResult | void>
   /** Invalidate the cached diff so it re-fetches after applying. */
   onInvalidate: () => void
   /** Collapsed shows only the header bar so the diff above keeps the space. */
@@ -98,8 +99,14 @@ export function HunkReviewList({
     try {
       // Reverse `newStart` order (already sorted) so earlier stages don't shift
       // later offsets; re-fetch happens once afterwards via onInvalidate.
+      let appliedAny = false
       for (const hunk of patches) {
-        await onStagePatch(hunk.patch)
+        const failure = await onStagePatch(hunk.patch)
+        if (failure) {
+          if (appliedAny) onInvalidate()
+          return
+        }
+        appliedAny = true
       }
       clearFile(rootDir, reviewKey)
       onInvalidate()

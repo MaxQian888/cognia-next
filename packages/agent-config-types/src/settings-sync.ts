@@ -58,6 +58,7 @@ export const SETTINGS_SYNC = {
   profile: { category: "shared" },
   ocrSettings: { category: "desktop-only" },
   storageRetention: { category: "desktop-only" },
+  providerDiagnostics: { category: "desktop-only" },
   // Host-side scheduler config: the fallback ops chat is only ever read by the
   // host that runs the scheduler and delivers its notifications. A phone never
   // fires a scheduled task, so it has nothing to do with this value.
@@ -164,6 +165,7 @@ export const SETTINGS_SYNC = {
   userName: { category: "desktop-only" },
   welcomeStyle: { category: "desktop-only" },
   welcomeHidden: { category: "desktop-only" },
+  welcomeStats: { category: "desktop-only" },
   mcpPanel: { category: "desktop-only" },
   settingsSidebarCollapsedGroups: { category: "desktop-only" },
   memory: { category: "desktop-only" },
@@ -302,6 +304,10 @@ export const SETTINGS_SYNC = {
   activeThemePackId: { category: "desktop-only" },
   customCssScope: { category: "desktop-only" },
   componentStyles: { category: "desktop-only" },
+  // Pointer art and the pointer-effect layer are inert on a touch device — the
+  // applier and the effect overlay both stand down on a coarse pointer. Syncing
+  // it down would mirror a preference the phone can never express.
+  cursor: { category: "desktop-only" },
   webrtcEnabled: {
     category: "device-local",
     rationale:

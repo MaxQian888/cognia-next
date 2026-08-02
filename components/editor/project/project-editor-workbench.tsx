@@ -8,6 +8,7 @@ import { LightCodeEditor } from "@/components/editor/light-code-editor"
 import { Button } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import type { EditorActionDef } from "@/lib/editor-workbench/register-editor-actions"
+import type { EditorTabMode } from "@/lib/editor-workbench/editor-tab-model"
 import {
   notifyActiveEditorChanged,
   registerProjectEditorOpener,
@@ -28,7 +29,6 @@ import { ProjectMonaco } from "./project-monaco"
 import { ProjectSearchPanel } from "./project-search-panel"
 import { useProjectEditor, type UseProjectEditorArgs } from "./use-project-editor"
 import { ProjectContextWorkbench, ProjectContextWorkbenchMobile } from "./project-context-workbench"
-import { useContextWorkbenchSurfaceFlag } from "@/hooks/context-workbench/use-context-workbench-surface-flag"
 import type { TextSelectionCoordinates } from "@/types/context-workbench"
 import type { EditorLike, MonacoLike } from "@/hooks/use-monaco-markers"
 
@@ -91,6 +91,21 @@ export function useProjectEditorWorkbench({
       monaco: handles?.monaco ?? null,
     })
   }, [])
+
+  /**
+   * Tree-driven open. A plain click asks for a preview tab (VS Code's single
+   * reusable slot) so browsing the tree does not pile up tabs; a double-click
+   * pins it. Distinct from `gotoLine`, whose callers — search hits, terminal
+   * path links, the agent bridge — always mean "keep this open".
+   */
+  const openFromTree = useCallback(
+    (relPath: string, options?: { mode?: EditorTabMode }) => {
+      beforeOpen?.()
+      setMobilePane("editor")
+      void openFile(relPath, options)
+    },
+    [beforeOpen, openFile]
+  )
 
   const gotoLine = useCallback(
     (relPath: string, line?: number, column?: number) => {
@@ -233,6 +248,7 @@ export function useProjectEditorWorkbench({
     mobilePane,
     setMobilePane,
     gotoLine,
+    openFromTree,
     saveActive,
     saveAll: saveEveryFile,
     actionLabels,
@@ -264,8 +280,7 @@ export function ProjectEditorFileWorkbench({
   layout = "split",
 }: ProjectEditorFileWorkbenchProps) {
   const t = useTranslations("projectEditor")
-  const workbenchEnabled = useContextWorkbenchSurfaceFlag("project")
-  const contextWorkbenchVisible = workbenchEnabled && showContextWorkbench
+  const contextWorkbenchVisible = showContextWorkbench
   const [mobileWorkbenchOpen, setMobileWorkbenchOpen] = useState(false)
   const [editorSelectionState, setEditorSelectionState] = useState<{
     relPath: string
@@ -282,6 +297,7 @@ export function ProjectEditorFileWorkbench({
     editor,
     gotoLine,
     mobilePane,
+    openFromTree,
     saveActive,
     saveAll,
     setMobilePane,
@@ -296,6 +312,8 @@ export function ProjectEditorFileWorkbench({
     deps,
     dirtyCount,
     openFiles,
+    pinFile,
+    previewPath,
     rootPath,
     setActivePath,
     setDraft,
@@ -336,7 +354,7 @@ export function ProjectEditorFileWorkbench({
       rootPath={rootPath}
       refreshToken={treeRefreshToken}
       activePath={activePath}
-      onOpenFile={gotoLine}
+      onOpenFile={openFromTree}
       onRenamed={editor.renameOpenFile}
       deps={deps}
       density={layout === "mobile" ? "touch" : "compact"}
@@ -522,9 +540,11 @@ export function ProjectEditorFileWorkbench({
           <ProjectEditorTabs
             files={openFiles}
             activePath={activePath}
+            previewPath={previewPath}
             dirtyCount={dirtyCount}
             onSelect={setActivePath}
             onClose={closeFile}
+            onPin={pinFile}
             onSaveAll={saveAll}
           />
         ) : null}
@@ -532,8 +552,10 @@ export function ProjectEditorFileWorkbench({
           {activeFile ? (
             <>
               <div className="min-w-0 flex-1">
+                {/* No `key` — one editor serves every tab. Remounting per file
+                    destroyed the Monaco model and its undo stack; the model is
+                    swapped through `path` instead. */}
                 <ProjectMonaco
-                  key={activeFile.absolutePath}
                   file={activeFile}
                   projectRoot={rootPath}
                   onChange={(value) => setDraft(activeFile.relPath, value)}

@@ -58,14 +58,16 @@ export function RemotePanel({ open, onOpenChange, rootDir, actions }: RemotePane
     const n = name.trim()
     const u = url.trim()
     if (!n || !u) return
-    await actions.remoteAdd(n, u)
+    const failure = await actions.remoteAdd(n, u)
+    if (failure) return
     setName("")
     setUrl("")
     await reload()
   }
 
   const doRemove = async (remoteName: string) => {
-    await actions.remoteRemove(remoteName)
+    const failure = await actions.remoteRemove(remoteName)
+    if (failure) return
     await reload()
   }
 

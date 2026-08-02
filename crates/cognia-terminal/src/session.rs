@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
 use std::sync::Arc;
+use std::sync::Condvar;
 use std::sync::Mutex as StdMutex;
 use std::thread;
 
@@ -287,6 +288,8 @@ pub struct PtySession {
     /// fresh Channel after a webview reload and replays missed events.
     /// Detached (`None`) for remote (WS/RTC) sessions.
     pub(super) channel_slot: DeskChannel,
+    /// Reader-thread pause gate. See [`FlowGate`].
+    pub(super) flow: Arc<FlowGate>,
 }
 
 /// Generic event sink — the reader / waiter threads fan out
@@ -625,9 +628,19 @@ pub fn spawn_session_with_identity(
     let reader_replay = replay.clone();
     let nonce_for_reader = nonce.clone();
     let reader_id = id.clone();
+    let flow = FlowGate::new();
+    let reader_flow = Arc::clone(&flow);
     thread::Builder::new()
         .name(format!("pty-reader-{reader_id}"))
-        .spawn(move || pty_reader_loop(reader, reader_sink, reader_replay, nonce_for_reader))
+        .spawn(move || {
+            pty_reader_loop(
+                reader,
+                reader_sink,
+                reader_replay,
+                nonce_for_reader,
+                reader_flow,
+            )
+        })
         .map_err(|e| format!("reader thread spawn: {e}"))?;
 
     let alive = Arc::new(AtomicBool::new(true));
@@ -654,6 +667,7 @@ pub fn spawn_session_with_identity(
         alive,
         replay,
         channel_slot,
+        flow,
     })
 }
 
@@ -702,15 +716,96 @@ pub(super) fn spawn_writer_thread(
     tx
 }
 
+/// Cooperative pause for a PTY reader thread.
+///
+/// Parking the reader is *real* flow control: unread bytes stay in the kernel's
+/// PTY buffer and the child blocks on write, so nothing is dropped and nothing
+/// accumulates in user space. The alternative — buffering in the renderer —
+/// merely moves the flood.
+///
+/// Uses `std::sync::Mutex` + `Condvar` rather than `parking_lot`: `Condvar::wait`
+/// atomically releases the guard while blocked, which is the only correct way to
+/// park a thread that also has to observe later state changes.
+pub struct FlowGate {
+    state: StdMutex<FlowGateState>,
+    cvar: Condvar,
+}
+
+#[derive(Default)]
+struct FlowGateState {
+    paused: bool,
+    closed: bool,
+}
+
+impl FlowGate {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            state: StdMutex::new(FlowGateState::default()),
+            cvar: Condvar::new(),
+        })
+    }
+
+    /// Park or release the reader. Idempotent.
+    pub fn set_paused(&self, paused: bool) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        if state.paused == paused {
+            return;
+        }
+        state.paused = paused;
+        drop(state);
+        self.cvar.notify_all();
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.state.lock().map(|state| state.paused).unwrap_or(false)
+    }
+
+    /// Permanently release the gate. Called before the child is signalled so a
+    /// parked reader can never outlive its session — that would leak a thread
+    /// and, worse, wedge the PTY forever.
+    pub fn close(&self) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        state.closed = true;
+        state.paused = false;
+        drop(state);
+        self.cvar.notify_all();
+    }
+
+    /// Block while paused. Returns `false` once the gate is closed, so the
+    /// reader loop exits instead of spinning.
+    fn wait_for_resume(&self) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        while state.paused && !state.closed {
+            state = match self.cvar.wait(state) {
+                Ok(next) => next,
+                Err(_) => return false,
+            };
+        }
+        !state.closed
+    }
+}
+
 fn pty_reader_loop(
     mut reader: Box<dyn Read + Send>,
     sink: EventSink,
     replay: Arc<ReplayBuffer>,
     nonce: String,
+    flow: Arc<FlowGate>,
 ) {
     let mut parser = Osc633Parser::new(nonce);
     let mut buf = [0u8; 64 * 1024];
     loop {
+        // Park *before* reading, so a pause takes effect without first pulling
+        // another 64 KiB out of the kernel buffer.
+        if !flow.wait_for_resume() {
+            break;
+        }
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
@@ -783,11 +878,24 @@ impl PtySession {
             .map_err(|e| std::io::Error::other(format!("resize: {e}")))
     }
 
+    /// Park or resume this session's reader thread. See [`FlowGate`].
+    pub fn set_flow_paused(&self, paused: bool) {
+        self.flow.set_paused(paused);
+    }
+
+    /// OS process id of the PTY child, when there is one.
+    pub fn pid(&self) -> Option<u32> {
+        self.pid
+    }
+
     pub fn kill(&self) -> std::io::Result<()> {
         // The child has already been reaped by the waiter thread, so its PID
         // is free for the OS to hand to an unrelated process. `ChildKiller`
         // signals by PID, so killing here could hit that stranger — the only
         // safe action on an exited session is nothing.
+        // Resume before signalling: a parked reader would never see the child's
+        // final output, nor reach EOF, so the session would look hung.
+        self.flow.set_paused(false);
         if !self.is_alive() {
             return Ok(());
         }
@@ -853,6 +961,10 @@ impl PtySession {
 
 impl Drop for PtySession {
     fn drop(&mut self) {
+        // Close the gate FIRST. A parked reader thread holds no reference back
+        // to this struct, so killing the child while it sleeps would strand the
+        // thread forever. Order here is load-bearing.
+        self.flow.close();
         // Best-effort kill. If the child already exited, this is a no-op
         // (or a benign error swallowed below).
         if let Ok(mut killer) = self.killer.lock() {
@@ -869,6 +981,65 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use std::sync::Mutex as StdMutex2;
+    use std::time::Duration;
+
+    /// The gate must actually block, or "flow control" is a lie that lets the
+    /// host keep draining the PTY while the renderer drowns.
+    #[test]
+    fn flow_gate_parks_a_waiter_until_resumed() {
+        let gate = FlowGate::new();
+        gate.set_paused(true);
+        assert!(gate.is_paused());
+
+        let waiter = Arc::clone(&gate);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let handle = thread::spawn(move || {
+            let alive = waiter.wait_for_resume();
+            let _ = tx.send(alive);
+        });
+
+        // Still parked: nothing arrives while paused.
+        assert!(rx.recv_timeout(Duration::from_millis(120)).is_err());
+
+        gate.set_paused(false);
+        assert_eq!(rx.recv_timeout(Duration::from_secs(2)), Ok(true));
+        handle.join().unwrap();
+    }
+
+    /// The reader thread holds no reference back to its session, so a gate that
+    /// never released would strand the thread — and wedge the PTY — forever.
+    #[test]
+    fn flow_gate_close_releases_a_parked_waiter() {
+        let gate = FlowGate::new();
+        gate.set_paused(true);
+
+        let waiter = Arc::clone(&gate);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let handle = thread::spawn(move || {
+            let _ = tx.send(waiter.wait_for_resume());
+        });
+        assert!(rx.recv_timeout(Duration::from_millis(120)).is_err());
+
+        gate.close();
+        // `false` tells the reader loop to exit rather than read again.
+        assert_eq!(rx.recv_timeout(Duration::from_secs(2)), Ok(false));
+        assert!(!gate.is_paused());
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn flow_gate_resume_is_idempotent_and_never_blocks_when_open() {
+        let gate = FlowGate::new();
+        gate.set_paused(false);
+        assert!(!gate.is_paused());
+        // An unpaused gate must fall straight through.
+        assert!(gate.wait_for_resume());
+        gate.set_paused(true);
+        gate.set_paused(true);
+        assert!(gate.is_paused());
+        gate.set_paused(false);
+        assert!(gate.wait_for_resume());
+    }
 
     fn capture_channel() -> (Channel<SeqEvent>, Arc<StdMutex2<Vec<TerminalEvent>>>) {
         let sink = Arc::new(StdMutex2::new(Vec::<TerminalEvent>::new()));

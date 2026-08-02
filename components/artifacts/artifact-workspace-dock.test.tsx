@@ -801,6 +801,63 @@ describe("ArtifactWorkspaceDock", () => {
     expect(screen.getByTestId("resizable-panel-artifact-chat")).toHaveAttribute("data-min", "35%")
   })
 
+  it("lets a width request outrank a sizing profile that has not caught up", () => {
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+
+    // `dockProfile` is written by `useDockPanelSync` in an effect that runs
+    // *after* the activation which asked for the width, so a workspace panel
+    // requests 65% while the profile still reads `compact` (50% cap, 50% chat
+    // floor). Clamping there left the workspace panel at the artifact width and
+    // landed the clamp as a second, untransitioned layout pass.
+    act(() => useArtifactDockLayoutStore.getState().requestDockSize(65))
+
+    expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("compact")
+    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-max", "65%")
+    expect(screen.getByTestId("resizable-panel-artifact-chat")).toHaveAttribute("data-min", "35%")
+  })
+
+  it("keeps the resize animation alive when the layout echoes a settled width back", () => {
+    const offsetWidth = jest
+      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.dataset.testid === "artifact-dock-wrapper" ? 340 : 1000
+      })
+    try {
+      render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+      const panel = screen.getByTestId("resizable-panel-artifact-dock")
+      const body = screen.getByTestId("artifact-dock-wrapper")
+
+      act(() => useArtifactDockLayoutStore.getState().requestDockSize(50))
+      expect(body.style.width).toBe("500px")
+
+      // `onLayoutChanged` reports a pixel measurement converted back to a
+      // percent, so it practically never equals the number that was requested.
+      // That echo used to be a dependency of the animation effect: React ran
+      // its cleanup mid-flight, stripping the transition and the frozen width
+      // one frame after they were applied, and the re-run bailed on the
+      // unchanged request token instead of putting them back. The dock snapped
+      // while its contents were briefly laid out at the destination width
+      // inside the old box — a reflow flash that blinked a scrollbar in and out
+      // of the panel body on every switch.
+      act(() => screen.getByTestId("resize-dock").click())
+
+      expect(useArtifactDockLayoutStore.getState().dockSize).toBe(42)
+      expect(body.style.width).toBe("500px")
+      expect(panel.style.transitionProperty).toBe("flex-grow")
+    } finally {
+      offsetWidth.mockRestore()
+    }
+  })
+
   it("applies a width preset to the docked panel straight away", async () => {
     render(
       <ArtifactWorkspaceDock>

@@ -14,6 +14,14 @@ spec:
       labels:
         app: cognia-server
     spec:
+      terminationGracePeriodSeconds: 300
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       # Production: set `runtimeClassName: gvisor` via the tenant overlay
       # (cluster/runtimeclass-gvisor.yaml must be applied first).
       # Grants pods create/attach for the k8s exec backend (runner Pods);
@@ -28,6 +36,11 @@ spec:
           ports:
             - containerPort: 27890
               name: https
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
           env:
             - name: COGNIA_DATA_DIR
               value: /data
@@ -36,6 +49,52 @@ spec:
                 secretKeyRef:
                   name: cognia-secrets
                   key: COGNIA_MASTER_KEY
+            - name: COGNIA_MASTER_KEY_DIR
+              value: /run/cognia-master-keys
+            - name: COGNIA_BACKUP_KEY_DIR
+              value: /run/cognia-backup-keys
+            - name: COGNIA_S3_ACCESS_KEY_FILE
+              value: /run/cognia-backup-secrets/s3-access-key
+            - name: COGNIA_S3_SECRET_KEY_FILE
+              value: /run/cognia-backup-secrets/s3-secret-key
+            - name: COGNIA_BACKUP_KEY_VERSION
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: backupKeyVersion
+                  optional: true
+            - name: COGNIA_S3_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: objectStoreEndpoint
+                  optional: true
+            - name: COGNIA_S3_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: objectStoreRegion
+                  optional: true
+            - name: COGNIA_S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: objectStoreBucket
+                  optional: true
+            - name: COGNIA_S3_PATH_STYLE
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: objectStorePathStyle
+                  optional: true
+            - name: COGNIA_BACKUP_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: backupPrefix
+                  optional: true
+            - name: COGNIA_REQUIRE_OBJECT_BACKUP
+              value: "true"
             # REQUIRED (not optional): `cognia-server pair` run via kubectl
             # exec falls back to https://127.0.0.1:<DEFAULT_PORT> when unset,
             # which is never reachable from a paired device — every tenant
@@ -96,6 +155,20 @@ spec:
                   name: cognia-config
                   key: runnerImage
                   optional: true
+            - name: COGNIA_WORKSPACE_RUNTIME_IMAGE
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: workspaceRuntimeImage
+                  optional: true
+            - name: COGNIA_CONFIG_REVISION
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: configRevision
+                  optional: true
+            - name: COGNIA_METRICS_OPERATOR_TOKEN_FILE
+              value: /run/cognia-operator-secrets/metrics-operator-token
             - name: COGNIA_WORKSPACES_VOLUME
               valueFrom:
                 configMapKeyRef:
@@ -130,18 +203,28 @@ spec:
                   optional: true
           readinessProbe:
             httpGet:
-              path: /api/v1/healthz
+              path: /api/v1/readyz
               port: 27890
               scheme: HTTPS
-            initialDelaySeconds: 15
-            periodSeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /api/v1/readyz
+              port: 27890
+              scheme: HTTPS
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
           livenessProbe:
             httpGet:
-              path: /api/v1/healthz
+              path: /api/v1/livez
               port: 27890
               scheme: HTTPS
-            initialDelaySeconds: 60
-            periodSeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 4
           resources:
             requests:
               cpu: 500m
@@ -155,11 +238,50 @@ spec:
             - name: runtime-secrets
               mountPath: /runtime-secrets
               readOnly: true
+            - name: backup-secrets
+              mountPath: /run/cognia-backup-secrets
+              readOnly: true
+            - name: backup-keys
+              mountPath: /run/cognia-backup-keys
+              readOnly: true
+            - name: master-key-versions
+              mountPath: /run/cognia-master-keys
+              readOnly: true
+            - name: operator-secrets
+              mountPath: /run/cognia-operator-secrets
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: run
+              mountPath: /run
       volumes:
         - name: runtime-secrets
           secret:
             secretName: workspace-runtime-secrets
             optional: true
+        - name: backup-secrets
+          secret:
+            secretName: cognia-backup-secrets
+            optional: true
+        - name: backup-keys
+          secret:
+            secretName: cognia-backup-keys
+            optional: true
+        - name: master-key-versions
+          secret:
+            secretName: cognia-master-key-versions
+            optional: true
+        - name: operator-secrets
+          secret:
+            secretName: cognia-operator-secrets
+            optional: true
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: run
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
   volumeClaimTemplates:
     - metadata:
         name: data

@@ -175,7 +175,7 @@ describe("SubscriptionUsageTab", () => {
     expect(screen.getByTestId("usage-window-7d")).toBeInTheDocument()
     expect(screen.getByTestId("usage-trend-chart")).toBeInTheDocument()
     expect(screen.getByTestId("usage-model-stat-cost")).toBeInTheDocument()
-    expect(screen.getByTestId("usage-cost-chart")).toBeInTheDocument()
+    expect(screen.getByTestId("usage-cost-heatmap")).toBeInTheDocument()
     // The representative window earns a badge.
     expect(screen.getByText("Representative")).toBeInTheDocument()
   })
@@ -250,6 +250,148 @@ describe("SubscriptionUsageTab", () => {
     await user.click(thirtyDay)
     expect(thirtyDay).toHaveAttribute("aria-pressed", "true")
     expect(sevenDay).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("offers a 90-day range and no longer offers all-time", async () => {
+    const user = userEvent.setup()
+    setup({ sessionRows: [usageRow({ at: NOW - 60 * 86_400_000 })] })
+    render(<SubscriptionUsageTab />)
+    expect(screen.queryByTestId("usage-range-all")).not.toBeInTheDocument()
+    const ninety = screen.getByTestId("usage-range-90d")
+    expect(ninety).toHaveTextContent("Last 90 days")
+    // A 60-day-old row is out of the 7-day default and back in range at 90d.
+    expect(screen.getByTestId("usage-cost-empty")).toBeInTheDocument()
+    await user.click(ninety)
+    expect(ninety).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("usage-cost-heatmap")).toBeInTheDocument()
+  })
+
+  describe("cost over time", () => {
+    /** Local "YYYY-MM-DD" for an epoch-ms instant — matches the cell testids. */
+    const dayKey = (at: number) => {
+      const d = new Date(at)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+        d.getDate()
+      ).padStart(2, "0")}`
+    }
+
+    it("defaults to the heatmap and switches to the bar chart", async () => {
+      const user = userEvent.setup()
+      setup()
+      render(<SubscriptionUsageTab />)
+      expect(screen.getByTestId("usage-cost-heatmap")).toBeInTheDocument()
+      expect(screen.queryByTestId("usage-cost-chart")).not.toBeInTheDocument()
+      expect(screen.getByTestId("usage-cost-view-heatmap")).toHaveAttribute("data-state", "on")
+
+      await user.click(screen.getByTestId("usage-cost-view-bar"))
+      expect(screen.getByTestId("usage-cost-chart")).toBeInTheDocument()
+      expect(screen.queryByTestId("usage-cost-heatmap")).not.toBeInTheDocument()
+    })
+
+    it("keeps a view selected when the active toggle item is clicked again", async () => {
+      const user = userEvent.setup()
+      setup()
+      render(<SubscriptionUsageTab />)
+      // Radix emits "" when a single-select item is deselected; the guard keeps
+      // the section from rendering neither view.
+      await user.click(screen.getByTestId("usage-cost-view-heatmap"))
+      expect(screen.getByTestId("usage-cost-heatmap")).toBeInTheDocument()
+    })
+
+    it("paints one cell per day in range, carrying the localized date and cost", () => {
+      setup()
+      render(<SubscriptionUsageTab />)
+      const cells = screen.getAllByTestId(/^usage-cost-heatmap-cell-/)
+      expect(cells).toHaveLength(7)
+      // The fixture row is priced at $0.25 today; the rest of the week is empty.
+      const today = screen.getByTestId(`usage-cost-heatmap-cell-${dayKey(NOW)}`)
+      expect(today).toHaveAttribute("data-level", "4")
+      expect(today.getAttribute("aria-label")).toMatch(/\$0\.25/)
+      expect(today.getAttribute("aria-label")).toMatch(/1 request/)
+      const yesterday = screen.getByTestId(`usage-cost-heatmap-cell-${dayKey(NOW - 86_400_000)}`)
+      expect(yesterday).toHaveAttribute("data-level", "0")
+      // `formatCostInCurrency` renders a zero total as "Free".
+      expect(yesterday.getAttribute("aria-label")).toMatch(/Free/)
+      expect(yesterday.getAttribute("aria-label")).toMatch(/no requests/)
+    })
+
+    it("grows the grid with the selected range", async () => {
+      const user = userEvent.setup()
+      setup()
+      render(<SubscriptionUsageTab />)
+      await user.click(screen.getByTestId("usage-range-30d"))
+      expect(screen.getAllByTestId(/^usage-cost-heatmap-cell-/)).toHaveLength(30)
+      await user.click(screen.getByTestId("usage-range-90d"))
+      expect(screen.getAllByTestId(/^usage-cost-heatmap-cell-/)).toHaveLength(90)
+    })
+
+    it("scales cell intensity against the busiest day in range", () => {
+      setup({
+        sessionRows: [
+          usageRow({ messageId: "hot", at: NOW, costUsd: 4 }),
+          usageRow({ messageId: "cold", at: NOW - 2 * 86_400_000, costUsd: 0.5 }),
+        ],
+      })
+      render(<SubscriptionUsageTab />)
+      expect(screen.getByTestId(`usage-cost-heatmap-cell-${dayKey(NOW)}`)).toHaveAttribute(
+        "data-level",
+        "4"
+      )
+      expect(
+        screen.getByTestId(`usage-cost-heatmap-cell-${dayKey(NOW - 2 * 86_400_000)}`)
+      ).toHaveAttribute("data-level", "1")
+    })
+
+    it("scopes the heatmap to the active surface filter", async () => {
+      const user = userEvent.setup()
+      setup({
+        sessionRows: [
+          usageRow({ messageId: "c1", at: NOW, surface: "chat", costUsd: 1 }),
+          usageRow({
+            messageId: "w1",
+            at: NOW - 3 * 86_400_000,
+            surface: "workflow",
+            costUsd: 1,
+          }),
+        ],
+      })
+      render(<SubscriptionUsageTab />)
+      await user.click(screen.getByTestId("usage-surface-workflow"))
+      expect(screen.getByTestId(`usage-cost-heatmap-cell-${dayKey(NOW)}`)).toHaveAttribute(
+        "data-level",
+        "0"
+      )
+      expect(
+        screen.getByTestId(`usage-cost-heatmap-cell-${dayKey(NOW - 3 * 86_400_000)}`)
+      ).toHaveAttribute("data-level", "4")
+    })
+
+    it("summarizes the range and labels the intensity legend", () => {
+      setup()
+      render(<SubscriptionUsageTab />)
+      const total = screen.getByTestId("usage-cost-heatmap-total")
+      expect(total).toHaveTextContent("$0.25")
+      expect(total).toHaveTextContent("7 days")
+      expect(screen.getByText("Less")).toBeInTheDocument()
+      expect(screen.getByText("More")).toBeInTheDocument()
+    })
+
+    it("opens the same tooltip on hover and on keyboard focus", async () => {
+      const user = userEvent.setup()
+      setup()
+      render(<SubscriptionUsageTab />)
+      const today = screen.getByTestId(`usage-cost-heatmap-cell-${dayKey(NOW)}`)
+      const label = today.getAttribute("aria-label") as string
+
+      await user.hover(today)
+      const hovered = await screen.findByRole("tooltip")
+      expect(hovered).toHaveTextContent(label)
+
+      await user.unhover(today)
+      today.focus()
+      const focused = await screen.findByRole("tooltip")
+      expect(focused).toHaveTextContent(label)
+    })
   })
 
   it("exports usage rows as CSV", async () => {
@@ -327,7 +469,7 @@ describe("SubscriptionUsageTab", () => {
     expect(screen.getByTestId("usage-current-window")).toBeInTheDocument()
     // … but the charts/tables fold shut (bodies unmounted by MotionCollapse).
     expect(screen.queryByTestId("usage-trend-chart")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("usage-cost-chart")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("usage-cost-heatmap")).not.toBeInTheDocument()
     expect(screen.queryByTestId("usage-model-donut")).not.toBeInTheDocument()
   })
 
@@ -346,9 +488,9 @@ describe("SubscriptionUsageTab", () => {
     currentMode = "simplified"
     setup()
     render(<SubscriptionUsageTab />)
-    expect(screen.queryByTestId("usage-cost-chart")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("usage-cost-heatmap")).not.toBeInTheDocument()
     await user.click(screen.getByTestId("usage-expand-all"))
-    expect(screen.getByTestId("usage-cost-chart")).toBeInTheDocument()
+    expect(screen.getByTestId("usage-cost-heatmap")).toBeInTheDocument()
   })
 
   it("collapse-all folds the open sections in standard mode", async () => {

@@ -11,6 +11,7 @@
 // passed in.
 
 import type {
+  AgentCapabilityEvidence,
   AgentCapabilityId,
   AgentExecutionDecisionTrace,
   AgentExecutionIdentity,
@@ -19,6 +20,7 @@ import type {
   AgentRuntimeAdapterId,
   ResolvedAgentExecutionSpec,
 } from "@cognia/agent-config-types/agent-execution"
+import { RESOLVED_SPEC_VERSION } from "@cognia/agent-config-types/agent-execution"
 
 import type { AgentExecutionFlag } from "./feature-flags"
 import { computeExecutionFingerprint } from "./fingerprint"
@@ -27,6 +29,41 @@ import {
   routePolicyFromProxyMode,
   runtimeFromLegacy,
 } from "./legacy-mapping"
+
+/**
+ * Per-capability verdicts for a resolved spec (contract v2).
+ *
+ * The rule is deliberately conservative: a capability is `native` only if it
+ * is in this adapter's runtime table, and the runtime table only lists what is
+ * actually wired. Everything the caller asked about and did not get is
+ * recorded as `unsupported` with a reason, so a fail-closed rejection can
+ * always say which capability and why.
+ *
+ * Note what is NOT here: the 16 SDK-parity capability ids exist in the
+ * vocabulary from contract v2 onward, but they are added to
+ * {@link RUNTIME_CAPABILITIES} only as each one is genuinely implemented.
+ * Listing them early would make the resolver claim coverage that no code
+ * provides — the exact "built but dormant" failure this repo keeps hitting.
+ */
+export function buildCapabilitySupport(
+  adapter: AgentRuntimeAdapterId,
+  effective: readonly AgentCapabilityId[],
+  asked: readonly AgentCapabilityId[]
+): Partial<Record<AgentCapabilityId, AgentCapabilityEvidence>> {
+  const support: Partial<Record<AgentCapabilityId, AgentCapabilityEvidence>> = {}
+
+  for (const cap of effective) support[cap] = { support: "native" }
+
+  for (const cap of asked) {
+    if (support[cap]) continue
+    support[cap] = {
+      support: "unsupported",
+      reason: `runtime adapter "${adapter}" does not implement "${cap}"`,
+    }
+  }
+
+  return support
+}
 
 // ---- Runtime capability tables (Phase 0 static; refined by certification) ---
 
@@ -234,8 +271,14 @@ export function resolveAgentExecutionSpec(
   const missingRequired = requires.filter((cap) => !runtimeCaps.includes(cap))
   const disabledOptional = prefers.filter((cap) => !runtimeCaps.includes(cap))
 
+  const effective = runtimeCaps.filter(
+    (cap) =>
+      !disabledOptional.includes(cap) &&
+      !(input.certifiedPath?.disabledOptional.includes(cap) ?? false)
+  )
+
   const specWithoutFingerprint: Omit<ResolvedAgentExecutionSpec, "executionFingerprint"> = {
-    specVersion: 1,
+    specVersion: RESOLVED_SPEC_VERSION,
     identity,
     executionKind,
     runtimeAdapter: adapter,
@@ -256,17 +299,14 @@ export function resolveAgentExecutionSpec(
         }
       : { evidence: "native" },
     capabilities: {
-      effective: runtimeCaps.filter(
-        (cap) =>
-          !disabledOptional.includes(cap) &&
-          !(input.certifiedPath?.disabledOptional.includes(cap) ?? false)
-      ),
+      effective,
       disabledOptional: [
         ...disabledOptional,
         ...(input.certifiedPath?.disabledOptional.filter(
           (cap) => !disabledOptional.includes(cap)
         ) ?? []),
       ],
+      support: buildCapabilitySupport(adapter, effective, [...requires, ...prefers]),
     },
     credential: input.policy?.credentialProfileRef
       ? {
@@ -326,7 +366,10 @@ export function sendSpecFromResolved(
   gateway?: { endpoint: string; ticketId: string }
 ): import("@cognia/agent-config-types/agent-execution").AgentExecutionSendSpec {
   return {
-    specVersion: 1,
+    // The wire spec advertises the same contract version as the resolved one:
+    // the sidecar reads `capabilities.support` to fail closed on its own side,
+    // and a v1 wire spec would silently drop those verdicts.
+    specVersion: spec.specVersion,
     executionFingerprint: spec.executionFingerprint,
     runtimeAdapter: spec.runtimeAdapter,
     executionKind: spec.executionKind,

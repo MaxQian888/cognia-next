@@ -1,0 +1,51 @@
+# Apply this Job once with an owner-created enrollment token Secret, wait for
+# completion, then delete both the Job and token Secret. The long-lived
+# Deployment consumes only the resulting short-lived client certificate.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cognia-deploy-agent-enroll
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: enroll
+          image: ghcr.io/owner/cognia-deploy-agent@sha256:REPLACE_WITH_DIGEST
+          args:
+            - enroll
+            - --controller-url
+            - https://ops.example.com
+            - --token-file
+            - /run/enrollment/token
+            - --agent-id
+            - staging-agent
+            - --output-directory
+            - /var/lib/cognia-agent/credentials
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: enrollment-token, mountPath: /run/enrollment, readOnly: true }
+            - { name: credentials, mountPath: /var/lib/cognia-agent/credentials }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: enrollment-token
+          secret:
+            secretName: cognia-deploy-agent-enrollment
+            defaultMode: 0400
+        - name: credentials
+          persistentVolumeClaim:
+            claimName: cognia-deploy-agent-credentials
+        - name: tmp
+          emptyDir: { sizeLimit: 32Mi }

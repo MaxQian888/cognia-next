@@ -28,6 +28,12 @@ jest.mock("@/lib/chat/attachments/dispatch", () => ({
   INLINE_TOKEN_CEILING: 12_000,
   buildSendContent: jest.fn(),
 }))
+// Passthrough by default — one test below overrides it with a deferred promise
+// to hold preparation open and inspect the in-flight placeholder chip.
+jest.mock("@/lib/chat/attachments/prepare", () => {
+  const actual = jest.requireActual("@/lib/chat/attachments/prepare")
+  return { ...actual, prepareComposerAttachments: jest.fn(actual.prepareComposerAttachments) }
+})
 jest.mock("@/lib/chat/link-context", () => ({
   ...jest.requireActual("@/lib/chat/link-context"),
   buildLinkContextBlocks: jest.fn(async () => ({ blocks: [], rejected: [], tokens: 0 })),
@@ -49,10 +55,12 @@ import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { buildSendContent } from "@/lib/chat/attachments/dispatch"
+import { prepareComposerAttachments } from "@/lib/chat/attachments/prepare"
 import { buildLinkContextBlocks } from "@/lib/chat/link-context"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 const buildSendContentMock = buildSendContent as jest.Mock
+const prepareAttachmentsMock = prepareComposerAttachments as jest.Mock
 const buildLinkContextBlocksMock = buildLinkContextBlocks as jest.Mock
 
 function makeAdapter(): DataAdapter {
@@ -284,6 +292,63 @@ describe("Composer — attachment send contract", () => {
     expect(ta.value).toBe("hi")
     expect(screen.getByAltText("shot.png")).toBeInTheDocument()
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith("blob:mock")
+  })
+
+  // Decoding and downscaling a photo happens BEFORE it becomes a staged
+  // attachment, so until this placeholder existed the context bar showed
+  // nothing at all for a second or more and users re-dropped the file.
+  it("holds a placeholder in the context bar while an image is being prepared", async () => {
+    const onSend = jest.fn(async () => undefined)
+    renderComposer(onSend)
+
+    let release: (() => void) | undefined
+    prepareAttachmentsMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({ files: [], unsupportedCount: 0, tooLargeCount: 0, optimizedCount: 0 })
+        })
+    )
+
+    await stageImage("slow.png")
+    expect(screen.getByTestId("composer-preparing-images")).toBeInTheDocument()
+    expect(screen.getByTestId("composer-preparing-images-label")).toHaveTextContent(
+      "Preparing 1 image…"
+    )
+
+    await act(async () => {
+      release?.()
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(screen.queryByTestId("composer-preparing-images")).not.toBeInTheDocument()
+  })
+
+  it("shows no placeholder for a document (only images get the scan indicator)", async () => {
+    const onSend = jest.fn(async () => undefined)
+    renderComposer(onSend)
+
+    let release: (() => void) | undefined
+    prepareAttachmentsMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({ files: [], unsupportedCount: 0, tooLargeCount: 0, optimizedCount: 0 })
+        })
+    )
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    await act(async () => {
+      fireEvent.change(input, {
+        target: { files: [new File(["x"], "notes.pdf", { type: "application/pdf" })] },
+      })
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(screen.queryByTestId("composer-preparing-images")).not.toBeInTheDocument()
+
+    await act(async () => {
+      release?.()
+      await new Promise((r) => setTimeout(r, 0))
+    })
   })
 
   // A dropped folder carries no absolute path, so it can't take the attach

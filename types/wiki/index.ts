@@ -221,6 +221,11 @@ export interface WikiSourceRef {
  */
 export interface WikiSection {
   id: string
+  /**
+   * Owning corpus (v142). Denormalized from the parent article so a corpus
+   * teardown is a single indexed range delete instead of an article join.
+   */
+  corpusId: string
   /** FK → wikiArticles.id */
   articleId: string
   /** 0-based ordering within the article. */
@@ -240,7 +245,14 @@ export interface WikiSection {
  */
 export interface WikiArticle {
   id: string
-  /** URL-safe identifier, e.g. "lib-twin-ingest-chunk". Unique within scope. */
+  /**
+   * Owning corpus (v142) — `"cognia-self"` for the built-in tree, otherwise a
+   * `WikiCorpus.id`. `[corpusId+slug]` is the unique key: two repos may both
+   * contain a `lib/utils` module, and before v142 the bare `&slug` unique
+   * index made that a write collision.
+   */
+  corpusId: string
+  /** URL-safe identifier, e.g. "lib-twin-ingest-chunk". Unique within corpus. */
   slug: string
   /** Human-readable title, e.g. "lib/twin/ingest/chunk.ts — Format-aware chunking". */
   title: string
@@ -331,6 +343,142 @@ export interface WikiManifest {
   /** Generator version stamp — same value lands on each `wikiArticles.generatorVersion`. */
   generatorVersion: string
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Corpora (v142) — one indexed body of source per repo.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Corpus id for Cognia's own tree. Pre-v142 rows carried no `corpusId`; the
+ * v142 upgrade backfills every one of them to this value, which is why it is a
+ * reserved id that repo CRUD refuses to hand out.
+ */
+export const SELF_CORPUS_ID = "cognia-self"
+
+export type WikiCorpusKind = "cognia-self" | "user-repo"
+
+/**
+ * What to do with a symlink encountered during the walk. `skip` is the default
+ * because following one is how a walk escapes `rootPath` — the target is
+ * resolved and re-checked against the root even under `follow-within-root`.
+ */
+export type WikiSymlinkPolicy = "skip" | "follow-within-root"
+
+/**
+ * A registered corpus. `cognia-self` exists implicitly and is not stored as a
+ * row until the user edits its defaults; every other row is a user repo whose
+ * `rootPath` was granted through the Tauri directory picker.
+ */
+export interface WikiCorpus {
+  /** Stable id. `SELF_CORPUS_ID` for the built-in tree, else a generated repo id. */
+  id: string
+  kind: WikiCorpusKind
+  displayName: string
+  /**
+   * Absolute, normalized repo root. The walker rejects any resolved path that
+   * does not stay under this prefix, so this is a security boundary and not a
+   * convenience default.
+   */
+  rootPath: string
+  /** Glob patterns; empty `include` means "everything not excluded". */
+  include: string[]
+  exclude: string[]
+  /** Files larger than this are skipped whole — bounds one hostile file. */
+  maxFileBytes: number
+  symlinkPolicy: WikiSymlinkPolicy
+  /** Disabled corpora keep their rows but are skipped by refresh and by search. */
+  enabled: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+/** Per-corpus Merkle map + build metadata. Supersedes the scope-keyed `WikiManifest`. */
+export interface WikiCorpusManifest {
+  /** Primary key. */
+  corpusId: string
+  /** Retained so legacy scope-filtered queries keep working. */
+  scope: WikiScope
+  /** filePath → sha256 at the last successful build. */
+  fileHashes: Record<string, string>
+  lastBuildAt: number
+  articleCount: number
+  generatorVersion: string
+  /**
+   * Hash over the sorted `fileHashes` entries. A full-rebuild confirmation is
+   * bound to this value, so a corpus that changed on disk between the estimate
+   * and the confirm must be re-confirmed rather than silently rebuilt at a
+   * cost the user never saw.
+   */
+  manifestHash: string
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Build jobs — cancellable, resumable, staging-backed rebuilds.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `cancelling` is distinct from `cancelled`: cancellation is cooperative and
+ * only takes effect at a scan / LLM-call / persist boundary, so a job that has
+ * been asked to stop is still running until it reaches one.
+ */
+export type WikiBuildJobStatus =
+  "queued" | "running" | "cancelling" | "cancelled" | "paused" | "completed" | "failed"
+
+export type WikiBuildMode = "incremental" | "full"
+
+/**
+ * Durable resume point. Persisted at each module boundary so a job resumed
+ * after a crash re-does at most one module's LLM work rather than the corpus.
+ */
+export interface WikiBuildCursor {
+  /** Modules already written to staging, in completion order. */
+  completedModules: string[]
+  processedFiles: number
+  /** Set when the job stopped mid-corpus; the next run starts here. */
+  nextModule?: string
+}
+
+/**
+ * Estimate shown before a full rebuild. `estimatedCostUsd` is `null` whenever
+ * the selected model has no known price — the UI then renders the token and
+ * byte figures and states that the monetary cost is unknown, rather than
+ * inventing a number.
+ */
+export interface WikiBuildCostEstimate {
+  fileCount: number
+  byteCount: number
+  estimatedInputTokens: number
+  estimatedOutputTokens: number
+  estimatedCostUsd: number | null
+  modelId: string
+  /** Binds this estimate to the exact corpus state it was computed from. */
+  manifestHash: string
+  computedAt: number
+}
+
+export interface WikiBuildJob {
+  id: string
+  corpusId: string
+  mode: WikiBuildMode
+  status: WikiBuildJobStatus
+  /** Staging rows for this build are keyed by `buildId === id`. */
+  cursor: WikiBuildCursor
+  /** Present for `mode: "full"` — the estimate the user confirmed against. */
+  estimate?: WikiBuildCostEstimate
+  queuedAt: number
+  startedAt?: number
+  finishedAt?: number
+  /** Set for `failed`; a resumable failure keeps `cursor` populated. */
+  error?: string
+}
+
+/**
+ * A staged article. Identical to the live row plus the owning `buildId`, so a
+ * cancelled or failed build is torn down by one indexed range delete and the
+ * live corpus is never pre-emptively emptied to make room for a rebuild.
+ */
+export type WikiStagedArticle = WikiArticle & { buildId: string }
+export type WikiStagedSection = WikiSection & { buildId: string }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MCP audit log — capped 5000-row record of every bridge call.

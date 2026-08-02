@@ -51,6 +51,109 @@ export {
 } from "./core"
 export { clearRecentErrorLogs, getRecentErrorLogs, subscribeRecentErrorLogs } from "./recent-errors"
 
+export {
+  OBSERVABILITY_EVENT_V1_SCHEMA,
+  observabilityEventToStructuredLogEntry,
+  structuredLogEntryToObservabilityEvent,
+  type ObservabilityCorrelation,
+  type ObservabilityDelivery,
+  type ObservabilityEventKind,
+  type ObservabilityEventScope,
+  type ObservabilityEventV1,
+  type ObservabilityPayload,
+  type ObservabilityPrivacy,
+  type ObservabilityRuntime,
+  type StructuredLogAdapterContext,
+} from "./observability-event"
+
+export {
+  OBSERVABILITY_GOLDEN_FIXTURES,
+  maximalGoldenFixture,
+  minimalGoldenFixture,
+  type ObservabilityGoldenFixture,
+} from "./observability-event-fixtures"
+
+export {
+  CLIENT_PRIVACY_MANIFEST_V1,
+  applyObservabilityPrivacy,
+  createLocalDebugCaptureSession,
+  scanHighConfidenceCredentials,
+  type ClientPrivacyManifest,
+  type CredentialScanResult,
+  type HighConfidenceCredentialFinding,
+  type HighConfidenceCredentialKind,
+  type LocalDebugCaptureSession,
+  type PrivacyApplicationOptions,
+} from "./privacy-manifest"
+
+export {
+  resolveCrashCapabilities,
+  type CrashCapabilityMatrix,
+  type CrashCapabilityProbe,
+  type CrashCapabilityState,
+  type CrashCapabilityStatus,
+  type CrashPlatform,
+} from "./crash-capabilities"
+
+export {
+  MemoryObservabilitySpoolStore,
+  ObservabilitySpool,
+  type ObservabilitySpoolEnqueueResult,
+  type ObservabilitySpoolLimits,
+  type ObservabilitySpoolRecord,
+  type ObservabilitySpoolStats,
+  type ObservabilitySpoolStore,
+  type SpoolCapacityReason,
+  type SpoolDrainOptions,
+  type SpoolDrainResult,
+} from "./spool"
+
+export {
+  IndexedDBObservabilitySpoolStore,
+  type IndexedDBObservabilitySpoolStoreOptions,
+} from "./transports/indexeddb-spool-store"
+
+export {
+  ObservabilitySpoolTransport,
+  createObservabilitySpoolTransport,
+  type ObservabilitySpoolTransportOptions,
+} from "./transports/observability-spool-transport"
+
+export {
+  RECOVERY_ORDER,
+  allEnabledCheckpointsPassed,
+  automaticReloadsDisabled,
+  checkpointFor,
+  isRecoverySubsystem,
+  nextCheckpoint,
+  recentRecoveryAudit,
+  recoveryProgress,
+  recoverySuspect,
+  requiresSafeShell,
+  type CheckpointResult,
+  type CheckpointStatus,
+  type RecoveryAuditEntry,
+  type RecoveryBoot,
+  type RecoveryMode,
+  type RecoveryProgress,
+  type RecoveryStateV1,
+  type RecoverySubsystem,
+  type RecoverySuspect,
+  type RendererReloadBudget,
+} from "./recovery-state"
+
+export {
+  assembleDiagnosticIncident,
+  transitionIncident,
+  type AssembleDiagnosticIncidentInput,
+  type DiagnosticIncident,
+  type IncidentAttachment,
+  type IncidentAttachmentInput,
+  type IncidentAttachmentKind,
+  type IncidentState,
+  type IncidentTransition,
+} from "./incident"
+
 // Context exports
 export { logContext, generateTraceId, traced } from "./context"
 

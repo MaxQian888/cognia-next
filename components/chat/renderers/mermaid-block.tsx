@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState, useCallback } from "react"
 import { useTranslations } from "next-intl"
-import { AlertCircle, Copy, Check, Maximize2, Code2, Download, RefreshCw, Play } from "lucide-react"
+import { AlertCircle, Maximize2, Code2, RefreshCw } from "lucide-react"
+import { AnimatedActionIcon, CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
+import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
+import { PlayIcon as AnimatedPlayIcon } from "@/components/ui/play"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -147,7 +150,7 @@ export function MermaidBlock({ content, className }: MermaidBlockProps) {
             {t("tooLarge", { chars: content.length })}
           </p>
           <Button variant="secondary" size="sm" onClick={() => setRenderRequested(true)}>
-            <Play className="mr-1 h-3.5 w-3.5" />
+            <AnimatedActionIcon icon={AnimatedPlayIcon} size={14} data-icon="inline-start" />
             {t("renderAnyway")}
           </Button>
         </div>
@@ -200,7 +203,7 @@ export function MermaidBlock({ content, className }: MermaidBlockProps) {
               aria-label={t("copySource")}
               tooltip={t("copySource")}
             >
-              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              <CopyFeedbackIcon copied={copied} size={14} />
             </TooltipIconButton>
           </div>
         </div>
@@ -240,7 +243,7 @@ export function MermaidBlock({ content, className }: MermaidBlockProps) {
             aria-label={t("copySource")}
             tooltip={t("copySource")}
           >
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            <CopyFeedbackIcon copied={copied} size={14} />
           </TooltipIconButton>
 
           <TooltipIconButton
@@ -251,7 +254,7 @@ export function MermaidBlock({ content, className }: MermaidBlockProps) {
             aria-label={t("exportSvg")}
             tooltip={t("exportSvg")}
           >
-            <Download className="h-3.5 w-3.5" />
+            <AnimatedActionIcon icon={AnimatedDownloadIcon} size={14} />
           </TooltipIconButton>
 
           <TooltipIconButton
@@ -293,7 +296,7 @@ export function MermaidBlock({ content, className }: MermaidBlockProps) {
                   aria-label={t("copySource")}
                   tooltip={t("copySource")}
                 >
-                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                  <CopyFeedbackIcon copied={copied} size={14} />
                 </TooltipIconButton>
                 <TooltipIconButton
                   variant="ghost"
@@ -303,7 +306,7 @@ export function MermaidBlock({ content, className }: MermaidBlockProps) {
                   aria-label={t("exportSvg")}
                   tooltip={t("exportSvg")}
                 >
-                  <Download className="h-3.5 w-3.5" />
+                  <AnimatedActionIcon icon={AnimatedDownloadIcon} size={14} />
                 </TooltipIconButton>
               </div>
             </DialogTitle>

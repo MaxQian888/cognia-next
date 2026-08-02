@@ -3,6 +3,7 @@
 import { useCallback } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
+  createSandboxConnectionRow,
   listSandboxConnections,
   putSandboxConnection,
   deleteSandboxConnection,
@@ -31,17 +32,22 @@ export function useSandboxConnections() {
   const create = useCallback(async (input: CreateSandboxConnectionInput): Promise<string> => {
     const now = Date.now()
     const id = crypto.randomUUID()
-    await putSandboxConnection({
-      id,
-      name: input.name,
-      provider: "docker",
-      image: input.image?.trim() || DEFAULT_IMAGE,
-      host: input.host?.trim() || "127.0.0.1",
-      port: 0,
-      lastHealthStatus: "unknown",
-      createdAt: now,
-      updatedAt: now,
-    })
+    await putSandboxConnection(
+      createSandboxConnectionRow({
+        id,
+        name: input.name,
+        // The tab only creates local Docker connections today; cua.ai Cloud
+        // and Lume connections are created by their own provider adapters.
+        driver: "computer-server",
+        config: {
+          provider: "docker",
+          image: input.image?.trim() || DEFAULT_IMAGE,
+          host: input.host?.trim() || "127.0.0.1",
+          port: 0,
+        },
+        now,
+      })
+    )
     return id
   }, [])
 
@@ -62,12 +68,21 @@ export function useSandboxConnections() {
   const start = useCallback(async (id: string): Promise<void> => {
     const row = await getSandboxConnection(id)
     if (!row) return
-    await putSandboxConnection({ ...row, lastHealthStatus: "starting", updatedAt: Date.now() })
+    await putSandboxConnection({
+      ...row,
+      state: "starting",
+      lastHealthStatus: "starting",
+      updatedAt: Date.now(),
+    })
     try {
-      const port = await sandboxClient.start(id, row.image)
+      // Docker-only lifecycle: the shared adapter layer lands with the
+      // provider adapters; until then a non-Docker row has no image to start.
+      if (row.config.provider !== "docker") return
+      const port = await sandboxClient.start(id, row.config.image)
       await putSandboxConnection({
         ...row,
-        port,
+        config: { ...row.config, port },
+        state: "running",
         lastHealthStatus: "ok",
         lastHealthError: undefined,
         lastHealthCheckAt: Date.now(),
@@ -76,6 +91,7 @@ export function useSandboxConnections() {
     } catch (err) {
       await putSandboxConnection({
         ...row,
+        state: "error",
         lastHealthStatus: "error",
         lastHealthError: err instanceof Error ? err.message : String(err),
         lastHealthCheckAt: Date.now(),
@@ -91,8 +107,14 @@ export function useSandboxConnections() {
     if (row) {
       await putSandboxConnection({
         ...row,
+        state: "stopped",
         lastHealthStatus: "unknown",
-        port: 0,
+        // Clear both the mapped port and the container id: the container is
+        // gone, and a stale id would make the next start() adopt a ghost.
+        config:
+          row.config.provider === "docker"
+            ? { provider: "docker", image: row.config.image, host: row.config.host, port: 0 }
+            : row.config,
         updatedAt: Date.now(),
       })
     }
@@ -105,6 +127,8 @@ export function useSandboxConnections() {
     await putSandboxConnection({
       ...row,
       lastHealthStatus: ok ? "ok" : "unreachable",
+      // A failed probe is not proof the machine is stopped, so `state` is left
+      // alone; only an explicit stop/start transition moves it.
       lastHealthCheckAt: Date.now(),
       updatedAt: Date.now(),
     })

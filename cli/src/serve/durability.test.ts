@@ -10,7 +10,14 @@ import path from "node:path"
 
 import { DEFAULT_EXECUTION_CONFIG, DEFAULT_NOTIFICATION_CONFIG } from "@/types/scheduler"
 
-import { installWriteFlush, startDurability, type DexieLike } from "./durability"
+import {
+  installWriteFlush,
+  resolveDurabilityBackend,
+  startDurability,
+  type DexieLike,
+} from "./durability"
+import { durabilityRoot } from "./persistence/backend"
+import { writeManifest } from "./persistence/manifest"
 import { __resetCliDbForTesting } from "../db/bootstrap"
 
 jest.setTimeout(30_000)
@@ -269,5 +276,51 @@ describe("startDurability", () => {
       __resetCliDbForTesting()
       fs.rmSync(home, { recursive: true, force: true })
     }
+  })
+})
+
+describe("resolveDurabilityBackend", () => {
+  let home: string
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-backend-gate-"))
+  })
+  afterEach(() => fs.rmSync(home, { recursive: true, force: true }))
+
+  it("defaults to the pre-existing snapshot store", () => {
+    expect(resolveDurabilityBackend(home, "acct", {})).toBe("snapshot-v3")
+  })
+
+  it("honours the rollout gate when no account has been migrated yet", () => {
+    expect(
+      resolveDurabilityBackend(home, "acct", { COGNIA_DURABILITY_BACKEND: "journal-v4" })
+    ).toBe("journal-v4")
+  })
+
+  it("ignores an unknown gate value", () => {
+    expect(resolveDurabilityBackend(home, "acct", { COGNIA_DURABILITY_BACKEND: "redis" })).toBe(
+      "snapshot-v3"
+    )
+  })
+
+  it("lets a written manifest override the gate", () => {
+    writeManifest(durabilityRoot(home, "acct"), {
+      manifestFormat: 1,
+      activeBackend: "sqlite-v5",
+      shadowBackend: null,
+      rollbackWatermark: null,
+      updatedAt: 0,
+    })
+    expect(
+      resolveDurabilityBackend(home, "acct", { COGNIA_DURABILITY_BACKEND: "journal-v4" })
+    ).toBe("sqlite-v5")
+  })
+
+  it("falls back to the gate when the manifest is unreadable", () => {
+    const root = durabilityRoot(home, "acct")
+    fs.mkdirSync(root, { recursive: true })
+    fs.writeFileSync(path.join(root, "backend-manifest.json"), "{oops")
+    expect(
+      resolveDurabilityBackend(home, "acct", { COGNIA_DURABILITY_BACKEND: "journal-v4" })
+    ).toBe("journal-v4")
   })
 })

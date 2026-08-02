@@ -17,22 +17,33 @@ jest.mock("@/lib/skills/recording/recorder-client", () => ({
   recordStatus: (...a: unknown[]) => recordStatusMock(...a),
 }))
 
-// Keep the modal import light — its real deps (stores/db) aren't needed here.
-jest.mock("./ui/record-skill-modal", () => ({ RecordSkillModal: () => null }))
+const openRecorderMock = jest.fn()
+const statusSnapshotMock = jest.fn().mockReturnValue({
+  recording: false,
+  phase: "idle",
+  stepCount: 0,
+})
+jest.mock("@/stores/skills/recorder-store", () => ({
+  openRecorder: (...a: unknown[]) => openRecorderMock(...a),
+  recorderStatusSnapshot: () => statusSnapshotMock(),
+}))
 
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
+import {
+  __resetRecorderAvailabilityForTesting,
+  getRecorderAvailability,
+} from "@/lib/skills/recording/recorder-availability"
 import plugin from "./index"
 
 const registerMock = registerSlashCommand as jest.Mock
 const unregisterMock = unregisterCommandsByPlugin as jest.Mock
 
-function makeCtx(modal?: { openModal: jest.Mock }) {
+function makeCtx() {
   const tools: Record<string, (args: unknown) => Promise<unknown>> = {}
   const showToast = jest.fn()
   const ctx: Partial<PluginContext> = {
     pluginId: "cognia-skill-recorder",
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } as never,
-    modal: modal as never,
     ui: { showToast } as never,
     agent: {
       registerTool: ({
@@ -54,6 +65,13 @@ beforeEach(() => {
   unregisterMock.mockReset()
   isTauriMock.mockReset().mockReturnValue(true)
   recordStatusMock.mockReset()
+  openRecorderMock.mockReset()
+  statusSnapshotMock.mockReset().mockReturnValue({
+    recording: false,
+    phase: "idle",
+    stepCount: 0,
+  })
+  __resetRecorderAvailabilityForTesting()
 })
 
 describe("skill-recorder (built-in)", () => {
@@ -68,46 +86,50 @@ describe("skill-recorder (built-in)", () => {
   })
 
   it("declines commands that aren't its own", async () => {
-    const openModal = jest.fn()
-    const { ctx } = makeCtx({ openModal })
+    const { ctx } = makeCtx()
     const hooks = await plugin.activate?.(ctx)
     expect(await hooks?.onCommand?.("someone-else", [])).toBe(false)
-    expect(openModal).not.toHaveBeenCalled()
+    expect(openRecorderMock).not.toHaveBeenCalled()
   })
 
-  it("opens the modal on desktop", async () => {
-    const openModal = jest.fn()
-    const { ctx } = makeCtx({ openModal })
+  it("opens the global recorder on desktop", async () => {
+    const { ctx } = makeCtx()
     const hooks = await plugin.activate?.(ctx)
     expect(await hooks?.onCommand?.("record-skill", [])).toBe(true)
-    expect(openModal).toHaveBeenCalledTimes(1)
+    expect(openRecorderMock).toHaveBeenCalledWith("plugin-command")
   })
 
   it("refuses outside Tauri", async () => {
     isTauriMock.mockReturnValue(false)
-    const openModal = jest.fn()
-    const { ctx, showToast } = makeCtx({ openModal })
+    const { ctx, showToast } = makeCtx()
     const hooks = await plugin.activate?.(ctx)
     expect(await hooks?.onCommand?.("record-skill", [])).toBe(true)
-    expect(openModal).not.toHaveBeenCalled()
+    expect(openRecorderMock).not.toHaveBeenCalled()
     expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/desktop-only/i), "error")
   })
+})
 
-  it("reports the UI is unavailable when no modal surface exists", async () => {
-    const { ctx, showToast } = makeCtx() // no modal
-    const hooks = await plugin.activate?.(ctx)
-    expect(await hooks?.onCommand?.("record-skill", [])).toBe(true)
-    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/unavailable/i), "error")
-  })
-
-  it("record_skill_status returns an error when the native call throws", async () => {
-    recordStatusMock.mockRejectedValue(new Error("ipc down"))
-    const { ctx, tools } = makeCtx()
+describe("availability ownership", () => {
+  it("publishes availability on activate", async () => {
+    expect(getRecorderAvailability().available).toBe(false)
+    const { ctx } = makeCtx()
     await plugin.activate?.(ctx)
-    expect(await tools.record_skill_status({})).toMatchObject({ ok: false, error: "ipc down" })
+    expect(getRecorderAvailability()).toEqual({
+      available: true,
+      pluginId: "cognia-skill-recorder",
+    })
   })
 
-  it("record_skill_status returns desktop-only off Tauri", async () => {
+  it("withdraws it on deactivate, so every entry point disappears at once", async () => {
+    const { ctx } = makeCtx()
+    await plugin.activate?.(ctx)
+    await plugin.deactivate?.(ctx)
+    expect(getRecorderAvailability()).toEqual({ available: false, pluginId: null })
+  })
+})
+
+describe("record_skill_status", () => {
+  it("returns desktop-only off Tauri without touching the native call", async () => {
     isTauriMock.mockReturnValue(false)
     const { ctx, tools } = makeCtx()
     await plugin.activate?.(ctx)
@@ -115,14 +137,38 @@ describe("skill-recorder (built-in)", () => {
     expect(recordStatusMock).not.toHaveBeenCalled()
   })
 
-  it("record_skill_status reports the native status on Tauri", async () => {
-    recordStatusMock.mockResolvedValue({ recording: true, stepCount: 3 })
+  it("prefers the store while a flow is in progress", async () => {
+    // Native capture has stopped but the user is still reviewing. Reporting
+    // "not recording" here would be true of the hook and misleading about the
+    // flow, so the store wins whenever it holds a session.
+    statusSnapshotMock.mockReturnValue({ recording: false, phase: "review", stepCount: 7 })
+    const { ctx, tools } = makeCtx()
+    await plugin.activate?.(ctx)
+    expect(await tools.record_skill_status({})).toMatchObject({
+      ok: true,
+      recording: false,
+      phase: "review",
+      stepCount: 7,
+    })
+    expect(recordStatusMock).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the native status when the store is idle", async () => {
+    recordStatusMock.mockResolvedValue({ recording: true, phase: "recording", stepCount: 3 })
     const { ctx, tools } = makeCtx()
     await plugin.activate?.(ctx)
     expect(await tools.record_skill_status({})).toMatchObject({
       ok: true,
       recording: true,
+      phase: "recording",
       stepCount: 3,
     })
+  })
+
+  it("returns an error when the native call throws", async () => {
+    recordStatusMock.mockRejectedValue(new Error("ipc down"))
+    const { ctx, tools } = makeCtx()
+    await plugin.activate?.(ctx)
+    expect(await tools.record_skill_status({})).toMatchObject({ ok: false, error: "ipc down" })
   })
 })

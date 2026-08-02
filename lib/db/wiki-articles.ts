@@ -24,6 +24,7 @@ export type WikiArticleDraft = Omit<WikiArticle, "id" | "generatedAt"> &
 export async function createWikiArticle(draft: WikiArticleDraft): Promise<WikiArticle> {
   const row: WikiArticle = {
     id: draft.id ?? newId(),
+    corpusId: draft.corpusId,
     slug: draft.slug,
     title: draft.title,
     module: draft.module,
@@ -47,6 +48,7 @@ export async function bulkCreateWikiArticles(drafts: WikiArticleDraft[]): Promis
   const now = Date.now()
   const rows: WikiArticle[] = drafts.map((draft) => ({
     id: draft.id ?? newId(),
+    corpusId: draft.corpusId,
     slug: draft.slug,
     title: draft.title,
     module: draft.module,
@@ -69,8 +71,35 @@ export async function getWikiArticle(id: string): Promise<WikiArticle | undefine
   return getDb().wikiArticles.get(id)
 }
 
-export async function getWikiArticleBySlug(slug: string): Promise<WikiArticle | undefined> {
-  return getDb().wikiArticles.where("slug").equals(slug).first()
+/**
+ * Resolve a slug **within a corpus** (v142).
+ *
+ * `corpusId` is required and there is deliberately no fallback to "any corpus
+ * with this slug". Two repos routinely contain the same module path, so a
+ * cross-corpus fallback would answer a question about repo A with repo B's
+ * source — worse than answering nothing, because the caller cannot tell.
+ */
+export async function getWikiArticleBySlug(
+  corpusId: string,
+  slug: string
+): Promise<WikiArticle | undefined> {
+  return getDb().wikiArticles.where("[corpusId+slug]").equals([corpusId, slug]).first()
+}
+
+/** Articles in a corpus, highest PageRank first. */
+export async function listWikiArticlesByCorpus(corpusId: string): Promise<WikiArticle[]> {
+  return getDb().wikiArticles.where("corpusId").equals(corpusId).reverse().sortBy("pageRank")
+}
+
+export async function listWikiArticlesByCorpusAndModule(
+  corpusId: string,
+  module: string
+): Promise<WikiArticle[]> {
+  return getDb().wikiArticles.where("[corpusId+module]").equals([corpusId, module]).toArray()
+}
+
+export async function countWikiArticlesByCorpus(corpusId: string): Promise<number> {
+  return getDb().wikiArticles.where("corpusId").equals(corpusId).count()
 }
 
 export async function listWikiArticlesByScope(scope: WikiScope): Promise<WikiArticle[]> {

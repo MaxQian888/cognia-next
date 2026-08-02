@@ -45,13 +45,29 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe("EvalSettingsSection", () => {
-  it("renders the four cards", () => {
-    render(<EvalSettingsSection />)
+  it("renders the four blocks as a flat stack, with no card chrome", () => {
+    const { container } = render(<EvalSettingsSection />)
     expect(screen.getByTestId("eval-settings-section")).toBeInTheDocument()
     expect(screen.getByText("judgeTitle")).toBeInTheDocument()
     expect(screen.getByText("runTitle")).toBeInTheDocument()
     expect(screen.getByText("gateTitle")).toBeInTheDocument()
     expect(screen.getByText("costTitle")).toBeInTheDocument()
+    expect(container.querySelector("[data-slot='card']")).toBeNull()
+  })
+
+  it("folds the two advanced blocks away and back", () => {
+    render(<EvalSettingsSection />)
+    // Judge and Run are always-open; only gate and cost are disclosures.
+    expect(screen.getByTestId("eval-block-gate")).toHaveAttribute("data-open", "true")
+    expect(screen.getByTestId("eval-block-cost")).toHaveAttribute("data-open", "true")
+    expect(screen.getByTestId("eval-block-judge")).not.toHaveAttribute("data-open")
+
+    fireEvent.click(screen.getByRole("button", { name: /gateTitle/ }))
+    expect(screen.getByTestId("eval-block-gate")).toHaveAttribute("data-open", "false")
+    expect(screen.queryByLabelText("gateMinPassAt1")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /gateTitle/ }))
+    expect(screen.getByLabelText("gateMinPassAt1")).toBeInTheDocument()
   })
 
   it("toggles deterministic-only through save", async () => {

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schemaVersion", "pluginPoints"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "pluginPoints": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "stability", "status", "introducedIn"],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "enum": ["ui-slot", "hook", "activation", "runtime"] },
+          "stability": { "enum": ["stable", "experimental", "deprecated"] },
+          "status": { "enum": ["implemented", "virtual", "deprecated"] },
+          "introducedIn": { "type": "string" },
+          "deprecatedIn": { "type": "string" },
+          "replacementId": { "type": "string" },
+          "retirementNote": { "type": "string" },
+          "permission": { "type": "string" },
+          "aliases": {
+            "type": "array",
+            "items": { "type": "string" },
+            "uniqueItems": true
+          },
+          "formFactor": { "enum": ["icon", "row", "block", "panel"] }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

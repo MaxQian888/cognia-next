@@ -19,12 +19,25 @@ use std::thread::{self, JoinHandle};
 use tokio::sync::mpsc::UnboundedSender;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
-use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
-    TranslateMessage, UnhookWindowsHookEx, HC_ACTION, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT,
-    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
-    WM_MBUTTONUP, WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN,
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetKeyboardLayout, GetKeyboardState, ToUnicodeEx,
 };
+use windows::Win32::UI::WindowsAndMessaging::{
+    CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW, GetWindowThreadProcessId,
+    PostThreadMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, HC_ACTION,
+    KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN,
+    WM_RBUTTONUP, WM_SYSKEYDOWN,
+};
+
+/// `ToUnicodeEx` flag bit 2: translate without mutating the keyboard state.
+///
+/// Without it, translating inside a low-level hook *consumes* a pending dead
+/// key, so the foreground application would receive `e` where the user typed
+/// `´` then `e`. Observing input must never change it. Available since Windows
+/// 10 1607; on older builds the flag is ignored and translation still works,
+/// just with the dead-key caveat.
+const TO_UNICODE_NO_STATE_CHANGE: u32 = 1 << 2;
 
 use super::{InputButton, InputEvent};
 
@@ -108,6 +121,43 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
     CallNextHookEx(None, code, wparam, lparam)
 }
 
+/// Decode the character this key press produces under the foreground window's
+/// keyboard layout.
+///
+/// A virtual-key code is layout-blind — the same `vk` is `;` on a US layout and
+/// `ö` on a German one — so transcribing typed text needs the translated
+/// character. `None` for dead keys, pure modifiers, and anything that does not
+/// resolve to a single `char`; all of those are described structurally
+/// downstream rather than guessed at.
+///
+/// Cost is a few microseconds, which the low-level hook's timeout budget can
+/// absorb. Nothing heavier (UIA, COM, the secure-field probe) belongs here —
+/// Windows silently evicts a hook that overruns `LowLevelHooksTimeout`.
+///
+/// # Safety
+/// Calls into user32 with stack buffers whose lengths are passed alongside them.
+unsafe fn decode_unicode(info: &KBDLLHOOKSTRUCT) -> Option<char> {
+    let mut state = [0u8; 256];
+    if GetKeyboardState(&mut state).is_err() {
+        return None;
+    }
+    let layout = GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow(), None));
+    let mut buf = [0u16; 8];
+    let written = ToUnicodeEx(
+        info.vkCode,
+        info.scanCode,
+        &state,
+        &mut buf,
+        TO_UNICODE_NO_STATE_CHANGE,
+        Some(layout),
+    );
+    if written <= 0 {
+        return None;
+    }
+    let len = (written as usize).min(buf.len());
+    char::decode_utf16(buf[..len].iter().copied()).next()?.ok()
+}
+
 unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
         match wparam.0 as u32 {
@@ -115,6 +165,7 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
                 let info = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
                 send(InputEvent::KeyDown {
                     vk: info.vkCode,
+                    text: decode_unicode(info),
                     ts_ms: now_ms(),
                 });
             }

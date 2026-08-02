@@ -22,6 +22,7 @@ import {
   setProviderPreset,
   subscriptionInit,
   authedGet,
+  authedRequest,
 } from "./transport"
 import type { Account, AnthropicCredentialData } from "@/types/subscription"
 import { __resetVaultChangeTrackerForTesting } from "@/lib/subscription/sync/change-tracker"
@@ -232,6 +233,35 @@ describe("subscription core transport", () => {
     expect(mockedCall).toHaveBeenCalledWith("subscription_authed_get", {
       url: "https://example.test/balance",
       headers: [{ name: "Authorization", value: "Bearer x" }],
+    })
+  })
+
+  it("authedRequest preserves upstream status, headers, and body", async () => {
+    const response = {
+      status: 429,
+      headers: [{ name: "retry-after", value: "60" }],
+      body: '{"error":"rate limited"}',
+    }
+    mockedCall.mockResolvedValueOnce(response)
+
+    await expect(
+      authedRequest({
+        url: "https://example.test/balance",
+        method: "POST",
+        headers: { Authorization: "Bearer x" },
+        body: "{}",
+        timeoutMs: 15_000,
+      })
+    ).resolves.toEqual(response)
+    expect(mockedCall).toHaveBeenCalledWith("subscription_authed_request", {
+      request: {
+        url: "https://example.test/balance",
+        method: "POST",
+        headers: [{ name: "Authorization", value: "Bearer x" }],
+        body: "{}",
+        timeoutMs: 15_000,
+        maxBodyBytes: 1_048_576,
+      },
     })
   })
 

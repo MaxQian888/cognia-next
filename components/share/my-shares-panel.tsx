@@ -3,10 +3,11 @@
 // Lists the share links the owner created (local Dexie mirror) with copy /
 // open / revoke. Revoking calls the worker DELETE and flips the local row.
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CalendarClockIcon, CopyIcon, ExternalLinkIcon, EyeIcon, Trash2Icon } from "lucide-react"
+import { CalendarClockIcon, ExternalLinkIcon, EyeIcon, Trash2Icon } from "lucide-react"
+import { CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { listSharedLinks } from "@/lib/db/shared-links"
@@ -26,10 +27,26 @@ export function MySharesPanel() {
   // Lazily fetched per-link view counts (avoid N network calls on mount).
   const [views, setViews] = useState<Record<string, number>>({})
   const [loadingStats, setLoadingStats] = useState<string | null>(null)
+  const [copiedCode, setCopiedCode] = useState<string | null>(null)
+  const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const onCopy = async (url: string) => {
-    await navigator.clipboard.writeText(url)
-    toast.success(t("copy"))
+  useEffect(
+    () => () => {
+      if (copyResetRef.current) clearTimeout(copyResetRef.current)
+    },
+    []
+  )
+
+  const onCopy = async (url: string, code: string) => {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopiedCode(code)
+      if (copyResetRef.current) clearTimeout(copyResetRef.current)
+      copyResetRef.current = setTimeout(() => setCopiedCode(null), 1500)
+      toast.success(t("copy"))
+    } catch (err) {
+      log.error("copy-failed", { error: err instanceof Error ? err.message : String(err) })
+    }
   }
 
   const onStats = async (code: string) => {
@@ -129,9 +146,9 @@ export function MySharesPanel() {
               variant="ghost"
               size="icon"
               aria-label={t("copy")}
-              onClick={() => void onCopy(row.url)}
+              onClick={() => void onCopy(row.url, row.code)}
             >
-              <CopyIcon className="size-4" />
+              <CopyFeedbackIcon copied={copiedCode === row.code} size={16} />
             </Button>
             <Button asChild variant="ghost" size="icon" aria-label={t("open")}>
               <a href={row.url} target="_blank" rel="noreferrer">

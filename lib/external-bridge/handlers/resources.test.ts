@@ -13,6 +13,7 @@ import {
   __TESTING__,
 } from "./resources"
 import { createWikiArticle } from "@/lib/db/wiki-articles"
+import { SELF_CORPUS_ID } from "@/types/wiki"
 import type { WikiArticleDraft } from "@/lib/db/wiki-articles"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { listSkills } from "@/lib/db/skills"
@@ -31,6 +32,7 @@ function articleDraft(overrides: Partial<WikiArticleDraft> = {}): WikiArticleDra
     title: overrides.title ?? "lib/foo overview",
     module: overrides.module ?? "lib/foo",
     scope: overrides.scope ?? "cognia-self",
+    corpusId: overrides.corpusId ?? SELF_CORPUS_ID,
     pageRank: overrides.pageRank ?? 0.5,
     summary: overrides.summary ?? "summary",
     sectionIds: overrides.sectionIds ?? [],

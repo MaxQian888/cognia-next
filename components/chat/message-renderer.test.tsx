@@ -220,13 +220,41 @@ jest.mock("@/components/chat/motion/motion-reveal", () => ({
   MotionStatusSwap: ({ children }: { children: ReactForMocks.ReactNode }) => children,
   useFlowMotion: () => ({ reduce: true }),
 }))
+// Stands in for the real group's chrome but keeps its contract: every child is
+// rendered through the caller's `renderChild`, in both open-state styles. That
+// is what makes a grouped tool go through `renderToolPart` (and pick up its
+// per-call plugin action slot) exactly like a standalone one.
 jest.mock("@/components/chat/message-parts/tool-activity-group", () => ({
-  ToolActivityGroup: ({ entries, mode }: { entries: unknown[]; mode: string }) =>
-    ReactForMocks.createElement("div", {
-      "data-test": "activity-group",
-      "data-mode": mode,
-      "data-count": entries.length,
-    }),
+  ToolActivityGroup: ({
+    entries,
+    mode,
+    renderChild,
+  }: {
+    entries: Array<{ part: { type: string }; key: string }>
+    mode: string
+    renderChild: (
+      part: { type: string },
+      key: string,
+      opts: { forceOpen?: boolean; expanded?: boolean; onToggle?: () => void }
+    ) => ReactForMocks.ReactNode
+  }) =>
+    ReactForMocks.createElement(
+      "div",
+      {
+        "data-test": "activity-group",
+        "data-mode": mode,
+        "data-count": entries.length,
+      },
+      entries.map((e) =>
+        renderChild(
+          e.part,
+          e.key,
+          mode === "simplified"
+            ? { expanded: false, onToggle: () => {} }
+            : { forceOpen: mode === "detailed" ? true : undefined }
+        )
+      )
+    ),
 }))
 jest.mock("@/components/chat/message-parts/tool-call-row", () => ({
   ToolCallRow: ({ part }: { part: { type: string } }) =>
@@ -1055,7 +1083,24 @@ describe("agent-flow grouping + mode", () => {
     expect(group).toBeTruthy()
     expect(group?.getAttribute("data-count")).toBe("2")
     expect(group?.getAttribute("data-mode")).toBe("standard")
-    // The individual cards are owned by the group, not rendered standalone.
+    // The individual cards are owned by the group — rendered through its
+    // `renderChild`, never standalone alongside it.
+    expect(group?.querySelectorAll("[data-test='tool']")).toHaveLength(2)
+    expect(document.querySelectorAll("[data-test='tool']")).toHaveLength(2)
+  })
+
+  // Regression: the group used to render its simplified children itself,
+  // bypassing `renderToolPart` — so every tool inside a folded run lost the
+  // per-call plugin action slot (and the session id its cards need).
+  it("routes a grouped run through the shared tool renderer in simplified mode", () => {
+    mockFlowMode = "simplified"
+    render(<MessageRenderer message={toolMsg("g1s", "tool-Read", "tool-Grep")} />)
+    const group = document.querySelector("[data-test='activity-group']")
+    expect(group?.getAttribute("data-mode")).toBe("simplified")
+    const rows = group?.querySelectorAll("[data-test='tool-call-row']")
+    expect(rows).toHaveLength(2)
+    expect(rows?.[0].getAttribute("data-type")).toBe("tool-Read")
+    // …and no standard card leaked in alongside the rows.
     expect(document.querySelector("[data-test='tool']")).toBeNull()
   })
 
@@ -1098,7 +1143,7 @@ describe("agent-flow grouping + mode", () => {
     const groups = document.querySelectorAll("[data-test='activity-group']")
     expect(groups).toHaveLength(1)
     expect(groups[0].getAttribute("data-count")).toBe("2")
-    expect(document.querySelector("[data-test='tool']")).toBeNull()
+    expect(groups[0].querySelectorAll("[data-test='tool']")).toHaveLength(2)
   })
 
   it("still breaks the run when the model writes prose between tool calls", () => {

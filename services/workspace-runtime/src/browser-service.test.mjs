@@ -162,7 +162,7 @@ function fakeChromium() {
   }
 }
 
-async function fixture(t) {
+async function fixture(t, options = {}) {
   const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cognia-browser-service-"))
   t.after(() => fs.rm(workspaceRoot, { recursive: true, force: true }))
   const chromium = fakeChromium()
@@ -179,6 +179,7 @@ async function fixture(t) {
       authorizeRedirect: async (_from, url) => ({ url }),
     }),
     fileBridge: new WorkspaceFileBridge({ workspaceRoot }),
+    ...options,
   })
   return { service, chromium }
 }
@@ -322,4 +323,25 @@ test("named profiles are exclusive while ephemeral sessions leave no profile", a
   await assert.doesNotReject(() =>
     service.createSession({ id: "session-2", profileId: "qa-login", grants: [] })
   )
+})
+
+test("reclaims idle and absolute-lifetime sessions while releasing profiles", async (t) => {
+  let now = 1_000
+  const { service, chromium } = await fixture(t, {
+    now: () => now,
+    idleTimeoutMs: 100,
+    maxLifetimeMs: 500,
+  })
+  await service.createSession({ id: "idle", profileId: "idle-profile", grants: [] })
+  const idleContext = chromium.launches[0].context
+  now += 101
+  assert.deepEqual(await service.reapExpired(), ["idle"])
+  assert.equal(idleContext.closed, true)
+
+  await service.createSession({ id: "absolute", profileId: "idle-profile", grants: [] })
+  now += 400
+  await service.listPages("absolute")
+  now += 101
+  assert.deepEqual(await service.reapExpired(), ["absolute"])
+  assert.equal(chromium.launches[1].context.closed, true)
 })

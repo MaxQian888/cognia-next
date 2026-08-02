@@ -14,6 +14,7 @@
 //! with install/read accessors, so the many `CompanionState` constructors
 //! don't have to thread it.
 
+pub mod backup;
 pub mod brain;
 pub mod gateway_host;
 
@@ -100,6 +101,7 @@ fn resolve_mcp_sidecar_path_from(
 pub use crate::api_key::ApiKeyState;
 pub use crate::claude::host::{HeadlessSidecarHost, SidecarHost, SIDECAR_SCRIPT_ENV};
 pub use crate::claude::sidecar::kill_sidecar;
+pub use crate::claude::sidecar::spawn as spawn_sidecar;
 pub use crate::connectors::state::ConnectorsState;
 pub use crate::external_agent::container_backend::exec_backend_from_env;
 pub use crate::external_agent::presets::SpawnPolicy;

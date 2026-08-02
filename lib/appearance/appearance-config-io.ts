@@ -34,6 +34,7 @@ export const APPEARANCE_CONFIG_KEYS = [
   "reduceMotion",
   "a11y",
   "componentStyles",
+  "cursor",
   "customCss",
   "customCssEnabled",
   "customCssScope",

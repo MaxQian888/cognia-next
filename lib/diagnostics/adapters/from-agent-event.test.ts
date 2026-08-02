@@ -7,6 +7,7 @@ import { diagnoseAgentEvent } from "./from-agent-event"
 
 const envelope = (overrides: Record<string, unknown> = {}) =>
   ({
+    schemaVersion: 1,
     eventId: "e1",
     sequence: 1,
     sessionId: "sess-1",

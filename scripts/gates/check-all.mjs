@@ -122,6 +122,15 @@ const REGISTRY = [
   { script: "check:provider-name-branches", group: "audit" },
   // ADR-0090 Phase 5: certification staleness inputs must match real pins.
   { script: "check:runtime-versions", group: "audit" },
+  // The Agent SDK's public surface must stay fully triaged. `anthropic.mjs`
+  // builds `query()` options from an explicit allowlist, so a new SDK option
+  // is otherwise invisible — no break, no warning, the capability just does
+  // not exist. Same for a new Query method, SDKMessage variant or HookEvent.
+  { script: "check:sdk-surface", group: "audit" },
+  // The live session-control surface is hand-declared in four files across
+  // three languages. This binds all four to protocol/agent-control-methods.json
+  // and refuses to let a still-`planned` control reach a live Query object.
+  { script: "audit:agent-control-methods", group: "audit" },
   { script: "audit:trusted-publishers", group: "audit" },
   { script: "audit:silent-flags", group: "audit" },
   { script: "audit:pii-boundaries", group: "audit" },

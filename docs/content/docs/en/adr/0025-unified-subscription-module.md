@@ -5,6 +5,8 @@ description: "One Rust module + one TS module + one Settings UI tab covering Ant
 
 # ADR 0025 — Unified Subscription Module
 
+> Balance and quota projections are extended by [ADR-0104 — Provider diagnostics control plane](/docs/en/adr/0104-provider-diagnostics-control-plane).
+
 **Status:** Accepted
 **Date:** 2026-05-18
 **Branch:** `feat/subscription-unification`

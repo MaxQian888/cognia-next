@@ -146,6 +146,10 @@ impl ConsentBroker {
     /// given prompt. Does not consume the grant, but does evict it once it has
     /// lapsed so an expired grant can never be resurrected by a clock quirk.
     pub fn has_session_grant(&self, prompt: &ConsentPrompt) -> bool {
+        // One-shot prompts are never covered by a grant, even a live one.
+        if prompt.is_one_shot() {
+            return false;
+        }
         let key = GrantKey::from_prompt(prompt);
         let mut inner = self.inner.lock();
         match inner.session_grants.get(&key) {
@@ -247,8 +251,11 @@ impl ConsentBroker {
         if let Some(tx) = sender {
             let _ = tx.send(allow);
         }
+        // `is_one_shot` is checked here as well as in `has_session_grant`, so a
+        // grant for such a prompt is never even written — a stale entry could
+        // otherwise outlive a future change to the read path.
         if allow && persist {
-            if let Some(p) = prompt {
+            if let Some(p) = prompt.filter(|p| !p.is_one_shot()) {
                 let expiry = Instant::now() + clamp_grant_duration(grant_duration_ms);
                 self.inner
                     .lock()
@@ -294,6 +301,52 @@ mod tests {
     }
 
     const MINUTE: Duration = Duration::from_secs(60);
+
+    #[test]
+    fn record_start_ignores_a_pre_existing_grant() {
+        // Even a live grant must not cover it. Without the `is_one_shot` check
+        // in `has_session_grant`, `request_with_thumbnail` would short-circuit
+        // and arm a global input hook with no prompt at all.
+        let b = ConsentBroker::new();
+        let p = prompt("record_start", Surface::ComputerUse);
+        grant(&b, &p, MINUTE);
+        assert!(
+            !b.has_session_grant(&p),
+            "a recording may never be pre-authorized"
+        );
+    }
+
+    #[test]
+    fn record_start_never_forms_a_session_grant() {
+        let b = ConsentBroker::new();
+        let p = prompt("record_start", Surface::ComputerUse);
+        // The renderer asked to persist ("don't ask again"); the broker must
+        // refuse to write the grant rather than merely refuse to read it.
+        b.resolve(
+            "unknown-id",
+            true,
+            true,
+            Some(MINUTE.as_millis() as u64),
+            Some(&p),
+        );
+        assert!(b.inner.lock().session_grants.is_empty());
+    }
+
+    #[test]
+    fn an_ordinary_prompt_still_forms_a_grant() {
+        // The one-shot rule must be narrow — every other prompt keeps its
+        // "don't ask again" behaviour.
+        let b = ConsentBroker::new();
+        let p = prompt("click", Surface::ComputerUse);
+        b.resolve(
+            "unknown-id",
+            true,
+            true,
+            Some(MINUTE.as_millis() as u64),
+            Some(&p),
+        );
+        assert!(b.has_session_grant(&p));
+    }
 
     #[test]
     fn session_grant_matches_same_tuple() {

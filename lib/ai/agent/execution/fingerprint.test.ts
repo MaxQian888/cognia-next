@@ -64,6 +64,41 @@ describe("computeExecutionFingerprint", () => {
     expect(withVolatile).toBe(computeExecutionFingerprint(spec))
   })
 
+  it("survives the v1 -> v2 contract upgrade unchanged", () => {
+    // The fingerprint identifies an execution *configuration*. Re-serialising
+    // the same configuration under a newer contract version is not a different
+    // execution, so an in-flight run's fingerprint must still match after the
+    // upgrade — recovery and ticket-remint both compare on it.
+    const v1 = computeExecutionFingerprint({ ...spec, specVersion: 1 })
+    const v2 = computeExecutionFingerprint({
+      ...spec,
+      specVersion: 2,
+      capabilities: {
+        effective: ["streaming"],
+        disabledOptional: [],
+        support: { streaming: { support: "native" } },
+      },
+    })
+    const v2WithMoreVerdicts = computeExecutionFingerprint({
+      ...spec,
+      specVersion: 2,
+      capabilities: {
+        effective: ["streaming"],
+        disabledOptional: [],
+        // A later stage implementing a capability adds verdicts here. That is
+        // not a configuration change and must not move the fingerprint.
+        support: {
+          streaming: { support: "native" },
+          "output.structured": { support: "unsupported", reason: "not implemented yet" },
+        },
+      },
+    })
+
+    expect(v2).toBe(v2WithMoreVerdicts)
+    expect(v1).not.toBe(v2) // `capabilities.effective` genuinely differs here
+    expect(computeExecutionFingerprint({ ...spec, specVersion: 2 })).toBe(v1)
+  })
+
   it("changes when runtime, route or model binding change", () => {
     const base = computeExecutionFingerprint(spec)
     expect(computeExecutionFingerprint({ ...spec, runtimeAdapter: "ai-sdk" })).not.toBe(base)

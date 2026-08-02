@@ -199,6 +199,14 @@ export const SURFACE_CONTRACTS = [
     offline: "cached-read",
   },
   {
+    id: "servers",
+    route: "/servers",
+    navigation: true,
+    standalone: "full",
+    companion: "full",
+    offline: "cached-read",
+  },
+  {
     id: "eval",
     route: "/eval",
     navigation: true,
@@ -244,6 +252,7 @@ export const INTERNAL_ROUTE_EXEMPTIONS = [
   "/plugin-auth/callback",
   "/selection-toolbar",
   "/share-target",
+  "/tray-panel",
 ] as const
 
 const CONTRACT_BY_ID = new Map<string, SurfaceContract>(

@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cognia-diagnostics.fullname" . }}
+  labels:
+    {{- include "cognia-diagnostics.labels" . | nindent 4 }}
+data:
+  DIAGNOSTIC_BIND: "0.0.0.0:8080"
+  DATABASE_MAX_CONNECTIONS: {{ .Values.config.databaseMaxConnections | quote }}
+  {{- if and (not .Values.config.s3Endpoint) (not .Values.config.objectStoreLocalDir) }}
+    {{- fail "set config.s3Endpoint (object storage) or config.objectStoreLocalDir (PV-backed single replica): the diagnostic server refuses to start without one" }}
+  {{- end }}
+  {{- if and .Values.config.s3Endpoint .Values.config.objectStoreLocalDir }}
+    {{- fail "set only one of config.s3Endpoint and config.objectStoreLocalDir" }}
+  {{- end }}
+  {{- if .Values.config.s3Endpoint }}
+  S3_ENDPOINT: {{ .Values.config.s3Endpoint | quote }}
+  {{- end }}
+  {{- if .Values.config.objectStoreLocalDir }}
+  OBJECT_STORE_LOCAL_DIR: {{ .Values.config.objectStoreLocalDir | quote }}
+  {{- end }}
+  DIAGNOSTIC_RUN_MIGRATIONS: {{ .Values.config.runMigrations | quote }}
+  DIAGNOSTIC_INGEST_ENABLED: {{ .Values.config.ingestEnabled | quote }}
+  S3_BUCKET: {{ .Values.config.s3Bucket | quote }}
+  S3_REGION: {{ .Values.config.s3Region | quote }}
+  OIDC_ISSUER: {{ .Values.config.oidcIssuer | quote }}
+  OIDC_AUDIENCE: {{ .Values.config.oidcAudience | quote }}
+  OIDC_PUBLIC_KEY_PEM: {{ .Values.config.oidcPublicKeyPem | quote }}
+  KMS_ENDPOINT: {{ .Values.config.kmsEndpoint | quote }}
+  KMS_REGION: {{ .Values.config.kmsRegion | quote }}
+  KMS_KEY_ID: {{ .Values.config.kmsKeyId | quote }}
+  PROCESSING_ENABLED: {{ .Values.config.processingEnabled | quote }}
+  PROCESSING_BATCH_SIZE: {{ .Values.config.processingBatchSize | quote }}
+  PROCESSING_INTERVAL_MS: {{ .Values.config.processingIntervalMs | quote }}
+  MINIDUMP_STACKWALK_TIMEOUT_SECONDS: {{ .Values.config.minidumpStackwalkTimeoutSeconds | quote }}
+  RETENTION_ENABLED: {{ .Values.config.retentionEnabled | quote }}
+  RETENTION_INTERVAL_MS: {{ .Values.config.retentionIntervalMs | quote }}
+  RETENTION_BATCH_SIZE: {{ .Values.config.retentionBatchSize | quote }}
+  ALERT_ENABLED: {{ .Values.config.alertEnabled | quote }}
+  ALERT_INTERVAL_MS: {{ .Values.config.alertIntervalMs | quote }}
+  ALERT_BATCH_SIZE: {{ .Values.config.alertBatchSize | quote }}
+  ALERT_TIMEOUT_SECONDS: {{ .Values.config.alertTimeoutSeconds | quote }}
+  {{- if .Values.config.alertWebhookUrl }}
+  ALERT_WEBHOOK_URL: {{ .Values.config.alertWebhookUrl | quote }}
+  {{- end }}
+  ALERT_SMTP_FROM: {{ .Values.config.alertSmtpFrom | quote }}
+  ALERT_SMTP_TO: {{ .Values.config.alertSmtpTo | quote }}
+  PROCESSING_TEMP_DIR: /var/lib/cognia/diagnostics/tmp
+  RUST_LOG: cognia_diagnostic_server=info,tower_http=info

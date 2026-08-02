@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use cognia_terminal::host::ClientIdentity;
 use cognia_terminal::host::HostSessionInfo;
+use cognia_terminal::host::HostTransportState;
 use cognia_terminal::host_wire::{read_frame, write_frame};
 use cognia_terminal::osc633::IntegrationEvent;
 use cognia_terminal::protocol::{FrameKind, TerminalErrorCode, TerminalFrame, MAX_FRAME_PAYLOAD};
@@ -56,6 +57,12 @@ pub enum HostChannelEvent {
     ControllerChanged {
         controller: Option<String>,
     },
+    /// Transport health for this session — today, whether the host has parked
+    /// the producer because some attached client asked it to.
+    TransportState {
+        state: HostTransportState,
+        message: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -91,9 +98,26 @@ struct ExitPayload {
     code: Option<u32>,
 }
 
+/// Hello ack. `protocolFeatures` is absent on hosts older than this build, so
+/// it defaults to empty and every gated command degrades to a clean error.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AckPayload {
+    #[serde(default)]
+    protocol_features: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct ControllerPayload {
     controller: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TransportStatePayload {
+    state: HostTransportState,
+    #[serde(default)]
+    message: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,6 +136,12 @@ struct BridgeClient {
     channels: Mutex<HashMap<String, Channel<HostSeqEvent>>>,
     next_sequence: AtomicU64,
     closed: AtomicBool,
+    /// `protocolFeatures` from the hello ack. Empty until the handshake lands,
+    /// and empty forever against a host old enough not to send the field —
+    /// which is exactly the case [`BridgeClient::supports`] exists to detect,
+    /// since the bridge happily reuses an already-running host binary that may
+    /// predate this build (start-at-login login service).
+    features: Mutex<Vec<String>>,
 }
 
 impl BridgeClient {
@@ -125,6 +155,7 @@ impl BridgeClient {
             channels: Mutex::new(HashMap::new()),
             next_sequence: AtomicU64::new(1),
             closed: AtomicBool::new(false),
+            features: Mutex::new(Vec::new()),
         });
 
         let writer_client = Arc::clone(&client);
@@ -158,6 +189,18 @@ impl BridgeClient {
 
     fn is_open(&self) -> bool {
         !self.closed.load(Ordering::SeqCst)
+    }
+
+    /// Whether the connected host advertised `feature` in its hello ack.
+    /// Callers of post-1.0 frame kinds must gate on this — an older host
+    /// answers an unknown kind with `invalid_request`, and a *much* older one
+    /// would not decode the frame at all.
+    fn supports(&self, feature: &str) -> bool {
+        self.features.lock().iter().any(|known| known == feature)
+    }
+
+    fn set_features(&self, features: Vec<String>) {
+        *self.features.lock() = features;
     }
 
     async fn request(
@@ -271,6 +314,14 @@ impl BridgeClient {
                     first_available: payload.first_available,
                     last_available: payload.last_available,
                 }),
+            FrameKind::TransportState => {
+                serde_json::from_slice::<TransportStatePayload>(&frame.payload)
+                    .ok()
+                    .map(|payload| HostChannelEvent::TransportState {
+                        state: payload.state,
+                        message: payload.message,
+                    })
+            }
             _ => None,
         };
         if let Some(event) = event {
@@ -333,6 +384,7 @@ impl TerminalHostBridgeState {
         }
         let endpoint = default_terminal_host_endpoint();
         if let Ok(client) = BridgeClient::connect(&endpoint).await {
+            send_hello(&client, app).await;
             *slot = Some(Arc::clone(&client));
             return Ok(client);
         }
@@ -347,6 +399,7 @@ impl TerminalHostBridgeState {
             tokio::time::sleep(START_RETRY_DELAY).await;
             match BridgeClient::connect(&endpoint).await {
                 Ok(client) => {
+                    send_hello(&client, app).await;
                     *slot = Some(Arc::clone(&client));
                     return Ok(client);
                 }
@@ -355,6 +408,82 @@ impl TerminalHostBridgeState {
         }
         Err(last_error)
     }
+
+    /// The already-connected client, or `None`.
+    ///
+    /// Never starts the host: background readers (the managed-process sampler)
+    /// must not spawn a terminal host the user never asked for. Uses
+    /// `try_lock`, so a concurrent connect attempt yields `None` rather than
+    /// blocking a sampler tick.
+    fn existing_client(&self) -> Option<Arc<BridgeClient>> {
+        let slot = self.client.try_lock().ok()?;
+        slot.as_ref()
+            .filter(|client| client.is_open())
+            .map(Arc::clone)
+    }
+}
+
+/// Push the app's view of the terminal host's PATH and record the host's
+/// advertised capabilities. Best-effort: a host that rejects or ignores the
+/// hello still serves terminals, just without the app-managed CLI directories.
+async fn send_hello<R: Runtime>(client: &BridgeClient, app: &AppHandle<R>) {
+    let payload = serde_json::json!({
+        "pathInjection": path_injection_payload(&cognia_terminal::commands::build_cli_path_injection(app)),
+    });
+    match client
+        .request_json(FrameKind::Hello, Uuid::nil(), &payload)
+        .await
+    {
+        Ok(frame) => {
+            if let Ok(ack) = serde_json::from_slice::<AckPayload>(&frame.payload) {
+                client.set_features(ack.protocol_features);
+            }
+        }
+        Err(error) => {
+            log::warn!("terminal host hello failed: {error}");
+        }
+    }
+}
+
+/// Re-push the PATH view after the in-app CLI download registers a new managed
+/// directory, so the running host resolves `cognia` for the *next* shell
+/// without an app restart.
+///
+/// Already-running shells keep their old PATH — a PTY's environment is fixed at
+/// `execve`, and rewriting it would mean injecting `export PATH=` into the
+/// user's live shell.
+pub async fn resync_terminal_host_path<R: Runtime>(app: &AppHandle<R>) {
+    let Some(state) = app.try_state::<TerminalHostBridgeState>() else {
+        return;
+    };
+    let Some(client) = state.existing_client() else {
+        return;
+    };
+    send_hello(&client, app).await;
+}
+
+/// Wire form of a [`PathInjection`], dropping directories that are not valid
+/// UTF-8. Serde's `PathBuf` impl errors on those, which would fail the entire
+/// hello — config, profiles and all — over one odd `$HOME`.
+fn path_injection_payload(path: &cognia_terminal::session::PathInjection) -> serde_json::Value {
+    fn encode(dirs: &[PathBuf]) -> Vec<String> {
+        dirs.iter()
+            .filter_map(|dir| match dir.to_str() {
+                Some(text) => Some(text.to_string()),
+                None => {
+                    log::warn!(
+                        "terminal host PATH entry {} is not valid UTF-8; skipping",
+                        dir.display()
+                    );
+                    None
+                }
+            })
+            .collect()
+    }
+    serde_json::json!({
+        "prepend": encode(&path.prepend),
+        "append": encode(&path.append),
+    })
 }
 
 fn spawn_terminal_host(
@@ -725,6 +854,33 @@ pub async fn terminal_take_control<R: Runtime>(
     Ok(())
 }
 
+/// Ask the host to park (or resume) a session's producer.
+///
+/// Issued by the renderer's xterm backpressure watermarks. Gated on the host
+/// advertising `flowControl` so a login-service host older than this build
+/// fails with a clear message instead of an opaque `invalid_request` — the
+/// renderer latches the capability off on the first refusal.
+#[tauri::command]
+pub async fn terminal_set_flow_control<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    id: String,
+    paused: bool,
+) -> Result<(), String> {
+    let client = state.client(&app).await?;
+    if !client.supports("flowControl") {
+        return Err("terminal host does not support flow control".into());
+    }
+    client
+        .request_json(
+            FrameKind::FlowControl,
+            parse_session_id(&id)?,
+            &serde_json::json!({ "paused": paused }),
+        )
+        .await?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn terminal_release_control<R: Runtime>(
     app: AppHandle<R>,
@@ -994,6 +1150,56 @@ fn terminal_lan_url(state: &crate::companion_api::CompanionServerState) -> Optio
 mod tests {
     use super::*;
 
+    /// One non-UTF-8 directory must not take the whole hello down with it —
+    /// serde's `PathBuf` impl errors on those, and the hello also carries the
+    /// host config and the profile table.
+    #[test]
+    fn path_injection_payload_skips_non_utf8_directories() {
+        let mut prepend = vec![PathBuf::from("/opt/cognia/bin")];
+        #[cfg(unix)]
+        {
+            use std::ffi::OsString;
+            use std::os::unix::ffi::OsStringExt;
+            prepend.push(PathBuf::from(OsString::from_vec(vec![0x2f, 0xff, 0xfe])));
+        }
+        let payload = path_injection_payload(&cognia_terminal::session::PathInjection {
+            prepend,
+            append: vec![PathBuf::from("/home/dev/.cargo/bin")],
+        });
+        assert_eq!(payload["prepend"], serde_json::json!(["/opt/cognia/bin"]));
+        assert_eq!(
+            payload["append"],
+            serde_json::json!(["/home/dev/.cargo/bin"])
+        );
+    }
+
+    /// Capability gating is what lets this build talk to an already-running
+    /// host binary that predates the feature.
+    #[test]
+    fn features_from_the_hello_ack_gate_post_release_commands() {
+        let (writer, _reader) = mpsc::channel(1);
+        let client = BridgeClient {
+            writer,
+            pending: Mutex::new(HashMap::new()),
+            channels: Mutex::new(HashMap::new()),
+            next_sequence: AtomicU64::new(1),
+            closed: AtomicBool::new(false),
+            features: Mutex::new(Vec::new()),
+        };
+        assert!(!client.supports("flowControl"));
+        client.set_features(vec!["pathInjection".into(), "flowControl".into()]);
+        assert!(client.supports("flowControl"));
+        assert!(!client.supports("history"));
+    }
+
+    /// An older host answers the hello without `protocolFeatures`; that must
+    /// deserialize to an empty list rather than failing the handshake.
+    #[test]
+    fn ack_without_protocol_features_degrades_to_an_empty_list() {
+        let ack: AckPayload = serde_json::from_slice(br#"{"ok":true,"hostId":"h"}"#).unwrap();
+        assert!(ack.protocol_features.is_empty());
+    }
+
     #[tokio::test]
     async fn timed_out_requests_are_removed_from_the_pending_map() {
         let (writer, _reader) = mpsc::channel(1);
@@ -1003,6 +1209,7 @@ mod tests {
             channels: Mutex::new(HashMap::new()),
             next_sequence: AtomicU64::new(1),
             closed: AtomicBool::new(false),
+            features: Mutex::new(Vec::new()),
         };
         let (sender, receiver) = oneshot::channel();
         client.pending.lock().insert(7, sender);

@@ -49,10 +49,15 @@ jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() },
 }))
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { toast } from "sonner"
 import { useSkillsStore } from "@/stores/skills"
+import {
+  __resetRecorderAvailabilityForTesting,
+  setRecorderAvailability,
+} from "@/lib/skills/recording/recorder-availability"
+import { useRecorderStore } from "@/stores/skills/recorder-store"
 import { SkillPanelToolbar } from "./skill-panel-toolbar"
 
 beforeEach(() => {
@@ -105,5 +110,36 @@ describe("SkillPanelToolbar", () => {
     await user.click(item)
     expect(useSkillsStore.getState().urlInstallOpen).toBe(true)
     useSkillsStore.setState({ urlInstallOpen: false })
+  })
+})
+
+describe("the Record Skill entry", () => {
+  beforeEach(() => {
+    __resetRecorderAvailabilityForTesting()
+    useRecorderStore.getState().reset()
+  })
+
+  it("is absent until the owning plugin publishes", () => {
+    // Gated on the plugin, not on `isTauri()`: the plugin holds the native
+    // grants, so disabling it must take every entry point with it.
+    render(<SkillPanelToolbar />)
+    expect(screen.queryByText("entry.toolbarButton")).not.toBeInTheDocument()
+  })
+
+  it("appears once the plugin publishes, and opens the global recorder", async () => {
+    setRecorderAvailability({ available: true, pluginId: "cognia-skill-recorder" })
+    render(<SkillPanelToolbar />)
+    await userEvent.click(screen.getByText("entry.toolbarButton"))
+    expect(useRecorderStore.getState().sheetOpen).toBe(true)
+    expect(useRecorderStore.getState().phase).toBe("setup")
+  })
+
+  it("disappears again when the plugin is turned off", async () => {
+    setRecorderAvailability({ available: true, pluginId: "cognia-skill-recorder" })
+    render(<SkillPanelToolbar />)
+    await act(async () => {
+      setRecorderAvailability({ available: false, pluginId: null })
+    })
+    expect(screen.queryByText("entry.toolbarButton")).not.toBeInTheDocument()
   })
 })

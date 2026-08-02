@@ -41,6 +41,71 @@ describe("terminal protocol", () => {
     )
   })
 
+  it("mirrors the Rust frame-kind discriminants exactly", () => {
+    // The wire encodes numbers, so a rename is free but a renumber is a
+    // breaking change for every installed client. `frame_kind_discriminants_
+    // are_frozen` in crates/cognia-terminal/src/protocol.rs is the other half.
+    expect({
+      Hello: TerminalFrameKind.Hello,
+      List: TerminalFrameKind.List,
+      Spawn: TerminalFrameKind.Spawn,
+      Attach: TerminalFrameKind.Attach,
+      Detach: TerminalFrameKind.Detach,
+      TakeControl: TerminalFrameKind.TakeControl,
+      ReleaseControl: TerminalFrameKind.ReleaseControl,
+      Resize: TerminalFrameKind.Resize,
+      Kill: TerminalFrameKind.Kill,
+      Ack: TerminalFrameKind.Ack,
+      Stdin: TerminalFrameKind.Stdin,
+      Stdout: TerminalFrameKind.Stdout,
+      HostSnapshot: TerminalFrameKind.HostSnapshot,
+      SessionSnapshot: TerminalFrameKind.SessionSnapshot,
+      Integration: TerminalFrameKind.Integration,
+      ControllerChanged: TerminalFrameKind.ControllerChanged,
+      ReplayGap: TerminalFrameKind.ReplayGap,
+      TransportState: TerminalFrameKind.TransportState,
+      Exit: TerminalFrameKind.Exit,
+      Error: TerminalFrameKind.Error,
+      FlowControl: TerminalFrameKind.FlowControl,
+      HistoryQuery: TerminalFrameKind.HistoryQuery,
+      HistorySnapshot: TerminalFrameKind.HistorySnapshot,
+    }).toEqual({
+      Hello: 1,
+      List: 2,
+      Spawn: 3,
+      Attach: 4,
+      Detach: 5,
+      TakeControl: 6,
+      ReleaseControl: 7,
+      Resize: 8,
+      Kill: 9,
+      Ack: 10,
+      Stdin: 11,
+      Stdout: 12,
+      HostSnapshot: 13,
+      SessionSnapshot: 14,
+      Integration: 15,
+      ControllerChanged: 16,
+      ReplayGap: 17,
+      TransportState: 18,
+      Exit: 19,
+      Error: 20,
+      FlowControl: 21,
+      HistoryQuery: 22,
+      HistorySnapshot: 23,
+    })
+  })
+
+  it("decodes every assigned frame kind and rejects the first unassigned one", () => {
+    for (let kind = 1; kind <= TerminalFrameKind.HistorySnapshot; kind += 1) {
+      const encoded = encodeTerminalFrame(makeTerminalFrame(kind as TerminalFrameKind))
+      expect(decodeTerminalFrame(encoded).kind).toBe(kind)
+    }
+    const unknown = encodeTerminalFrame(makeTerminalFrame(TerminalFrameKind.List))
+    unknown[4] = TerminalFrameKind.HistorySnapshot + 1
+    expect(() => decodeTerminalFrame(unknown)).toThrow("unknown terminal frame kind")
+  })
+
   it("rejects bad magic and truncated payloads", () => {
     const encoded = encodeTerminalFrame(makeTerminalFrame(TerminalFrameKind.List))
     encoded[0] = 0

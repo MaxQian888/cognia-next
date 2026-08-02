@@ -15,7 +15,7 @@ import { fileDiffKey, type GitDiff, type GitFileChange, type GitHunk } from "@/t
 import { useGitStore } from "@/stores/git/git-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
-import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
+import type { GitActionResult } from "@/hooks/git/use-git-actions"
 import { DiffViewer, type HunkAction } from "./diff-viewer"
 import { HunkReviewList } from "./hunk-review-list"
 import { AiExplainPopover } from "./ai-explain-popover"
@@ -24,7 +24,11 @@ interface DiffPaneProps {
   rootDir: string
   path: string
   staged: boolean
-  actions: Pick<UseGitActionsResult, "stage" | "unstage" | "discard">
+  actions: {
+    stage: (paths: string[], patch?: string) => Promise<GitActionResult | void>
+    unstage: (paths: string[], patch?: string) => Promise<GitActionResult | void>
+    discard: (paths: string[], patch?: string) => Promise<GitActionResult | void>
+  }
   density?: "compact" | "touch"
   /**
    * Stage this diff as context for the next chat message.
@@ -81,8 +85,9 @@ export function DiffPane({
   }, [rootDir, path, staged, key, cachedDiff, cacheDiff, statusStamp])
 
   const runHunk = useCallback(
-    async (fn: (patch: string) => Promise<void>, hunk: GitHunk) => {
-      await fn(hunk.patch)
+    async (fn: (patch: string) => Promise<GitActionResult | void>, hunk: GitHunk) => {
+      const failure = await fn(hunk.patch)
+      if (failure) return
       invalidateDiff(fileDiffKey(path, staged))
       // status refresh (triggered inside the action) re-runs `load`.
     },

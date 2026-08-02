@@ -92,6 +92,35 @@ describe("RunDetailSheet", () => {
     const err = screen.getByTestId("run-sheet-error")
     expect(err).toHaveTextContent("boom")
     expect(err).toHaveTextContent("timeout")
+    // No stack → no disclosure at all.
+    expect(screen.queryByTestId("run-sheet-stack")).toBeNull()
+  })
+
+  it("keeps a stack trace behind a closed, bounded disclosure", () => {
+    render(
+      <RunDetailSheet
+        open={true}
+        onOpenChange={() => {}}
+        run={makeRun({
+          status: "failed",
+          result: undefined,
+          error: { message: "boom", stack: "at a()\nat b()\nat c()" },
+        })}
+      />
+    )
+    const stack = screen.getByTestId("run-sheet-stack") as HTMLDetailsElement
+    expect(stack.open).toBe(false)
+    // Bounded + wrapping, so opening it can't stretch the sheet indefinitely.
+    const pre = stack.querySelector("pre")!
+    expect(pre.className).toContain("max-h-64")
+    expect(pre.className).toContain("overflow-auto")
+    expect(pre.className).toContain("break-words")
+  })
+
+  it("bounds the payload and result dumps so a large blob scrolls in place", () => {
+    render(<RunDetailSheet open={true} onOpenChange={() => {}} run={makeRun()} />)
+    expect(screen.getByTestId("run-sheet-payload").className).toContain("max-h-64")
+    expect(screen.getByTestId("run-sheet-result").className).toContain("overflow-auto")
   })
 
   it("logs are collapsed by default and reveal when the toggle is clicked", () => {
@@ -99,6 +128,42 @@ describe("RunDetailSheet", () => {
     expect(screen.queryByTestId("run-sheet-logs")).toBeNull()
     fireEvent.click(screen.getByTestId("run-sheet-logs-toggle"))
     expect(screen.getByTestId("run-sheet-logs")).toBeInTheDocument()
+  })
+
+  it("colours every log level once revealed", () => {
+    render(
+      <RunDetailSheet
+        open={true}
+        onOpenChange={() => {}}
+        run={makeRun({
+          logs: [
+            { ts: 0, level: "debug", message: "dbg" },
+            { ts: 1, level: "info", message: "inf" },
+            { ts: 2, level: "warn", message: "wrn" },
+            { ts: 3, level: "error", message: "err" },
+          ],
+        })}
+      />
+    )
+    fireEvent.click(screen.getByTestId("run-sheet-logs-toggle"))
+    const logs = screen.getByTestId("run-sheet-logs")
+    expect(logs.querySelector(".text-muted-foreground")).not.toBeNull()
+    expect(logs.querySelector(".text-blue-500")).not.toBeNull()
+    expect(logs.querySelector(".text-yellow-500")).not.toBeNull()
+    expect(logs.querySelector(".text-red-500")).not.toBeNull()
+  })
+
+  it("falls back to String() for a payload JSON.stringify cannot serialize", () => {
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+    render(
+      <RunDetailSheet
+        open={true}
+        onOpenChange={() => {}}
+        run={makeRun({ payload: circular, result: undefined })}
+      />
+    )
+    expect(screen.getByTestId("run-sheet-payload")).toHaveTextContent("[object Object]")
   })
 
   it("hides the logs section entirely when the run has no logs", () => {

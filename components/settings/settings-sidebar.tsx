@@ -129,7 +129,11 @@ export function SettingsSidebar({ activeSection, onSelect, searchQuery, onSearch
           </InputGroup>
         )}
       </SidebarHeader>
-      <SidebarContent className="p-2">
+      {/* Icon mode drops the horizontal padding: the rail is only
+          `--sidebar-width-icon` (3rem) wide and the menu buttons are forced to
+          `size-8` (2rem), so `SidebarContent` + `SidebarGroup` padding would
+          leave 1rem and clip every icon in half. */}
+      <SidebarContent className="p-2 group-data-[collapsible=icon]:px-0">
         {filtered.length > 0 ? (
           SETTINGS_GROUP_ORDER.map((group) => {
             const items = grouped[group]
@@ -147,10 +151,13 @@ export function SettingsSidebar({ activeSection, onSelect, searchQuery, onSearch
                 }}
                 className="group/collapsible"
               >
-                <SidebarGroup className="py-1">
+                <SidebarGroup className="py-1 group-data-[collapsible=icon]:px-0">
                   <SidebarGroupLabel
                     asChild
-                    className="px-2 text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider"
+                    // In icon mode the base label is only `opacity-0` + `-mt-8`,
+                    // so it still overlays (and swallows clicks on) the first
+                    // menu item — make it inert there.
+                    className="px-2 text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider group-data-[collapsible=icon]:pointer-events-none"
                   >
                     <CollapsibleTrigger
                       disabled={searching}
@@ -164,7 +171,7 @@ export function SettingsSidebar({ activeSection, onSelect, searchQuery, onSearch
                   </SidebarGroupLabel>
                   <CollapsibleContent className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up motion-reduce:animate-none">
                     <SidebarGroupContent>
-                      <SidebarMenu>
+                      <SidebarMenu className="group-data-[collapsible=icon]:items-center">
                         {items.map((item) => {
                           const Icon = item.icon
                           return (
@@ -176,10 +183,14 @@ export function SettingsSidebar({ activeSection, onSelect, searchQuery, onSearch
                                   setOpenMobile(false)
                                 }}
                                 tooltip={t(`settings.descriptions.${item.descriptionKey}` as never)}
-                                className="px-2.5 py-2 h-auto"
+                                className="px-2.5 py-2 h-auto group-data-[collapsible=icon]:justify-center"
                               >
                                 <Icon className="h-4 w-4" />
-                                <div className="flex flex-col gap-0.5 text-left leading-none flex-1 min-w-0">
+                                {/* Not a `span:last-child`, so the base
+                                    icon-mode rules don't hide it — without this
+                                    the label keeps consuming the 2rem button
+                                    and pushes the icon out of view. */}
+                                <div className="flex flex-col gap-0.5 text-left leading-none flex-1 min-w-0 group-data-[collapsible=icon]:hidden">
                                   <span className="font-medium truncate">
                                     {t(`settings.tabs.${item.labelKey}` as never)}
                                   </span>

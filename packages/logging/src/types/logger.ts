@@ -27,9 +27,9 @@ export interface Logger {
    * `spanId` (and `parentSpanId` when nested); on completion a debug entry
    * named `name` is emitted with `phase: "end"` and the measured `durationMs`.
    */
-  span<T>(name: string, fn: () => T): T
+  span<T>(name: string, fn: (logger: Logger) => T): T
   /** Async variant of {@link Logger.span}. */
-  spanAsync<T>(name: string, fn: () => Promise<T>): Promise<T>
+  spanAsync<T>(name: string, fn: (logger: Logger) => Promise<T>): Promise<T>
 }
 
 /**

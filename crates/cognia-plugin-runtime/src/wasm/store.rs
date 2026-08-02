@@ -101,11 +101,13 @@ pub fn build_store(
     memory_limit_mb: u32,
     call_timeout_ms: u64,
 ) -> wasmtime::Result<Store<HostState>> {
+    let plugin_id = plugin_id.into();
     let mut wasi_builder = WasiCtxBuilder::new();
     wasi_builder
-        .inherit_stdio()
+        // Guest stdout/stderr remain closed so plugins cannot bypass the
+        // host-owned structured logger or create unmanaged transports.
         // The plugin gets a sanitized $PATH-free env; we pass nothing.
-        .args(&[plugin_id.into() as String]);
+        .args(std::slice::from_ref(&plugin_id));
 
     if !data_dir.exists() {
         std::fs::create_dir_all(data_dir).map_err(|e| {
@@ -136,7 +138,7 @@ pub fn build_store(
     let mut store = Store::new(
         engine(),
         HostState {
-            plugin_id: String::new(), // overwritten below for clarity
+            plugin_id,
             capabilities,
             // Empty by default; `build_activation_store` mirrors the plugin's
             // declared `shellCommands` in after construction.
@@ -221,6 +223,7 @@ mod tests {
         )
         .expect("store builds");
         assert!(store.data().capabilities.allows("notification"));
+        assert_eq!(store.data().plugin_id, plugin_id);
         assert_eq!(store.data().call_timeout_ms, DEFAULT_CALL_TIMEOUT_MS);
     }
 }

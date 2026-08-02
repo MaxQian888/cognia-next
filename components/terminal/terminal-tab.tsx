@@ -9,7 +9,7 @@
  *   * Clicking the × kills + removes the session.
  */
 
-import type { MouseEvent as ReactMouseEvent } from "react"
+import type { MouseEvent as ReactMouseEvent, Ref } from "react"
 
 import { useTranslations } from "next-intl"
 import { XIcon } from "lucide-react"
@@ -25,9 +25,31 @@ export interface TerminalTabProps {
   onClose: (id: string) => void
   /** Right-click handler — used by the tab context menu (Wave 3A). */
   onContextMenu?: (e: ReactMouseEvent<HTMLDivElement>) => void
+  /**
+   * React 19 ref-as-prop. Required so a Radix `ContextMenuTrigger asChild`
+   * parent — and dnd-kit's sortable wrapper — can anchor to the tab element.
+   */
+  ref?: Ref<HTMLDivElement>
+  /** Renderer backpressure is holding this session's output back. */
+  throttled?: boolean
+  /**
+   * Extra DOM props injected by an `asChild` / drag-listener parent
+   * (`data-state`, `aria-*`, pointer handlers). Spread first so the tab's own
+   * className and handlers still win.
+   */
+  [key: string]: unknown
 }
 
-export function TerminalTab({ row, active, onSelect, onClose, onContextMenu }: TerminalTabProps) {
+export function TerminalTab({
+  row,
+  active,
+  onSelect,
+  onClose,
+  onContextMenu,
+  ref,
+  throttled,
+  ...rest
+}: TerminalTabProps) {
   const t = useTranslations("terminal.tab")
 
   const statusKey =
@@ -50,12 +72,15 @@ export function TerminalTab({ row, active, onSelect, onClose, onContextMenu }: T
 
   return (
     <div
+      {...rest}
+      ref={ref}
       role="tab"
       data-testid="terminal-tab"
       data-id={row.id}
       data-active={active}
       data-status={row.status}
       data-agent-trusted={row.agentTrusted ? "true" : undefined}
+      data-throttled={throttled ? "true" : undefined}
       aria-selected={active}
       onClick={() => onSelect(row.id)}
       onContextMenu={onContextMenu}
@@ -72,7 +97,9 @@ export function TerminalTab({ row, active, onSelect, onClose, onContextMenu }: T
         active
           ? "border-b-foreground bg-background font-medium text-foreground"
           : "border-b-transparent text-muted-foreground hover:bg-muted/50",
-        row.agentTrusted && "ring-1 ring-amber-500/40"
+        row.agentTrusted && "ring-1 ring-amber-500/40",
+        // A throttled background tab must be legible without switching to it.
+        throttled && "ring-1 ring-orange-500/50"
       )}
     >
       <MotionStatusSwap swapKey={`${row.status}:${row.exitCode ?? ""}`}>

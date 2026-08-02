@@ -1,0 +1,32 @@
+{
+  "name": "@cognia/agent",
+  "version": "0.1.0",
+  "description": "Embed the Cognia coding agent in a Node process. One persistent session runtime — the same one behind `cognia-agent run`, the TUI and the RPC server — with canonical streaming events, durable sessions and a structured result contract.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build/build-agent-sdk.mjs",
+    "test": "pnpm -w exec jest packages/agent",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  }
+}

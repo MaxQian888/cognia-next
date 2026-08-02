@@ -69,7 +69,7 @@ For the Rust reader/waiter threads to surface both the replay buffer's assigned 
 
 This is the contract change that lets the replay buffer remain the single source of truth for event ordering — consumers either honor seq or explicitly ignore it.
 
-### D6 — WebRTC datachannel transport — designed, deferred
+### D6 — WebRTC datachannel transport — **shipped** (was: designed, deferred)
 
 ADR-0021's signaling stack (`src-tauri/src/companion_api/signaling/{mod,client,dispatch,peer}.rs`, ~5000 LOC across signaling + dispatch + envelope) shipped a `cognia.v2` JSON-only data channel for the RPC + event plane. Carrying terminal traffic over the same peer requires either:
 
@@ -167,7 +167,7 @@ Net: **121 + 15 + 8 = 144 new/extended tests, all passing.**
 
 ## Follow-ups explicitly scoped out
 
-1. **WebRTC terminal transport** — `pick-transport.ts` returns `["ws"]` on Capacitor today; the chain will extend to `["ws", "webrtc"]` once the Rust side ships. The TS-side `transport-webrtc.ts` will subclass `BaseTerminalSession`; the Rust side needs a new `rtc_terminal.rs` module + a `cognia.v2.terminal` data channel label in `signaling/peer.rs`. Estimate: ~400 LOC across Rust + TS.
+1. ~~**WebRTC terminal transport**~~ — **shipped.** `selectTerminalTransportChain()` returns `["ws", "webrtc"]` on Capacitor and for a desktop driving a remote host; `RemoteTerminalSession` implements `spawnWan` / `listWan` / `reattachWan` over the companion data channel (`lib/terminal/transport-ws.ts`). This entry is left in place because §D6 below still describes it as deferred.
 2. **Remote shell-integration script delivery** — mobile WS sessions deliberately disable OSC 633 today (the integration scripts are local file paths the remote shell can't resolve). A future minor version can ship the script bytes over the WS handshake so mobile gets prompt markers + command tracking.
 3. **Server-side workflow execution + consent broker bridge** — `action.system.terminal` is renderer-only. Headless V2 server workflows that want to invoke the dock need a Tauri command bridge for the broker (or restrict to the headless `terminal_repl_*` path).
 4. **More shells** — elvish / tcsh / xonsh would each need a new `shell-integration.<x>` script + `ShellKind` variant. The pattern is established; the work is per-shell.

@@ -538,5 +538,27 @@ describe("ChatPane", () => {
       expect(props?.override).toBe(emptyState)
       storeState.messages = saved
     })
+
+    it("passes the usage dashboard to the generic welcome", () => {
+      const saved = storeState.messages
+      storeState.messages = []
+      EmptyChatState.mockClear()
+      EmptyChatState.mockReturnValue(null)
+      render(<ChatPane {...makeProps()} />)
+      expect(EmptyChatState.mock.calls.at(-1)?.[0]?.statsSlot).toBeTruthy()
+      storeState.messages = saved
+    })
+
+    it("omits the usage dashboard on surfaces that replace the welcome copy", () => {
+      const saved = storeState.messages
+      storeState.messages = []
+      EmptyChatState.mockClear()
+      EmptyChatState.mockReturnValue(null)
+      // The workflow-editor chat tab supplies its own copy; a generic usage
+      // dashboard underneath it would read as off-topic.
+      render(<ChatPane {...makeProps()} emptyState={{ title: "Build a workflow" }} />)
+      expect(EmptyChatState.mock.calls.at(-1)?.[0]?.statsSlot).toBeUndefined()
+      storeState.messages = saved
+    })
   })
 })

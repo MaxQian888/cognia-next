@@ -67,4 +67,19 @@ describe("RestoreDialog", () => {
     })
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
+
+  it("stays open after a failed restore so the source can be corrected", async () => {
+    const actions = makeActions()
+    actions.restore.mockResolvedValue({ kind: "notFound", detail: "unknown revision" })
+    const onOpenChange = jest.fn()
+    render(<RestoreDialog rootDir="/r" path="a.ts" onOpenChange={onOpenChange} actions={actions} />)
+    await screen.findByTestId("restore-dialog")
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("restore-confirm"))
+    })
+
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    expect(screen.getByTestId("restore-dialog")).toBeInTheDocument()
+  })
 })

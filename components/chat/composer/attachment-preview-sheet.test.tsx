@@ -155,6 +155,15 @@ describe("AttachmentPreviewSheet — model view", () => {
     expect(screen.getByText("Reading…")).toBeInTheDocument()
   })
 
+  // The panel and the chip describe the same wait, so they show the same
+  // indicator — opening the panel mid-wait is visually continuous.
+  it("reports an image's wait as analysis, matching its chip", async () => {
+    renderSheet({ target: IMG, state: { status: "extracting", sizeBytes: 0 } })
+    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    expect(screen.getAllByText("Analyzing image…").length).toBeGreaterThan(0)
+    expect(screen.queryByText("Reading…")).not.toBeInTheDocument()
+  })
+
   it("shows the downscale rule and wire size for an image", async () => {
     renderSheet({
       target: IMG,

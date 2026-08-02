@@ -5,6 +5,8 @@ description: "Closes the gap between Cognia's large LLM-provider configuration s
 
 # ADR-0043 — LLM provider execution & local-provider support
 
+> Protocol-aware advisory benchmarks are defined by [ADR-0104 — Provider diagnostics control plane](/docs/en/adr/0104-provider-diagnostics-control-plane).
+
 **Status**: Accepted (design); implemented incrementally — verify per-phase against the code. On `feat/unified-plan-execution-hub`, the **non-Anthropic dispatcher** work — gated tool-calling (Phase 2), AI SDK v6 field mapping (`text` / `output` / `tool-error`), built-in local-engine protocol resolution, and `modelParams` forwarding — was recovered from the `qc-stash-backup` snapshot and landed during the built-in-agent P0 wave (2026-06-03). The remaining send-path wiring for **Phase 3 (multi-key rotation)** and **Phase 4 (routing telemetry)** is **not yet on this branch**: the types/UI exist, but `selectApiKey` / `recordProviderOutcome` are not yet called from `build-options` / `use-claude-chat` here — deferred to the provider-routing wave.
 **Authors**: Max Qian + Claude Opus 4.8
 **Builds on**: the multi-provider port (`provider`/`providerCredentials` on `SendOptions`, the `anthropic` vs `ai-sdk` dispatch split), `lib/ai/provider-consumption.ts`, the models.dev catalog sync, and the existing provider settings UI (`components/settings/provider/*`, ~50 components)

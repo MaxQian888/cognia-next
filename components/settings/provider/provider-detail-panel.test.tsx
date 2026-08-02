@@ -27,6 +27,7 @@ jest.mock("next-intl", () => ({
       "tabs.config": "Config",
       "tabs.models": "Models",
       "tabs.cost": "Cost",
+      "tabs.diagnostics": "Diagnostics",
       "tabs.advanced": "Advanced",
     }
     return map[key] ?? key
@@ -49,6 +50,7 @@ describe("ProviderDetailPanel", () => {
         configTab={<div />}
         modelsTab={<div />}
         costTab={<div />}
+        diagnosticsTab={<div />}
         advancedTab={<div />}
       />
     )
@@ -60,6 +62,7 @@ describe("ProviderDetailPanel", () => {
     expect(screen.getByText("Config")).toBeInTheDocument()
     expect(screen.getByText("Models")).toBeInTheDocument()
     expect(screen.getByText("Cost")).toBeInTheDocument()
+    expect(screen.getByText("Diagnostics")).toBeInTheDocument()
     expect(screen.getByText("Advanced")).toBeInTheDocument()
   })
 
@@ -80,7 +83,83 @@ describe("ProviderDetailPanel", () => {
     expect(screen.getByTestId("local-config")).toBeInTheDocument()
     expect(screen.queryByText("Models")).not.toBeInTheDocument()
     expect(screen.queryByText("Cost")).not.toBeInTheDocument()
+    expect(screen.queryByText("Diagnostics")).not.toBeInTheDocument()
     expect(screen.queryByText("Advanced")).not.toBeInTheDocument()
+  })
+
+  describe("tab layout", () => {
+    // Radix activates a tab on mousedown, not click.
+    const openModels = () => fireEvent.mouseDown(screen.getByRole("tab", { name: "Models" }))
+
+    it("lets the tab triggers share the pane width instead of overflowing it", () => {
+      const { container } = render(
+        <ProviderDetailPanel
+          provider={{ id: "openai", name: "OpenAI" }}
+          configTab={<div />}
+          modelsTab={<div />}
+        />
+      )
+      const list = container.querySelector('[data-slot="tabs-list"]')
+      expect(list).toHaveClass("w-full", "min-w-0")
+      container
+        .querySelectorAll('[data-slot="tabs-trigger"]')
+        .forEach((trigger) => expect(trigger).toHaveClass("min-w-0", "flex-1"))
+    })
+
+    it("keeps the Models tab out of the shared scroller so it can pin its own toolbar", () => {
+      const { container } = render(
+        <ProviderDetailPanel
+          provider={{ id: "openai", name: "OpenAI" }}
+          configTab={<div data-testid="config-body" />}
+          modelsTab={<div data-testid="models-body" />}
+        />
+      )
+      const scroller = container.querySelector('[data-slot="scroll-area"]')
+      expect(scroller).toContainElement(screen.getByTestId("config-body"))
+
+      openModels()
+      expect(container.querySelector('[data-slot="scroll-area"]')).not.toContainElement(
+        screen.getByTestId("models-body")
+      )
+    })
+
+    it("takes the shared scroller out of the layout while Models is active", () => {
+      // Left in place it claimed half the pane as an empty box, because every
+      // one of its tab bodies is inactive on the Models tab.
+      const { container } = render(
+        <ProviderDetailPanel
+          provider={{ id: "openai", name: "OpenAI" }}
+          configTab={<div />}
+          modelsTab={<div />}
+        />
+      )
+      expect(container.querySelector('[data-slot="scroll-area"]')).not.toHaveClass("hidden")
+      openModels()
+      expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass("hidden")
+    })
+
+    it("falls back to Config when the active tab's slot disappears", () => {
+      // Selecting a local engine drops the Models slot; the panel must not sit
+      // on a tab that no longer has a trigger to leave it.
+      const { rerender } = render(
+        <ProviderDetailPanel
+          provider={{ id: "openai", name: "OpenAI" }}
+          configTab={<div data-testid="config-body" />}
+          modelsTab={<div data-testid="models-body" />}
+        />
+      )
+      openModels()
+      expect(screen.getByTestId("models-body")).toBeInTheDocument()
+
+      rerender(
+        <ProviderDetailPanel
+          provider={{ id: "ollama", name: "Ollama" }}
+          configTab={<div data-testid="config-body" />}
+        />
+      )
+      expect(screen.getByTestId("config-body")).toBeInTheDocument()
+      expect(screen.queryByTestId("models-body")).not.toBeInTheDocument()
+    })
   })
 
   it("preserves a supplied legacy icon for an unknown provider", () => {

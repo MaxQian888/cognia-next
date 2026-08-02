@@ -8,14 +8,60 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const catalogPath = resolve(repoRoot, "packages/plugin-sdk/contract/catalog.json")
 const catalogSchemaPath = resolve(repoRoot, "packages/plugin-sdk/contract/catalog.schema.json")
+const pluginPointCatalogPath = resolve(repoRoot, "packages/plugin-sdk/contract/plugin-points.json")
+const pluginPointSchemaPath = resolve(
+  repoRoot,
+  "packages/plugin-sdk/contract/plugin-points.schema.json"
+)
+const pluginPointExporterPath = resolve(repoRoot, "scripts/plugin/export-plugin-points.mts")
+const tsxCliPath = resolve(repoRoot, "node_modules/tsx/dist/cli.mjs")
 const rustPath = resolve(repoRoot, "crates/cognia-cli/src/engine/contract.rs")
 const pythonPath = resolve(repoRoot, "plugin-sdk/python/src/cognia/_generated_contract.py")
+
+export function validatePluginPointCatalog(pointCatalog, permissions) {
+  const seen = new Set()
+  const validPermissions = new Set(permissions)
+  for (const point of pointCatalog.pluginPoints) {
+    const key = `${point.kind}:${point.id}`
+    if (seen.has(key)) throw new Error(`duplicate plugin point ${key}`)
+    seen.add(key)
+    if (point.kind === "ui-slot" && !point.formFactor) {
+      throw new Error(`UI plugin point ${point.id} must declare formFactor`)
+    }
+    if (point.kind !== "ui-slot" && point.formFactor !== undefined) {
+      throw new Error(`non-UI plugin point ${point.id} cannot declare formFactor`)
+    }
+    if (point.permission && !validPermissions.has(point.permission)) {
+      throw new Error(`plugin point ${point.id} uses unknown permission ${point.permission}`)
+    }
+  }
+  return pointCatalog
+}
+
+export function readPluginPointCatalog(permissions) {
+  const result = spawnSync(process.execPath, [tsxCliPath, pluginPointExporterPath], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  })
+  if (result.status !== 0) {
+    throw new Error(`plugin point export failed: ${result.stderr.trim()}`)
+  }
+  const pointCatalog = JSON.parse(result.stdout)
+  const pointSchema = JSON.parse(readFileSync(pluginPointSchemaPath, "utf8"))
+  validateAgainstSchema(pointCatalog, pointSchema, "pluginPointCatalog")
+  return validatePluginPointCatalog(pointCatalog, permissions)
+}
 
 export function readCatalog() {
   const catalog = JSON.parse(readFileSync(catalogPath, "utf8"))
   const schema = JSON.parse(readFileSync(catalogSchemaPath, "utf8"))
   validateAgainstSchema(catalog, schema)
-  return catalog
+  const pointCatalog = readPluginPointCatalog(catalog.permissions)
+  return {
+    ...catalog,
+    pluginPointSchemaVersion: pointCatalog.schemaVersion,
+    pluginPoints: pointCatalog.pluginPoints,
+  }
 }
 
 function valueType(value) {
@@ -82,6 +128,12 @@ function rustStrings(values) {
   return values.map((value) => `    ${JSON.stringify(value)},`).join("\n")
 }
 
+function rustRawString(value) {
+  let hashes = "#"
+  while (value.includes(`"${hashes}`)) hashes += "#"
+  return `r${hashes}"${value}"${hashes}`
+}
+
 function formatRust(source) {
   const result = spawnSync("rustfmt", ["--emit", "stdout", "--edition", "2021"], {
     input: source,
@@ -94,6 +146,7 @@ function formatRust(source) {
 }
 
 export function renderRustContract(catalog) {
+  const authoringCatalog = rustRawString(JSON.stringify(catalog))
   const capabilityMinimums = catalog.capabilities
     .map(
       (capability) =>
@@ -153,7 +206,9 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[\n    (&str, &[&str], &str, Option<&s
 pub(crate) const RUNTIME_ENTRY_CONTRACTS: &[(&str, &[&str], Option<&str>, bool, &[&str])] = &[\n${runtimeEntries}\n];\n\n\
 pub(crate) const PLUGIN_PATH_FIELDS: &[&str] = &[\n${rustStrings(
     catalog.pathFields.map((entry) => entry.path)
-  )}\n];\n`)
+  )}\n];\n\n\
+/// Complete canonical catalog used by read-only authoring queries.\n\
+pub(crate) const AUTHORING_CATALOG_JSON: &str = ${authoringCatalog};\n`)
 }
 
 function pythonTuple(values) {
@@ -218,6 +273,8 @@ CAPABILITY_MINIMUM_HOST_VERSIONS = ${pythonLiteral(minimums)}\n\n\
 MANIFEST_CONTRIBUTIONS = ${pythonLiteral(catalog.manifestContributions)}\n\n\
 RUNTIME_ENTRY_CONTRACTS = ${pythonLiteral(catalog.runtimeEntries)}\n\n\
 PLUGIN_PATH_FIELD_CONTRACTS = ${pythonLiteral(catalog.pathFields)}\n\n\
+PLUGIN_POINT_SCHEMA_VERSION = ${catalog.pluginPointSchemaVersion}\n\n\
+PLUGIN_POINT_CONTRACTS = ${pythonLiteral(catalog.pluginPoints)}\n\n\
 PLUGIN_PATH_FIELDS = (\n${pythonTuple(catalog.pathFields.map((entry) => entry.path))}\n)\n`
 }
 
@@ -236,6 +293,18 @@ function writeOrCheck(path, content, check) {
 
 export function generate({ check = false } = {}) {
   const catalog = readCatalog()
+  writeOrCheck(
+    pluginPointCatalogPath,
+    `${JSON.stringify(
+      {
+        schemaVersion: catalog.pluginPointSchemaVersion,
+        pluginPoints: catalog.pluginPoints,
+      },
+      null,
+      2
+    )}\n`,
+    check
+  )
   writeOrCheck(rustPath, renderRustContract(catalog), check)
   writeOrCheck(pythonPath, renderPythonContract(catalog), check)
 }

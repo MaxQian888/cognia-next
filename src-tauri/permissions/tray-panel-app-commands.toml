@@ -1,0 +1,21 @@
+[[permission]]
+identifier = "allow-tray-panel-app-commands"
+description = "Allows the least-privilege tray quick-panel webview to size and dismiss its own window, read its placement config, and raise the main window when an action asks for it."
+# Every command the panel window invokes must be listed here. The generated
+# `all-app-commands.toml` grant does NOT cover it: that permission is attached to
+# the `default` capability, which is scoped `windows: ["main"]`, so anything
+# missing below is rejected at runtime with "Command not found" rather than
+# failing to compile.
+#
+# Deliberately absent: `open_tray_panel` / `toggle_tray_panel` (the panel cannot
+# re-open itself; only the tray, the menu and the main window may) and every
+# chat/agent command (the panel never runs work itself — it hands a request to
+# the main window over `tray-panel://run`).
+commands.allow = [
+  "close_tray_panel",
+  "reveal_tray_panel",
+  "show_main_window",
+  "tray_panel_get_config",
+  "tray_panel_resize",
+  "tray_run_native_action",
+]

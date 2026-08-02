@@ -1,0 +1,44 @@
+[package]
+name = "cognia-deploy-agent"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Outbound provider-neutral deployment agent for Cognia."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_deploy_agent"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cognia-deploy-agent"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+cognia-deployment = { path = "../cognia-deployment" }
+ed25519-dalek = "2"
+futures-util = "0.3"
+parking_lot = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rcgen = { version = "0.13", features = ["pem"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
+rustls-pemfile = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = { version = "2", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"

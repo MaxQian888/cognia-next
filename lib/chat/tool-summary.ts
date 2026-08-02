@@ -47,13 +47,42 @@ export function bareToolName(rawType: string): string {
 }
 
 /**
+ * Loosest shape that still identifies a tool call. `groupAgentParts` is generic
+ * over `{ type?: string }`, so the fold predicates cannot demand a full
+ * `ToolUIPart` — but they must still see `toolName`, which is where the AI SDK's
+ * `dynamic-tool` shape carries the name.
+ */
+export interface ToolNamedPartLike {
+  type?: string
+  toolName?: string
+}
+
+/**
+ * Resolve a part's bare tool name, or `null` when the part is not a tool call.
+ *
+ * Handles both encodings the renderer receives: `tool-<name>` (statically
+ * declared tools) and `dynamic-tool` + `toolName` (imported transcripts, CLI
+ * handoff). Any `mcp__<server>__` namespace is folded away, so
+ * `tool-mcp__cognia-tools__grep` and a dynamic `grep` resolve identically.
+ */
+export function resolveToolPartName(part: ToolNamedPartLike | undefined): string | null {
+  const type = part?.type
+  if (type === "dynamic-tool") {
+    const name = typeof part?.toolName === "string" ? part.toolName.trim() : ""
+    return name ? bareToolName(name) : null
+  }
+  if (typeof type !== "string" || !type.startsWith("tool-")) return null
+  return bareToolName(type) || null
+}
+
+/**
  * Strip the `tool-` part-type prefix and any `mcp__<server>__` namespace so
  * `tool-mcp__cognia-tools__bash` and `tool-Bash` both fold to `bash`/`Bash`.
+ * A `dynamic-tool` part with no usable `toolName` degrades to `"tool"` so the
+ * row still has something to print.
  */
 export function normalizeToolName(part: ToolPartLike): string {
-  const raw =
-    part.type === "dynamic-tool" ? ((part as DynamicToolUIPart).toolName ?? "tool") : part.type
-  return bareToolName(raw)
+  return resolveToolPartName(part as ToolNamedPartLike) ?? "tool"
 }
 
 function basename(p: string): string {
@@ -93,6 +122,13 @@ const ICON_BY_NAME: Record<string, ToolIconKey> = {
   webfetch: "web",
   websearch: "web",
   todowrite: "task",
+  // Aliases a third-party MCP server is as likely to use as the canonical
+  // names above. Mirrors the CLI's `CONTEXT_TOOLS` set so the two surfaces
+  // classify (and therefore fold) the same tools.
+  cat: "read",
+  view: "read",
+  search: "search",
+  list: "folder",
 }
 
 function iconFor(name: string): ToolIconKey {
@@ -110,6 +146,12 @@ export function toolIconKeyForName(rawName: string): ToolIconKey {
  * / glob / list / web) collapses into one summary row, while the actual actions
  * (edit / write / run) stay their own prominent rows. Mirrors the CLI set
  * (`cli/src/tui/format/context-group.ts`), plus `web` per product decision.
+ *
+ * The web surface deliberately diverges on one point: the CLI folds only
+ * *settled, non-error* calls, whereas a burst here folds from the first call
+ * and {@link ../../components/chat/message-parts/tool-activity-group}
+ * auto-opens the group while any child is running or failed. Same visibility,
+ * without the group splitting and re-merging on every streaming delta.
  */
 const CONTEXT_FOLD_ICONS: ReadonlySet<ToolIconKey> = new Set([
   "read",
@@ -120,13 +162,17 @@ const CONTEXT_FOLD_ICONS: ReadonlySet<ToolIconKey> = new Set([
 ])
 
 /**
- * True for a `tool-*` part type whose tool is a context-gathering read (its icon
- * bucket is in {@link CONTEXT_FOLD_ICONS}). Used by the simplified-mode grouping
- * to fold only read/search bursts and leave edits/commands standing.
+ * True for a tool part whose tool is a context-gathering read (its icon bucket
+ * is in {@link CONTEXT_FOLD_ICONS}). Used by the simplified-mode grouping to
+ * fold only read/search bursts and leave edits/commands standing.
+ *
+ * Takes the whole part, not just the type: a `dynamic-tool` part keeps its name
+ * on `toolName`, and folding those is exactly the case that matters for
+ * imported transcripts and CLI handoff sessions.
  */
-export function isContextFoldTool(type: string | undefined): boolean {
-  if (typeof type !== "string" || !type.startsWith("tool-")) return false
-  return CONTEXT_FOLD_ICONS.has(iconFor(bareToolName(type)))
+export function isContextFoldPart(part: ToolNamedPartLike | undefined): boolean {
+  const name = resolveToolPartName(part)
+  return name !== null && CONTEXT_FOLD_ICONS.has(iconFor(name))
 }
 
 /**

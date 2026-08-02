@@ -4,7 +4,8 @@
  * Provides AI provider capabilities to plugins.
  */
 
-import { streamText } from "ai"
+import { streamText, type ModelMessage } from "ai"
+import { partitionPrompt } from "@/lib/ai/prompt-partition"
 import {
   createFeatureProviderModel,
   createProviderSettingsSnapshot,
@@ -298,15 +299,21 @@ export function createAIProviderAPI(pluginId: string): PluginAIProviderAPI {
 
       const resolution = resolveBuiltInProviderFallback()
       const model = createFeatureProviderModel(resolution)
+      // Plugin-supplied histories routinely lead with a system turn; AI SDK 7
+      // rejects `{ role: "system" }` inside `messages`, so hoist it into the
+      // top-level instructions option.
       const streamOptions: Record<string, unknown> = {
         model,
-        messages,
+        ...partitionPrompt(messages as ModelMessage[]),
       }
       if (options?.temperature !== undefined) {
         streamOptions.temperature = options.temperature
       }
       if (options?.maxTokens !== undefined) {
-        streamOptions.maxTokens = options.maxTokens
+        // `AIChatOptions.maxTokens` is the plugin-facing name; the AI SDK option
+        // has been `maxOutputTokens` since v5, so the old key was silently
+        // dropped and every plugin cap went unenforced.
+        streamOptions.maxOutputTokens = options.maxTokens
       }
       if (options?.topP !== undefined) {
         streamOptions.topP = options.topP

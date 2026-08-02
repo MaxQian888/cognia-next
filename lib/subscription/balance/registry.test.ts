@@ -27,6 +27,7 @@ describe("balance registry", () => {
       "openrouter",
       "ppio",
       "siliconflow",
+      "stepfun",
     ])
   })
 
@@ -35,6 +36,7 @@ describe("balance registry", () => {
     expect(findBalanceAdapter({ providerKey: "openrouter" })?.key).toBe("openrouter")
     expect(findBalanceAdapter({ providerKey: "moonshot" })?.key).toBe("moonshot")
     expect(findBalanceAdapter({ providerKey: "siliconflow" })?.key).toBe("siliconflow")
+    expect(findBalanceAdapter({ providerKey: "stepfun" })?.key).toBe("stepfun")
   })
 
   it("falls back to baseUrl host when providerKey doesn't match", () => {

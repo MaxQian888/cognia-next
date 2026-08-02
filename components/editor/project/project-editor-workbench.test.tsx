@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 const mockToastError = jest.fn()
@@ -51,8 +51,12 @@ jest.mock("./project-editor-tabs", () => ({
   ProjectEditorTabs: () => <div data-testid="tabs" />,
 }))
 jest.mock("./project-file-tree", () => ({
-  ProjectFileTree: ({ onOpenFile }: { onOpenFile: (path: string) => void }) => (
-    <button data-testid="tree" onClick={() => onOpenFile("src/tree.ts")} />
+  ProjectFileTree: ({
+    onOpenFile,
+  }: {
+    onOpenFile: (path: string, options?: { mode?: string }) => void
+  }) => (
+    <button data-testid="tree" onClick={() => onOpenFile("src/tree.ts", { mode: "preview" })} />
   ),
 }))
 jest.mock("./project-search-panel", () => ({
@@ -66,11 +70,17 @@ jest.mock("./project-monaco", () => ({
   ProjectMonaco: ({
     actions,
     onDiagnosticsReady,
+    onSelectionChange,
   }: {
     actions: Array<{ id: string; run?: () => void }>
     onDiagnosticsReady?: (relPath: string, next: unknown) => void
+    onSelectionChange?: (selection: unknown) => void
   }) => (
     <div data-testid="monaco">
+      <button
+        data-testid="monaco-select"
+        onClick={() => onSelectionChange?.({ kind: "text", start: 1, end: 4 })}
+      />
       {actions.map((action) => (
         <button key={action.id} data-testid={action.id} onClick={action.run} />
       ))}
@@ -112,10 +122,28 @@ const projectContextWorkbenchProps = jest.fn()
 jest.mock("./project-context-workbench", () => ({
   ProjectContextWorkbench: (props: Record<string, unknown>) => {
     projectContextWorkbenchProps(props)
-    return <div data-testid="project-context-workbench" />
+    return (
+      <div data-testid="project-context-workbench">
+        <button
+          data-testid="workbench-draft"
+          onClick={() => (props.onDraftChange as (c: string) => void)?.("from workbench")}
+        />
+      </div>
+    )
   },
-  ProjectContextWorkbenchMobile: ({ open }: { open: boolean }) => (
-    <div data-testid="project-context-workbench-mobile" data-open={String(open)} />
+  ProjectContextWorkbenchMobile: ({
+    open,
+    onDraftChange,
+  }: {
+    open: boolean
+    onDraftChange?: (content: string) => void
+  }) => (
+    <div data-testid="project-context-workbench-mobile" data-open={String(open)}>
+      <button
+        data-testid="workbench-draft-mobile"
+        onClick={() => onDraftChange?.("from mobile workbench")}
+      />
+    </div>
   ),
 }))
 jest.mock("@/components/editor/light-code-editor", () => ({
@@ -129,6 +157,7 @@ jest.mock("@/components/editor/light-code-editor", () => ({
 }))
 
 import { ProjectEditorFileWorkbench, useProjectEditorWorkbench } from "./project-editor-workbench"
+import { PROJECT_EDITOR_GOTO_EVENT } from "./editor-events"
 
 function Harness({
   beforeOpen,
@@ -149,6 +178,7 @@ function Harness({
   })
   return (
     <div onKeyDown={workbench.onKeyDown}>
+      <button data-testid="goto" onClick={() => workbench.gotoLine("src/jump.ts", 7)} />
       <ProjectEditorFileWorkbench
         workbench={workbench}
         sidebarPosition={sidebarPosition}
@@ -192,7 +222,7 @@ it("shares file navigation, search actions, and keyboard saves", () => {
 
   fireEvent.click(screen.getByTestId("tree"))
   expect(beforeOpen).toHaveBeenCalled()
-  expect(editor.openFile).toHaveBeenCalledWith("src/tree.ts")
+  expect(editor.openFile).toHaveBeenCalledWith("src/tree.ts", { mode: "preview" })
 
   fireEvent.click(screen.getByTestId("file.searchProject"))
   fireEvent.click(screen.getByTestId("search"))
@@ -267,6 +297,20 @@ describe("readActive", () => {
     render(<Harness />)
 
     expect(notifyActiveEditorChanged).toHaveBeenCalled()
+  })
+
+  it("reports a null path when no file is active", async () => {
+    const previousActive = editor.activePath
+    editor.activePath = null
+    editor.openFiles = []
+    try {
+      render(<Harness />)
+      await expect(registeredReadActive()!()).resolves.toEqual(
+        expect.objectContaining({ path: null, openEditors: [] })
+      )
+    } finally {
+      editor.activePath = previousActive
+    }
   })
 
   it("does not re-register the opener when the mounted handles change", () => {
@@ -354,7 +398,7 @@ it("reuses the workbench as a touch-friendly mobile Files/Search/Editor flow", (
     "true"
   )
   fireEvent.click(screen.getByTestId("tree"))
-  expect(editor.openFile).toHaveBeenCalledWith("src/tree.ts")
+  expect(editor.openFile).toHaveBeenCalledWith("src/tree.ts", { mode: "preview" })
   expect(screen.getByTestId("light-editor")).toBeInTheDocument()
 
   fireEvent.change(screen.getByTestId("light-editor"), { target: { value: "mobile edit" } })
@@ -408,4 +452,53 @@ describe("saveDirty", () => {
 
     await expect(registeredSaveDirty()?.()).resolves.toEqual(["/repo"])
   })
+})
+
+it("lifts the editor selection so the context workbench sees it", () => {
+  notifyActiveEditorChanged.mockClear()
+  render(<Harness />)
+  fireEvent.click(screen.getByTestId("monaco-select"))
+  expect(notifyActiveEditorChanged).toHaveBeenCalled()
+})
+
+it("dispatches a goto event after the file opens, defaulting the column", async () => {
+  const events: CustomEvent[] = []
+  const listener = (e: Event) => events.push(e as CustomEvent)
+  window.addEventListener(PROJECT_EDITOR_GOTO_EVENT, listener)
+  jest.useFakeTimers()
+  try {
+    render(<Harness />)
+    fireEvent.click(screen.getByTestId("goto"))
+    // The dispatch is scheduled inside `openFile().then(...)`, so the microtask
+    // queue has to drain before the timer it schedules exists.
+    await act(async () => {})
+    await act(async () => {
+      jest.runAllTimers()
+    })
+    expect(events.at(-1)?.detail).toEqual({ relPath: "src/jump.ts", line: 7, column: 1 })
+  } finally {
+    jest.useRealTimers()
+    window.removeEventListener(PROJECT_EDITOR_GOTO_EVENT, listener)
+  }
+})
+
+it("routes a context-workbench draft edit back into the active file", () => {
+  render(<Harness />)
+  fireEvent.click(screen.getByTestId("workbench-draft"))
+  expect(editor.setDraft).toHaveBeenCalledWith("src/a.ts", "from workbench")
+})
+
+it("routes a mobile context-workbench draft edit back into the active file", () => {
+  render(<MobileHarness />)
+  fireEvent.click(screen.getByTestId("workbench-draft-mobile"))
+  expect(editor.setDraft).toHaveBeenCalledWith("src/a.ts", "from mobile workbench")
+})
+
+it("ignores a plain `s` keypress and a non-save modifier chord", () => {
+  render(<Harness />)
+  const surface = screen.getByTestId("tabs").parentElement!
+  fireEvent.keyDown(surface, { key: "s" })
+  fireEvent.keyDown(surface, { key: "p", metaKey: true })
+  expect(editor.saveFile).not.toHaveBeenCalled()
+  expect(editor.saveAll).not.toHaveBeenCalled()
 })

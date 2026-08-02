@@ -22,6 +22,21 @@ import {
   unregisterProjectWorkspace,
 } from "@/lib/plugin/vscode-shim/lsp-workspace-manager"
 import { watchWorkspace } from "@/lib/files/workspace-watch"
+import { pathToFileUri } from "@/lib/files/path-uri"
+import {
+  releaseModel,
+  releaseModels,
+  retainModel,
+} from "@/lib/editor-workbench/monaco-model-registry"
+import {
+  EMPTY_EDITOR_TAB_STATE,
+  forgetTab,
+  pinTab,
+  renameTab,
+  resolveTabIntent,
+  type EditorTabMode,
+  type EditorTabState,
+} from "@/lib/editor-workbench/editor-tab-model"
 import { languageFromPath, type EditorLanguage } from "@/components/editor/editor-language"
 import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-session-store"
 import { loggers } from "@cognia/logging"
@@ -117,6 +132,54 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
   // calls (before React flushes state) don't re-read a file that is already
   // opening. Kept in lockstep with `openFiles` by the mutators below.
   const openPathsRef = useRef<Set<string>>(new Set())
+  // Per-path open counter. `openFile` reads a file asynchronously, so by the
+  // time a read settles the tab may have been evicted, closed, *or* re-opened —
+  // and the last case is invisible to `openPathsRef` alone, since the path is
+  // back in the set under a newer read. Stamping each attempt lets a stale one
+  // recognise that it no longer owns the tab and leave both the file list and
+  // the model retain count to whoever does.
+  const openSeqRef = useRef<Map<string, number>>(new Map())
+  // `file://` URIs this hook currently holds in the Monaco model registry, kept
+  // in lockstep with `openPathsRef`. Open documents — not editor mounts — are
+  // what keeps a model (and its undo stack) alive, so the retain/release pairs
+  // live here rather than in the Monaco component.
+  const openUrisRef = useRef<Set<string>>(new Set())
+
+  const retainFileModel = useCallback((absolutePath: string) => {
+    const uri = pathToFileUri(absolutePath)
+    if (openUrisRef.current.has(uri)) return
+    openUrisRef.current.add(uri)
+    retainModel(uri)
+  }, [])
+
+  const releaseFileModel = useCallback((absolutePath: string) => {
+    const uri = pathToFileUri(absolutePath)
+    if (!openUrisRef.current.delete(uri)) return
+    releaseModel(uri)
+  }, [])
+
+  const releaseAllFileModels = useCallback(() => {
+    const uris = [...openUrisRef.current]
+    openUrisRef.current.clear()
+    releaseModels(uris)
+  }, [])
+
+  // Preview/pinned tab state. Mirrored into a ref for the same reason
+  // `openPathsRef` exists: `openFile` must resolve the transition synchronously,
+  // and a state updater is not allowed to have the side effects a transition
+  // implies (evicting a tab, releasing its model).
+  const [tabState, setTabStateValue] = useState<EditorTabState>(EMPTY_EDITOR_TAB_STATE)
+  const tabStateRef = useRef(tabState)
+  const setTabState = useCallback((next: EditorTabState) => {
+    if (next === tabStateRef.current) return
+    tabStateRef.current = next
+    setTabStateValue(next)
+  }, [])
+
+  // Tearing the editor down closes every document it had open. Without this the
+  // `keepCurrentModel` that protects the undo stack would leak a model per file
+  // for the lifetime of the tab.
+  useEffect(() => releaseAllFileModels, [releaseAllFileModels])
 
   const activeRoot = useMemo(
     () => roots.find((r) => r.key === rootKey) ?? roots[0],
@@ -168,16 +231,46 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
   }, [scopeKey, rootKey, openFiles, activePath, setEditorSession])
 
   // ── File operations ─────────────────────────────────────────────────────
+
+  /** Drop a tab that lost the preview slot. No active-tab fallback: the caller
+   *  is in the middle of activating its replacement. */
+  const evictTab = useCallback(
+    (relPath: string) => {
+      openPathsRef.current.delete(relPath)
+      releaseFileModel(joinRootRel(rootPath, relPath))
+      setOpenFiles((prev) => prev.filter((f) => f.relPath !== relPath))
+    },
+    [rootPath, releaseFileModel]
+  )
+
   const openFile = useCallback(
-    async (relPath: string) => {
+    async (relPath: string, options?: { mode?: EditorTabMode }) => {
+      // Pinned by default: every existing caller (session restore, search jump,
+      // the agent bridge, "new file") means "keep this open".
+      const mode = options?.mode ?? "pinned"
+      const isOpen = openPathsRef.current.has(relPath)
+      const transition = resolveTabIntent(tabStateRef.current, { relPath, mode, isOpen })
+      setTabState(transition.state)
       setActivePath(relPath)
-      if (openPathsRef.current.has(relPath)) return
+      if (transition.evicted) evictTab(transition.evicted)
+      if (isOpen) return
       openPathsRef.current.add(relPath)
+      const seq = (openSeqRef.current.get(relPath) ?? 0) + 1
+      openSeqRef.current.set(relPath, seq)
+      /** Whether this attempt still owns the tab it opened. */
+      const stillOurs = () =>
+        openPathsRef.current.has(relPath) && openSeqRef.current.get(relPath) === seq
+      retainFileModel(joinRootRel(rootPath, relPath))
       try {
         const [content, stat] = await Promise.all([
           d.readFile(rootPath, relPath),
           d.statFile(rootPath, relPath).catch(() => null),
         ])
+        // Opening a second preview while this read was in flight evicts this
+        // tab — `evictTab` has already dropped the ref entry and released the
+        // model. Appending anyway would resurrect the evicted file and leave
+        // two tabs in the single reusable preview slot.
+        if (!stillOurs()) return
         setOpenFiles((prev) => {
           if (prev.some((f) => f.relPath === relPath)) return prev
           return [
@@ -194,11 +287,24 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
           ]
         })
       } catch (err) {
-        openPathsRef.current.delete(relPath) // allow a later retry
+        // A failed read only gets to tear the tab down if the tab is still the
+        // one it opened. Otherwise the path has been evicted (already released)
+        // or re-opened by a newer read, and closing it here would blank a tab
+        // the user is looking at.
+        if (stillOurs()) {
+          openPathsRef.current.delete(relPath) // allow a later retry
+          releaseFileModel(joinRootRel(rootPath, relPath))
+        }
         editorLogger.warn("open file failed", { relPath, err: String(err) })
       }
     },
-    [d, rootPath]
+    [d, rootPath, retainFileModel, releaseFileModel, evictTab, setTabState]
+  )
+
+  /** Promote a preview tab to permanent (double-click, explicit pin). */
+  const pinFile = useCallback(
+    (relPath: string) => setTabState(pinTab(tabStateRef.current, relPath)),
+    [setTabState]
   )
 
   const closeFile = useCallback(
@@ -206,6 +312,8 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
       const idx = openFiles.findIndex((f) => f.relPath === relPath)
       const remaining = openFiles.filter((f) => f.relPath !== relPath)
       openPathsRef.current.delete(relPath)
+      releaseFileModel(joinRootRel(rootPath, relPath))
+      setTabState(forgetTab(tabStateRef.current, relPath))
       setOpenFiles(remaining)
       setActivePath((cur) => {
         if (cur !== relPath) return cur
@@ -213,18 +321,24 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
         return fallback?.relPath ?? null
       })
     },
-    [openFiles]
+    [openFiles, rootPath, releaseFileModel, setTabState]
   )
 
-  const setDraft = useCallback((relPath: string, content: string) => {
-    setOpenFiles((prev) =>
-      prev.map((f) =>
-        f.relPath === relPath
-          ? { ...f, draftContent: content, draftVersion: f.draftVersion + 1 }
-          : f
+  const setDraft = useCallback(
+    (relPath: string, content: string) => {
+      // Editing a preview tab makes it permanent — otherwise the next tree
+      // click would evict a buffer the user has unsaved work in.
+      setTabState(pinTab(tabStateRef.current, relPath))
+      setOpenFiles((prev) =>
+        prev.map((f) =>
+          f.relPath === relPath
+            ? { ...f, draftContent: content, draftVersion: f.draftVersion + 1 }
+            : f
+        )
       )
-    )
-  }, [])
+    },
+    [setTabState]
+  )
 
   const saveFile = useCallback(
     async (relPath: string) => {
@@ -296,12 +410,19 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
     [d, rootPath]
   )
 
-  const selectRoot = useCallback((key: string) => {
-    setRootKey(key)
-    openPathsRef.current.clear()
-    setOpenFiles([])
-    setActivePath(null)
-  }, [])
+  const selectRoot = useCallback(
+    (key: string) => {
+      setRootKey(key)
+      openPathsRef.current.clear()
+      // The new root's files live at different absolute paths, so every model
+      // held for the old root is now unreachable.
+      releaseAllFileModels()
+      setTabState(EMPTY_EDITOR_TAB_STATE)
+      setOpenFiles([])
+      setActivePath(null)
+    },
+    [releaseAllFileModels, setTabState]
+  )
 
   // ── One-shot session restore (reopen persisted files for this root) ─────
   useEffect(() => {
@@ -367,6 +488,18 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
       } catch (error) {
         editorLogger.warn("resource session rename migration failed", { error })
       }
+      // A rename changes the `file://` URI, so the model behind the old URI is
+      // orphaned and a fresh one is created at the new one. Move the registry
+      // hold before touching state — a state updater must stay pure.
+      for (const previousRelPath of [...openPathsRef.current]) {
+        const relPath = migratePath(previousRelPath)
+        if (relPath === previousRelPath) continue
+        openPathsRef.current.delete(previousRelPath)
+        openPathsRef.current.add(relPath)
+        releaseFileModel(joinRootRel(rootPath, previousRelPath))
+        retainFileModel(joinRootRel(rootPath, relPath))
+      }
+      setTabState(renameTab(tabStateRef.current, from, to))
       setOpenFiles((previous) =>
         previous.map((file) => {
           const relPath = migratePath(file.relPath)
@@ -382,7 +515,7 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
       )
       setActivePath((previous) => (previous ? migratePath(previous) : previous))
     },
-    [rootPath, scopeKey]
+    [rootPath, scopeKey, releaseFileModel, retainFileModel, setTabState]
   )
 
   const dirtyCount = useMemo(
@@ -403,10 +536,13 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
     openFiles,
     activePath,
     activeFile,
+    /** relPath of the single preview (italic) tab, or `null`. */
+    previewPath: tabState.previewPath,
     dirtyCount,
     treeRefreshToken,
     selectRoot,
     openFile,
+    pinFile,
     closeFile,
     setActivePath,
     setDraft,

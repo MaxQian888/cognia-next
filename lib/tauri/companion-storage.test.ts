@@ -9,7 +9,9 @@ import {
   __setCompanionStorageForTests,
   companionStorage,
   pickCompanionStorage,
+  pickLegacyCompanionStorage,
 } from "./companion-storage"
+import { MigratingCompanionStorage } from "@/lib/companion/credential-book"
 import {
   buildRoomDescriptorV2,
   generatePersistableV2SigningIdentity,
@@ -297,15 +299,20 @@ describe("SecureStorageCompanionStorage", () => {
 })
 
 describe("pickCompanionStorage / companionStorage", () => {
-  it("returns LocalStorage when not in Capacitor", () => {
-    expect(pickCompanionStorage()).toBeInstanceOf(LocalStorageCompanionStorage)
-  })
-
-  it("returns SecureStorage when window.Capacitor.isNativePlatform() === true", () => {
+  it("returns the credential-book storage, whatever the platform", () => {
+    expect(pickCompanionStorage()).toBeInstanceOf(MigratingCompanionStorage)
     ;(window as { Capacitor?: { isNativePlatform: () => boolean } }).Capacitor = {
       isNativePlatform: () => true,
     }
-    expect(pickCompanionStorage()).toBeInstanceOf(SecureStorageCompanionStorage)
+    expect(pickCompanionStorage()).toBeInstanceOf(MigratingCompanionStorage)
+  })
+
+  it("still picks the platform's legacy store as the migration source", () => {
+    expect(pickLegacyCompanionStorage()).toBeInstanceOf(LocalStorageCompanionStorage)
+    ;(window as { Capacitor?: { isNativePlatform: () => boolean } }).Capacitor = {
+      isNativePlatform: () => true,
+    }
+    expect(pickLegacyCompanionStorage()).toBeInstanceOf(SecureStorageCompanionStorage)
   })
 
   it("companionStorage() memoizes one instance per process", () => {

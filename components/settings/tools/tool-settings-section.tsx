@@ -92,6 +92,7 @@ export function ToolSettingsSection() {
   const setSkillToolEnabled = useSettingsStore((s) => s.setSkillToolEnabled)
   const setSlashCommandToolEnabled = useSettingsStore((s) => s.setSlashCommandToolEnabled)
   const setTeamCollaborationToolEnabled = useSettingsStore((s) => s.setTeamCollaborationToolEnabled)
+  const setVectorToolEnabled = useSettingsStore((s) => s.setVectorToolEnabled)
 
   const builtinTools = settings?.builtinTools ?? DEFAULT_BUILTIN_TOOLS
   const webToolsEnabled = settings?.webTools?.enabled ?? true
@@ -101,6 +102,7 @@ export function ToolSettingsSection() {
   const skillToolEnabled = settings?.selfInvokeTools?.skill ?? false
   const slashCommandToolEnabled = settings?.selfInvokeTools?.slashCommand ?? false
   const teamCollaborationToolEnabled = settings?.selfInvokeTools?.teamCollaboration ?? false
+  const vectorToolEnabled = settings?.selfInvokeTools?.vector ?? false
   const desktop = isTauri()
 
   return (
@@ -237,6 +239,22 @@ export function ToolSettingsSection() {
               checked={teamCollaborationToolEnabled}
               onCheckedChange={(next) => setTeamCollaborationToolEnabled(next)}
               aria-label={t("toggleAriaLabel", { name: t("teamCollabToolTitle") })}
+            />
+          </div>
+          {/* Vector memory runs against the native sqlite-vec store, so unlike
+              the other self-invoke tools it is desktop-only. */}
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-[12px] font-medium">{t("vectorToolTitle")}</p>
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                {desktop ? t("vectorToolDesc") : t("vectorToolDesktopOnly")}
+              </p>
+            </div>
+            <Switch
+              checked={vectorToolEnabled}
+              disabled={!desktop}
+              onCheckedChange={(next) => setVectorToolEnabled(next)}
+              aria-label={t("toggleAriaLabel", { name: t("vectorToolTitle") })}
             />
           </div>
         </CardHeader>

@@ -8,7 +8,8 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { QRCodeSVG } from "qrcode.react"
-import { CheckIcon, CopyIcon, ExternalLinkIcon, Link2Icon, ShieldOffIcon } from "lucide-react"
+import { ExternalLinkIcon, Link2Icon, ShieldOffIcon } from "lucide-react"
+import { CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import {
   Dialog,
   DialogContent,
@@ -206,7 +207,7 @@ export function ShareLinkDialog({
                 aria-label={t("copy")}
                 onClick={() => void onCopy()}
               >
-                {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
+                <CopyFeedbackIcon copied={copied} size={16} />
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">{t("createdHelp")}</p>

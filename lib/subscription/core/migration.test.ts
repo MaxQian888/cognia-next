@@ -13,6 +13,21 @@ jest.mock("sonner", () => ({
   },
 }))
 
+// Host detection: jsdom is plain web, so default the suite to "a host exists"
+// and let the skip tests flip these off explicitly.
+jest.mock("@/lib/platform/detect", () => ({
+  isTauri: () => mockIsTauri(),
+  isCapacitor: () => mockIsCapacitor(),
+}))
+
+jest.mock("@/lib/platform/web-companion", () => ({
+  hasWebCompanionTarget: () => mockHasWebCompanion(),
+}))
+
+const mockIsTauri = jest.fn(() => true)
+const mockIsCapacitor = jest.fn(() => false)
+const mockHasWebCompanion = jest.fn(() => false)
+
 const mockedInit = subscriptionInit as jest.MockedFunction<typeof subscriptionInit>
 const mockedSuccess = toast.success as jest.MockedFunction<typeof toast.success>
 
@@ -32,6 +47,9 @@ class MemoryStorage {
 beforeEach(() => {
   mockedInit.mockReset()
   mockedSuccess.mockReset()
+  mockIsTauri.mockReturnValue(true)
+  mockIsCapacitor.mockReturnValue(false)
+  mockHasWebCompanion.mockReturnValue(false)
 })
 
 describe("subscriptionInitOnce", () => {
@@ -88,6 +106,39 @@ describe("subscriptionInitOnce", () => {
     mockedInit.mockResolvedValueOnce([{ kind: "migrated", provider: "anthropic", accountId: "a" }])
     const reFire = await subscriptionInitOnce({ storage })
     expect(reFire.toastShown).toBe(true)
+  })
+
+  it("skips the command entirely in web mode with no backend", async () => {
+    mockIsTauri.mockReturnValue(false)
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+
+    const result = await subscriptionInitOnce({ storage: new MemoryStorage() })
+
+    expect(result).toEqual({
+      outcomes: [],
+      migratedCount: 0,
+      toastShown: false,
+      skipped: true,
+    })
+    expect(result.error).toBeUndefined()
+    expect(mockedInit).not.toHaveBeenCalled()
+    expect(warn).not.toHaveBeenCalled()
+    expect(mockedSuccess).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it.each([
+    ["capacitor", () => mockIsCapacitor.mockReturnValue(true)],
+    ["a paired web companion", () => mockHasWebCompanion.mockReturnValue(true)],
+  ])("still runs when the host is %s", async (_label, enableHost) => {
+    mockIsTauri.mockReturnValue(false)
+    enableHost()
+    mockedInit.mockResolvedValueOnce([{ kind: "no-legacy-data", provider: "anthropic" }])
+
+    const result = await subscriptionInitOnce({ storage: new MemoryStorage() })
+
+    expect(result.skipped).toBeUndefined()
+    expect(mockedInit).toHaveBeenCalledTimes(1)
   })
 
   it("swallows transport errors and returns the message", async () => {

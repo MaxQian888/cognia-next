@@ -18,6 +18,10 @@ jest.mock("motion/react", () => ({
   },
 }))
 
+jest.mock("@/components/shared/animated-action-icon", () => ({
+  AnimatedActionIcon: () => React.createElement("span", { "data-slot": "animated-action-icon" }),
+}))
+
 jest.mock("@/components/ui/button", () => ({
   Button: ({
     children,

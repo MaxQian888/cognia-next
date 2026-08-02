@@ -7,26 +7,17 @@ import {
   MessageContent,
 } from "@/components/ai-elements/message"
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning"
-import { Tool, ToolHeader, ToolContent, ToolInput } from "@/components/ai-elements/tool"
-import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
-import { ErrorParsedView } from "@/components/error/error-parsed-view"
-import { normalizeErrorText } from "@cognia/error-parsers"
+import { Tool, ToolHeader, ToolContent } from "@/components/ai-elements/tool"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { StreamingTextPart } from "@/components/chat/streaming-text-part"
 import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
-import { A2UIToolOutput, hasA2UIToolOutput } from "@/components/a2ui/a2ui-tool-output"
 import { InboundA2UIRenderer } from "@/components/chat/message-parts/inbound-a2ui-renderer"
 import { SubagentTree } from "@/components/chat/message-parts/subagent-tree"
 import { AgentTeamDispatchPart } from "@/components/chat/message-parts/agent-team-dispatch-part"
 import { ArtifactPart } from "@/components/chat/message-parts/artifact-part"
 import { SourcesPart } from "@/components/chat/message-parts/sources-part"
 import { TerminalToolPart } from "@/components/chat/message-parts/terminal-tool-part"
-import {
-  MCPToolCard,
-  McpToolBodyOrContent,
-  isStructuredMcpToolPart,
-  toolNameOf,
-} from "@/components/chat/message-parts/mcp-tool-card"
+import { ToolDetailBody, isBashToolPart } from "@/components/chat/message-parts/tool-detail-body"
 import { CanvasInlinePart } from "@/components/chat/message-parts/canvas-inline-part"
 import { FilePartPreview } from "@/components/chat/message-parts/file-part-preview"
 import { AttachmentTextCard } from "@/components/chat/message-parts/attachment-text-card"
@@ -52,6 +43,7 @@ import {
 import { ToolCallRow } from "@/components/chat/message-parts/tool-call-row"
 import {
   ToolActivityGroup,
+  type ToolActivityChildOptions,
   type ToolActivityGroupEntry,
 } from "@/components/chat/message-parts/tool-activity-group"
 import { MotionReveal } from "@/components/chat/motion/motion-reveal"
@@ -80,10 +72,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { AnimatedActionIcon, CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import {
-  BookmarkIcon,
-  CheckIcon,
-  CopyIcon,
   LinkIcon,
   CornerUpLeftIcon,
   GitBranchIcon,
@@ -93,6 +83,8 @@ import {
   RefreshCcwIcon,
   Share2Icon,
 } from "lucide-react"
+import { BookmarkIcon as AnimatedBookmarkIcon } from "@/components/ui/bookmark"
+import { CheckIcon as AnimatedCheckIcon } from "@/components/ui/check"
 import { QuoteCardDialog } from "@/components/share/quote-card-dialog"
 import { toast } from "sonner"
 import type { ToolUIPart, UIMessage } from "ai"
@@ -492,15 +484,14 @@ function MessageRendererInner({
                         key={agentFlowMode}
                         entries={entries}
                         mode={agentFlowMode}
-                        renderCard={(part, key, opts) =>
+                        renderChild={(part, key, opts) =>
                           renderToolPart(
                             part,
                             key,
                             agentFlowMode,
-                            opts.forceOpen,
+                            opts,
                             message.id,
-                            branchSessionId ?? undefined,
-                            t
+                            branchSessionId ?? undefined
                           )
                         }
                       />
@@ -649,11 +640,7 @@ function MessageRendererInner({
               label={t("copyLabel")}
               onClick={handleCopy}
             >
-              {copied || richCopied ? (
-                <CheckIcon className="size-3.5" />
-              ) : (
-                <CopyIcon className="size-3.5" />
-              )}
+              <CopyFeedbackIcon copied={copied || richCopied} size={14} />
             </MessageAction>
 
             <MessageAction
@@ -675,7 +662,7 @@ function MessageRendererInner({
                 onClick={handleCopyLink}
               >
                 {linkCopied ? (
-                  <CheckIcon className="size-3.5" />
+                  <AnimatedActionIcon icon={AnimatedCheckIcon} size={14} animateOnChange />
                 ) : (
                   <LinkIcon className="size-3.5" />
                 )}
@@ -698,7 +685,12 @@ function MessageRendererInner({
               onClick={() => toggleBookmark(message.id)}
               className={cn(isBookmarked && "text-yellow-500")}
             >
-              <BookmarkIcon className={cn("size-3.5", isBookmarked && "fill-current")} />
+              <AnimatedActionIcon
+                icon={AnimatedBookmarkIcon}
+                size={14}
+                animateOnChange={isBookmarked}
+                className={isBookmarked ? "fill-current" : undefined}
+              />
             </MessageAction>
 
             {message.role === "user" && onEditResend && (
@@ -955,22 +947,25 @@ MessagePart.displayName = "MessagePart"
 /**
  * Build a single tool-call element for standard/detailed modes (or a compact
  * row for simplified), plus the per-call plugin action slot. Shared by the
- * inline single-tool path and the activity group's `renderCard`.
+ * inline single-tool path and the activity group's `renderChild`, so a grouped
+ * tool and a standalone one are rendered by the exact same code — including the
+ * plugin slot, which used to be dropped for every tool inside a simplified
+ * group.
  *
- * `forceOpen` (from the group's expand-all/collapse-all) overrides the
- * per-state default-open heuristic when provided.
+ * The body itself lives in `ToolDetailBody` and is identical across modes; only
+ * the chrome differs (card + header vs. one-line row). `opts.forceOpen` (from
+ * the group's expand-all/collapse-all, and from `detailed`) overrides the
+ * per-state default-open heuristic; `opts.expanded` / `opts.onToggle` make a
+ * simplified row's open state controlled by its group.
  */
 function renderToolPart(
   tp: ToolUIPart,
   key: string,
   mode: AgentFlowMode,
-  forceOpen: boolean | undefined,
+  opts: ToolActivityChildOptions,
   messageId: string | undefined,
-  sessionId: string | undefined,
-  t: ReturnType<typeof useTranslations>
+  sessionId: string | undefined
 ): React.ReactNode {
-  const type = tp.type
-
   const slot = (
     <PluginExtensionSlot
       point="chat.tool-call.actions"
@@ -989,76 +984,39 @@ function renderToolPart(
   if (mode === "simplified") {
     return (
       <React.Fragment key={key}>
-        <ToolCallRow part={tp} />
+        <ToolCallRow
+          part={tp}
+          sessionId={sessionId}
+          expanded={opts.expanded}
+          onToggle={opts.onToggle}
+          defaultOpen={opts.forceOpen}
+        />
         {slot}
       </React.Fragment>
     )
   }
 
-  const cardOpen = (fallback: boolean) => forceOpen ?? (mode === "detailed" ? true : fallback)
+  // A failed call and a still-running one open by default (the user needs the
+  // trace / the live output); a settled success stays collapsed.
+  const defaultOpen =
+    opts.forceOpen ??
+    (mode === "detailed" || tp.state === "output-error" || tp.state === "input-available")
 
-  let toolEl: React.ReactNode
-  if (
-    (type === "tool-Bash" || type === "tool-bash" || type === "tool-mcp__cognia-tools__bash") &&
-    tp.state !== "output-error"
-  ) {
-    toolEl = <TerminalToolPart part={tp} />
-  } else if (isStructuredMcpToolPart(tp) && tp.state !== "output-error") {
-    toolEl = (
-      <Tool defaultOpen={cardOpen(tp.state === "input-available")}>
+  // Bash keeps its own card so the terminal view owns the whole block; every
+  // other tool — and a *failed* Bash, whose parsed error trace outranks the
+  // terminal view — shares one generic card whose body routes in
+  // `ToolDetailBody`.
+  const toolEl =
+    isBashToolPart(tp) && tp.state !== "output-error" ? (
+      <TerminalToolPart part={tp} defaultOpen={defaultOpen} />
+    ) : (
+      <Tool defaultOpen={defaultOpen}>
         <ToolHeader type={tp.type} state={tp.state} />
         <ToolContent>
-          <MCPToolCard part={tp} sessionId={sessionId} />
+          <ToolDetailBody part={tp} sessionId={sessionId} />
         </ToolContent>
       </Tool>
     )
-  } else if (tp.state !== "output-error" && hasA2UIToolOutput(tp.output)) {
-    // A tool whose result embeds an A2UI payload (surface + components) renders
-    // as an interactive surface instead of the generic tool body.
-    toolEl = (
-      <Tool defaultOpen={cardOpen(tp.state === "input-available")}>
-        <ToolHeader type={tp.type} state={tp.state} />
-        <ToolContent>
-          <A2UIToolOutput
-            toolId={tp.toolCallId}
-            toolName={toolNameOf(tp) ?? type}
-            output={tp.output}
-          />
-        </ToolContent>
-      </Tool>
-    )
-  } else if (tp.state === "output-error") {
-    const rawError = (tp as { errorText?: unknown }).errorText
-    toolEl = (
-      <Tool defaultOpen={forceOpen ?? true}>
-        <ToolHeader type={tp.type} state={tp.state} />
-        <ToolContent>
-          {tp.input !== undefined && tp.input !== null && <ToolInput input={tp.input} />}
-          <ErrorTraceDetails
-            error={{ message: normalizeErrorText(rawError, t("toolCallFailed")) }}
-            title={t("toolCallFailed")}
-            className="mt-2"
-            body={
-              <ErrorParsedView
-                rawError={rawError}
-                toolType={tp.type}
-                fallback={t("toolCallFailed")}
-              />
-            }
-          />
-        </ToolContent>
-      </Tool>
-    )
-  } else {
-    toolEl = (
-      <Tool defaultOpen={cardOpen(tp.state === "input-available")}>
-        <ToolHeader type={tp.type} state={tp.state} />
-        <ToolContent>
-          <McpToolBodyOrContent part={tp} />
-        </ToolContent>
-      </Tool>
-    )
-  }
 
   return (
     <React.Fragment key={key}>
@@ -1304,7 +1262,7 @@ function renderPart(
     const tp = part as ToolUIPart
     // Delegate to the shared tool renderer (mode-aware: simplified row vs.
     // standard/detailed card), which also appends the per-call plugin slot.
-    return renderToolPart(tp, key, mode, undefined, messageId, sessionId, t)
+    return renderToolPart(tp, key, mode, {}, messageId, sessionId)
   }
 
   // AI SDK structural/control parts carry no visible content — render nothing

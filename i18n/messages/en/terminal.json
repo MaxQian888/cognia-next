@@ -29,7 +29,14 @@
     "detachError": "Couldn't detach terminal: {message}",
     "spawnDenied": "Terminal blocked by a plugin",
     "spawnError": "Couldn't open terminal: {message}",
-    "splitRight": "Split terminal right (Ctrl+\\)"
+    "splitRight": "Split terminal right (Ctrl+\\)",
+    "dragToMove": "Drag to move the terminal dock",
+    "dropZoneBottom": "Drop here to dock the terminal at the bottom",
+    "dropZoneRight": "Drop here to dock the terminal on the right",
+    "moveToBottom": "Dock the terminal at the bottom",
+    "moveToRight": "Dock the terminal on the right",
+    "overflowTabs": "More terminal tabs",
+    "resizeVertical": "Drag to resize the terminal dock (arrow keys also work)"
   },
   "emptyState": {
     "desktop": {
@@ -38,8 +45,14 @@
       "title": "No terminals yet"
     },
     "mobile": {
+      "action": "+ New terminal",
       "body": "Pair this device with the desktop server to connect to its terminal over LAN.",
       "title": "Remote terminal not configured"
+    },
+    "remote": {
+      "action": "+ New remote terminal",
+      "body": "New terminals open on the connected Cognia host. Spawn one with the button below, or press Ctrl+` to toggle the dock anywhere in the app.",
+      "title": "No terminals on the remote host"
     },
     "unsupported": {
       "body": "The integrated terminal needs the desktop or mobile shell — it isn't available in the plain browser preview.",
@@ -110,9 +123,15 @@
     "previous": "Previous match"
   },
   "sessionState": {
+    "chipDetails": "Terminal session status",
+    "chipLabel": "Terminal status: {state}",
     "fullHost": "Full host",
     "integrationDegraded": "Shell integration unavailable",
+    "outputThrottled": "Output throttled — the process was paused to catch up",
+    "outputThrottledBuffered": "Output throttled — buffering in this window",
     "readOnly": "Read-only",
+    "releaseConfirm": "Release control of this session? Another client can then take over.",
+    "releaseControl": "Release control",
     "replayGap": "Output before sequence {firstAvailable} is no longer available.",
     "replayGapMarker": "Earlier terminal output is unavailable because the replay buffer was truncated.",
     "sandboxed": "Sandboxed",

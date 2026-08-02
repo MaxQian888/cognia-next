@@ -1,12 +1,16 @@
 import {
   AUTHOR_CAPABILITY_CONTRACTS,
+  AUTHOR_PLUGIN_POINT_CONTRACTS,
   CANONICAL_PLUGIN_CAPABILITIES,
   CANONICAL_PLUGIN_PERMISSIONS,
+  CANONICAL_PLUGIN_POINT_KINDS,
   CANONICAL_PLUGIN_TYPES,
   PLUGIN_PATH_FIELD_CONTRACTS,
   PLUGIN_MANIFEST_CONTRIBUTIONS,
   PLUGIN_RUNTIME_ENTRY_CONTRACTS,
   PLUGIN_CONTRACT_SCHEMA_VERSION,
+  PLUGIN_POINT_CONTRACT_SCHEMA_VERSION,
+  getAuthorPluginPointContract,
 } from "./catalog"
 
 describe("canonical plugin author contract", () => {
@@ -78,6 +82,28 @@ describe("canonical plugin author contract", () => {
         "vscodeExtension.contributes.grammars[].path",
         "vscodeExtension.contributes.chatInstructions[].path",
       ])
+    )
+  })
+
+  it("exposes every plugin point through the language-neutral author contract", () => {
+    expect(PLUGIN_POINT_CONTRACT_SCHEMA_VERSION).toBe(1)
+    expect(CANONICAL_PLUGIN_POINT_KINDS).toEqual(["ui-slot", "hook", "activation", "runtime"])
+    expect(AUTHOR_PLUGIN_POINT_CONTRACTS).toHaveLength(275)
+    expect(
+      new Set(AUTHOR_PLUGIN_POINT_CONTRACTS.map((point) => `${point.kind}:${point.id}`)).size
+    ).toBe(AUTHOR_PLUGIN_POINT_CONTRACTS.length)
+    expect(getAuthorPluginPointContract("chat.input.actions")).toEqual(
+      expect.objectContaining({
+        kind: "ui-slot",
+        formFactor: "row",
+        permission: "extension:ui",
+      })
+    )
+    expect(getAuthorPluginPointContract("onAgentTool:*")).toEqual(
+      expect.objectContaining({
+        status: "deprecated",
+        replacementId: "onTool:*",
+      })
     )
   })
 })

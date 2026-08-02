@@ -7,11 +7,20 @@
  * plus expand-all / collapse-all over the children.
  *
  * Per display mode:
- *  - simplified — collapsed by default; children are compact `ToolCallRow`s
- *                 whose open state is owned by the group (expand/collapse all).
- *  - standard   — expanded by default; children are the full `Tool` cards via
- *                 `renderCard`; expand/collapse all remounts them open/closed.
- *  - detailed   — expanded by default; children render with `forceOpen`.
+ *  - simplified — collapsed by default; the group owns each child's open state
+ *                 and hands it down as `expanded` + `onToggle`, so
+ *                 expand/collapse all is a controlled state change.
+ *  - standard   — expanded by default; children get `forceOpen` and a
+ *                 generation-stamped key, so expand/collapse all remounts them
+ *                 with the new default (the `<Tool>` Collapsible reads
+ *                 `defaultOpen` only at mount).
+ *  - detailed   — expanded by default; children render with `forceOpen: true`.
+ *
+ * Every child goes through the caller's `renderChild` in every mode. The group
+ * owns *when* a child is open, never *what* a child looks like — that belongs
+ * to the caller, which is what lets the main chat render mode-aware tool parts
+ * (rows or cards, plus their per-call plugin action slot) while a sub-agent
+ * tree renders plain rows, with no branch duplicated here.
  */
 
 import { useCallback, useMemo, useState, type ReactNode } from "react"
@@ -27,7 +36,6 @@ import {
 import type { LucideIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 
-import { ToolCallRow } from "@/components/chat/message-parts/tool-call-row"
 import { MotionCollapse, MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
 import {
   aggregateToolStatus,
@@ -52,14 +60,28 @@ export interface ToolActivityGroupEntry {
   key: string
 }
 
+/** How the group wants one child rendered on this pass. */
+export interface ToolActivityChildOptions {
+  /**
+   * standard / detailed — force the child open (`true`) or closed (`false`),
+   * or `undefined` to keep its own per-state default. Paired with a
+   * generation-stamped key so an uncontrolled child re-reads it.
+   */
+  forceOpen?: boolean
+  /** simplified — controlled open state, owned by the group. */
+  expanded?: boolean
+  /** simplified — toggles this child's controlled open state. */
+  onToggle?: () => void
+}
+
 export interface ToolActivityGroupProps {
   entries: ToolActivityGroupEntry[]
   mode: AgentFlowMode
-  /** Renders one full tool card (standard/detailed modes). */
-  renderCard: (part: ToolUIPart, key: string, opts: { forceOpen?: boolean }) => ReactNode
+  /** Renders one child (a compact row or a full tool card — the caller decides). */
+  renderChild: (part: ToolUIPart, key: string, opts: ToolActivityChildOptions) => ReactNode
 }
 
-export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGroupProps) {
+export function ToolActivityGroup({ entries, mode, renderChild }: ToolActivityGroupProps) {
   const t = useTranslations("chat.agentFlow")
 
   // Simplified: per-row open set. Standard/detailed: remount generation + value.
@@ -114,19 +136,17 @@ export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGro
   const body: ReactNode =
     mode === "simplified" ? (
       <div className="space-y-1">
-        {entries.map((entry, i) => (
-          <ToolCallRow
-            key={entry.key}
-            part={entry.part}
-            expanded={expandedRows.has(i)}
-            onToggle={rowToggles[i]}
-          />
-        ))}
+        {entries.map((entry, i) =>
+          renderChild(entry.part, entry.key, {
+            expanded: expandedRows.has(i),
+            onToggle: rowToggles[i],
+          })
+        )}
       </div>
     ) : (
       <div className="space-y-0">
         {entries.map((entry) =>
-          renderCard(entry.part, `${entry.key}:${gen}`, {
+          renderChild(entry.part, `${entry.key}:${gen}`, {
             forceOpen: cardsOpen ?? (mode === "detailed" ? true : undefined),
           })
         )}

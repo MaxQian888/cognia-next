@@ -19,7 +19,7 @@
 //! expects, so `cg_keycode_to_vk` translates them — keeping the shared coalescer
 //! and its tests correct across platforms.
 
-use std::ffi::c_void;
+use std::ffi::{c_ulong, c_void};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, OnceLock};
 use std::thread::{self, JoinHandle};
@@ -30,6 +30,7 @@ use core_graphics::event::{
     CGEvent, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
     CGEventTapProxy, CGEventType, CallbackResult, EventField,
 };
+use foreign_types::ForeignType;
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::{InputButton, InputEvent};
@@ -40,6 +41,47 @@ extern "C" {
     /// directly; the symbol resolves through the CoreGraphics framework the
     /// crate already links.
     fn CGEventTapEnable(tap: *const c_void, enable: bool);
+
+    /// The layout-resolved characters a key event produces.
+    ///
+    /// `core-graphics` binds only the *setter* (`…SetUnicodeString`), so the
+    /// getter is declared here the same way. This has to run inside the tap
+    /// callback: the translation depends on the live keyboard layout and
+    /// dead-key state, both of which have moved on by the time the drain loop
+    /// sees the event.
+    fn CGEventKeyboardGetUnicodeString(
+        event: *const c_void,
+        max_length: c_ulong,
+        actual_length: *mut c_ulong,
+        unicode_string: *mut u16,
+    );
+}
+
+/// Decode the character a key press produced under the current layout.
+///
+/// `None` for a dead key (which yields zero characters until it is composed),
+/// for a pure modifier, and for any multi-scalar result we cannot represent as
+/// one `char`. Every one of those is handled downstream as "describe this key
+/// structurally", never as a guess.
+fn decode_unicode(event: &CGEvent) -> Option<char> {
+    let mut buf = [0u16; 8];
+    let mut actual: c_ulong = 0;
+    // SAFETY: `buf` outlives the call and `max_length` matches its capacity, so
+    // the callee cannot write past it. `as_ptr` yields the live CGEventRef the
+    // tap callback already holds a reference to.
+    unsafe {
+        CGEventKeyboardGetUnicodeString(
+            event.as_ptr() as *const c_void,
+            buf.len() as c_ulong,
+            &mut actual,
+            buf.as_mut_ptr(),
+        );
+    }
+    let len = (actual as usize).min(buf.len());
+    if len == 0 {
+        return None;
+    }
+    char::decode_utf16(buf[..len].iter().copied()).next()?.ok()
 }
 
 /// Windows `WHEEL_DELTA` — one notch. The Windows hook reports wheel motion in
@@ -135,6 +177,7 @@ pub(crate) fn to_signal(
     y: i32,
     scroll_dy: i32,
     keycode: i64,
+    text: Option<char>,
     ts_ms: i64,
 ) -> Option<InputEvent> {
     match etype {
@@ -186,6 +229,7 @@ pub(crate) fn to_signal(
         }),
         CGEventType::KeyDown => Some(InputEvent::KeyDown {
             vk: cg_keycode_to_vk(keycode),
+            text,
             ts_ms,
         }),
         _ => None,
@@ -221,12 +265,16 @@ fn on_event(
                 event.get_integer_value_field(EventField::SCROLL_WHEEL_EVENT_DELTA_AXIS_1) as i32
                     * WHEEL_DELTA;
             let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+            let text = matches!(etype, CGEventType::KeyDown)
+                .then(|| decode_unicode(event))
+                .flatten();
             if let Some(sig) = to_signal(
                 etype,
                 loc.x as i32,
                 loc.y as i32,
                 scroll_dy,
                 keycode,
+                text,
                 now_ms(),
             ) {
                 // Unbounded send is non-blocking and does not silently drop
@@ -385,7 +433,7 @@ mod tests {
     #[test]
     fn to_signal_maps_each_button_and_kind() {
         assert!(matches!(
-            to_signal(CGEventType::LeftMouseUp, 3, 4, 0, 0, 9),
+            to_signal(CGEventType::LeftMouseUp, 3, 4, 0, 0, None, 9),
             Some(InputEvent::MouseUp {
                 x: 3,
                 y: 4,
@@ -394,25 +442,25 @@ mod tests {
             })
         ));
         assert!(matches!(
-            to_signal(CGEventType::RightMouseUp, 0, 0, 0, 0, 0),
+            to_signal(CGEventType::RightMouseUp, 0, 0, 0, 0, None, 0),
             Some(InputEvent::MouseUp {
                 button: InputButton::Right,
                 ..
             })
         ));
         assert!(matches!(
-            to_signal(CGEventType::OtherMouseUp, 0, 0, 0, 0, 0),
+            to_signal(CGEventType::OtherMouseUp, 0, 0, 0, 0, None, 0),
             Some(InputEvent::MouseUp {
                 button: InputButton::Middle,
                 ..
             })
         ));
         assert!(matches!(
-            to_signal(CGEventType::ScrollWheel, 1, 2, -240, 0, 7),
+            to_signal(CGEventType::ScrollWheel, 1, 2, -240, 0, None, 7),
             Some(InputEvent::Scroll { dy: -240, .. })
         ));
         assert!(matches!(
-            to_signal(CGEventType::KeyDown, 0, 0, 0, 0x00, 0),
+            to_signal(CGEventType::KeyDown, 0, 0, 0, 0x00, None, 0),
             Some(InputEvent::KeyDown { vk: 0x41, .. }) // A
         ));
     }
@@ -420,11 +468,11 @@ mod tests {
     #[test]
     fn to_signal_ignores_non_input_events() {
         assert!(matches!(
-            to_signal(CGEventType::LeftMouseDown, 0, 0, 0, 0, 0),
+            to_signal(CGEventType::LeftMouseDown, 0, 0, 0, 0, None, 0),
             Some(InputEvent::MouseDown { .. })
         ));
         assert!(matches!(
-            to_signal(CGEventType::MouseMoved, 1, 2, 0, 0, 3),
+            to_signal(CGEventType::MouseMoved, 1, 2, 0, 0, None, 3),
             Some(InputEvent::MouseMoved {
                 x: 1,
                 y: 2,
@@ -432,7 +480,7 @@ mod tests {
             })
         ));
         // Disable notifications produce no observation.
-        assert!(to_signal(CGEventType::TapDisabledByTimeout, 0, 0, 0, 0, 0).is_none());
+        assert!(to_signal(CGEventType::TapDisabledByTimeout, 0, 0, 0, 0, None, 0).is_none());
     }
 
     #[test]
@@ -441,7 +489,7 @@ mod tests {
         // it and `keys_to_hint` drops it, exactly like a Windows modifier.
         // 0x3F is the Fn key: no VK equivalent, so it lands in the 0 bucket.
         assert!(matches!(
-            to_signal(CGEventType::KeyDown, 0, 0, 0, 0x3F, 0),
+            to_signal(CGEventType::KeyDown, 0, 0, 0, 0x3F, None, 0),
             Some(InputEvent::KeyDown { vk: 0, .. })
         ));
     }
@@ -452,7 +500,7 @@ mod tests {
         // fall through to `0`, which is also every unmapped key — so the check
         // could never fire on macOS.
         assert!(matches!(
-            to_signal(CGEventType::KeyDown, 0, 0, 0, 0x35, 0),
+            to_signal(CGEventType::KeyDown, 0, 0, 0, 0x35, None, 0),
             Some(InputEvent::KeyDown { vk: 0x1B, .. })
         ));
     }

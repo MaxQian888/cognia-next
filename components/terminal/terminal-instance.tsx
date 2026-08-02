@@ -66,7 +66,6 @@ import type { IDecoration, ILink, ILinkProvider, IMarker } from "@xterm/xterm"
 // workflow canvas uses for `@xyflow/react/dist/style.css`.
 import "@xterm/xterm/css/xterm.css"
 
-import { Button } from "@/components/ui/button"
 import { TerminalBackpressure } from "@/lib/terminal/backpressure"
 import { findColorScheme, resolveTerminalTheme } from "@/lib/terminal/color-schemes"
 import type { TerminalTheme } from "@/lib/terminal/color-schemes"
@@ -91,6 +90,7 @@ import { TerminalCommandMenu } from "@/components/terminal/terminal-command-menu
 import { TerminalCompletionPopup } from "@/components/terminal/terminal-completion-popup"
 import { TerminalGhostText } from "@/components/terminal/terminal-ghost-text"
 import { TerminalQuickFix } from "@/components/terminal/terminal-quick-fix"
+import { TerminalSessionChip } from "@/components/terminal/terminal-session-chip"
 import { TerminalStickyScroll } from "@/components/terminal/terminal-sticky-scroll"
 
 /**
@@ -545,6 +545,9 @@ function TerminalInstanceImpl(
     controllerId: null,
   })
   const [replayGap, setReplayGap] = useState<TerminalReplayGap | null>(null)
+  // Renderer backpressure. Lives in the store (not local state) so the tab
+  // strip can mark a throttled *background* tab without the pane being visible.
+  const throttled = useTerminalStore((s) => s.outputThrottled[sessionId] ?? false)
 
   const quickFixesRef = useRef(quickFixesEnabled)
   const commandActionsRef = useRef(commandActionsEnabled)
@@ -1047,8 +1050,40 @@ function TerminalInstanceImpl(
         refit()
       })
 
+      // Flow control, end to end. The watermark logic in `backpressure.ts` was
+      // already correct; it just had nowhere to report to, so a `yes(1)` flood
+      // ran unchecked until the host dropped the whole attachment for queue
+      // overflow — the tab going *dead*, not merely slow.
+      //
+      // `onPause`/`onResume` fire from the rAF flush path and can invert faster
+      // than the IPC round trip, so converge on the latest desired value with a
+      // single-flight loop instead of firing a request per transition.
+      let flowDesired = false
+      let flowSent = false
+      let flowInFlight = false
+      const pushFlowControl = async () => {
+        if (flowInFlight) return
+        flowInFlight = true
+        try {
+          while (flowDesired !== flowSent) {
+            const want = flowDesired
+            await session.setFlowControl(want)
+            flowSent = want
+          }
+        } finally {
+          flowInFlight = false
+        }
+      }
+      const setFlow = (paused: boolean) => {
+        useTerminalStore.getState().setOutputThrottled(sessionId, paused)
+        flowDesired = paused
+        void pushFlowControl()
+      }
+
       const bp = new TerminalBackpressure({
         term: { write: (data, cb) => term.write(data, cb) },
+        onPause: () => setFlow(true),
+        onResume: () => setFlow(false),
       })
       const offData = session.onData((bytes) => bp.push(bytes))
       const offControl = session.onControlState(setControlState)
@@ -1380,7 +1415,16 @@ function TerminalInstanceImpl(
         setSticky(null)
         ro.disconnect()
         themeObserver.disconnect()
+        // A remount tears down only the renderer; the host-owned PTY survives.
+        // Converge the single-flight loop back to running before dropping the
+        // backpressure instance, including when a pause IPC is still in flight.
+        if (flowDesired || flowSent) {
+          flowDesired = false
+          void pushFlowControl()
+        }
         bp.dispose()
+        // A killed tab must not leave a stuck "throttled" indicator behind.
+        useTerminalStore.getState().setOutputThrottled(sessionId, false)
         try {
           webglContextLossDisposable?.dispose()
         } catch {
@@ -1559,54 +1603,16 @@ function TerminalInstanceImpl(
         data-session-id={sessionId}
         className="h-full w-full overflow-hidden bg-background"
       />
-      <div className="pointer-events-none absolute left-2 right-2 top-2 z-30 flex flex-wrap gap-1">
-        {controlState.role === "viewer" ? (
-          <div
-            className="pointer-events-auto flex items-center gap-2 rounded-md border border-amber-500/40 bg-background/95 px-2 py-1 text-xs shadow-sm backdrop-blur"
-            data-testid="terminal-read-only-state"
-          >
-            <span>{t("sessionState.readOnly")}</span>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-6 px-2 text-[11px]"
-              onClick={() => {
-                if (!window.confirm(t("sessionState.takeoverConfirm"))) return
-                void getLiveSession(sessionId)?.takeControl()
-              }}
-            >
-              {t("sessionState.takeControl")}
-            </Button>
-          </div>
-        ) : null}
-        {replayGap ? (
-          <div
-            className="rounded-md border border-orange-500/40 bg-background/95 px-2 py-1 text-xs shadow-sm backdrop-blur"
-            role="status"
-            data-testid="terminal-replay-gap-state"
-          >
-            {t("sessionState.replayGap", {
-              first: replayGap.firstAvailable,
-              last: replayGap.lastAvailable,
-            })}
-          </div>
-        ) : null}
-        {getLiveSession(sessionId)?.info.sandboxed ? (
-          <div className="rounded-md border bg-background/95 px-2 py-1 text-xs shadow-sm backdrop-blur">
-            {t("sessionState.sandboxed")}
-          </div>
-        ) : (
-          <div className="rounded-md border border-red-500/30 bg-background/95 px-2 py-1 text-xs shadow-sm backdrop-blur">
-            {t("sessionState.fullHost")}
-          </div>
-        )}
-        {getLiveSession(sessionId)?.info.integrationCapabilities?.degradedReason ? (
-          <div className="rounded-md border border-amber-500/40 bg-background/95 px-2 py-1 text-xs shadow-sm backdrop-blur">
-            {t("sessionState.integrationDegraded")}
-          </div>
-        ) : null}
-      </div>
+      {/* One auto-collapsing chip instead of a permanent badge stack. It reads
+          live session facts reactively and owns both halves of the control
+          lease (take / release). */}
+      <TerminalSessionChip
+        sessionId={sessionId}
+        controlState={controlState}
+        replayGap={replayGap}
+        throttled={throttled}
+        flowControlSupported={getLiveSession(sessionId)?.supportsFlowControl ?? false}
+      />
       {autocomplete.enabled && autocomplete.ghost ? (
         <TerminalGhostText
           ghost={autocomplete.ghost}

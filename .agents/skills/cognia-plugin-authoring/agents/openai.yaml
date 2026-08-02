@@ -1,0 +1,7 @@
+interface:
+  display_name: "Cognia Plugin Authoring"
+  short_description: "Create or extend build-ready Cognia plugins"
+  default_prompt: "Use $cognia-plugin-authoring to create or extend a Cognia plugin from these requirements."
+
+policy:
+  allow_implicit_invocation: false

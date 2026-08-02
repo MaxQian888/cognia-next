@@ -1,0 +1,25 @@
+{
+  "name": "an active debug session keeps content but still redacts secrets and patterns",
+  "debugSession": true,
+  "input": {
+    "message": "Tool call finished",
+    "data": {
+      "prompt": "summarize /Users/alice/notes.txt",
+      "apiKey": "abcdef0123456789",
+      "toolName": "read_file"
+    }
+  },
+  "expected": {
+    "payload": {
+      "message": "Tool call finished",
+      "data": {
+        "prompt": "summarize [REDACTED_PATH]",
+        "apiKey": "[REDACTED]",
+        "toolName": "read_file"
+      }
+    },
+    "removedFields": [],
+    "capturePolicy": "debug-session",
+    "contentCaptured": true
+  }
+}

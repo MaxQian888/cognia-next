@@ -6,7 +6,10 @@ name: Images
 #   ghcr.io/<owner>/cognia-share          services/share-server
 #   ghcr.io/<owner>/cognia-runner        deploy/runner (external agent CLIs)
 #   ghcr.io/<owner>/cognia-workspace-runtime services/workspace-runtime
+#   ghcr.io/<owner>/cognia-diagnostics    services/diagnostic-server
 #   ghcr.io/<owner>/cognia-server        Dockerfile.cognia-server (slim/full)
+#   ghcr.io/<owner>/cognia-deploy-agent  Dockerfile.deploy-agent
+#   ghcr.io/<owner>/cognia-ops-controller Dockerfile.ops-controller
 #
 # Publish happens on version tags (and manual dispatch with push=true).
 # PRs touching the container inputs get a compile check instead:
@@ -34,11 +37,16 @@ on:
   pull_request:
     paths:
       - "Dockerfile.cognia-server"
+      - "Dockerfile.deploy-agent"
+      - "Dockerfile.ops-controller"
       - ".dockerignore"
       - "deploy/runner/**"
       - "services/signaling-server/Dockerfile"
       - "services/share-server/Dockerfile"
       - "services/workspace-runtime/**"
+      # The whole crate, not just its Dockerfile: the build context is the
+      # service directory, so a source or migration change is an image change.
+      - "services/diagnostic-server/**"
       - "lib/browser/overlay.injected.js"
       - ".github/workflows/images.yml"
       # cognia-server compile inputs: the `check` stage COPYs these, so a PR
@@ -106,6 +114,15 @@ jobs:
           - name: cognia-workspace-runtime
             context: .
             file: services/workspace-runtime/Dockerfile
+          - name: cognia-diagnostics
+            context: services/diagnostic-server
+            file: services/diagnostic-server/Dockerfile
+          - name: cognia-deploy-agent
+            context: .
+            file: Dockerfile.deploy-agent
+          - name: cognia-ops-controller
+            context: .
+            file: Dockerfile.ops-controller
     steps:
       - uses: actions/checkout@v6
 

@@ -101,6 +101,9 @@
     "0097-cross-device-settings-contract-and-companion-reach",
     "0098-persistent-workbench-rail",
     "0100-unified-template-platform",
-    "0101-model-evaluation-lab"
+    "0101-model-evaluation-lab",
+    "0102-unified-observability-crash-diagnostics",
+    "0104-provider-diagnostics-control-plane",
+    "0106-end-to-end-skill-recorder"
   ]
 }

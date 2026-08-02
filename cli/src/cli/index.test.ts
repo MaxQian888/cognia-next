@@ -56,6 +56,21 @@ describe("main", () => {
     expect(s.stderr()).toMatch(/Usage:/)
   })
 
+  it("dispatches durability", async () => {
+    const s = sink()
+    const durability = jest.fn().mockResolvedValue(0)
+    expect(
+      await main(["durability", "verify", "--account", "acct"], { out: s.out, durability })
+    ).toBe(0)
+    expect(durability).toHaveBeenCalled()
+  })
+
+  it("lists durability in the help text", async () => {
+    const s = sink()
+    await main(["--help"], { out: s.out })
+    expect(s.stdout()).toMatch(/cognia-agent durability/)
+  })
+
   it("dispatches run", async () => {
     const s = sink()
     const run = jest.fn().mockResolvedValue(0)

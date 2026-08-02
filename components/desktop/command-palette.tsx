@@ -30,12 +30,15 @@ import {
   Trash2Icon,
   UsersIcon,
   UsersRoundIcon,
+  VideoIcon,
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { useSessions } from "@/hooks/chat"
+import { useRecorderAvailable } from "@/hooks/skills/use-skill-recorder"
+import { openRecorder } from "@/stores/skills/recorder-store"
 import { useChatHistorySearch } from "@/hooks/chat/use-chat-history-search"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { usePlatform } from "@/hooks/use-platform"
@@ -82,6 +85,8 @@ interface Props {
 
 export function CommandPalette({ onOpenSettings }: Props) {
   const t = useTranslations("desktop.commandPalette")
+  const tRecorder = useTranslations("skills.recorder")
+  const recorderAvailable = useRecorderAvailable()
   const [open, setOpen] = useState(false)
   const [searchInput, setSearchInput] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
@@ -411,6 +416,22 @@ export function CommandPalette({ onOpenSettings }: Props) {
             <FolderOpenIcon className="size-4" />
             <span>{t("actions.openFolder")}</span>
           </CommandItem>
+          {/* Gated on the owning plugin, not on `isTauri()` — disabling the
+              Skill Recorder must withdraw every entry point at once. */}
+          {recorderAvailable ? (
+            <CommandItem
+              onSelect={() => {
+                setOpen(false)
+                openRecorder("palette")
+              }}
+            >
+              <VideoIcon className="size-4" />
+              <span>{tRecorder("entry.paletteLabel")}</span>
+              <span className="ml-auto text-xs text-muted-foreground">
+                {tRecorder("entry.paletteHint")}
+              </span>
+            </CommandItem>
+          ) : null}
         </CommandGroup>
 
         <CommandSeparator />

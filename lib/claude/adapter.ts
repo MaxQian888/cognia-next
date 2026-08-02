@@ -396,8 +396,9 @@ export function applySdkEvent(
       // thinking deltas into an in-progress assistant message keyed by the
       // `message_start` id. The authoritative full `assistant` message arrives
       // later and replaces this preview via appendAssistantMessage's
-      // replace-by-id (same Anthropic message id). Tool_use blocks are left to
-      // the final message — only text + reasoning drive the live preview.
+      // replace-by-id (same Anthropic message id). Tool_use blocks stream too:
+      // `content_block_start` paints the row the instant the model names the
+      // tool, and `content_block_stop` fills in the parsed input.
       return {
         messages: applyStreamEvent(messages, evt as unknown as SDKPartialAssistantMessage),
         turnComplete: false,
@@ -701,10 +702,15 @@ function appendDelta(
   const parts = (msg.parts ?? []).slice()
   let pIdx = -1
   for (let i = parts.length - 1; i >= 0; i--) {
-    if ((parts[i] as { type?: string }).type === partType) {
+    const type = (parts[i] as { type?: string }).type
+    if (type === partType) {
       pIdx = i
       break
     }
+    // A tool call closes the text/reasoning block that preceded it. Without
+    // this the text streaming *after* a tool_use would be appended to the text
+    // part from *before* it, silently welding two separate blocks into one.
+    if (typeof type === "string" && type.startsWith("tool-")) break
   }
   if (pIdx >= 0) {
     const prev = parts[pIdx] as unknown as { text?: string }
@@ -772,20 +778,65 @@ function mergeLiveUsage(messages: UIMessage[], partial: Partial<UsageInfo>): UIM
 }
 
 /**
+ * In-flight `tool_use` input buffers, keyed `<messageId>#<blockIndex>`.
+ *
+ * The Agent SDK streams a tool call's arguments as a run of `input_json_delta`
+ * fragments that are only valid JSON once the block closes, so the fragments
+ * have to be accumulated somewhere across events. They deliberately live HERE
+ * rather than on the part: `use-claude-chat` debounce-persists the message list
+ * mid-stream, so parking a growing raw-JSON string on the part would write a
+ * second full copy of every large `Write` / `Edit` payload into Dexie for the
+ * duration of the call. Entries are dropped at `content_block_stop`.
+ */
+const streamingToolInputs = new Map<string, { toolCallId: string; text: string }>()
+
+/**
+ * Ceiling on live tool-input buffers. Every entry is normally freed by its
+ * `content_block_stop`, but an aborted turn (user pressed stop, sidecar died)
+ * never sends one. The cap keeps a long-lived renderer from leaking; the only
+ * cost of a wrong eviction is a tool row whose input arrives with the canonical
+ * `assistant` message instead of at `content_block_stop`.
+ */
+const MAX_STREAMING_TOOL_INPUTS = 128
+
+/** Test seam — drops every in-flight tool-input buffer. */
+export function resetStreamingToolInputs(): void {
+  streamingToolInputs.clear()
+}
+
+/** Parse an accumulated `input_json_delta` buffer, or undefined if incomplete. */
+function tryParseToolInput(text: string): unknown | undefined {
+  if (!text.trim()) return undefined
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Apply a `stream_event` (SDKPartialAssistantMessage) to the in-progress
  * assistant message. `message_start` seeds an empty assistant message keyed by
  * the Anthropic message id (and attaches live input/cache usage); each
  * `content_block_delta` (text_delta / thinking_delta) grows it; `message_delta`
- * merges the running output-token usage. Other raw events (content_block
- * start/stop, message_stop) are ignored — the final `assistant` message carries
- * the canonical content and the `result` message the authoritative usage.
+ * merges the running output-token usage.
+ *
+ * Tool calls stream through the block lifecycle: `content_block_start` carries
+ * the tool's id + name (its `input` is always `{}` at that point), so the row
+ * is painted immediately in `input-streaming`; the `input_json_delta` run is
+ * accumulated off-message; `content_block_stop` parses the buffer and promotes
+ * the part to `input-available`. `message_stop` is ignored — the final
+ * `assistant` message carries the canonical content and the `result` message
+ * the authoritative usage.
  */
 function applyStreamEvent(messages: UIMessage[], evt: SDKPartialAssistantMessage): UIMessage[] {
   const raw = evt.event as unknown as {
     type?: string
+    index?: number
     message?: { id?: string; usage?: Record<string, unknown> }
     usage?: Record<string, unknown>
-    delta?: { type?: string; text?: string; thinking?: string }
+    content_block?: { type?: string; id?: string; name?: string }
+    delta?: { type?: string; text?: string; thinking?: string; partial_json?: string }
   }
   if (!raw || typeof raw !== "object") return messages
 
@@ -824,8 +875,80 @@ function applyStreamEvent(messages: UIMessage[], evt: SDKPartialAssistantMessage
     return out
   }
 
+  if (raw.type === "content_block_start") {
+    const block = raw.content_block
+    if (block?.type !== "tool_use") return messages
+    const { id, name } = block
+    if (!id || !name) return messages
+    const idx = findLastAssistantIndex(messages)
+    // Same turn guard the text deltas use: never graft this turn's tool call
+    // onto the previous turn's finished reply.
+    if (idx < 0 || idx < findLastUserIndex(messages)) return messages
+    const msg = messages[idx]
+    // A replayed / resumed stream can re-announce a block already on the
+    // message. Re-seeding would duplicate the row and orphan the first one.
+    if (msg.parts.some((p) => (p as { toolCallId?: string }).toolCallId === id)) return messages
+
+    if (streamingToolInputs.size >= MAX_STREAMING_TOOL_INPUTS) streamingToolInputs.clear()
+    streamingToolInputs.set(`${msg.id}#${raw.index ?? 0}`, { toolCallId: id, text: "" })
+
+    const out = messages.slice()
+    out[idx] = {
+      ...msg,
+      parts: [
+        ...msg.parts,
+        // No `input` yet — the arguments are still being generated. The row
+        // renders as tool name + pending glyph until `content_block_stop`.
+        { type: `tool-${name}`, toolCallId: id, state: "input-streaming" } as unknown as Part,
+      ],
+    } as UIMessage
+    return out
+  }
+
+  if (raw.type === "content_block_stop") {
+    const idx = findLastAssistantIndex(messages)
+    if (idx < 0) return messages
+    const msg = messages[idx]
+    const key = `${msg.id}#${raw.index ?? 0}`
+    const buffered = streamingToolInputs.get(key)
+    if (!buffered) return messages
+    streamingToolInputs.delete(key)
+
+    const pIdx = msg.parts.findIndex(
+      (p) => (p as { toolCallId?: string }).toolCallId === buffered.toolCallId
+    )
+    if (pIdx < 0) return messages
+    const prev = msg.parts[pIdx] as unknown as Record<string, unknown>
+    // The arguments are complete but the tool has not run: that is exactly
+    // `input-available`, so the canonical `assistant` message that lands next
+    // replaces this part with an identical one and the row never flickers.
+    // A buffer that fails to parse (truncated stream) keeps `input` absent
+    // rather than inventing one — the canonical message supplies the truth.
+    const parsed = tryParseToolInput(buffered.text)
+    const parts = msg.parts.slice()
+    parts[pIdx] = {
+      ...prev,
+      state: "input-available",
+      ...(parsed !== undefined ? { input: parsed } : {}),
+    } as unknown as Part
+    const out = messages.slice()
+    out[idx] = { ...msg, parts } as UIMessage
+    return out
+  }
+
   if (raw.type === "content_block_delta") {
     const delta = raw.delta
+    if (delta?.type === "input_json_delta") {
+      // O(1) append only — no whole-buffer re-parse and no message-list copy
+      // per chunk. Mid-stream parses virtually never succeed (the JSON is
+      // truncated), and the row is already painted, so there is nothing to
+      // re-render until the block closes.
+      const idx = findLastAssistantIndex(messages)
+      if (idx < 0) return messages
+      const buffered = streamingToolInputs.get(`${messages[idx].id}#${raw.index ?? 0}`)
+      if (buffered) buffered.text += delta.partial_json ?? ""
+      return messages
+    }
     let chunk = ""
     let partType: "text" | "reasoning" | null = null
     if (delta?.type === "text_delta") {

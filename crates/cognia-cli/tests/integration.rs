@@ -151,6 +151,7 @@ fn plugin_group_help_mentions_every_public_subcommand() {
     assert_eq!(code, Some(0), "stderr: {stderr}");
     for command in [
         "new",
+        "contract",
         "import",
         "lint",
         "build",
@@ -170,6 +171,197 @@ fn plugin_group_help_mentions_every_public_subcommand() {
             stdout.contains(command),
             "plugin group help missing {command}: {stdout}"
         );
+    }
+}
+
+#[test]
+fn plugin_contract_json_returns_the_complete_canonical_inventory_without_writing() {
+    let workspace = tempfile::tempdir().unwrap();
+    let (code, stdout, stderr) =
+        run_cognia_in_dir(workspace.path(), &["plugin", "contract", "--json"]);
+
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    assert!(stderr.trim().is_empty(), "unexpected stderr: {stderr}");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("contract --json should emit valid JSON only");
+    assert_eq!(parsed["schemaVersion"], 2);
+    assert_eq!(parsed["ok"], true);
+    assert_eq!(parsed["action"], "contract");
+    assert_eq!(parsed["catalogSchemaVersion"], 4);
+    assert_eq!(parsed["pluginPointSchemaVersion"], 1);
+    assert_eq!(parsed["catalogCounts"]["pluginTypes"], 5);
+    assert_eq!(parsed["catalogCounts"]["capabilities"], 68);
+    assert_eq!(parsed["catalogCounts"]["manifestContributions"], 55);
+    assert_eq!(parsed["catalogCounts"]["permissions"], 108);
+    assert_eq!(parsed["catalogCounts"]["runtimeEntries"], 5);
+    assert_eq!(parsed["catalogCounts"]["pathFields"], 50);
+    assert_eq!(parsed["catalogCounts"]["pluginPoints"], 275);
+    assert_eq!(parsed["selectionCounts"], parsed["catalogCounts"]);
+    assert_eq!(parsed["filters"]["capabilities"], serde_json::json!([]));
+    assert_eq!(parsed["filters"]["pluginPoints"], serde_json::json!([]));
+    assert_eq!(
+        parsed["filters"]["pluginPointKinds"],
+        serde_json::json!([])
+    );
+    assert_eq!(parsed["filters"]["permissions"], serde_json::json!([]));
+    assert!(parsed["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["id"] == "chat-middleware" && entry["support"] == "supported"));
+    assert!(parsed["manifestContributions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| {
+            entry["field"] == "chatMiddlewares"
+                && entry["execution"] == "javascript"
+                && entry["pythonExecution"] == "experimental"
+        }));
+    assert!(parsed["pathFields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["path"] == "contextPanels[].entry"));
+    assert!(parsed["pluginPoints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| {
+            entry["id"] == "chat.input.actions"
+                && entry["kind"] == "ui-slot"
+                && entry["formFactor"] == "row"
+                && entry["permission"] == "extension:ui"
+        }));
+    assert_eq!(std::fs::read_dir(workspace.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn plugin_contract_filters_related_capabilities_contributions_and_runtime_entries() {
+    let (code, stdout, stderr) = run_cognia(&[
+        "plugin",
+        "contract",
+        "--capability",
+        "components",
+        "--contribution",
+        "contextPanels",
+        "--plugin-type",
+        "hybrid",
+        "--json",
+    ]);
+
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(parsed["pluginTypes"], serde_json::json!(["hybrid"]));
+    assert_eq!(parsed["runtimeEntries"].as_object().unwrap().len(), 1);
+    assert!(parsed["runtimeEntries"].get("hybrid").is_some());
+    let capability_ids = parsed["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["id"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(capability_ids, ["components", "context-panel"]);
+    let contribution_fields = parsed["manifestContributions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["field"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        contribution_fields,
+        ["a2uiComponents", "extensions", "contextPanels"]
+    );
+    assert_eq!(parsed["selectionCounts"]["pluginTypes"], 1);
+    assert_eq!(parsed["selectionCounts"]["capabilities"], 2);
+    assert_eq!(parsed["selectionCounts"]["manifestContributions"], 3);
+    // Permissions and path contracts remain complete because the canonical
+    // catalog does not claim a one-to-one permission/path mapping.
+    assert_eq!(parsed["selectionCounts"]["permissions"], 108);
+    assert_eq!(parsed["selectionCounts"]["pathFields"], 50);
+    assert_eq!(parsed["selectionCounts"]["pluginPoints"], 275);
+}
+
+#[test]
+fn plugin_contract_filters_points_kinds_and_permissions() {
+    let (code, stdout, stderr) = run_cognia(&[
+        "plugin",
+        "contract",
+        "--point",
+        "chat.input.actions",
+        "--point-kind",
+        "ui-slot",
+        "--permission",
+        "extension:ui",
+        "--json",
+    ]);
+
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(parsed["schemaVersion"], 2);
+    assert_eq!(parsed["selectionCounts"]["pluginPoints"], 1);
+    assert_eq!(parsed["selectionCounts"]["permissions"], 1);
+    assert_eq!(parsed["pluginPoints"][0]["id"], "chat.input.actions");
+    assert_eq!(parsed["pluginPoints"][0]["formFactor"], "row");
+    assert_eq!(parsed["permissions"], serde_json::json!(["extension:ui"]));
+}
+
+#[test]
+fn plugin_contract_human_output_supports_repeatable_filters() {
+    let (code, stdout, stderr) = run_cognia(&[
+        "plugin",
+        "contract",
+        "--capability",
+        "tools",
+        "--contribution",
+        "contextPanels",
+        "--plugin-type",
+        "frontend",
+        "--plugin-type",
+        "hybrid",
+    ]);
+
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    assert!(stdout.contains("Cognia plugin contract"));
+    assert!(stdout.contains("frontend"));
+    assert!(stdout.contains("hybrid"));
+    assert!(stdout.contains("contextPanels"));
+    assert!(stdout.contains("Path fields:"));
+    assert!(stdout.contains("Plugin points:"));
+}
+
+#[test]
+fn plugin_contract_json_rejects_every_unknown_selector_with_a_structured_error() {
+    for (flag, value, expected_error) in [
+        ("--capability", "not-a-capability", "unknown capability"),
+        (
+            "--contribution",
+            "not-a-contribution",
+            "unknown contribution",
+        ),
+        ("--plugin-type", "not-a-runtime", "unknown plugin type"),
+        ("--point", "not-a-point", "unknown plugin point"),
+        (
+            "--point-kind",
+            "not-a-point-kind",
+            "unknown plugin point kind",
+        ),
+        (
+            "--permission",
+            "not:a-permission",
+            "unknown permission",
+        ),
+    ] {
+        let (code, stdout, stderr) = run_cognia(&["plugin", "contract", flag, value, "--json"]);
+
+        assert_eq!(code, Some(1));
+        assert!(stderr.trim().is_empty(), "unexpected stderr: {stderr}");
+        let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(parsed["schemaVersion"], 2);
+        assert_eq!(parsed["ok"], false);
+        assert_eq!(parsed["action"], "contract");
+        assert_eq!(parsed["stage"], "input");
+        assert!(parsed["error"].as_str().unwrap().contains(expected_error));
     }
 }
 

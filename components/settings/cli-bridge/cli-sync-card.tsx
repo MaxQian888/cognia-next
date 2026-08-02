@@ -13,11 +13,8 @@ import { toast } from "sonner"
 import { Loader2Icon, RefreshCwIcon, TerminalIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import {
-  SettingsCard,
-  SettingsRow,
-  SettingsToggle,
-} from "@/components/settings/common/settings-section"
+import { SettingsBlock, SettingsField } from "@/components/settings/common/settings-block"
+import { Switch } from "@/components/ui/switch"
 import { useSettingsStore } from "@/stores/settings"
 import { isTauri } from "@/lib/tauri"
 import { resolveCliHome } from "@/lib/cli-bridge/home"
@@ -98,12 +95,13 @@ export function CliSyncCard() {
       : t("status.notDetected")
 
   return (
-    <SettingsCard
-      icon={<TerminalIcon className="size-5" />}
+    <SettingsBlock
+      icon={<TerminalIcon />}
       title={t("title")}
       description={t("description")}
+      contentClassName="space-y-0 [&>*+*]:pt-4"
     >
-      <SettingsRow label={t("status.label")} description={statusDescription}>
+      <SettingsField label={t("status.label")} description={statusDescription}>
         <Button
           size="sm"
           variant="outline"
@@ -118,18 +116,24 @@ export function CliSyncCard() {
           )}
           {t("syncNow")}
         </Button>
-      </SettingsRow>
+      </SettingsField>
 
-      <SettingsToggle
-        id="cli-bridge-auto-sync"
+      <SettingsField
+        htmlFor="cli-bridge-auto-sync"
         label={t("autoSync.label")}
         description={t("autoSync.hint")}
-        checked={autoSync}
-        onCheckedChange={(next) => void onToggleAutoSync(next)}
-      />
+      >
+        <Switch
+          id="cli-bridge-auto-sync"
+          checked={autoSync}
+          onCheckedChange={(next) => void onToggleAutoSync(next)}
+        />
+      </SettingsField>
 
-      <p className="text-[11px] text-muted-foreground">{t("codexChatGptHint")}</p>
-      <p className="text-[11px] text-muted-foreground">{t("mcpHint")}</p>
-    </SettingsCard>
+      <div className="space-y-1">
+        <p className="text-[11px] text-muted-foreground">{t("codexChatGptHint")}</p>
+        <p className="text-[11px] text-muted-foreground">{t("mcpHint")}</p>
+      </div>
+    </SettingsBlock>
   )
 }

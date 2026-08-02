@@ -1,321 +1,301 @@
 ---
 title: "0020 — Computer Use 补齐"
-description: "在 M5 脚手架基础上补齐五个 stub 动作、同意 UI、sidecar 头部、角色开关、MCP 暴露和 macOS/Linux 最小后端。"
+description: "填补了M5支架留下的空白：5个存根操作、同意UI、sidecar头部、角色选择加入、MCP曝光、macOS/Linux最低要求。"
 ---
 
 # ADR 0020 — Computer Use 补齐
 
-**状态：** 已通过
-**日期：** 2026-05-14
-**分支：** `feat/computer-use-completeness`
+**状态：** 已接受 **日期：** 2026-05-14 **分支：** `feat/computer-use-completeness`
 
-## Context
+## 背景
 
-Computer Use 脚手架（M5）已经上线了一个可运行的 Rust 自动化子系统
-（`src-tauri/src/automation/`）、工作流节点、Settings UI 框架、审计表，以及一个
-位于 `plugins/computer-use/` 的插件，该插件注册了三个 Anthropic 原生工具
-（`computer_20251124`、`bash_20250124`、`text_editor_20250728`）。但有四块地方
-还是缺失或残缺的：
+计算机使用支架（M5）自带了一个工作Rust自动化子系统（`src-tauri/src/automation/`）、一个工作流节点接口、一个设置UI壳、一个审计表，以及一个注册三个原生Anthropic工具（`computer_20251124`、`bash_20250124`、`text_editor_20250728`）`plugins/computer-use/`的插件。有四个部分被删减或缺失：
 
-1. **`computer_20251124` 的 10 个动作中有 5 个返回 “not yet implemented”** —
-   `MouseMove` / `Drag` 被当成点击处理，`MouseButtonDown` / `MouseButtonUp` /
-   `Scroll` / `HoldKey` 直接报错。
-2. **PerCall 同意 UI 没有渲染。** `Decision::RequireConsent` 直接返回
-   “Consent required for this action” 错误，最严格的权限层级实际上不可用。
-3. **Sidecar 看不到注册的原生工具。** `lib/claude/build-options.ts` 没读
-   `native-anthropic-tool-registry`，所以 Anthropic Agent SDK 启动时没有带
-   `anthropic-beta: computer-use-2025-11-24` 头。
-4. **Settings → Whitelist 与 Inspector 两个 tab 是占位卡片**，写着 “Ships in M2”。
+1. **10个`computer_20251124`操作中的5个**返回`"not yet implemented"` — `MouseMove` / `Drag`被模拟为点击声，`MouseButtonDown` / `MouseButtonUp` / `Scroll` / `HoldKey`字面上出现错误。
+2. **PerCall同意UI从未被交付。**`Decision::RequireConsent`返回了硬性`"Consent required for this action"`错误，而不是提示用户，使得最严格的权限层级无法使用。
+3. **sidecar从未看到注册的原生工具。**`lib/claude/build-options.ts`没有读取`native-anthropic-tool-registry`，所以Anthropic Agent SDK启动时没有`anthropic-beta: computer-use-2025-11-24`头。
+4. **设置→白名单+检查员标签页是占位卡**，带有“M2中的船只”副本。
 
-此外：没有 `Character` 字段控制工具的可见性（每个对话都会带出工具），外部桥接
-MCP 没有暴露 `computer_use`，macOS / Linux 后端是 `StubBackend` 占位。
+此外：没有`Character`字段门槛可见性（每次聊天都会显示这些工具），外部桥接MCP不会暴露`computer_use`，macOS/Linux后端只是`StubBackend`占位符。
 
-用户要求做一次 **不重设计的补齐**：保留现有架构，补齐所有缺口，并且
-**在合适的地方更深入地调用 `uiautomation` crate**。
+用户要求非重新设计的完成通行证——保留现有架构，填补所有空白，**在`uiautomation` crate增值方面更加努力。
 
-## Decision
+## 决策
 
-七项具体改动。
+七个具体调整。
 
-### 1. AutomationBackend trait 新增 5 个方法
+### 1. AutomationBackend特征扩展为5种新方法
 
-`src-tauri/src/automation/backend.rs` 把 `mouse_move`、`drag`、`scroll`、
-`hold_key`、`mouse_button` 加进 trait。`StubBackend` 对每个都返回
-`UnsupportedPlatform`。Windows 的 `UiaBackend` 用 `windows::SendInput` 实现
-（移动 / 滚轮 / 按钮）和 `uiautomation::inputs::Keyboard::{begin_hold_keys,
-end_hold_keys}` 实现 hold_key。新类型 `Point`、`DragOpts`、`ScrollTarget`、
-`ScrollOpts`、`ButtonTransition` 落在 `automation/types.rs`。
+`src-tauri/src/automation/backend.rs` 在特征中添加了 `mouse_move`、`drag`、`scroll`、`hold_key` 和 `mouse_button`。`StubBackend` 对每个特征返回`UnsupportedPlatform`。Windows `UiaBackend`通过`windows::SendInput`（移动/滚动/按钮）和`uiautomation::inputs::Keyboard::{begin_hold_keys, end_hold_keys}` API（hold_key）提供真实实现。`automation/types.rs`中出现了新的模式`Point`、`DragOpts`、`ScrollTarget`、`ScrollOpts`和`ButtonTransition`。
 
-### 2. UIA Pattern 优先点击策略
+### 2. UIA 模式优先点击策略
 
-`ClickOpts.useNative` 默认为 `true`。当点击带 `Element` 目标时，后端依次尝试
-`InvokePattern` → `TogglePattern` → `SelectionItemPattern`；都不行则回退到
-元素自带的 `click()` helper；最终落到 bounding-rect 中心坐标点击。Pattern
-派发代码集中在 `automation/platform/uia/pattern.rs`，同时被
-`desktop_invoke_pattern`（之前的 stub Tauri 命令）复用。`desktop_window_op`
-也通过同模块的 `dispatch_window_op` 走 `UIWindowPattern` /
-`UITransformPattern`。
+`ClickOpts.useNative`默认为`true`。点击`Element`目标时，后端按顺序尝试`InvokePattern` → `TogglePattern` → `SelectionItemPattern`;未击中时，会退回到元素的原生`click()`辅助程序，最后回到边界矩形中心的坐标点击。调度器位于`automation/platform/uia/pattern.rs`，并且被`desktop_invoke_pattern`（之前被存管的Tauri 命令）重复使用。`desktop_window_op`通过同一模块的`dispatch_window_op`接线，并使用`UIWindowPattern` / `UITransformPattern`进行可视化状态/调整大小/移动操作。
 
-### 3. 通过 Tauri 事件 broker 实现 PerCall 同意 UI
+### 3. PerCall通过Tauri活动经纪人获得同意UI
 
-`automation/consent.rs` 新增 `ConsentBroker`。当 gate 返回
-`Decision::RequireConsent`：
+`automation/consent.rs`引入了`ConsentBroker`。当门禁返回`Decision::RequireConsent`时，经纪人：
 
-1. 在 `session_grants` 中按 `(surface, command, plugin_id, process_name)`
-   元组查“本会话总是允许”授权。命中 → 直接允许。
-2. 否则生成 UUID，注册 `oneshot::Sender`，发出 `automation:consent-request`
-   事件并 await receiver（30 秒超时）。
-3. 渲染端 `<ConsentOverlay />`（`components/automation/consent-overlay.tsx`）
-   监听事件，在主窗口右下角浮出 `允许一次 / 本会话总是允许 / 拒绝` 三选一卡片。
-4. 用户点击后调用 `automation_consent_respond({ id, allow, persist, prompt })`
-   解析 channel；若是“总是允许”则写入会话授权表。
+1. 检查`session_grants`是否有已有的“始终允许此场次”的授权，由`(surface, command, plugin_id, process_name)`激活。点击→允许。
+2. Else 生成UUID，注册`oneshot::Sender`，发出`automation:consent-request`，并以30秒超时等待接收器。
+3. 渲染端`<ConsentOverlay />`（`components/automation/consent-overlay.tsx`）监听事件，并在右下角渲染一张浮动卡片，显示`Allow once / Always allow this session / Reject`。
+4. 点击时，覆盖层调用`automation_consent_respond({ id, allow, persist, prompt })`，解析通道——并在持久化时将资助存储在会话映射中。
 
-启用 kill switch 会清掉所有 session 授权。
+启动杀机开关会清除所有会话赠予。
 
-### 4. Sidecar `anthropic-beta` 头透传
+### 4. sidecar `anthropic-beta` header passthrough
 
-`sidecar/dispatch/anthropic.mjs` 已经懂得通过 `ANTHROPIC_DEFAULT_HEADERS`
-透传 Anthropic Agent Skills。同一条路径现在也合并
-`sendOptions.appendHeaders` —— 这部分由 `resolveSendOptions` 用
-`computeAnthropicBetaHeaders([...])` 填充 —— API 请求于是带上
-`anthropic-beta: computer-use-2025-11-24`。
+`sidecar/dispatch/anthropic.mjs`已经理解了拟人Agent技能通行的`ANTHROPIC_DEFAULT_HEADERS`。同一条路径现在合并了`sendOptions.appendHeaders`——由`computeAnthropicBetaHeaders([...])`的`resolveSendOptions`填充——因此API请求随`anthropic-beta: computer-use-2025-11-24`令牌一起发出。
 
-完整的 canUseTool 端 → 渲染端 `desktop.*` API 派发 **不**包含在本 ADR 中；每个
-注册工具的 `executeIpc.invoke` 字段都指向真实的 Tauri 命令，所以工作流节点和
-MCP 调用方可以直接驱动 Computer Use，但 SDK 主导的聊天路径还需要在后续提交中
-做渲染端桥接。
+本ADR中**不包含对渲染器`desktop.*` API的全 canUseTool-side 调度;每个注册工具的`executeIpc.invoke`字段指向一个真实Tauri 命令，因此工作流节点和MCP调用者可以直接驱动动作，但基于聊天驱动的SDK路径后续需要渲染器端桥接。
 
-### 5. 软绑定 `Character.enableComputerUse`
+### 5. 软装订`Character.enableComputerUse`
 
-对齐已有的 `Character.twinId` 与 `Character.a2uiEnabled` 范式：
+与现有的`Character.twinId`和`Character.a2uiEnabled`惯例相符：
 
 ```ts
 interface Character {
   enableComputerUse?: boolean
   computerUseSettings?: {
-    allowedToolIds?: string[] // 已注册工具 id 的子集
+    allowedToolIds?: string[] // subset of registered tool ids
     requireConsent?: boolean
   }
 }
 ```
 
-`lib/claude/build-options.ts` 通过 `lib/claude/computer-use-tools.ts:applyComputerUseTools`
-读注册表；仅当 `enableComputerUse === true` 时才填充 `opts.anthropicTools`
-和 `opts.appendHeaders["anthropic-beta"]`。Character 编辑器在
-brief / debug / bare 三个开关旁加一个 `Enable Computer Use` 开关。Schema
-升到 v32（不需要迁移，字段都是可选的）。
+`lib/claude/build-options.ts`通过`lib/claude/computer-use-tools.ts:applyComputerUseTools`读取注册表，只有当角色有`enableComputerUse === true`时才填充`opts.anthropicTools`+`opts.appendHeaders["anthropic-beta"]`。角色设置编辑器除了现有的brief/debug/bare开关外，还会有一个`Enable Computer Use`开关。模式会跳升到v32（不迁移——字段是可选的）。
 
-### 6. 外部桥接的 `computer_use` MCP 工具
+### 6. 外部桥上的`computer_use` MCP工具
 
-`lib/external-bridge/handlers/computer-use.ts` 注册一个 `computer_use` MCP
-工具，输入是动作联合体（`screenshot` / `click` / `type` / `keys` /
-`mouse_move` / `drag` / `scroll` / `hold_key` / `mouse_button`）。Node sidecar
-入口暴露这个工具；新 scope `mcp:computer-use`（默认关）通过 `checkToolCall`
-门控每一次调用。Settings → External Bridge 渲染对应开关。
+`lib/external-bridge/handlers/computer-use.ts` 注册一个带有 union 动作模式的 `computer_use` 工具（`screenshot` / `click` / `type` / `keys` / `mouse_move` / `drag` / `scroll` / `hold_key` / `mouse_button`）。节点 sidecar 条目通告该工具;新的`mcp:computer-use`示波器（默认OFF）门禁通过`checkToolCall`的每次通话。设置→外部桥会渲染新的示波器切换。
 
-在独立模式（cognia 桌面应用未连接）下，handler 返回结构化的 `not-yet-bridged`
-错误以便外部 agent 看清原因；渲染桥接的派发暂时只走应用内路径，直到 sidecar
-→ Rust → 渲染端的 IPC 桥落地。
+当以独立Cognia运行（未连接桌面应用）时，处理器返回结构化`not-yet-bridged`错误，以便外部代理看到明确原因;渲染桥接调度会留在应用内路径中，直到sidecar→渲染器→Tauri IPC桥接落地。
 
-### 7. macOS / Linux 最小可用后端
+### 7. macOS / Linux 最小可行后端
 
-`platform/ax/mod.rs`（macOS）和 `platform/atspi/mod.rs`（Linux）把
-`StubBackend` 占位替换成 `enigo` 驱动的实现：`capabilities`、`screenshot`
-（走跨平台 `platform::shared::screenshot::capture_primary`）、`click(Point)`、
-`type_text`、`send_keys`、`mouse_move`、`drag`、`scroll`、`mouse_button`。
+`platform/ax/mod.rs`（macOS）和`platform/atspi/mod.rs`（Linux）用`enigo`-backed实现替代`StubBackend`占位符，包括`capabilities`、`screenshot`（通过跨平台`platform::shared::screenshot::capture_primary`）、`click(Point)`、`type_text`、`send_keys`、`mouse_move`、`drag`、`scroll`和`mouse_button`实现。
 
-`AXUIElement` / AT-SPI 树遍历 **不** 在范围内 —— `find` / `read_tree` /
-`invoke_pattern` / `window_op` / Element 目标点击在这两个平台都返回
-`UnsupportedPlatform`。`Capabilities.hasUia` 在 macOS / Linux 为 false，
-渲染端会隐藏 UIA 专属功能（Inspector tab、工作流节点的按树定位对话框）。
+`AXUIElement` / AT-SPI树导航在范围内**不**——`find` / `read_tree` / `invoke_pattern` / `window_op` / 元素目标点击在这些平台上返回`UnsupportedPlatform`。`Capabilities.hasUia` 在 macOS 和 Linux 上是假的，因此渲染器隐藏了UIA-only功能（检查器标签、工作流节点中的按树定位器对话框）。
 
 ## 能力矩阵
 
-| 动作                  | Windows  | macOS | Linux |
-| --------------------- | -------- | ----- | ----- |
-| `screenshot`          | yes      | yes   | yes   |
-| `click(Point)`        | yes      | yes   | yes   |
-| `click(Element)`      | yes      | no    | no    |
-| `type_text`           | yes      | yes   | yes   |
-| `send_keys`（组合键） | yes      | 部分¹ | 部分¹ |
-| `mouse_move`          | yes      | yes   | yes   |
-| `drag`                | yes      | yes   | yes   |
-| `scroll`              | yes      | yes   | yes   |
-| `mouse_button`        | yes      | yes   | yes   |
-| `hold_key`            | yes      | no    | no    |
-| `read_tree` / `find`  | yes      | no    | no    |
-| `invoke_pattern`      | yes      | no    | no    |
-| `window_op`           | yes      | no    | no    |
-| UIA 事件订阅          | no（M2） | no    | no    |
+| 行动 | 窗户 | macOS | Linux |
+| -------------------------- | ------- | -------- | -------- |
+| `screenshot` | 是的 | 是的 | 是的 |
+| `click(Point)` | 是的 | 是的 | 是的 |
+| `click(Element)` | 是的 | 不 | 不 |
+| `type_text` | 是的 | 是的 | 是的 |
+| `send_keys`（和弦） | 是的 | 部分 | 部分 |
+| `mouse_move` | 是的 | 是的 | 是的 |
+| `drag` | 是的 | 是的 | 是的 |
+| `scroll` | 是的 | 是的 | 是的 |
+| `mouse_button` | 是的 | 是的 | 是的 |
+| `hold_key` | 是的 | 不 | 不 |
+| `read_tree` / `find` | 是的 | 不 | 不 |
+| `invoke_pattern` | 是的 | 不 | 不 |
+| `window_op` | 是的 | 不 | 不 |
+| UIA / 无障碍活动 | 不（M2） | 不 | 不 |
 
-¹ macOS / Linux 支持单键组合（`Enter`、`Tab`、`Escape`、`Backspace`、
-`Delete`、`Space`）；带修饰键的组合（如 `ctrl+shift+t`）会返回 `BackendError`。
-Windows 后端解析 `uiautomation::inputs::Keyboard::send_keys` 能接受的所有
-组合。
+¹ macOS 和 Linux 接受单符号和弦（`Enter`、`Tab`、`Escape`、`Backspace`、`Delete`、`Space`）;修饰和弦（`ctrl+shift+t`）返回清晰的`BackendError`。Windows 后端解析`uiautomation::inputs::Keyboard::send_keys`接受的每个和弦。
 
-## Settings 体验
+## 设定UX
 
-- **Settings → Automation → Permissions** —— 每个 surface（Workflow /
-  Computer Use / MCP / Plugin）三个 tier（Off / Whitelist / Per-call），默认 Off。
-- **Settings → Automation → Whitelist** —— 进程名 + 窗口标题 glob 编辑器 +
-  “Capture focused window” 助手按钮。
-- **Settings → Automation → Inspector** —— 树管理器 + 元素详情 +
-  locator/element-ref 复制按钮 + UIA pattern 测试按钮。macOS / Linux 上由
-  `Capabilities.hasUia === false` 禁用。
-- **Settings → Characters → Edit** —— 在 brief / debug / bare 开关下面加一个
-  Enable Computer Use 开关。
-- **Settings → External Bridge** —— `mcp:computer-use` scope 开关。
+- **自动化→权限设置→**——每个接口有三级（关闭/白名单/每次通话）（工作流程/电脑使用/MCP/插件）。默认关闭。
+- **设置→自动化→白名单**——进程名和窗口标题-glob编辑器，带有“捕获聚焦窗口”辅助工具。
+- **设置→自动化→检查器** — 树管理器 + 每元素细节 + 定位器 / 元素-参考复制按钮 + UIA-pattern 测试按钮。在 macOS / Linux （`Capabilities.hasUia === false`） 上禁用。
+- **字符→设置→编辑** — 在简短/调试/裸模式切换下启用电脑使用开关。
+- **外部桥接→设置** — `mcp:computer-use`瞄准镜切换。
 
-## 不在范围内
+## Non-Goals
 
-- macOS / Linux 的 UIA 等价树遍历（AXUIElement.children、AT-SPI 介质）。
-  Phase 6.b 跟进。
-- 插件注册自定义桌面动作 / UIA pattern。插件依然通过
-  `registerNativeAnthropicTool` 贡献整个原生工具。
-- 元素拾取器叠层（Inspector → “Pick” 按钮需要的
-  `desktop_pick_start` / `_cancel` Rust 命令）。UI 渲染为禁用状态并附 “M5b
-  落地” 提示。
-- 聊天路径完整的 canUseTool sidecar 派发（工作流节点和 MCP 调用已经能通过
-  现有 `desktop_*` Tauri 命令驱动 Computer Use）。
+- macOS / Linux UIA-equivalent树行走（AXUIElement.children，AT-SPI内省）。第6.b阶段后续。
+- 插件注册的自定义桌面动作/UIA模式。插件仍然通过`registerNativeAnthropicTool`贡献完整的原生工具。
+- 元素选择器覆盖层（检查员需要→“选”按钮所需的 `desktop_pick_start`/`_cancel` Rust 命令）。UI占位符显示为禁用，配有“M5b 中的舰船”提示。
+- 为聊天驱动路径提供全canUseTool sidecar调度（工作流节点和MCP调用者已能通过现有`desktop_*` Tauri 命令驱动计算机使用）。
 
-详细文件列表见英文版 ADR。
+## 文件
 
-## 附录 2026-05-15 — 完整性 Slate 2
+```
+src-tauri/src/automation/
+  backend.rs        — trait extended; StubBackend grew 5 methods
+  commands.rs       — 6 new Tauri commands + consent broker wiring
+  consent.rs        — ConsentBroker (new)
+  permission.rs     — Call::kind() recognises new driving commands
+  types.rs          — Point / DragOpts / ScrollTarget / ScrollOpts / ButtonTransition
+  worker.rs         — 5 new Request variants + AutomationHandle methods
+  platform/
+    shared/
+      mod.rs        — re-exports
+      screenshot.rs — xcap-based capture (moved from uia/)
+    uia/
+      mod.rs        — UIA Pattern-first click + 5 new methods
+      input.rs      — windows::SendInput-based mouse / scroll / button
+      pattern.rs    — UIA pattern dispatch (new)
+    ax/mod.rs       — minimum-viable macOS backend (enigo)
+    atspi/mod.rs    — minimum-viable Linux backend (enigo)
 
-在 M5 脚手架之上的补齐 PR 关闭了 11 个遗留缺口。其中两个原始 Non-Goal（聊天驱动 canUseTool 侧车派发、Sidecar→Renderer 的 MCP automation-proxy IPC）经研究确认需要结构性新架构而非「补齐」工作，转入独立 ADR 跟进。
+plugins/computer-use/rust/src/
+  commands.rs       — 5 stubs replaced with real handle.* calls
+  translator.rs     — Anthropic action shape → automation types
 
-**已关闭缺口**
+lib/automation/
+  client.ts         — 6 new methods + consent-respond
+  types.ts          — mirror Rust types
 
-1. `text_editor` 新增 `undo_edit` 动作。`TextEditorAction::UndoEdit { path }` 在 `plugins/computer-use/rust/src/types.rs` 声明；`UNDO_STORE` 在每次 `Create` / `StrReplace` / `Insert` 之前快照旧内容；undo 恢复旧内容，若旧状态是「文件不存在」则删除当前文件。
-2. `bash.restart: true` 作为审计内空操作处理。Cognia 没有可重启的常驻 shell，命令返回合成 `BashResult` 在 `stdout` 说明差异，审计命令名为 `bash:restart`。
-3. `plugins/computer-use/plugin.json` 的 `runtimeCompatibility` 键由 `desktop` 改为规范的 `tauri`（与 `types/plugin/plugin.ts:99` 一致）。新增 `lib/plugin/core/builtin-manifest-shape.test.ts` 遍历所有内置插件 manifest，拒绝非规范键。其余 6 个插件同步修正。
-4. 删除 `plugins/computer-use/src/index.ts` 中 `activate()` 里的运行时 `registerNativeAnthropicTool` 调用；manifest 驱动注册为规范路径。
-5. TypeScript SDK 文件按能力契约路径补齐：`packages/plugin-sdk/src/api/native-anthropic-tool.ts` 与 `packages/plugin-sdk/src/context/index.ts`。
-6. `runtime-proof-audit.test.ts` 锁定 `native-anthropic-tool` 的 `proofStatus` = `verified`。
-7. 设置 → 自动化 的授权浮层 + 全部五个标签（概览 / 权限 / 白名单 / 审计 / 检查器），以及 角色 → Computer Use 开关、外部网桥 `mcp:computer-use` 作用域描述均通过 `useTranslations()` 接入 i18n；新增 `automation.*` 命名空间，扩展现有 `settings.*`。`/cu` 斜杠命令通过 `lib/i18n/plugin-i18n-registry` 注册插件侧 i18n bundle。
-8. `i18n/messages/en.json` 与 `zh-CN.json` 键对齐恢复。`scripts/i18n-baseline.json` 重置 — JSX 硬编码字符串数量从 811 降至 698（关闭 ~113 处）。
-9. 能力契约 `hostBindings` 与运行时证明审计同步更新。
+lib/workflow/nodes/
+  desktop.ts        — windowFocus / Close / Resize via desktop.windowOp
 
-**仍延迟（Non-Goal，独立跟进）**
+lib/claude/
+  build-options.ts  — call applyComputerUseTools
+  computer-use-tools.ts — registry → SendOptions mapping (new)
+  types.ts          — SendOptions.anthropicTools + appendHeaders;
+                      Character.enableComputerUse + computerUseSettings
 
-- 聊天驱动的 `canUseTool` 侧车派发（`computer` / `bash` / `text_editor`）。`@anthropic-ai/claude-agent-sdk` 是纯 MCP 架构，没有可以传入 API 级原生工具的字段。关闭这个缺口需要：要么让 `sidecar/dispatch/ai-sdk.mjs` 借助 Vercel AI SDK 通过 `provider-defined` 工具承载，要么新增直调 Anthropic SDK 的派发器。任一路径都是结构性新派发器，超出「补齐」范畴。
-- MCP 单机 `computer_use` IPC。Node MCP sidecar 使用 SDK 的 `StdioServerTransport`，独占 stdin/stdout。`automation_proxy` 信封需要 Node 侧自定义 Transport 包装 + Rust 侧 `mcp_server/sidecar.rs` 的 stdout 抽取重构，独立跟进。
-- macOS / Linux 等效 UIA 树遍历（Phase 6.b）。
-- 插件注册的自定义桌面动作 / UIA 模式。
+lib/external-bridge/
+  handlers/computer-use.ts — MCP tool handler (new)
+  mcp-server/server.ts     — registerComputerUseTool
+  types.ts                 — TOOL_TO_SCOPE.computer_use
 
-## Addendum 2026-05-18 — 聊天派发 + 三个动作 + cursor_position
+types/wiki/index.ts — BridgeScope adds "mcp:computer-use"
 
-通过架构上的转向关闭了 2026-05-15 addendum 标记为结构性 Non-Goal 的两个派发缺口，并补齐 M5 原始范围之外的三个小动作。
+components/automation/consent-overlay.tsx — new
+components/settings/automation/
+  whitelist-tab.tsx        — new
+  inspector-tab.tsx        — new
+  automation-section.tsx   — replaces 2 PlaceholderTabs
+components/settings/characters-section.tsx — Computer Use toggle
+components/settings/external-bridge/external-bridge-section.tsx — scope desc
 
-### 架构转向 —— 经由 Plugin MCP 实现聊天，而不是新派发器
+app/layout.tsx — mount <ConsentOverlay />
 
-2026-05-15 addendum 把聊天驱动的 `canUseTool` 派发框定为「要么让 `ai-sdk.mjs`
-透传 provider-defined tools，要么新建 Anthropic 直连派发器」。两条路都会绕过
-`@anthropic-ai/claude-agent-sdk`，丧失只在该 SDK 内才存在的 Claude Code 能力
-（built-in Bash/Read/Edit、subagent `agents`、settings sources、resume/fork、
-`effort`、`maxThinkingTokens`、partial-message 流、Anthropic Skills 透传）。
+sidecar/dispatch/anthropic.mjs — appendHeaders → ANTHROPIC_DEFAULT_HEADERS merge
 
-转向方案：**把 `computer_use` / `bash` / `text_editor` 通过现有
-`cognia-plugin-tools` 桥包装成 Plugin MCP 工具**，而不是注入 API 级原生工具。
-模型看到的是 `mcp__cognia-plugin-tools__{computer_use,bash,text_editor}` 而不是
-API 级 `type: "computer_20251124"`。功能等价，但 Anthropic API 端原生
-computer-use 的预训练加成不会触发 —— 模型仍然可用，只是少了原生工具类型带来的
-prompt 处理优惠。
+lib/db/schema.ts — v32 marker (no migration)
+```
 
-用户明确接受这个权衡：Claude Code SDK 的全部能力得以保留；聊天路径继续走
-`dispatchAnthropic`，无任何改动。
+## 补充 2026-05-15 — 完整性表2
 
-### 已关闭的缺口
+后续的完工处理封闭了M5脚手架留下的11个空白。其中两个原始Non-Goals（聊天驱动`canUseTool` sidecar调度、sidecar→渲染器MCP自动化代理IPC）需要结构性新架构，而非“完成”工作，且仍Non-Goals在专门的后续跟踪ADR中进行跟踪。
 
-1. **聊天驱动 Computer Use** — `plugins/computer-use/src/index.ts` 的
-   `activate()` 通过 `ctx.agent.registerTool()` 注册三个插件工具。`plugin.json`
-   增加 `"tools"` capability。现有 `sidecar/builtin-tools/plugin-tools.mjs` 桥
-   会自动把它们暴露为 MCP 工具给 SDK，**无需任何派发器改动**。
-   `requiresApproval: true` 触发聊天侧 `canUseTool` 模态；Rust 权限门在每次
-   `desktop.*` 调用时独立启用。
+**闭合缝隙**
 
-2. **外部 MCP `mcp_computer_use`** — `src-tauri/src/mcp_server/automation_proxy.rs`
-   （新）为每个 `SidecarProcess` 创建专属 Unix Socket / Windows Named Pipe，
-   通过 `COGNIA_AUTOMATION_PROXY` 环境变量传给 Node MCP sidecar。
-   `lib/external-bridge/handlers/computer-use.ts` 在首次调用时打开该套接字，
-   发送 `{ id, command, args, ctx }` 信封并等待对应响应。MCP stdin/stdout
-   传输的串行 mutex 不受影响 —— 自动化请求走完全独立的通道。
+1. `text_editor` `undo_edit`动作——`TextEditorAction::UndoEdit { path }`在`plugins/computer-use/rust/src/types.rs`中进行，在每次变异动作（`Create` / `StrReplace` / `Insert`）前由`UNDO_STORE: Lazy<Mutex<HashMap<PathBuf, UndoEntry>>>`快照。撤销用于恢复之前的内容，或在快照“缺失”时删除文件。
+2. `bash.restart: true`被尊为经审计的无操作者。Cognia没有持续的壳可重启，因此调用返回一个合成`BashResult`，其`stdout`解释了分歧。审计归属`command: "bash:restart"`。
+3. `plugins/computer-use/plugin.json` `runtimeCompatibility`密钥被重命名为 `desktop` → `tauri`（`types/plugin/plugin.ts:99` 的规范密钥）。新的`lib/plugin/core/builtin-manifest-shape.test.ts`会遍历每个内置清单，并拒绝非规范的 接口 密钥。同一遍还规范化了另外六个插件。
+4. 激活时间`ctx.agent?.registerNativeAnthropicTool?.(...)`呼叫已从`plugins/computer-use/src/index.ts`中取消。清单驱动注册（`manifest.nativeAnthropicTools`）是规范的。
+5. TypeScript SDK在能力合同宣传的路径上搭建的支架：`packages/plugin-sdk/src/api/native-anthropic-tool.ts`和`packages/plugin-sdk/src/context/index.ts`。
+6. `runtime-proof-audit.test.ts`锁`native-anthropic-tool`证明状态=`verified`。
+7. 设置→自动化同意覆盖层+全部五个标签页（总览、权限、白名单、审计、检查器）以及“角色电脑使用”开关和外部桥接`mcp:computer-use`范围描述，均通过新`automation.*`和现有`settings.*`命名空间下的`useTranslations()`完全连接i18n。插件`/cu`斜语命令通过`lib/i18n/plugin-i18n-registry`注册i18n捆绑。
+8. `i18n/messages/en.json` + `zh-CN.json` 对等性恢复。`scripts/i18n-baseline.json` 重新基底——JSX硬编码字符串数量从811降至698（~113字符串闭合）。
+9. 能力合同`hostBindings`更新以进行运行时无效审计。
 
-3. **Inspector Pick** — `src-tauri/src/automation/platform/uia/pick.rs`（新，
-   Windows）在专用线程注册低级 `WH_MOUSE_LL` 钩子，打开一个透明置顶 webview
-   `automation-pick-overlay`（覆盖窗仅作视觉提示 —— `pointer-events: none` 让
-   点击穿透到底层应用），首次捕获 `WM_LBUTTONDOWN` 后通过 UIA
-   `ElementFromPoint(x, y)` 解析 `ElementInfo`。新 Tauri 命令
-   `desktop_pick_start` / `desktop_pick_cancel`。macOS / Linux 返回
-   `UnsupportedPlatform`。
+**仍然推迟（Non-Goals，单独记录）**
 
-4. **`triple_click` / `wait` / `cursor_position`** — `ClickOpts.count` 字段
-   （1/2/3）；UIA 后端按 OS `GetDoubleClickTime` 节奏重复点击。`Wait` 已在
-   ComputerAction 枚举里，Anthropic action mapper 层在 TS 端直接 sleep，无
-   Rust 往返。`cursor_position` 作为只读 Tauri 命令新增（Windows
-   `GetCursorPos`，macOS / Linux 走 `Enigo::location()`）。
+- `computer` / `bash` / `text_editor` 的聊天驱动`canUseTool` sidecar调度。`@anthropic-ai/claude-agent-sdk`是MCP-only的——它没有字段可以注入API-level本地工具。要解决这个问题，要么教`sidecar/dispatch/ai-sdk.mjs`通过 Vercel AI SDK 接入提供商定义的工具，要么添加一个全新的 Anthropic 直接调度器。无论哪条路径都是结构性新调度器，而非完成任务。
+- MCP独立`computer_use` IPC。节点MCP sidecar使用拥有stdin/stdout的SDK的`StdioServerTransport`。布线`automation_proxy`包线需要在节点端定制传输封装器，并进行 `src-tauri/src/mcp_server/sidecar.rs` 的标准泵送重构。单独跟踪。
+- macOS / Linux UIA-equivalent树步（6.b阶段）。
+- 插件注册的自定义桌面动作/UIA模式。
 
-### 重新分类的 Non-Goal
+## 补充 2026-05-18 — 聊天发送 + 3 个动作 + cursor_position
 
-2026-05-15 addendum 中归为结构性 Non-Goal 的两项现在已关闭：
+后续的完工通行通过与原ADR不同的架构方法，弥补了两个结构延迟的调度空白，同时运送了原M5未接口的三个小动作。
 
-- ~~聊天驱动 `canUseTool` 侧车派发~~ —— 通过 Plugin MCP 实现。
-- ~~MCP 单机 `computer_use` IPC~~ —— 通过 `COGNIA_AUTOMATION_PROXY` 侧通道实现。
+### 架构枢轴——通过插件MCP的聊天路径，而不是新调度器
 
-### 仍延迟
+2026-05-15的补充说明将聊天驱动`canUseTool`调度描述为“要么教`ai-sdk.mjs`通过Vercel AI SDK接入提供商定义的工具，要么新增一个全新的Anthropic直销调度员”。这两条路由都会绕过`@anthropic-ai/claude-agent-sdk`，放弃所有仅存在于该SDK中的所有Claude Code功能（内置Bash/Read/Edit、子代理`agents`、设置源、resume/fork会话连续性、`effort`、`maxThinkingTokens`、部分消息流、Anthropic Skills直通）。
 
-- macOS / Linux 等效 UIA 树遍历（Phase 6.b）。
-- 插件注册的自定义桌面动作 / UIA 模式。
-- macOS / Linux 完整 chord 解析器 + `hold_key` 等价支持。归入 Phase 6.b 非
-  Windows 后端补齐。
+枢轴：**通过现有的 `cognia-plugin-tools` 桥将 `computer_use` / `bash` / `text_editor` 暴露为插件MCP工具**，而不是尝试注入API-level原生工具。模型将它们视为`mcp__cognia-plugin-tools__{computer_use,bash,text_editor}`，而非API-level `type: "computer_20251124"`形状。功能接口相同（相同的动作工会，相同的后端调度）。代价是 Anthropic API 的 _native_ 计算机预训练提升功能不如以往——该模型依然非常强大，但没有原生工具类型触发的特殊紧急处理。
 
-### Schema
+用户明确已接受权衡：所有Claude Code SDK功能都被保留;聊天路径通过`dispatchAnthropic`保持不变。
 
-Schema 升级到 `v40`（仅新增，无迁移）。增加可选字段
-`Character.computerUseSettings.chatConsentMode`
-（`"always-ask" | "session-grant" | "auto"`，默认 `"always-ask"`）和
-`ClickOpts.count`（1/2/3）。既有行原样可读。
+### 闭合间隙
 
-## 附录 2026-05-29 — 远程执行目标（cua Docker 沙箱）
+1. **聊天驱动的计算机使用** — `plugins/computer-use/src/index.ts` `activate()`现在通过`ctx.agent.registerTool()`注册了三个插件工具。`plugin.json`增加了`"tools"`功能。现有的sidecar桥接`sidecar/builtin-tools/plugin-tools.mjs` 接口它们作为MCP工具连接到SDK，无需更改调度器。`requiresApproval: true`调用了聊天端`canUseTool`模态;Rust许可门禁在每次出勤`desktop.*`中独立开火。
 
-新增一根**执行目标**轴：computer-use 的 GUI 动作可在由 cognia 编排的、隔离的
-[`trycua/cua`](https://github.com/trycua/cua)（MIT）Docker 桌面
-（`ghcr.io/trycua/cua-xfce`）里运行，而不是本机。这与 ADR-0028 的 `sandboxTier`
-轴（隔离 Bash/Edit/Write，命令执行契约）**正交**；GUI 目标是另一套契约，**不**走
-`dispatchSandbox`。cua 只当"手脚"——agent 循环仍是
-`@anthropic-ai/claude-agent-sdk`，**不**采用 cua 的 `ComputerAgent`/LiteLLM。
+2. **外部MCP `mcp_computer_use`** — `src-tauri/src/mcp_server/automation_proxy.rs`（新）为每个`SidecarProcess`创建一个专用的Unix域套接字/Windows命名管道。路径通过`COGNIA_AUTOMATION_PROXY` env var传递给节点MCP sidecar。`lib/external-bridge/handlers/computer-use.ts`在第一次调用时打开该套接字，发送一个换行符的信封JSON信封`{ id, command, args, ctx }`，等待匹配响应。MCP stdin/stdout 传输严格的顺序互斥体保持不变——自动化请求运行在完全独立的通道上。
 
-### 架构（R3 路由）
+3. **Inspector Pick** — `src-tauri/src/automation/platform/uia/pick.rs`（新，Windows）在专用线程注册一个低级`WH_MOUSE_LL` hook，打开一个透明且始终在顶部的网页视图，标记为`automation-pick-overlay`（覆盖层纯属装饰——点击通过`pointer-events: none`传递到底层应用），并通过UIA的`ElementFromPoint(x, y)`在第一`WM_LBUTTONDOWN`解决`ElementInfo`。新Tauri 命令 `desktop_pick_start` / `desktop_pick_cancel`。macOS / Linux 返回`UnsupportedPlatform`。检查器标签页在`caps.hasUia === true`时启用“选择”按钮。
 
-- **锚点实体** `sandboxConnection`（Dexie `v57`，`lib/db/sandbox-connections.ts`）；
-  所有目标选择器按 `id` 引用——存 id 而非裸标志，使未来收敛是纯加法。
-- **目标轴** `Character.computerUseTarget` / `ChatSession.computerUseTarget`
-  （`"local" | { connectionId }`），按 session → character → local 解析
-  （`lib/automation/sandbox-target.ts`），在 `resolveSendOptions` 按会话暂存
-  （`lib/claude/computer-use-target-state.ts`），由插件执行器盖到
-  `CallContext.sandboxConnectionId`。Workflow `desktop` 节点带 per-node `target`。
-- **路由（R3）** `src-tauri/src/automation/cua_route.rs` 是唯一路由层；
-  `dispatcher::execute_action` 与各 `desktop_*` 命令都在 `run_gated` 的 `do_call`
-  闭包内调用它，故权限闸 → consent → 审计对本地/远程一致生效。远程
-  （`sandboxConnectionId` 非空）派发到异步 `CuaRemoteClient`（tokio-tungstenite
-  WS → 容器 `computer-server`），否则走现有同步 COM worker。**不变量**：每个驱动/
-  读取动作都路由；无远程等价物的动作（`get_focus`/`find`/`invoke_pattern`/
-  `window_op`/`pick_at_point`）远程时返回 `UnsupportedPlatform`，绝不回落本机。
-- **生命周期** `src-tauri/src/cua_sandbox/`（模块名避开既有 `src-tauri/src/sandbox/`
-  的撞名）shell `docker run/stop/port`，持有按连接的 `CuaRemoteClient` 注册表；
-  `cua_sandbox_*` 命令 + 设置 → 自动化 → 沙箱页驱动。容器即隔离边界。
-- **能力位** `Capabilities.has_a11y_tree`（远程后端暴露跨平台 a11y 树）。
+4. **`triple_click` / `wait` / `cursor_position`** — `ClickOpts.count`添加（1/2/3）;UIA后端以OS双击节奏重复点击（`GetDoubleClickTime`）。`Wait`已在动作枚举中，在Anthropic-action-mapper层处理（TS睡眠，无需Rust往返）。`cursor_position`作为新的只读Tauri 命令添加（Windows上`GetCursorPos`，macOS / Linux上`Enigo::location()`）。
 
-### Phase 1 范围 / Non-Goals
+### 更名为Non-Goals
 
-含：本地 Docker provider、GUI 动作路由、Character + workflow 节点目标选择器。
-延后：cua.ai 云 + Lume provider、`cua-driver` 后台驱动，以及与 ADR-0028 的**收敛**
-（未来 `sandboxTier: "cua-desktop"` 读同一 session→connectionId 绑定，把
-Bash/Edit/Write 也路由进同一容器）。因绑定已是一等实体，收敛纯加法、无迁移。
-会话级 composer 目标选择器是剩余 UI（会话字段 + 解析已端到端可用）。
+2026年5月15日附录中被归类为结构性延期Non-Goals的两项现已关闭：
 
-### Schema（远程目标）
+- ~~聊天驱动的`canUseTool` sidecar派遣~~ — 通过插件MCP发布。
+- ~~MCP独立`computer_use` IPC~~ ——通过`COGNIA_AUTOMATION_PROXY`侧通道发送。
 
-Dexie 升至 `v57`（仅新增，无升级钩子）——新增 `sandboxConnections` 表。
-`Character.computerUseTarget` / `ChatSession.computerUseTarget` 均可选；既有行
-原样可读。
+### 仍然延期
+
+- macOS / Linux UIA-equivalent树步（6.b阶段）。
+- 插件注册的自定义桌面动作/UIA模式。
+- macOS / Linux 全和弦解析器 + `hold_key` 对等性。作为 Phase 6.b non-Windows 后端完成的一部分进行跟踪。
+
+### 结构
+
+模式提升到`v40`（加法——无迁移）。增加了可选的`Character.computerUseSettings.chatConsentMode`（`"always-ask" | "session-grant" | "auto"`，默认为`"always-ask"`）和`ClickOpts.count`（1/2/3）。现有行往返不变。
+
+## 附录 2026-05-29 — 远程执行目标（cua Docker沙箱）
+
+增加了一个远程**执行目标**轴：计算机使用GUI动作可以在隔离的、由认知编排的[`trycua/cua`](https://github.com/trycua/cua)（MIT）Docker桌面（`ghcr.io/trycua/cua-xfce`）中运行，而非本地主机。这与ADR-0028 `sandboxTier`轴*正交*（Bash/Edit/Write隔离——命令执行合同）;GUI目标是一个独立的合同，**不**运行`dispatchSandbox`。Cua 仅作为“手”使用——代理循环保持在`@anthropic-ai/claude-agent-sdk`;Cua 的`ComputerAgent`/LiteLLM循环被**未**采用。
+
+### 架构（R3路由）
+
+- **锚点实体** — `sandboxConnection`（Dexie `v57`，`lib/db/sandbox-connections.ts`）。每个目标选择器都通过`id`引用连接。存储连接ID（绝不为裸标志）保持未来收敛（如下）纯粹的加法。
+- **目标轴** — `Character.computerUseTarget`和`ChatSession.computerUseTarget`（`"local" | { connectionId }`），通过`lib/automation/sandbox-target.ts`解析会话字符→→字符，按本地化，每个会话（`lib/claude/computer-use-target-state.ts`）存储在`resolveSendOptions`中，并由计算机插件执行器印刻在`CallContext.sandboxConnectionId`上。工作流程`desktop`节点携带每个节点的`target`参数。
+- **路由（R3）**——`src-tauri/src/automation/cua_route.rs`是单一路由层。后端调度接口——`dispatcher::execute_action`（规范渲染器`desktop.*`+聊天Plugin-MCP路径）和细粒`desktop_*` 命令——都将其称为*`run_gated` `do_call`闭包内部，因此门禁 →同意在审计流水线→封装本地和远程路径是相同的。远程`CallContext`（非空`sandboxConnectionId`）向异步`CuaRemoteClient`（`tokio-tungstenite` WS到容器的`computer-server`）发送;否则，现有的同步COM Worker运行。**不变：** 每个driving/reading动作都被路由;没有远程对应的动作（`get_focus` / `find` / `invoke_pattern` / `window_op` / `pick_at_point`）在远程时返回`UnsupportedPlatform`，而不是静默地击中主机。
+- **生命周期** — `src-tauri/src/cua_sandbox/`（模块命名以避免现有`src-tauri/src/sandbox/` ADR-0028碰撞）壳体`docker run/stop/ port`并拥有每个连接的`CuaRemoteClient`注册表;`cua_sandbox_*` Tauri 命令 + a 设置→自动化→沙箱标签驱动。容器是隔离边界（与端对端微虚拟机层相同型号）。
+- **能力** — `Capabilities.has_a11y_tree`（远程后端暴露跨平台`get_accessibility_tree`本地Enigo后端则不）。
+
+### 第一阶段范围/Non-Goals
+
+在：本地Docker 提供商、GUI动作路由、Character + 工作流节点目标选择器。延迟：cua.ai Cloud + Lume 提供商，`cua-driver`后台主机驱动，以及与 ADR-0028 的**收敛**——未来`sandboxTier: "cua-desktop"`通过读取同一会话→connectionId绑定将Bash/Edit/Write导入*同一*容器的`run_command`/`read_text`/`write_text`。由于绑定本身就是一类实体，这种收敛纯粹是加法的（无迁移）。每场次Composer目标选择器是剩余的UI 接口（会话字段 + 解析已经端到端工作）。
+
+### 模式（远程目标）
+
+Dexie 提升到 `v57`（加法，无升级hook）——新增`sandboxConnections`表。`Character.computerUseTarget` + `ChatSession.computerUseTarget` 为可选;现有行往返不变。
+
+## 附录（2026-06-27）——OCR-assisted点击 + macOS有界元素树
+
+### `find_text` / `click_text`（像素⇄ OCR桥）
+
+两个新的**gated**插件MCP工具（`lib/automation/ocr-click.ts`，由电脑插件显示）允许模型按名称操作屏幕上的文本，而非猜测像素坐标：
+
+- `find_text` — 捕获屏幕（门禁`desktop.screenshot`）→ OCR →返回具有**屏幕空间**坐标的文本块，查询中排名最佳优先。
+- `click_text` ——相同，然后`desktop.click`匹配块的中心（occurrence/button/double可选）。坐标通过提供商光栅化调光和Rust截图降频因子（`coordinate-scaler`信号）OCR `bbox` →映射物理 px。两者都依赖现有的gate/consent/audit流水线。需要一个发出边界框的 OCR 提供商（tesseract / windows-ocr）;无几何体 提供商 返回明显错误。`extract_screenshot_ocr`现在还返回了相对于图像的`blocks`。
+
+### macOS有界AX元素树
+
+macOS 上的 `read_tree` / `find` 现在可以通过高层`accessibility` crate走**最前窗口**的AX子树，depth/node-capped通过新的平台无关`automation::platform::shared::tree_shape`助手（matcher + budget + rect-center;在包括 Windows 开发机在内的所有主机上进行了单元测试）。`capabilities.has_a11y_tree`现在macOS `true`，`find`满足名称 / name_contains / control_type（不仅仅是process/title）。原生AX FFI在macOS CI上验证——它不会在Windows开发主机上编译。
+
+**延迟（下一阶段）:** macOS `pick_at_point`坐标命中测试（`AXUIElementCopyElementAtPosition`需要在`accessibility` crate旧核心基础引脚上进行原始`-sys` ref封装）、元素定向动作（可解析元素引用）、元素几何（`AXPosition`/`AXSize`），以及**Linux AT-SPI**等效物（async/zbus——不是从Windows主机盲目尝试）。`tree_shape`是它们将重复使用的共享骨干网。
+
+## 附录（2026-07-06）——macOS 检查员实际可用
+
+后续的两个缺陷使macOS检查员实际上死了，尽管2026-06-27的边界AX树已经发货：
+
+1. **前端被错误的能力限制了。** `InspectorTab`和概览徽章关闭了`caps.hasUia`（Windows UI自动化），所以macOS——报告`hasA11yTree: true`而非`hasUia`——总是跳入“仅限Windows......后续里程碑”警报。TS `Capabilities`类型甚至没有镜像Rust `has_a11y_tree`字段。修复方法：在TS类型中添加`hasA11yTree`;门禁检查员在`hasUia || hasA11yTree`;将UIA-only模式测试功能（Windows上`UnsupportedPlatform`回归）隐藏在一个诚实的仅限a11y的注释后面;接口在概览上`a11yTree`徽章（`platform-capabilities-card.tsx`，提取+单元测试）。
+
+2. **树“只有窗口名”。** 在macOS主机上通过用独立的AX探针对真实应用（Chrome、VS Code）进行诊断——三个根本原因，现已在`ax/mod.rs`+新`ax/raw.rs`中修复：
+   - **懒惰的网页a11y。** Chromium / WebKit / Electron 应用（包括Cognia自家WKWebView）在AT客户端设置 `AXManualAccessibility` / `AXEnhancedUserInterface` 后才发布网页内容树。`read_tree`现在会激活它（应用没有窗口时会有短暂的稳定延迟）。
+   - **错误的根窗口。** `AXWindows[0]`通常是空的辅助窗口（在 Chrome 上观察到）。根选择现在`AXFocusedWindow` → `AXMainWindow` →应用元素→第一个非空窗口。
+   - ** 瘦节点。** 节点现在携带子角色（→ `class_name`）、标识符（→ `automation_id`）、enabled/focused 回退、链名（`AXTitle` → `AXDescription` →字符串`AXValue` → `AXRoleDescription`）和几何体（`AXPosition`/`AXSize` → `bounding_rect`）。**AX信任门禁**现在会`read_tree`大声失败（系统提示），当进程未被授予可访问性时，而不是默默返回空树。
+
+整个依赖图共享一个`core-foundation-sys`（0.8），因此原始AX FFI通过`accessibility-sys` + `core-foundation-sys`干净利落地桥接，避免了之前笔记担心的核心基础0.9与0.10封装冲突——延迟`AXUIElementCopyElementAtPosition`选中测试现在被同一桥接解除阻挡。Inspector的默认`maxDepth`提升为2→4（上限6→
+   10) 所以树默认会达到真实内容。
+
+---
+
+## 附录——记录器门禁与紧急停车（2026-08-01，参见[ADR-0106](/docs/en/adr/0106-end-to-end-skill-recorder)）
+
+添加技能记录器——一个安装全局输入hook并比启动通话更久的会话——暴露了本书ADR建立的门禁合同中的三个漏洞。这三个漏洞在这里都被修复，而不是在录音器中绕过。
+
+1. **`run_gated`门控一次性操作，而非会话。** 解决方式：** 转折门禁，而非会话。** “Armed a Recording”实际上是一次性操作，完成时间为毫秒，因此`record_start`正常通过`dispatcher::run_gated`;拆除无需授权，写入自己的配对`audit_session_end`行，因此诊断显示的是匹配的对，而非单侧`record_start`。
+
+2. **`Whitelist`层可以自动允许全局输入hook。** `Call::forces_per_call()`现在对shell类*和*`record_start`返回为true，`record_start`加入`CallKind::Driving`臂。由于`evaluate`现有的顺序是kill switch→禁用→→白名单的层级关闭→同意，且`run_gated_impl`中没有在白名单之前运行，因此“在提示前拒绝”是从现有排序中导出的，而不是新的检查。调用站点通过捕获范围派生的`process_name` / `window_title`;之前绕过的路径对两者都通过了`None`，完全跳过了白名单。
+
+3. **同意从未一次性完成。** `request_with_thumbnail`在`has_session_grant`时短路，每当渲染器传递`persist: true`时`resolve`插入授权——`session_key: None`未阻止。`ConsentPrompt::is_one_shot()` 现在对 `record_start` 返回为真;`has_session_grant` 对其提前返回 false，`resolve`跳过插入。一个“不要再问”，默默重新激活全局输入hook，不是用户可以提前有意义地给予的授权。
+
+**紧急停止包含三个不同的功能。** `automation_kill_switch`（命令.rs）、全局快捷方式（`shortcuts/registry.rs`）和托盘项（`tray/mod.rs`）各自承担不同的子集工作：前者从未发出事件，后者跳过持久性和虚拟显示释放，第三者跳过了授权清除。它们现在共享`automation::kill_switch::engage`，会激活→持久化→清除会话授权→释放虚拟显示→ `recorder.interrupt_blocking(KillSwitch)` →发出一个`automation:kill-switch`。事件*名称*未变，现有TS监听者继续工作;它的载荷从`null`变成`KillSwitchEvent`。`interrupt_blocking`不接受`AppHandle`（它使用存储的`EventSink`），这让`engage`能保持通用而不会感染`ActiveSession` `R: Runtime`。
+
+两个支持性新增：一个非提示`platform/shared/input_monitoring.rs`（`IOHIDCheckAccess`，与`screen_capture.rs`相同的5s缓存），使得印前检查可以报告输入监控状态，而唯一信号不会`HookGuard::install`失效;以及`InputEvent::KeyDown`获得一个布局解码的`text`字段（macOS `CGEventKeyboardGetUnicodeString`，Windows `ToUnicodeEx`），因为`keys_to_hint`只输出大写ASCII。

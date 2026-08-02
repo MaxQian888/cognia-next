@@ -23,6 +23,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import { VideoIcon } from "lucide-react"
+import { openRecorder } from "@/stores/skills/recorder-store"
+import { useRecorderAvailable } from "@/hooks/skills/use-skill-recorder"
 import { SkillDiscovery } from "./skill-discovery"
 import { SkillTemplateDialog } from "./skill-template-dialog"
 import { toast } from "sonner"
@@ -65,6 +68,8 @@ function slug(name: string): string {
 
 export function SkillPanelToolbar() {
   const t = useTranslations("skills.toolbar")
+  const tRecorder = useTranslations("skills.recorder")
+  const recorderAvailable = useRecorderAvailable()
   const tCommon = useTranslations("skills")
   const tToasts = useTranslations("skills.toasts")
   const tSync = useTranslations("skills.sync")
@@ -371,6 +376,15 @@ export function SkillPanelToolbar() {
         <PlusIcon className="size-3.5 sm:mr-1.5" />
         <span className="hidden sm:inline">{t("new")}</span>
       </Button>
+      {/* Gated on the owning plugin rather than on `isTauri()`: disabling the
+          Skill Recorder must take every entry point with it, and the plugin is
+          the thing that holds the native grants. */}
+      {recorderAvailable ? (
+        <Button size="sm" variant="outline" onClick={() => openRecorder("toolbar")} disabled={busy}>
+          <VideoIcon className="size-3.5 sm:mr-1.5" />
+          <span className="hidden sm:inline">{tRecorder("entry.toolbarButton")}</span>
+        </Button>
+      ) : null}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button size="sm" variant="outline" disabled={busy}>

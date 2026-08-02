@@ -1,0 +1,16 @@
+# Optional override for an existing certificate instead of ACME.
+# External reverse proxies omit the `tls` profile entirely.
+services:
+  caddy:
+    environment:
+      COGNIA_TLS_CERT_FILE: /run/secrets/tls_certificate
+      COGNIA_TLS_KEY_FILE: /run/secrets/tls_private_key
+    volumes:
+      - ./Caddyfile.existing:/etc/caddy/Caddyfile:ro
+    secrets: [tls_certificate, tls_private_key]
+
+secrets:
+  tls_certificate:
+    file: ${COGNIA_TLS_CERT_FILE:?set COGNIA_TLS_CERT_FILE}
+  tls_private_key:
+    file: ${COGNIA_TLS_KEY_FILE:?set COGNIA_TLS_KEY_FILE}

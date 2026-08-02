@@ -16,6 +16,7 @@ on:
       - "scripts/smoke/compose-smoke.mjs"
       - "services/signaling-server/**"
       - "services/share-server/**"
+      - "services/diagnostic-server/**"
       - ".github/workflows/compose-e2e.yml"
   # schedule/workflow_dispatch only fire from the default branch, where this
   # workflow does not exist yet — the dev-scoped push trigger is what actually
@@ -78,6 +79,82 @@ jobs:
         working-directory: deploy/compose
         env:
           SHARE_UPLOAD_SECRET: ci-smoke-secret
+        run: docker compose down -v
+
+  diagnostics:
+    name: Diagnostics stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # `services/diagnostic-server/deploy` is its own compose project (Postgres +
+    # MinIO + a KMS stub), not part of the self-host suite the tiers above
+    # exercise. It gets its own job because its whole bring-up sequence —
+    # migrate, then seed, then serve — is what used to be broken: the tenant
+    # fixture ran as a Postgres init hook, before the tables existed.
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Up + wait (build, migrate, seed, serve)
+        working-directory: services/diagnostic-server/deploy
+        run: docker compose up -d --wait diagnostic-service
+
+      - name: Migrate and seed both completed
+        working-directory: services/diagnostic-server/deploy
+        run: |
+          set -euo pipefail
+          for svc in migrate seed; do
+            # `docker inspect` rather than `compose ps --format`: the Go-template
+            # form of the latter is not available on every compose v2 build.
+            cid="$(docker compose ps -aq "$svc")"
+            [ -n "$cid" ] || { echo "::error::$svc never ran"; exit 1; }
+            code="$(docker inspect -f '{{.State.ExitCode}}' "$cid")"
+            echo "$svc exited with $code"
+            [ "$code" = "0" ] || { echo "::error::$svc did not succeed"; exit 1; }
+          done
+
+      - name: Seed row is present
+        working-directory: services/diagnostic-server/deploy
+        run: |
+          set -euo pipefail
+          rows="$(docker compose exec -T -e PGPASSWORD=diagnostics-development-only postgres \
+            psql -tAq -U cognia_diagnostics -d cognia_diagnostics \
+            -c "select count(*) from projects where tenant_id = '00000000-0000-4000-8000-000000000001'")"
+          echo "seeded projects: $rows"
+          [ "$rows" = "1" ] || { echo "::error::development tenant was not seeded"; exit 1; }
+
+      - name: Health and OpenAPI
+        run: |
+          set -euo pipefail
+          status() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+          [ "$(status http://127.0.0.1:18080/health/live)" = "204" ]
+          [ "$(status http://127.0.0.1:18080/health/ready)" = "204" ]
+          [ "$(status http://127.0.0.1:18080/openapi.yaml)" = "200" ]
+
+      - name: Intake kill switch answers 503 without taking the API down
+        working-directory: services/diagnostic-server/deploy
+        env:
+          DIAGNOSTIC_INGEST_ENABLED: "false"
+        run: |
+          set -euo pipefail
+          docker compose up -d --wait --force-recreate diagnostic-service
+          status() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+          intake="$(status -X POST http://127.0.0.1:18080/v1/grants/anonymous \
+            -H 'content-type: application/json' -d '{}')"
+          echo "grants/anonymous → $intake"
+          [ "$intake" = "503" ] || { echo "::error::intake still accepting with the switch off"; exit 1; }
+          # The point of a *separate* switch: liveness and the read side stay up
+          # so deletion requests can still be served.
+          [ "$(status http://127.0.0.1:18080/health/live)" = "204" ]
+
+      - name: Logs on failure
+        if: failure()
+        working-directory: services/diagnostic-server/deploy
+        run: docker compose logs --no-color
+
+      - name: Down
+        if: always()
+        working-directory: services/diagnostic-server/deploy
         run: docker compose down -v
 
   tier2:

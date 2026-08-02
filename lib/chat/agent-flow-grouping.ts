@@ -5,7 +5,7 @@
  *
  * Grouping is *mode-aware*. In `standard` / `detailed` every tool (bar
  * TodoWrite) folds. In `simplified` only context-gathering reads fold (the
- * TUI's `groupContextRuns` philosophy) — see {@link isContextFoldTool} — so
+ * TUI's `groupContextRuns` philosophy) — see {@link isContextFoldPart} — so
  * edits, writes and commands stand as their own prominent rows.
  *
  * Sub-agent parts are transparent to grouping — they render once as a dispatch
@@ -13,7 +13,7 @@
  * `TodoWrite` is excluded because it renders as a structured plan, not a card.
  */
 
-import { isContextFoldTool } from "./tool-summary"
+import { isContextFoldPart } from "./tool-summary"
 import type { AgentFlowMode } from "@/types/appearance"
 
 export const MIN_GROUP_SIZE = 2
@@ -40,8 +40,16 @@ export function isToolPartType(type: string | undefined): boolean {
 /** True for tool parts that participate in activity grouping. */
 export function isGroupableToolType(type: string | undefined): boolean {
   if (!isToolPartType(type)) return false
-  // TodoWrite renders as a plan list, not a tool card.
+  // TodoWrite renders as a plan list, not a tool card. Only the two statically
+  // declared spellings are special-cased in the renderer, so only those are
+  // excluded here — a `dynamic-tool` named TodoWrite renders as an ordinary
+  // tool card and must keep folding with its neighbours.
   return type !== "tool-TodoWrite" && type !== "tool-mcp__cognia-tools__TodoWrite"
+}
+
+/** Part-level companion to {@link isGroupableToolType}. */
+export function isGroupableToolPart<P extends { type?: string }>(part: P): boolean {
+  return isGroupableToolType(part?.type)
 }
 
 /** AI SDK structural/control part types the renderer draws nothing for. */
@@ -89,7 +97,12 @@ export function groupAgentParts<P extends { type?: string }>(
   // Simplified mode adopts the TUI's selective folding: only context-gathering
   // reads (read/search/glob/list/web) fold; every other tool breaks the run and
   // stands alone. Standard/detailed keep the "any tool folds" behaviour.
-  const isGroupable = mode === "simplified" ? isContextFoldTool : isGroupableToolType
+  //
+  // Both predicates take the whole part, not its type: `dynamic-tool` carries
+  // its name on `toolName`, so a type-only check would silently refuse to fold
+  // every imported / CLI-handoff read burst in simplified mode.
+  const isGroupable: (part: P) => boolean =
+    mode === "simplified" ? isContextFoldPart : isGroupableToolPart
 
   const segments: AgentFlowSegment<P>[] = []
   let run: PartEntry<P>[] = []
@@ -105,7 +118,7 @@ export function groupAgentParts<P extends { type?: string }>(
 
   parts.forEach((part, index) => {
     if (isTransparentPart(part)) return
-    if (isGroupable(part?.type)) {
+    if (isGroupable(part)) {
       run.push({ part, index })
       return
     }

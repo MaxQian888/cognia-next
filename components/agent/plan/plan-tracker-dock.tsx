@@ -6,9 +6,11 @@
  * slot as the approval dock (their gating statuses are mutually exclusive).
  * Adds pause / resume / cancel controls wired to the plan runtime.
  *
- * Only orchestrated runs (`runPlan` → workflow driver) reach `executing`;
- * direct-chat plans stay `approved` after resume, so this dock is silent for
- * them until the P3 in-session driver lands.
+ * Both executors reach `executing` and therefore this dock: orchestrated runs
+ * (`runPlan` → workflow driver) and in-session runs (`startPlan` → the chat
+ * hook's turn driver, one visible turn per step). Pausing an in-session plan
+ * rotates its generation, which makes the next `handlePlanTurnComplete` return
+ * `stale` — that is how the driver stops.
  */
 
 import { useState } from "react"

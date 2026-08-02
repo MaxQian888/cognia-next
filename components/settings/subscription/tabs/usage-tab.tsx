@@ -22,8 +22,9 @@
  * `tool-activity-group`), with an expand/collapse-all control. Motion is gated
  * through `useFlowMotion` so it honours reduced-motion.
  *
- * A range toggle (7d / 30d / all) filters every section; CSV/JSON export dumps
- * the raw billable rows.
+ * A range toggle (7d / 30d / 90d) filters every section; CSV/JSON export dumps
+ * the raw billable rows. Cost over time draws the same daily aggregates either
+ * as a calendar heatmap (default) or as the original bar chart.
  */
 
 import { useEffect, useMemo, useState } from "react"
@@ -44,6 +45,8 @@ import {
   YAxis,
 } from "recharts"
 import {
+  BarChart3Icon,
+  CalendarRangeIcon,
   ChevronDownIcon,
   CoinsIcon,
   DatabaseZapIcon,
@@ -75,8 +78,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { SettingsAlert, SettingsEmptyState } from "@/components/settings/common/settings-section"
 import { StatCard } from "@/components/scheduler/stat-card"
+import { UsageHeatmap } from "@/components/usage/usage-heatmap"
 import { cn } from "@/lib/utils"
 
 import { useThemeColors } from "@/hooks/logging/use-theme-colors"
@@ -125,16 +130,29 @@ import { useChatStore } from "@/stores/chat"
 
 const DAY_MS = 86_400_000
 
+/**
+ * Trailing local-calendar windows. "All time" is gone on purpose: `sessionUsage`
+ * is pruned to 90 days, so the label promised history the table cannot hold.
+ * 90 days is the honest ceiling and the widest grid the heatmap renders.
+ */
 const RANGES = [
   { key: "7d", days: 7 },
   { key: "30d", days: 30 },
-  { key: "all", days: null },
+  { key: "90d", days: 90 },
 ] as const
 
 type RangeKey = (typeof RANGES)[number]["key"]
 
 const SURFACE_FILTERS = ["all", "chat", "workflow", "agent-team"] as const
 type SurfaceFilter = (typeof SURFACE_FILTERS)[number]
+
+/** How the cost-over-time section draws the same daily aggregates. */
+const COST_VIEWS = ["heatmap", "bar"] as const
+type CostView = (typeof COST_VIEWS)[number]
+
+function isCostView(value: string): value is CostView {
+  return (COST_VIEWS as readonly string[]).includes(value)
+}
 
 /** Keep rows whose producing surface matches the active filter. */
 function filterBySurface(
@@ -174,7 +192,7 @@ export function SubscriptionUsageTab() {
   const sessionRows = useMemo(() => liveSessionUsage ?? [], [liveSessionUsage])
 
   const [range, setRange] = useState<RangeKey>("7d")
-  const rangeDays = useMemo(() => RANGES.find((r) => r.key === range)?.days ?? null, [range])
+  const rangeDays = useMemo(() => RANGES.find((r) => r.key === range)?.days ?? 7, [range])
   const [surface, setSurface] = useState<SurfaceFilter>("all")
 
   // Per-section fold overrides, scoped to the active mode: switching mode resets
@@ -301,6 +319,8 @@ export function SubscriptionUsageTab() {
       <MotionReveal index={6}>
         <CostOverTimeCard
           rows={filteredSessionRows}
+          rangeDays={rangeDays}
+          now={now}
           open={isOpen("cost")}
           onToggle={() => toggleSection("cost")}
         />
@@ -805,7 +825,7 @@ function UtilizationTrendCard({
   onToggle,
 }: {
   rows: SubscriptionUsageRow[]
-  rangeDays: number | null
+  rangeDays: number
   now: number
   open: boolean
   onToggle: () => void
@@ -814,11 +834,7 @@ function UtilizationTrendCard({
   const colors = useThemeColors()
   const { reduce } = useFlowMotion()
   const series = useMemo(
-    () =>
-      buildUtilizationSeries(rows, {
-        now,
-        rangeMs: rangeDays != null ? rangeDays * DAY_MS : null,
-      }),
+    () => buildUtilizationSeries(rows, { now, rangeMs: rangeDays * DAY_MS }),
     [rows, rangeDays, now]
   )
 
@@ -1107,10 +1123,14 @@ function InsightsCard({
 
 function CostOverTimeCard({
   rows,
+  rangeDays,
+  now,
   open,
   onToggle,
 }: {
   rows: SessionUsageRow[]
+  rangeDays: number
+  now: number
   open: boolean
   onToggle: () => void
 }) {
@@ -1118,6 +1138,9 @@ function CostOverTimeCard({
   const colors = useThemeColors()
   const { reduce } = useFlowMotion()
   const daily = useMemo(() => aggregateByDay(rows), [rows])
+  // View choice is page-local on purpose: it is a way of looking at the same
+  // numbers, not a preference worth persisting into settings.
+  const [view, setView] = useState<CostView>("heatmap")
 
   return (
     <UsageSection
@@ -1127,10 +1150,33 @@ function CostOverTimeCard({
       onToggle={onToggle}
       testid="usage-cost-section"
     >
+      <ToggleGroup
+        type="single"
+        size="sm"
+        value={view}
+        onValueChange={(value) => {
+          if (isCostView(value)) setView(value)
+        }}
+        aria-label={t("view.label")}
+        data-testid="usage-cost-view-toggle"
+      >
+        <ToggleGroupItem
+          value="heatmap"
+          aria-label={t("view.heatmap")}
+          data-testid="usage-cost-view-heatmap"
+        >
+          <CalendarRangeIcon className="size-3.5" />
+        </ToggleGroupItem>
+        <ToggleGroupItem value="bar" aria-label={t("view.bar")} data-testid="usage-cost-view-bar">
+          <BarChart3Icon className="size-3.5" />
+        </ToggleGroupItem>
+      </ToggleGroup>
       {daily.length === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="usage-cost-empty">
           {t("empty")}
         </p>
+      ) : view === "heatmap" ? (
+        <UsageHeatmap daily={daily} rangeDays={rangeDays} now={now} />
       ) : (
         <div className="h-48" data-testid="usage-cost-chart">
           <ResponsiveContainer
@@ -1295,14 +1341,13 @@ function RawSamplesCard({
   onToggle,
 }: {
   rows: SubscriptionUsageRow[]
-  rangeDays: number | null
+  rangeDays: number
   now: number
   open: boolean
   onToggle: () => void
 }) {
   const t = useTranslations("subscription.usage")
   const filtered = useMemo(() => {
-    if (rangeDays == null) return rows
     const cutoff = now - rangeDays * DAY_MS
     return rows.filter((r) => r.fetchedAt >= cutoff)
   }, [rows, rangeDays, now])

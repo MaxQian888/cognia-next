@@ -5,9 +5,9 @@ import {
 } from "./nav-config"
 
 describe("APPEARANCE_NAV_GROUPS", () => {
-  it("covers ten panels across three groups", () => {
+  it("covers twelve panels across three groups", () => {
     expect(APPEARANCE_NAV_GROUPS).toHaveLength(3)
-    expect(APPEARANCE_NAV_GROUPS.flatMap((g) => g.items)).toHaveLength(11)
+    expect(APPEARANCE_NAV_GROUPS.flatMap((g) => g.items)).toHaveLength(12)
   })
 
   it("has no duplicate panel ids", () => {

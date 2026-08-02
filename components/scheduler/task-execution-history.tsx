@@ -59,6 +59,60 @@ function getResultSummary(result: unknown): string | null {
   return null
 }
 
+/** Beyond this, a one-line error is worth an explicit expand affordance. */
+const ERROR_INLINE_LIMIT = 80
+
+/**
+ * Failure detail for one row. Collapsed it stays a single truncated line so the
+ * list keeps its rhythm; expanded it wraps inside a bounded, scrollable block
+ * rather than pushing every following row down the page. The toggle stops
+ * propagation so expanding an error never also opens the run sheet behind it.
+ */
+function ExecutionErrorLine({
+  error,
+  expandLabel,
+  collapseLabel,
+}: {
+  error: string
+  expandLabel: string
+  collapseLabel: string
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const isLong = error.length > ERROR_INLINE_LIMIT || error.includes("\n")
+
+  return (
+    <div className="mt-0.5">
+      <p
+        data-testid="error-message"
+        title={error}
+        className={cn(
+          "text-[11px] text-red-400",
+          expanded && isLong
+            ? "max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded bg-red-500/5 px-1.5 py-1 font-mono"
+            : "truncate"
+        )}
+      >
+        {error}
+      </p>
+      {isLong && (
+        <button
+          type="button"
+          data-testid="error-toggle"
+          aria-expanded={expanded}
+          onClick={(e) => {
+            e.stopPropagation()
+            setExpanded((v) => !v)
+          }}
+          onKeyDown={(e) => e.stopPropagation()}
+          className="mt-0.5 text-[10px] text-muted-foreground underline-offset-2 hover:underline"
+        >
+          {expanded ? collapseLabel : expandLabel}
+        </button>
+      )}
+    </div>
+  )
+}
+
 interface TaskExecutionHistoryProps {
   executions: TaskExecution[]
   /**
@@ -105,11 +159,11 @@ export function TaskExecutionHistory({
         const isLast = index === displayed.length - 1
         const resultSummary =
           execution.status === "completed" ? getResultSummary(execution.output) : null
+        // Only ever attached when `onSelectExecution` is set (see `isClickable`).
         const handleKey = (e: React.KeyboardEvent) => {
-          if (!onSelectExecution) return
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault()
-            onSelectExecution(execution)
+            onSelectExecution!(execution)
           }
         }
 
@@ -156,16 +210,18 @@ export function TaskExecutionHistory({
                     className="ml-1.5 inline-flex items-center rounded-full border border-border/50 px-1.5 text-[10px]"
                     data-testid="execution-trigger-source"
                   >
-                    {t(`triggerSources.${execution.triggerSource}`) || execution.triggerSource}
+                    {t(`triggerSources.${execution.triggerSource}`)}
                   </span>
                 )}
               </p>
 
               {/* Detail line: error for failed, result for completed */}
               {execution.status === "failed" && execution.error && (
-                <p className="text-[11px] text-red-400 truncate" data-testid="error-message">
-                  {execution.error}
-                </p>
+                <ExecutionErrorLine
+                  error={execution.error}
+                  expandLabel={t("showMore")}
+                  collapseLabel={t("showLess")}
+                />
               )}
               {execution.status === "completed" && resultSummary && (
                 <p className="text-[11px] text-muted-foreground truncate">{resultSummary}</p>
@@ -196,7 +252,7 @@ export function TaskExecutionHistory({
             onClick={() => setDisplayCount((count) => count + maxItems)}
             data-testid="execution-load-more"
           >
-            {t("loadMore") || "Load more"} ({remaining})
+            {t("loadMore")} ({remaining})
           </Button>
         </div>
       )}

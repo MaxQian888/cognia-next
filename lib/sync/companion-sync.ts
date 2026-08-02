@@ -26,6 +26,7 @@
 
 import { subscribeResume } from "@/lib/capacitor/app"
 import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
+import { companionCursorNamespace } from "@/lib/companion/credential-book/legacy-migration"
 import { transport } from "@/lib/tauri"
 import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import type { Transport } from "@/lib/tauri/transport-types"
@@ -131,34 +132,58 @@ const stateMap = new Map<SyncableTable, SyncState>()
  */
 let hydratePromise: Promise<void> | null = null
 
+interface HostCursorKeys {
+  /** The key this host's cursors are written under now. */
+  key: string
+  /** Keys the same host's cursors were written under by earlier builds. */
+  legacy: readonly string[]
+}
+
 /**
- * Which host these cursors belong to — the device id it issued at pair time.
+ * Which host these cursors belong to (ADR-0097 D13).
+ *
+ * The key is the host's **cursor namespace** — `{accountNamespace}:{hostId}`
+ * — not the device id it issued at pair time. Two things change with that:
+ *
+ *   • The same desktop reached from two local accounts no longer shares one
+ *     watermark, so account A's pull cannot advance account B's cursor.
+ *   • A *re-pair to the same host* keeps its watermark. `deviceId` is minted
+ *     per pairing, so it used to read as a different host and forced a full
+ *     re-pull of every table; `hostId` is stable across re-pairs.
  *
  * Unpaired clients get `""`, which is a real key: it keeps their (empty)
  * cursors from colliding with any host's, and the moment they pair, the key
- * changes and the reset below runs.
+ * changes and the reconciliation below runs.
+ *
+ * `legacy` carries the pre-namespace key for the *same* host so an existing
+ * install can adopt its own cursors instead of mistaking them for another
+ * host's — see {@link adoptLegacyCursorKeys}.
  */
-function currentServerKey(): string {
-  return loadCompanionConfig()?.deviceId ?? ""
+function currentHostCursorKeys(): HostCursorKeys {
+  const config = loadCompanionConfig()
+  if (!config) return { key: "", legacy: [] }
+  const key = companionCursorNamespace(config)
+  const legacy = config.deviceId && config.deviceId !== key ? [config.deviceId] : []
+  return { key, legacy }
 }
 
 /** The host whose cursors `stateMap` currently holds. */
 let hydratedServerKey: string | null = null
 
 async function ensureHydrated(): Promise<void> {
-  const serverKey = currentServerKey()
-  // The host changed under us — a re-pair, or (later) a switch. Everything in
-  // memory belongs to the previous one.
+  const { key: serverKey, legacy } = currentHostCursorKeys()
+  // The host changed under us — a re-pair, or a switch. Everything in memory
+  // belongs to the previous one. The mirrored *rows* are reconciled below,
+  // from the database rather than from this in-memory comparison.
   if (hydratedServerKey !== null && hydratedServerKey !== serverKey) {
     hydratePromise = null
     stateMap.clear()
-    await resetMirrorsForHostChange([hydratedServerKey])
   }
   if (hydratePromise) return hydratePromise
-  const isColdStart = hydratedServerKey === null
   hydratedServerKey = serverKey
   hydratePromise = (async () => {
-    if (isColdStart) await resetMirrorsLeftByAnotherHost(serverKey)
+    await adoptLegacyCursorKeys(serverKey, legacy)
+    await resetMirrorsSharedWithAnotherHost(serverKey)
     const persisted = await loadCursors(serverKey)
     for (const [table, row] of persisted) {
       stateMap.set(table, {
@@ -172,14 +197,52 @@ async function ensureHydrated(): Promise<void> {
 }
 
 /**
- * Drop the mirrored rows when the client starts talking to a different host.
+ * Re-file cursors an earlier build wrote under this same host's bare device id.
  *
- * Partitioning the cursors alone is not enough. It stops a client resuming
- * from the wrong watermark, but the *rows* pulled from the previous host are
- * still sitting in the same tables, so the two hosts' sessions, messages and
- * characters would simply pile up together. These tables are a cache of a
- * host's state, not the client's own data, so clearing and re-pulling loses
- * nothing.
+ * Without this, the first run after the key changed to a cursor namespace would
+ * see the install's own rows under a key it no longer recognises, classify them
+ * as another host's, and wipe the mirror of the host it is still paired to —
+ * a full re-pull of every table on upgrade.
+ *
+ * The credential-book migration re-files these too, but it runs from
+ * `hydrateCompanionConfig()`, and a sync tick can beat it: `loadCompanionConfig`
+ * reads a cache, so the orchestrator can observe the new key before the
+ * migration has moved anything. Both paths are idempotent, so whichever runs
+ * first wins and the other finds nothing.
+ *
+ * A cursor already under the canonical key wins — it was written by this build
+ * against the key we are about to resume from, so the legacy row is a stale
+ * duplicate, not a newer watermark.
+ */
+async function adoptLegacyCursorKeys(
+  serverKey: string,
+  legacyKeys: readonly string[]
+): Promise<void> {
+  if (serverKey === "" || legacyKeys.length === 0) return
+  const canonical = await loadCursors(serverKey)
+  const { clearCursorsForServer } = await import("./cursor-store")
+  for (const legacyKey of legacyKeys) {
+    const rows = await loadCursors(legacyKey)
+    if (rows.size === 0) continue
+    for (const [table, row] of rows) {
+      if (canonical.has(table)) continue
+      const adopted = { ...row, serverKey }
+      await saveCursor(adopted)
+      canonical.set(table, adopted)
+    }
+    await clearCursorsForServer(legacyKey)
+  }
+}
+
+/**
+ * Drop the mirrored rows when this database also holds another host's state.
+ *
+ * Partitioning the cursors alone is not enough *when two hosts share one
+ * database*. It stops a client resuming from the wrong watermark, but the
+ * *rows* pulled from the previous host are still sitting in the same tables,
+ * so the two hosts' sessions, messages and characters would simply pile up
+ * together. These tables are a cache of a host's state, not the client's own
+ * data, so clearing and re-pulling loses nothing.
  *
  * Failures are swallowed: a wipe that could not run leaves a stale cache,
  * which is what the user had before, whereas throwing here would break sync
@@ -213,19 +276,30 @@ async function resetMirrorsForHostChange(previousServerKeys: readonly string[]):
 }
 
 /**
- * Cold-start half of the wipe above.
+ * Decide whether the wipe above is needed at all, from the database itself.
  *
- * `ensureHydrated`'s in-memory check only fires when *this process* already
- * talked to a different host. Re-pairing is normally a restart, and on iOS the
- * app is routinely killed between the `CompanionConfig` write and the next sync
- * tick — so on its own that check lets host A's rows sit in the tables while
- * host B's cursors start from zero, which is the exact blend the per-host
- * cursors were introduced to prevent.
+ * The rule is one question: **does the database we are about to sync into
+ * already hold cursors for a host other than this one?** Cursors are written
+ * per host on every handler run into the same database as the mirrored rows,
+ * so a foreign key here means that host's rows are in these very tables, and
+ * nothing else does.
  *
- * The persisted cursors are the durable record of who we last talked to: they
- * are written per host and deleted for the host we leave, so a row under a
- * foreign `serverKey` at cold start means the switch happened while we were not
- * running.
+ * Asking the database rather than tracking the switch in memory is what lets
+ * host switching stop being destructive (ADR-0061 L3 / ADR-0097 D13). Once an
+ * account has runtime targets, each host's mirror lives in its *own* Dexie
+ * database (`activateAccountDatabase(accountId, targetId)` — see
+ * `lib/runtime/account-runtime-target.ts`), so switching activates the other
+ * host's database and this scan finds nothing foreign: both hosts keep their
+ * mirror and their watermark, and switching back re-pulls nothing. When the
+ * two hosts *do* share one database — an install with no runtime target, and
+ * the legacy account-level database — the scan finds the foreign key and the
+ * wipe still fires, exactly as before.
+ *
+ * It also covers the switch this process never saw. Re-pairing is normally a
+ * restart, and on iOS the app is routinely killed between the
+ * `CompanionConfig` write and the next sync tick, so an in-memory check alone
+ * let host A's rows sit in the tables while host B's cursors started from
+ * zero — the exact blend per-host cursors were introduced to prevent.
  *
  * An unpaired client (`serverKey === ""`) never wipes. It is not "talking to a
  * different host" yet, and `loadCompanionConfig` reads a cache that is empty
@@ -233,7 +307,7 @@ async function resetMirrorsForHostChange(previousServerKeys: readonly string[]):
  * hydration would otherwise destroy the mirror of the host it is still paired
  * to.
  */
-async function resetMirrorsLeftByAnotherHost(serverKey: string): Promise<void> {
+async function resetMirrorsSharedWithAnotherHost(serverKey: string): Promise<void> {
   if (serverKey === "") return
   const { listCursorServerKeys } = await import("./cursor-store")
   const foreign = (await listCursorServerKeys()).filter((key) => key !== serverKey)

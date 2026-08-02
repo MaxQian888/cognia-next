@@ -18,6 +18,29 @@ export type {
   ComponentStyleEntry,
   ComponentStyleGroup,
 } from "./component-style-registry"
+export { CursorApplier, resolveCursorStyle } from "./cursor/cursor-applier"
+export {
+  CURSOR_PACKS,
+  CURSOR_PACKS_BY_ID,
+  CURSOR_PACK_FAMILIES,
+  getCursorPack,
+  packsInFamily,
+} from "./cursor/cursor-packs"
+export {
+  CURSOR_ROLE_SELECTORS,
+  CURSOR_ROOT_ATTR,
+  CURSOR_STYLE_ELEMENT_ID,
+  buildCursorCss,
+} from "./cursor/cursor-css"
+export {
+  CURSOR_BASE_PX,
+  CURSOR_MAX_PX,
+  cursorPixelSize,
+  renderPackRoles,
+  resolveCursorPalette,
+  svgToDataUrl,
+} from "./cursor/render-cursor"
+export { useCursorAccentColor } from "./cursor/use-cursor-accent"
 export { TypographyApplier, resolveTypographyVars } from "./typography-applier"
 export { DensityApplier, resolveDensityAttrs, densitySurfaceProps } from "./density-applier"
 export { RadiusApplier, resolveRadiusVar } from "./radius-applier"

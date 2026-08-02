@@ -7,6 +7,7 @@ function article(slug: string, contentMd: string, over: Partial<WikiArticle> = {
     slug,
     title: `Article ${slug}`,
     module: `lib/${slug}`,
+    corpusId: "cognia-self",
     scope: "cognia-self",
     pageRank: 0.5,
     summary: "",

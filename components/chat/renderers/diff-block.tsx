@@ -2,7 +2,8 @@
 
 import { useState, memo, useCallback, useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { Copy, Check, Columns, Rows, Plus, Minus } from "lucide-react"
+import { Columns, Rows, Plus, Minus } from "lucide-react"
+import { CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import { cn } from "@/lib/utils"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
@@ -150,7 +151,7 @@ export const DiffBlock = memo(function DiffBlock({
             aria-label={t("copy")}
             tooltip={t("copy")}
           >
-            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            <CopyFeedbackIcon copied={copied} size={12} />
           </TooltipIconButton>
         </div>
       </div>

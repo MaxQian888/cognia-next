@@ -24,9 +24,19 @@ describe("TerminalEmptyState", () => {
     expect(screen.queryByTestId("terminal-empty-state-new")).toBeNull()
   })
 
-  it("renders the mobile variant (no spawn button — LAN-only path is task #14)", () => {
-    render(<TerminalEmptyState variant="mobile" onNew={() => undefined} />)
-    expect(screen.queryByTestId("terminal-empty-state-new")).toBeNull()
+  it("offers the action on the mobile variant too — ws spawns are real", () => {
+    const onNew = jest.fn()
+    render(<TerminalEmptyState variant="mobile" onNew={onNew} />)
+    expect(screen.getByTestId("terminal-empty-state").getAttribute("data-variant")).toBe("mobile")
+    fireEvent.click(screen.getByTestId("terminal-empty-state-new"))
+    expect(onNew).toHaveBeenCalled()
+  })
+
+  it("renders the remote variant for a desktop driving a remote host", () => {
+    const onNew = jest.fn()
+    render(<TerminalEmptyState variant="remote" onNew={onNew} />)
+    expect(screen.getByTestId("terminal-empty-state").getAttribute("data-variant")).toBe("remote")
+    expect(screen.getByTestId("terminal-empty-state-new")).toBeInTheDocument()
   })
 
   it("renders the unsupported variant", () => {
@@ -34,5 +44,12 @@ describe("TerminalEmptyState", () => {
     expect(screen.getByTestId("terminal-empty-state").getAttribute("data-variant")).toBe(
       "unsupported"
     )
+  })
+
+  it("never offers an action for the unsupported variant, because the dock passes no onNew", () => {
+    // Gating is on `onNew`, not the variant: the dock only supplies it when
+    // `canSpawn` is true, which `unsupported` never is.
+    render(<TerminalEmptyState variant="unsupported" />)
+    expect(screen.queryByTestId("terminal-empty-state-new")).toBeNull()
   })
 })

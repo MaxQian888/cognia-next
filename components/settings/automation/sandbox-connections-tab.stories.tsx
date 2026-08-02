@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 
 import { SandboxConnectionsTab } from "./sandbox-connections-tab"
 import { clearDb, seedDb } from "@/lib/storybook/seed-db"
+import { createSandboxConnectionRow } from "@/lib/db/sandbox-connections"
 
 // Dexie-reading via `useSandboxConnections` (`sandboxConnections` table). The
 // lifecycle buttons need the Tauri shell (Docker orchestration is Rust), so
@@ -36,27 +37,39 @@ export const Populated: Story = {
       const now = Date.now()
       await db.sandboxConnections.bulkPut([
         {
-          id: "sbx-1",
-          name: "home-docker",
-          provider: "docker",
-          image: "ghcr.io/trycua/cua-xfce:latest",
-          host: "127.0.0.1",
-          port: 8100,
+          ...createSandboxConnectionRow({
+            id: "sbx-1",
+            name: "home-docker",
+            driver: "computer-server",
+            config: {
+              provider: "docker",
+              image: "ghcr.io/trycua/cua-xfce:latest",
+              host: "127.0.0.1",
+              port: 8100,
+            },
+            now: now - 86_400_000,
+          }),
+          state: "running",
           lastHealthStatus: "ok",
           lastHealthCheckAt: now - 30_000,
-          createdAt: now - 86_400_000,
           updatedAt: now - 30_000,
         },
         {
-          id: "sbx-2",
-          name: "lab-box",
-          provider: "docker",
-          image: "ghcr.io/trycua/cua-xfce:latest",
-          host: "10.0.0.5",
-          port: 0,
+          ...createSandboxConnectionRow({
+            id: "sbx-2",
+            name: "lab-box",
+            driver: "computer-server",
+            config: {
+              provider: "docker",
+              image: "ghcr.io/trycua/cua-xfce:latest",
+              host: "10.0.0.5",
+              port: 0,
+            },
+            now: now - 172_800_000,
+          }),
+          state: "error",
           lastHealthStatus: "unreachable",
           lastHealthError: "connection refused",
-          createdAt: now - 172_800_000,
           updatedAt: now - 600_000,
         },
       ])

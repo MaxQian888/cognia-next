@@ -787,6 +787,32 @@ describe("self-invocation tool toggles", () => {
       selfInvokeTools: { skill: true, teamCollaboration: true },
     })
   })
+
+  it("persists the vector tool flag, preserving other toggles", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ selfInvokeTools: { skill: true } }),
+      loaded: true,
+    })
+    await act(async () => {
+      await useSettingsStore.getState().setVectorToolEnabled(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      selfInvokeTools: { skill: true, vector: true },
+    })
+  })
+
+  it("turns the vector tool flag back off", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ selfInvokeTools: { vector: true } }),
+      loaded: true,
+    })
+    await act(async () => {
+      await useSettingsStore.getState().setVectorToolEnabled(false)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      selfInvokeTools: { vector: false },
+    })
+  })
 })
 
 // ---- setApiKey ----

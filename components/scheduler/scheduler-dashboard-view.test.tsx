@@ -9,6 +9,9 @@ jest.mock("next-intl", () => ({
   useLocale: () => "en",
 }))
 
+// The summary band renders live under test — only its Card-free layout matters
+// here; its own numbers/bars are covered by scheduler-overview-summary.test.
+
 jest.mock("./task-execution-chart", () => ({
   __esModule: true,
   TaskExecutionChart: () => <div data-testid="task-execution-chart-stub" />,
@@ -32,6 +35,13 @@ jest.mock("./scheduler-timeline-view", () => ({
   SchedulerTimelineView: () => <div data-testid="timeline-view-stub" />,
 }))
 
+// Stub the unified runs widget — it has its own test and pulls live Dexie
+// sources; here we only assert the dashboard swaps to it.
+jest.mock("./unified-recent-runs", () => ({
+  __esModule: true,
+  UnifiedRecentRuns: () => <div data-testid="unified-recent-runs-stub" />,
+}))
+
 const viewState = { view: "overview" as "overview" | "calendar" | "timeline" }
 jest.mock("@/hooks/scheduler/use-scheduler-dashboard-view", () => ({
   __esModule: true,
@@ -49,7 +59,9 @@ const stats: TaskStatistics = {
   totalExecutions: 100,
   successfulExecutions: 95,
   failedExecutions: 5,
-} as unknown as TaskStatistics
+  averageDuration: 1000,
+  upcomingExecutions: 2,
+}
 
 const upcoming: ScheduledTask[] = [
   {
@@ -116,22 +128,22 @@ describe("SchedulerDashboardView", () => {
   it("always renders the view toggle, even when statistics is null", () => {
     setup({ statistics: null })
     expect(screen.getByTestId("scheduler-dashboard-view-toggle")).toBeInTheDocument()
-    // Overview body bails out → no stat values rendered.
-    expect(screen.queryByText("10")).toBeNull()
+    // Overview body bails out → no summary band rendered.
+    expect(screen.queryByTestId("scheduler-overview-summary")).toBeNull()
   })
 
-  it("renders aggregate stats and the success rate in overview mode", () => {
+  it("renders the summary band and the success rate in overview mode", () => {
     setup()
+    expect(screen.getByTestId("scheduler-overview-summary")).toBeInTheDocument()
     expect(screen.getByText("10")).toBeInTheDocument()
-    expect(screen.getByText("100")).toBeInTheDocument()
-    expect(screen.getByText("95%")).toBeInTheDocument()
+    expect(screen.getByTestId("summary-success-rate")).toHaveTextContent("95%")
   })
 
   it("renders the calendar view when mode is calendar", () => {
     viewState.view = "calendar"
     setup({ tasks: [] })
     expect(screen.getByTestId("calendar-view-stub")).toBeInTheDocument()
-    expect(screen.queryByText("95%")).toBeNull()
+    expect(screen.queryByTestId("scheduler-overview-summary")).toBeNull()
   })
 
   it("renders the timeline view when mode is timeline", () => {
@@ -157,6 +169,26 @@ describe("SchedulerDashboardView", () => {
     expect(screen.getByText("Task 1")).toBeInTheDocument()
     expect(screen.getByText("Task 2")).toBeInTheDocument()
     expect(screen.getByText("Task 3")).toBeInTheDocument()
+  })
+
+  it("renders a status icon for every execution state, including pending", () => {
+    const { container } = setup({
+      recentExecutions: [
+        ...recent,
+        { id: "e4", taskId: "t4", taskName: "Task 4", status: "pending" } as TaskExecution,
+      ],
+    })
+    // completed / failed / running / pending → four distinct icon colours.
+    expect(container.querySelector(".text-green-500")).not.toBeNull()
+    expect(container.querySelector(".text-red-500")).not.toBeNull()
+    expect(container.querySelector(".text-blue-500")).not.toBeNull()
+    expect(screen.getByText("Task 4")).toBeInTheDocument()
+  })
+
+  it("swaps in the unified cross-kind runs widget when onSelectRun is supplied", () => {
+    setup({ onSelectRun: jest.fn() })
+    expect(screen.getByTestId("unified-recent-runs-stub")).toBeInTheDocument()
+    expect(screen.queryByTestId("overview-recent")).toBeNull()
   })
 
   it("renders the no-recent-executions empty state when recentExecutions is empty", () => {
@@ -186,36 +218,22 @@ describe("SchedulerDashboardView", () => {
     expect(screen.queryByTestId("kind-summary-strip")).toBeNull()
   })
 
-  it("applies the right success-rate color band for low success rates", () => {
-    setup({
-      statistics: {
-        ...stats,
-        successfulExecutions: 50,
-        totalExecutions: 100,
-      } as unknown as TaskStatistics,
-    })
-    expect(screen.getByText("50%")).toBeInTheDocument()
+  it("passes a low success rate through to the summary band", () => {
+    setup({ statistics: { ...stats, successfulExecutions: 50, totalExecutions: 100 } })
+    expect(screen.getByTestId("summary-success-rate")).toHaveTextContent("50%")
   })
 
   it("renders 0% success when totalExecutions is zero", () => {
-    setup({
-      statistics: {
-        ...stats,
-        successfulExecutions: 0,
-        totalExecutions: 0,
-      } as unknown as TaskStatistics,
-    })
-    expect(screen.getByText("0%")).toBeInTheDocument()
+    setup({ statistics: { ...stats, successfulExecutions: 0, totalExecutions: 0 } })
+    expect(screen.getByTestId("summary-success-rate")).toHaveTextContent("0%")
   })
 
-  it("renders the middle success-rate band (70–89)", () => {
-    setup({
-      statistics: {
-        ...stats,
-        successfulExecutions: 75,
-        totalExecutions: 100,
-      } as unknown as TaskStatistics,
-    })
-    expect(screen.getByText("75%")).toBeInTheDocument()
+  it("lays the overview out as flat blocks rather than nested cards", () => {
+    const { container } = setup()
+    // The summary, upcoming and recent blocks are plain sections — the only
+    // `Card` left in the overview tree belongs to a stubbed child widget.
+    expect(container.querySelectorAll('[data-slot="card"]')).toHaveLength(0)
+    expect(screen.getByTestId("overview-upcoming")).toBeInTheDocument()
+    expect(screen.getByTestId("overview-recent")).toBeInTheDocument()
   })
 })

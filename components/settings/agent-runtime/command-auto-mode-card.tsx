@@ -13,7 +13,7 @@ import { useTranslations } from "next-intl"
 import { PlusIcon, ShieldCheckIcon, Trash2Icon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -71,144 +71,135 @@ export function CommandAutoModeCard() {
   const ruleEntries = Object.entries(rules)
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <ShieldCheckIcon className="size-4" />
-          {t("title")}
-        </CardTitle>
-        <CardDescription className="text-xs">{t("desc")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex items-center justify-between gap-4">
-          <Label htmlFor="auto-mode-enable" className="text-sm font-normal">
-            {t("enable")}
-          </Label>
-          <Switch
-            id="auto-mode-enable"
-            checked={enabled}
-            onCheckedChange={(v) => patchAuto({ enabled: v })}
-            aria-label={t("enable")}
-          />
-        </div>
+    <SettingsBlock icon={<ShieldCheckIcon />} title={t("title")} description={t("desc")}>
+      <div className="flex items-center justify-between gap-4">
+        <Label htmlFor="auto-mode-enable" className="text-sm font-normal">
+          {t("enable")}
+        </Label>
+        <Switch
+          id="auto-mode-enable"
+          checked={enabled}
+          onCheckedChange={(v) => patchAuto({ enabled: v })}
+          aria-label={t("enable")}
+        />
+      </div>
 
-        {enabled && (
-          <>
-            <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">{t("modeLabel")}</Label>
+      {enabled && (
+        <>
+          <div className="space-y-2">
+            <Label className="text-xs text-muted-foreground">{t("modeLabel")}</Label>
+            <Select
+              value={mode}
+              onValueChange={(v) => patchAuto({ mode: v as "rules" | "rules+model" })}
+            >
+              <SelectTrigger className="w-full" aria-label={t("modeLabel")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="rules">{t("modeRules")}</SelectItem>
+                <SelectItem value="rules+model">{t("modeRulesModel")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">{t("modeHint")}</p>
+          </div>
+
+          {mode === "rules+model" && (
+            <>
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-0.5">
+                  <Label htmlFor="auto-mode-deny-high" className="text-sm font-normal">
+                    {t("denyHighRisk")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("denyHighRiskHint")}</p>
+                </div>
+                <Switch
+                  id="auto-mode-deny-high"
+                  checked={denyOnHighRisk}
+                  onCheckedChange={(v) => patchAuto({ denyOnHighRisk: v })}
+                  aria-label={t("denyHighRisk")}
+                />
+              </div>
+              <p className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
+                {t("privacyNote")}
+              </p>
+            </>
+          )}
+
+          <div className="space-y-2 border-t pt-3">
+            <div className="space-y-0.5">
+              <Label className="text-sm">{t("rulesTitle")}</Label>
+              <p className="text-xs text-muted-foreground">{t("rulesDesc")}</p>
+            </div>
+
+            {ruleEntries.length === 0 ? (
+              <p className="text-xs text-muted-foreground" role="status">
+                {t("noRules")}
+              </p>
+            ) : (
+              <ul className="space-y-1.5">
+                {ruleEntries.map(([pattern, verdict]) => (
+                  <li
+                    key={pattern}
+                    className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5"
+                  >
+                    <code className="truncate font-mono text-xs">{pattern}</code>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <span className="text-xs text-muted-foreground">
+                        {verdictLabel(verdict as PermissionVerdict)}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-7"
+                        onClick={() => removeRule(pattern)}
+                        aria-label={`${t("removeRule")}: ${pattern}`}
+                      >
+                        <Trash2Icon className="size-3.5" />
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Input
+                value={draftPattern}
+                onChange={(e) => setDraftPattern(e.target.value)}
+                placeholder={t("patternPlaceholder")}
+                aria-label={t("patternPlaceholder")}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    addRule()
+                  }
+                }}
+                className="flex-1"
+              />
               <Select
-                value={mode}
-                onValueChange={(v) => patchAuto({ mode: v as "rules" | "rules+model" })}
+                value={draftVerdict}
+                onValueChange={(v) => setDraftVerdict(v as PermissionVerdict)}
               >
-                <SelectTrigger className="w-full" aria-label={t("modeLabel")}>
+                <SelectTrigger className="w-full sm:w-28" aria-label={t("addRule")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="rules">{t("modeRules")}</SelectItem>
-                  <SelectItem value="rules+model">{t("modeRulesModel")}</SelectItem>
+                  {VERDICTS.map((v) => (
+                    <SelectItem key={v} value={v}>
+                      {verdictLabel(v)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">{t("modeHint")}</p>
+              <Button onClick={addRule} disabled={!draftPattern.trim()}>
+                <PlusIcon className="mr-2 size-4" />
+                {t("addRule")}
+              </Button>
             </div>
-
-            {mode === "rules+model" && (
-              <>
-                <div className="flex items-center justify-between gap-4">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="auto-mode-deny-high" className="text-sm font-normal">
-                      {t("denyHighRisk")}
-                    </Label>
-                    <p className="text-xs text-muted-foreground">{t("denyHighRiskHint")}</p>
-                  </div>
-                  <Switch
-                    id="auto-mode-deny-high"
-                    checked={denyOnHighRisk}
-                    onCheckedChange={(v) => patchAuto({ denyOnHighRisk: v })}
-                    aria-label={t("denyHighRisk")}
-                  />
-                </div>
-                <p className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
-                  {t("privacyNote")}
-                </p>
-              </>
-            )}
-
-            <div className="space-y-2 border-t pt-3">
-              <div className="space-y-0.5">
-                <Label className="text-sm">{t("rulesTitle")}</Label>
-                <p className="text-xs text-muted-foreground">{t("rulesDesc")}</p>
-              </div>
-
-              {ruleEntries.length === 0 ? (
-                <p className="text-xs text-muted-foreground" role="status">
-                  {t("noRules")}
-                </p>
-              ) : (
-                <ul className="space-y-1.5">
-                  {ruleEntries.map(([pattern, verdict]) => (
-                    <li
-                      key={pattern}
-                      className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5"
-                    >
-                      <code className="truncate font-mono text-xs">{pattern}</code>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <span className="text-xs text-muted-foreground">
-                          {verdictLabel(verdict as PermissionVerdict)}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7"
-                          onClick={() => removeRule(pattern)}
-                          aria-label={`${t("removeRule")}: ${pattern}`}
-                        >
-                          <Trash2Icon className="size-3.5" />
-                        </Button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <Input
-                  value={draftPattern}
-                  onChange={(e) => setDraftPattern(e.target.value)}
-                  placeholder={t("patternPlaceholder")}
-                  aria-label={t("patternPlaceholder")}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault()
-                      addRule()
-                    }
-                  }}
-                  className="flex-1"
-                />
-                <Select
-                  value={draftVerdict}
-                  onValueChange={(v) => setDraftVerdict(v as PermissionVerdict)}
-                >
-                  <SelectTrigger className="w-full sm:w-28" aria-label={t("addRule")}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {VERDICTS.map((v) => (
-                      <SelectItem key={v} value={v}>
-                        {verdictLabel(v)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button onClick={addRule} disabled={!draftPattern.trim()}>
-                  <PlusIcon className="mr-2 size-4" />
-                  {t("addRule")}
-                </Button>
-              </div>
-            </div>
-          </>
-        )}
-      </CardContent>
-    </Card>
+          </div>
+        </>
+      )}
+    </SettingsBlock>
   )
 }
 

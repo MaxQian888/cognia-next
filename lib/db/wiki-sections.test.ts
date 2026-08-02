@@ -14,6 +14,7 @@ import {
   updateWikiSection,
 } from "./wiki-sections"
 import type { WikiSectionDraft } from "./wiki-sections"
+import { SELF_CORPUS_ID } from "@/types/wiki"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 
 beforeEach(async () => {
@@ -26,6 +27,7 @@ beforeEach(async () => {
 function makeDraft(overrides: Partial<WikiSectionDraft> = {}): WikiSectionDraft {
   return {
     articleId: overrides.articleId ?? "wka_test",
+    corpusId: overrides.corpusId ?? SELF_CORPUS_ID,
     sectionIndex: overrides.sectionIndex ?? 0,
     headingPath: overrides.headingPath ?? ["intro"],
     bodyMd: overrides.bodyMd ?? "section body",

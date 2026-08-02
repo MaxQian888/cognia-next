@@ -86,4 +86,28 @@ describe("parseArgv", () => {
   it("returns undefined command for empty argv", () => {
     expect(parseArgv([]).command).toBeUndefined()
   })
+
+  it("treats durability as a grouped command so the verb lands in subcommand", () => {
+    const args = parseArgv(["durability", "verify", "--account", "acct"])
+    expect(args.command).toBe("durability")
+    expect(args.subcommand).toBe("verify")
+    expect(stringFlag(args, "account")).toBe("acct")
+  })
+
+  it("never lets --activate or --confirm swallow the next token", () => {
+    const args = parseArgv([
+      "durability",
+      "recover",
+      "--activate",
+      "--from",
+      "journal",
+      "--confirm",
+      "--generation",
+      "gen-0002",
+    ])
+    expect(boolFlag(args, "activate")).toBe(true)
+    expect(boolFlag(args, "confirm")).toBe(true)
+    expect(stringFlag(args, "from")).toBe("journal")
+    expect(stringFlag(args, "generation")).toBe("gen-0002")
+  })
 })

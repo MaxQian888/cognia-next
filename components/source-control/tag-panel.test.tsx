@@ -46,6 +46,23 @@ describe("TagPanel", () => {
     expect(gitTags).toHaveBeenCalledTimes(2)
   })
 
+  it("keeps tag input intact and does not reload after a failed create", async () => {
+    const actions = makeActions()
+    actions.createTag.mockResolvedValue({ kind: "commandFailed", detail: "tag exists" })
+    render(<TagPanel open rootDir="/repo" onOpenChange={() => {}} actions={actions} />)
+    await waitFor(() => expect(gitTags).toHaveBeenCalled())
+    fireEvent.change(screen.getByTestId("tag-name"), { target: { value: "v3.0" } })
+    fireEvent.change(screen.getByTestId("tag-message"), { target: { value: "keep me" } })
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("tag-create"))
+    })
+
+    expect(screen.getByTestId("tag-name")).toHaveValue("v3.0")
+    expect(screen.getByTestId("tag-message")).toHaveValue("keep me")
+    expect(gitTags).toHaveBeenCalledTimes(1)
+  })
+
   it("creates a lightweight tag with no message", async () => {
     const actions = makeActions()
     render(<TagPanel open rootDir="/repo" onOpenChange={() => {}} actions={actions} />)

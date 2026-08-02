@@ -71,8 +71,35 @@ agent 驱动的终端 tab 已带 `agentSpawner`（chat session id，由 `dock-to
 
 ## 明确 scoped out 的后续
 
-1. **WebRTC WAN 终端传输** — ADR-0031 follow-up #1，仍延后。
+1. ~~**WebRTC WAN 终端传输**~~ — **已上线**，见 ADR-0031 follow-up #1。
 2. **移动端 OSC 633 下发** — ADR-0031 follow-up #2，仍延后。
 3. **服务端工作流执行 + consent 桥** — ADR-0031 follow-up #3。
-4. **dock 内 AI 命令辅助**（解释报错 / 建议修复）——已设计，未实现。
-5. **消息级定位回对话** — 需要 chat 的 scroll-to-message 锚点。
+4. ~~**dock 内 AI 命令辅助**~~ — 已由 ADR-0039（终端自动补全）取代并上线。
+5. ~~**消息级定位回对话**~~ — **已上线**：会话行携带 `agentSpawnerMessageId`，dock 走 `messagePermalinkQuery`（scroll-to-message 锚点由 ADR-0094 提供）。
+
+## Phase 4 — dock 可用性（本次改动）
+
+叠加在本 ADR 之后才落地的「独立进程 durable host」之上。
+
+- **`PathInjection` 归 host 所有。** 应用的 managed-CLI 注册表是进程内 static
+  （`cli_bridge::detect`），独立的 host 进程无从推导。现改为经 `Hello` 帧传入并存于
+  host —— 不是按连接存：远程 spawn（Companion WS、WebRTC）走的连接永远不会发送它，
+  而会话本就归 host 所有。**仅本地身份**可写。应用内下载 CLI 注册新目录后会重新推送；
+  已在运行的 shell 保持旧 PATH（PTY 环境在 `execve` 时固化）。
+- **新增 frame kind 21–23** —— `FlowControl` / `HistoryQuery` / `HistorySnapshot`。
+  此前从未被构造的 `TransportState`(18) 现在承载流控状态变化。**兼容性铁律：host 绝不
+  主动发送 client 未索取的 frame kind**，因为客户端遇到未知判别值会直接抛错。将来若要新增
+  *推送型* kind，必须先经 `Hello` ack 的 `protocolFeatures` 协商。
+- **能力协商。** bridge 会复用已在运行的 host —— 那可能是以登录服务安装的旧二进制，
+  因此新命令都以 host 广播的能力列表把关，并以明确错误降级。
+- **端到端流控。** `FlowGate`（std `Mutex` + `Condvar`）挂起 PTY reader 线程，未读字节
+  留在内核缓冲区、子进程在写入时阻塞。暂停在各 attachment 间引用计数（最慢消费者优先），
+  并由五条独立路径释放 —— detach、断连、attachment 溢出、kill，以及针对「暂停后停止运行的
+  客户端」的 30 秒兜底回收。在此之前，洪流会撑爆 host 的有界每客户端队列并**丢弃整个
+  attachment**：标签页是直接死掉，而不是变慢。
+
+### 已知的下一步
+
+`Channel<HostSeqEvent>` 把 `bytes: Vec<u8>` 序列化成 JSON 十进制数组 —— 约 4 倍膨胀，
+外加每块一次 JSON parse，是洪流路径上最大的常数因子。流控让系统**正确**，但没有让它**快**。
+迁移到二进制 channel body 是后续项。

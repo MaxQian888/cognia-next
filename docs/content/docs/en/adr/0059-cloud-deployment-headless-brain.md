@@ -171,6 +171,42 @@ Target metadata is account-scoped, while each target has a physically separate D
 
 Public navigation and deep links consume the shared `SurfaceContract` registry. Each route therefore resolves to executable, remote, cached read-only, queued, or an explicit localized recovery state. Host build ids are diagnostic only: compatibility is negotiated from protocol range and per-feature versions, and undeclared, unhealthy, or ungranted operations fail closed.
 
+### 2026-08-02 — Durability ladder v4/v5 landed
+
+The risk table's "ladder" is now built. `HeadlessDurabilityBackend`
+(`cli/src/serve/persistence/`) is the persistence port; three rungs implement
+it and the active one is chosen by an atomic per-account manifest
+(`<home>/durability/<account>/backend-manifest.json`), falling back to the
+`COGNIA_DURABILITY_BACKEND` rollout gate and finally to `snapshot-v3`.
+
+| Rung | Shape | Crash window |
+| --- | --- | --- |
+| `snapshot-v3` | the pre-existing per-table JSON store, debounced | the debounce interval |
+| `journal-v4` | immutable checkpoint generations + an append-only, checksummed, gaplessly-sequenced transaction journal | none |
+| `sqlite-v5` | Node's built-in SQLite (WAL, `synchronous=FULL`, `foreign_keys=ON`, `integrity_check` on open, `0600`) holding generic database/table/key/value rows | none |
+
+- **Where the commit point is.** `installTransactionCapture` registers a
+  `complete` listener on the DBCore transaction *before* Dexie assigns its own
+  `oncomplete`, and appends + `fsync`s synchronously from that listener. A
+  transaction that resolved to the caller is therefore always already on disk.
+  Restore replays under suppression so it is never journalled, and installing
+  into an already-open Dexie is refused outright rather than silently no-oping.
+- **SQLite stays generic** — no second hand-maintained Cognia schema, per D3.
+  During a migration the journal is appended first and the same sequence is
+  applied to SQLite second; startup replays whatever tail SQLite is missing, so
+  the compatibility window survives interruption at any point.
+- **Nothing is destroyed except by `finalize`.** Migration, recovery and
+  rollback all *add* a generation, a rollback bundle, and a manifest revision.
+  `durability recover` stages into a new generation and verifies it before it
+  may be activated; `durability finalize --confirm` is the only pruning
+  operation and reports the rollback watermark it leaves behind.
+- **Parity gate.** A backend switch is promoted only after schema-version,
+  table-set, row-count, key-set, and per-table content-hash checks all pass;
+  a failure leaves the incumbent authoritative and prints every mismatch.
+
+The "cloud installs are bounded by brain memory" consequence below still holds:
+these rungs fix durability, not the in-memory dataset ceiling.
+
 ### Phase 3 — Scale-out (only if/when multi-tenant is wanted)
 
 `ExecBackend::Container` (per-workspace runners) → per-tenant units on gVisor/Kata → K8s orchestration + `ExecutionBroker`-backed quotas → observability per the services convention (Prometheus `/metrics` everywhere).
@@ -179,7 +215,7 @@ Public navigation and deep links consume the shared `SurfaceContract` registry. 
 
 | Risk | Mitigation |
 | --- | --- |
-| Dexie durability in Node (fake-indexeddb is in-memory; snapshots lose the last seconds on crash; whole-DB serialize is O(n)) | ladder: v1 debounced snapshot + write-triggered flush + exit hooks → v2 mutation journal for the crash window → v3 SQLite-backed IndexedDB adapter. Monitor brain RSS; the in-memory dataset is this path's ceiling. |
+| Dexie durability in Node (fake-indexeddb is in-memory; snapshots lose the last seconds on crash; whole-DB serialize is O(n)) | **Resolved 2026-08-02** — ladder built: `snapshot-v3` debounced store → `journal-v4` checksummed transaction journal (`fsync` before the transaction resolves) → `sqlite-v5` WAL row store, all behind `HeadlessDurabilityBackend` with a parity-gated migration path. Monitor brain RSS; the in-memory dataset remains this path's ceiling. |
 | Residual `window`/DOM assumptions in `lib/` runtimes the CLI never exercised (connectors, schedulers) | W2 lands a headless smoke per extracted runtime; failures surface at extraction time, not in production |
 | bwrap unavailable inside stock Docker (`CLONE_NEWUSER` blocked) | ship the tuned seccomp profile in compose; honest degradation via `UninstalledSandboxBackend` |
 | RCE surface of spawn-class RPC | preset allowlist + dedicated scope + audit; loopback-only for remote-control/gateway |

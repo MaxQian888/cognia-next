@@ -7,9 +7,14 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import type { MemoryInsights } from "@/hooks/memory/use-memory-insights"
 import { OverviewPanel } from "./overview-panel"
 
+let reduceMotion = true
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
-  useFlowMotion: () => ({ reduce: true, durationScale: 1 }),
+  useFlowMotion: () => ({ reduce: reduceMotion, durationScale: 1 }),
 }))
+
+beforeEach(() => {
+  reduceMotion = true
+})
 
 const insights: MemoryInsights = {
   corpus: {
@@ -54,6 +59,21 @@ describe("OverviewPanel", () => {
     )
   })
 
+  it("reads the corpus stats out as one divided strip, not five cards", () => {
+    const { container } = render(
+      <OverviewPanel
+        insights={insights}
+        onEnableHybrid={jest.fn()}
+        onAllowCloudEmbedding={jest.fn()}
+      />
+    )
+
+    const strip = screen.getByTestId("memory-stat-strip")
+    expect(strip.tagName).toBe("DL")
+    expect(strip.children).toHaveLength(5)
+    expect(container.querySelector("[data-slot='card']")).toBeNull()
+  })
+
   it("offers the action that repairs cloud-blocked retrieval", () => {
     const onAllowCloudEmbedding = jest.fn()
     render(
@@ -66,5 +86,19 @@ describe("OverviewPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Allow cloud embeddings" }))
     expect(onAllowCloudEmbedding).toHaveBeenCalledTimes(1)
+  })
+
+  it("animates the stat strip and the coverage bar when motion is allowed", () => {
+    reduceMotion = false
+    render(
+      <OverviewPanel
+        insights={insights}
+        onEnableHybrid={jest.fn()}
+        onAllowCloudEmbedding={jest.fn()}
+      />
+    )
+
+    expect(screen.getByTestId("memory-stat-strip")).toBeInTheDocument()
+    expect(screen.getByTestId("memory-coverage-bar")).toBeInTheDocument()
   })
 })

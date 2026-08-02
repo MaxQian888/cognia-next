@@ -28,6 +28,7 @@ import {
 import { BM25Index } from "@cognia/rag/hybrid-search"
 import { wrapUntrusted } from "../untrusted"
 import type { WikiArticle, WikiScope, WikiSourceRef } from "@/types/wiki"
+import { SELF_CORPUS_ID } from "@/types/wiki"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // wiki_search
@@ -124,6 +125,12 @@ function clamp(value: number, min: number, max: number): number {
 
 export interface WikiReadInput {
   slug: string
+  /**
+   * Which corpus to read from (v142). Defaults to Cognia's own tree, which is
+   * the only corpus with content until user repos are registrable. A slug is
+   * unique only within a corpus, so this must be explicit once it is not.
+   */
+  corpusId?: string
 }
 
 export interface WikiReadOutput {
@@ -149,7 +156,7 @@ export interface WikiReadOutput {
 export async function wikiRead(input: WikiReadInput): Promise<WikiReadOutput | undefined> {
   const slug = input.slug?.trim() ?? ""
   if (slug.length === 0) return undefined
-  const article = await getWikiArticleBySlug(slug)
+  const article = await getWikiArticleBySlug(input.corpusId ?? SELF_CORPUS_ID, slug)
   if (!article) return undefined
   return {
     slug: article.slug,

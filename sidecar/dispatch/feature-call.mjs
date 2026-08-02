@@ -1,4 +1,5 @@
 import { buildModel as defaultBuildModel } from "./protocol-adapters/ai-sdk-adapter.mjs"
+import { resolveAdapter as defaultResolveProtocolAdapter } from "./protocol-adapters/registry.mjs"
 import { buildBedrockProviderOptions, discoverBedrockModels } from "./bedrock.mjs"
 
 function modelInput(message) {
@@ -111,11 +112,125 @@ function scrubError(error, credentials = {}) {
   return message
 }
 
+function numberOrUndefined(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+function adapterUsageToLanguageModelUsage(usage = {}) {
+  const input =
+    numberOrUndefined(usage.promptTokens) ??
+    numberOrUndefined(usage.inputTokens?.total) ??
+    numberOrUndefined(usage.inputTokens)
+  const output =
+    numberOrUndefined(usage.completionTokens) ??
+    numberOrUndefined(usage.outputTokens?.total) ??
+    numberOrUndefined(usage.outputTokens)
+  // `cachedInputTokens` / `cacheCreationInputTokens` / `reasoningTokens` are the
+  // AI SDK's deprecated top-level mirrors, removed in v7 — keep them as the
+  // first candidate for adapter payloads that still use those names, but fall
+  // through to the canonical `*TokenDetails` objects (populated since v6) before
+  // the repo's own nested shape.
+  const cacheRead =
+    numberOrUndefined(usage.cachedInputTokens) ??
+    numberOrUndefined(usage.inputTokenDetails?.cacheReadTokens) ??
+    numberOrUndefined(usage.inputTokens?.cacheRead)
+  const cacheWrite =
+    numberOrUndefined(usage.cacheCreationInputTokens) ??
+    numberOrUndefined(usage.inputTokenDetails?.cacheWriteTokens) ??
+    numberOrUndefined(usage.inputTokens?.cacheWrite)
+  const reasoning =
+    numberOrUndefined(usage.reasoningTokens) ??
+    numberOrUndefined(usage.outputTokenDetails?.reasoningTokens) ??
+    numberOrUndefined(usage.outputTokens?.reasoning)
+  return {
+    inputTokens: {
+      total: input,
+      noCache: input === undefined ? undefined : Math.max(0, input - (cacheRead ?? 0)),
+      cacheRead,
+      cacheWrite,
+    },
+    outputTokens: {
+      total: output,
+      text: output === undefined ? undefined : Math.max(0, output - (reasoning ?? 0)),
+      reasoning,
+    },
+  }
+}
+
+function languageModelFinishReason(value) {
+  const raw = typeof value === "string" && value ? value : "stop"
+  const unified =
+    raw === "length" || raw === "content-filter" || raw === "tool-calls" || raw === "error"
+      ? raw
+      : "stop"
+  return { unified, raw }
+}
+
+function adapterRequest(message, controller) {
+  const { prompt = [], ...modelParams } = message.options ?? {}
+  return {
+    model: message.model,
+    providerId: message.providerId,
+    messages: prompt,
+    modelParams,
+    credentials: message.credentials ?? {},
+    abortSignal: controller.signal,
+  }
+}
+
+async function streamProtocolAdapter(adapter, request, emitPart) {
+  const result = await adapter.start(request)
+  let textStarted = false
+  let reasoningStarted = false
+  for await (const chunk of result.fullStream) {
+    request.abortSignal?.throwIfAborted()
+    if (chunk?.type === "text-delta") {
+      if (!textStarted) {
+        emitPart({ type: "text-start", id: "0" })
+        textStarted = true
+      }
+      emitPart({
+        type: "text-delta",
+        id: "0",
+        delta: chunk.text ?? chunk.textDelta ?? chunk.delta ?? "",
+      })
+      continue
+    }
+    if (chunk?.type === "reasoning-delta") {
+      if (!reasoningStarted) {
+        emitPart({ type: "reasoning-start", id: "r0" })
+        reasoningStarted = true
+      }
+      emitPart({
+        type: "reasoning-delta",
+        id: "r0",
+        delta: chunk.text ?? chunk.textDelta ?? chunk.delta ?? "",
+      })
+      continue
+    }
+    if (chunk?.type === "error") {
+      throw new Error(chunk.error instanceof Error ? chunk.error.message : String(chunk.error))
+    }
+    if (chunk?.type === "finish") {
+      if (reasoningStarted) emitPart({ type: "reasoning-end", id: "r0" })
+      if (textStarted) emitPart({ type: "text-end", id: "0" })
+      emitPart({
+        type: "finish",
+        finishReason: languageModelFinishReason(chunk.finishReason),
+        usage: adapterUsageToLanguageModelUsage(chunk.usage),
+        providerMetadata: chunk.providerMetadata,
+      })
+    }
+  }
+  request.abortSignal?.throwIfAborted()
+}
+
 export function createFeatureCallHandler({
   emit,
   buildModel = defaultBuildModel,
   buildEmbeddingModel = defaultBuildEmbeddingModel,
   discoverOpenCodeV2 = discoverOpenCodeV2Service,
+  resolveProtocolAdapter = defaultResolveProtocolAdapter,
 }) {
   const active = new Map()
 
@@ -130,7 +245,9 @@ export function createFeatureCallHandler({
       return
     }
     const controller = new AbortController()
-    active.set(requestId, controller)
+    const pendingProtocolExecs = new Map()
+    const sessionId = `feature:${requestId}`
+    active.set(requestId, { controller, pendingProtocolExecs, sessionId })
     try {
       if (operation === "bedrock-discover") {
         const models = await discoverBedrockModels(bedrockSettings(message.credentials))
@@ -152,6 +269,32 @@ export function createFeatureCallHandler({
         })
         emit({ type: "feature_call_result", requestId, result })
         return
+      }
+
+      if (operation === "language-stream") {
+        if (message.protocolAdapterSpec) {
+          const adapter = resolveProtocolAdapter(
+            message.credentials?.protocol,
+            message.protocolAdapterSpec,
+            {
+              emit,
+              sessionId,
+              pendingProtocolExecs,
+              onCancel: (execId, reason) =>
+                emit({ type: "protocol_adapter_cancel", sessionId, execId, reason }),
+            }
+          )
+          if (!adapter) {
+            throw new Error(
+              `no resolvable protocol adapter for ${message.credentials?.protocol ?? "unknown"}`
+            )
+          }
+          await streamProtocolAdapter(adapter, adapterRequest(message, controller), (part) => {
+            emit({ type: "feature_call_stream", requestId, part })
+          })
+          emit({ type: "feature_call_stream_end", requestId })
+          return
+        }
       }
 
       const model = await buildModel(modelInput(message))
@@ -197,11 +340,37 @@ export function createFeatureCallHandler({
   }
 
   function abort(requestId) {
-    const controller = active.get(requestId)
-    if (!controller) return false
-    controller.abort(new DOMException("Feature call aborted", "AbortError"))
+    const entry = active.get(requestId)
+    if (!entry) return false
+    entry.controller.abort(new DOMException("Feature call aborted", "AbortError"))
+    for (const [execId, channel] of entry.pendingProtocolExecs) {
+      entry.pendingProtocolExecs.delete(execId)
+      channel.cancel("aborted")
+    }
     return true
   }
 
-  return { call, abort, activeCount: () => active.size }
+  function handleProtocolAdapterMessage(message) {
+    if (typeof message?.sessionId !== "string" || !message.sessionId.startsWith("feature:")) {
+      return false
+    }
+    const requestId = message.sessionId.slice("feature:".length)
+    const entry = active.get(requestId)
+    const channel = entry?.pendingProtocolExecs.get(message.execId)
+    if (!channel) return false
+    if (message.type === "protocol_adapter_chunk") {
+      channel.push(message.chunk)
+    } else if (message.type === "protocol_adapter_done") {
+      channel.finish(message.usage)
+      entry.pendingProtocolExecs.delete(message.execId)
+    } else if (message.type === "protocol_adapter_error") {
+      channel.fail(message.error ?? "protocol adapter error")
+      entry.pendingProtocolExecs.delete(message.execId)
+    } else {
+      return false
+    }
+    return true
+  }
+
+  return { call, abort, handleProtocolAdapterMessage, activeCount: () => active.size }
 }

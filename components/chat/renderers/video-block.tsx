@@ -2,16 +2,11 @@
 
 import { useState, memo, useRef, useCallback } from "react"
 import { useTranslations } from "next-intl"
-import {
-  Play,
-  Pause,
-  Volume2,
-  VolumeX,
-  Maximize,
-  Download,
-  ExternalLink,
-  VideoIcon,
-} from "lucide-react"
+import { Volume2, VolumeX, Maximize, ExternalLink, VideoIcon } from "lucide-react"
+import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
+import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
+import { PauseIcon as AnimatedPauseIcon } from "@/components/ui/pause"
+import { PlayIcon as AnimatedPlayIcon } from "@/components/ui/play"
 import { cn, formatVideoTime } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
@@ -275,7 +270,12 @@ export const VideoBlock = memo(function VideoBlock({
                   aria-label={isPlaying ? t("pause") : t("play")}
                   tooltip={isPlaying ? t("pause") : t("play")}
                 >
-                  {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                  <AnimatedActionIcon
+                    icon={isPlaying ? AnimatedPauseIcon : AnimatedPlayIcon}
+                    size={16}
+                    animateOnChange={isPlaying}
+                    data-state={isPlaying ? "pause" : "play"}
+                  />
                 </TooltipIconButton>
 
                 <TooltipIconButton
@@ -304,7 +304,7 @@ export const VideoBlock = memo(function VideoBlock({
                     aria-label={t("download")}
                     tooltip={t("download")}
                   >
-                    <Download className="h-4 w-4" />
+                    <AnimatedActionIcon icon={AnimatedDownloadIcon} size={16} />
                   </TooltipIconButton>
                 )}
 

@@ -90,6 +90,10 @@ accessibility = "0.1"
 accessibility-sys = "0.1"
 core-foundation-sys = "0.8"
 core-foundation-0-9 = { package = "core-foundation", version = "0.9" }
+# `ForeignType::as_ptr` on `CGEvent`, so the recorder's input hook can call
+# `CGEventKeyboardGetUnicodeString` (core-graphics binds only the setter).
+# Pinned to core-graphics 0.25's own foreign-types requirement.
+foreign-types = "0.5"
 objc2-app-kit = { version = "0.3.2", features = ["libc", "NSRunningApplication", "NSWorkspace"] }
 objc2-foundation = { version = "0.3.2", features = ["NSArray", "NSString", "NSURL"] }
 objc2 = "0.6.4"

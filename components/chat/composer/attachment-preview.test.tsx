@@ -132,6 +132,26 @@ describe("AttachmentPreview — extraction status badges", () => {
     expect(screen.queryByTestId("attachment-tokens")).not.toBeInTheDocument()
   })
 
+  // An image's wait is a decode + downscale, not a text parse, and it is the
+  // slow one — it gets the scan indicator instead of the generic spinner.
+  it("shows the analyzing-image indicator while an image is being read", () => {
+    stage([{ id: "a", mediaType: "image/png", filename: "p.png", url: "blob:x" }], {
+      a: { status: "extracting", sizeBytes: 0 },
+    })
+    renderPreview(<AttachmentPreview />)
+    expect(screen.getByTestId("attachment-analyzing-image")).toBeInTheDocument()
+    expect(screen.queryByTestId("attachment-extracting")).not.toBeInTheDocument()
+  })
+
+  it("keeps the plain spinner for documents (the photo glyph would misdescribe one)", () => {
+    stage([{ id: "a", mediaType: "application/pdf", filename: "doc.pdf" }], {
+      a: { status: "extracting", sizeBytes: 0 },
+    })
+    renderPreview(<AttachmentPreview />)
+    expect(screen.getByTestId("attachment-extracting")).toBeInTheDocument()
+    expect(screen.queryByTestId("attachment-analyzing-image")).not.toBeInTheDocument()
+  })
+
   it("treats an id with no state yet as still extracting", () => {
     mockState.files = [{ id: "a", type: "file", filename: "new.pdf" }]
     mockState.order = ["a"]

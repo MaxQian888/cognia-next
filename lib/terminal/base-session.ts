@@ -164,6 +164,27 @@ export abstract class BaseTerminalSession {
   abstract releaseControl(): Promise<void>
   abstract kill(): Promise<void>
 
+  /**
+   * Ask the producer to stop (or resume) sending output.
+   *
+   * Concrete no-op by default, and deliberately so: transports without
+   * end-to-end flow control (LAN/WAN WebSocket, WebRTC, SSH) degrade to
+   * renderer-side buffering only — `TerminalBackpressure` still coalesces and
+   * holds the output, it simply cannot stop it at the source. The UI says which
+   * of the two is happening (`terminal.sessionState.outputThrottled` vs
+   * `outputThrottledBuffered`) rather than pretending they are the same.
+   *
+   * @returns `true` when the transport actually applied the request.
+   */
+  setFlowControl(_paused: boolean): Promise<boolean> {
+    return Promise.resolve(false)
+  }
+
+  /** True when {@link setFlowControl} reaches the producer rather than no-opping. */
+  get supportsFlowControl(): boolean {
+    return false
+  }
+
   // ── Fan-out helpers for subclasses ───────────────────────────────
 
   protected dispatchData(bytes: Uint8Array): void {

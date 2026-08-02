@@ -15,6 +15,7 @@ import {
   LayersIcon,
   PlusIcon,
   SearchIcon,
+  ServerCogIcon,
   UserRoundIcon,
   Users2Icon,
   WorkflowIcon,
@@ -38,6 +39,7 @@ export const MOBILE_QUICK_ACTION_ICONS: Record<string, LucideIcon> = {
   twin: BotIcon,
   agentTeams: Users2Icon,
   fleet: LayersIcon,
+  servers: ServerCogIcon,
   me: UserRoundIcon,
 }
 
@@ -51,6 +53,7 @@ export const MOBILE_QUICK_ACTION_SPOT_ICONS: Record<string, MobileSpotIconName> 
   twin: "digital-twin",
   agentTeams: "agent-teams",
   fleet: "device-sync",
+  servers: "device-sync",
   me: "profile",
 }
 

@@ -19,6 +19,7 @@ jest.mock("next-intl", () => ({
       reasonUnconfigured: "Add an API key to start using this provider",
       reasonError: "Last connection test failed — open to review the error",
       reasonLimited: "Verified with caveats — could not be fully confirmed in this runtime",
+      diagnosticPassed: "Latest diagnostic passed",
     }
     return map[key] ?? key
   },
@@ -125,5 +126,16 @@ describe("ProviderSidebarItem", () => {
       "Verified with caveats — could not be fully confirmed in this runtime"
     )
     expect(screen.getByText("Limited")).toBeInTheDocument()
+  })
+
+  it("mirrors diagnostics independently from connection health", () => {
+    render(<ProviderSidebarItem {...defaultProps} status="warning" diagnosticStatus="passed" />)
+    expect(screen.getByTestId("provider-diagnostic-badge")).toHaveAttribute(
+      "data-diagnostic-status",
+      "passed"
+    )
+    expect(screen.getByTestId("provider-diagnostic-badge")).toHaveAccessibleName(
+      "Latest diagnostic passed"
+    )
   })
 })

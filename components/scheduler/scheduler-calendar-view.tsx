@@ -4,7 +4,10 @@
  * Calendar (month grid) view for the scheduler dashboard. Renders a Monday-first
  * month matrix with a per-day run-density indicator (dots, capped with "+n")
  * computed from {@link computeUpcomingOccurrences}. Selecting a day reveals that
- * day's runs in an inline panel; a run row click routes to `onSelectTask`.
+ * day's runs in an inline panel — rendered by the shared {@link OccurrenceList},
+ * the same collapsed-per-task list the timeline agenda uses, so a task with many
+ * fires that day is one row and not N repeats. A row click routes to
+ * `onSelectTask`.
  *
  * Only future runs are projected, so days before "today" in the current month
  * are intentionally empty. The grid is horizontally scroll-safe on narrow
@@ -13,7 +16,6 @@
 
 import { useMemo, useState } from "react"
 import { useLocale, useTranslations } from "next-intl"
-import { motion, useReducedMotion } from "motion/react"
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -25,7 +27,7 @@ import {
   dayKey,
   type Occurrence,
 } from "@/lib/scheduler/upcoming-occurrences"
-import { listContainerVariants, listItemVariants, staticIf } from "./scheduler-motion"
+import { OccurrenceList } from "./occurrence-list"
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -68,7 +70,6 @@ export function SchedulerCalendarView({
 }: SchedulerCalendarViewProps) {
   const t = useTranslations("scheduler")
   const locale = useLocale()
-  const prefersReduced = useReducedMotion()
 
   const today = useMemo(() => now ?? new Date(), [now])
   const todayKey = dayKey(today)
@@ -108,10 +109,16 @@ export function SchedulerCalendarView({
       ),
     [locale, anchor]
   )
-  const timeFmt = useMemo(
-    () => new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }),
-    [locale]
-  )
+  const selectedDayLabel = useMemo(() => {
+    const cell = cells.find((c) => dayKey(c.date) === selectedKey)
+    if (!cell) return ""
+    if (selectedKey === todayKey) return t("timeline.today")
+    return new Intl.DateTimeFormat(locale, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    }).format(cell.date)
+  }, [cells, selectedKey, todayKey, locale, t])
 
   const shiftMonth = (delta: number) => {
     setAnchor((prev) => {
@@ -230,39 +237,24 @@ export function SchedulerCalendarView({
         </div>
       </div>
 
-      {/* Selected-day runs */}
+      {/* Selected-day runs — same collapsed-per-task list the timeline uses. */}
       <div data-testid="calendar-day-panel" className="rounded-lg border border-border/50 p-3">
+        <div className="mb-2 flex items-baseline justify-between gap-2 px-2">
+          <h4 className="text-xs font-semibold">{selectedDayLabel}</h4>
+          {selectedOccurrences.length > 0 && (
+            <span className="text-[11px] tabular-nums text-muted-foreground">
+              {t("timeline.runsCount", { count: selectedOccurrences.length })}
+            </span>
+          )}
+        </div>
         {selectedOccurrences.length === 0 ? (
           <p className="py-2 text-center text-xs text-muted-foreground">{t("calendar.noRuns")}</p>
         ) : (
-          <motion.ul
-            variants={staticIf(prefersReduced, listContainerVariants)}
-            initial="hidden"
-            animate="show"
-            className="space-y-0.5"
-          >
-            {selectedOccurrences.map((occ, i) => (
-              <motion.li
-                key={`${occ.taskId}-${occ.date.getTime()}-${i}`}
-                variants={listItemVariants}
-              >
-                <button
-                  type="button"
-                  onClick={() => onSelectTask(occ.taskId)}
-                  className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted/50"
-                  data-testid={`calendar-occ-${occ.taskId}`}
-                >
-                  <span className="w-14 shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
-                    {timeFmt.format(occ.date)}
-                  </span>
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-green-500" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {occ.taskName}
-                  </span>
-                </button>
-              </motion.li>
-            ))}
-          </motion.ul>
+          <OccurrenceList
+            occurrences={selectedOccurrences}
+            onSelectTask={onSelectTask}
+            testIdPrefix="calendar-occ"
+          />
         )}
       </div>
     </div>

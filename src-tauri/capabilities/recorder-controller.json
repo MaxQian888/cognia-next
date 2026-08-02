@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "recorder-controller-window",
+  "description": "Least-privilege capabilities for the skill recorder's always-on-top controller strip. Deliberately grants no window close/hide/destroy: while a recording runs there must always be a surface that can stop it, and 'collapsible, not dismissible' is enforced here rather than by UI discipline. The command allow-list (recorder-controller-app-commands.toml) likewise excludes record_start and the whole bundle-read surface.",
+  "windows": ["recorder-controller"],
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit",
+    "core:webview:default",
+    "core:window:allow-show",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-outer-position",
+    "core:window:allow-start-dragging",
+    "core:window:allow-scale-factor",
+    "allow-recorder-controller-app-commands"
+  ]
+}

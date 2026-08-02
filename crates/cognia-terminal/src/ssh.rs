@@ -18,7 +18,7 @@ use russh::keys::known_hosts::learn_known_hosts_path;
 use russh::keys::{check_known_hosts_path, load_secret_key, ssh_key};
 use russh::{ChannelMsg, Disconnect};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use crate::host::HostedTerminalProcess;
 use crate::integration::ShellKind;
@@ -451,6 +451,12 @@ enum SessionCommand {
 
 pub struct SshTerminalSession {
     command_tx: mpsc::Sender<SessionCommand>,
+    /// Flow-control pause, deliberately NOT routed through `command_tx`.
+    ///
+    /// The command queue is bounded and `try_send` fails exactly when a client
+    /// is drowning — the one moment a pause must not be lost. A `watch` channel
+    /// is lossless for the latest value and always accepts a send.
+    flow_tx: watch::Sender<bool>,
     alive: Arc<AtomicBool>,
     replay: Arc<ReplayBuffer>,
 }
@@ -498,6 +504,15 @@ impl HostedTerminalProcess for SshTerminalSession {
     fn replay(&self) -> Arc<ReplayBuffer> {
         Arc::clone(&self.replay)
     }
+
+    /// russh does its own window-based flow control; the equivalent of "stop
+    /// reading" is to stop polling the channel, so russh stops issuing window
+    /// adjustments and the remote end backs off.
+    fn set_flow_paused(&self, paused: bool) -> Result<(), String> {
+        self.flow_tx
+            .send(paused)
+            .map_err(|_| "SSH session is no longer running".to_string())
+    }
 }
 
 fn emit_event(replay: &ReplayBuffer, sink: &EventSink, event: TerminalEvent) {
@@ -521,6 +536,7 @@ enum ConnectionEnd {
     Lost,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn drive_connection(
     connection: &mut RemoteConnection,
     request: &mut SshSpawnRequest,
@@ -529,6 +545,7 @@ async fn drive_connection(
     replay: &ReplayBuffer,
     sink: &EventSink,
     parser: &mut Option<Osc633Parser>,
+    flow_rx: &mut watch::Receiver<bool>,
 ) -> ConnectionEnd {
     let mut exit_code = None;
     loop {
@@ -538,8 +555,14 @@ async fn drive_connection(
             }
             continue;
         }
+        // Read the flag into a plain bool: holding the `watch::Ref` across the
+        // `select!` below would keep the channel's lock over an await point.
+        let paused = *flow_rx.borrow();
         tokio::select! {
-            message = connection.reader.wait() => {
+            _ = flow_rx.changed() => {
+                continue;
+            }
+            message = connection.reader.wait(), if !paused => {
                 match message {
                     Some(ChannelMsg::Data { data })
                     | Some(ChannelMsg::ExtendedData { data, .. }) => {
@@ -631,6 +654,7 @@ async fn run_ssh_session(
     credential: StoredCredential,
     known_hosts_path: PathBuf,
     mut commands: mpsc::Receiver<SessionCommand>,
+    mut flow_rx: watch::Receiver<bool>,
     output: SshSessionOutput,
     integration_nonce: String,
     integration_enabled: bool,
@@ -646,6 +670,7 @@ async fn run_ssh_session(
             &output.replay,
             &output.sink,
             &mut parser,
+            &mut flow_rx,
         )
         .await
         {
@@ -754,9 +779,11 @@ pub async fn spawn_hosted_ssh(
         .fingerprint
         .ok_or_else(|| "SSH host-key fingerprint is unavailable".to_string())?;
     let (command_tx, command_rx) = mpsc::channel(COMMAND_QUEUE_CAPACITY);
+    let (flow_tx, flow_rx) = watch::channel(false);
     let alive = Arc::new(AtomicBool::new(true));
     let process = SshTerminalSession {
         command_tx,
+        flow_tx,
         alive: alive.clone(),
         replay: Arc::clone(&replay),
     };
@@ -766,6 +793,7 @@ pub async fn spawn_hosted_ssh(
         credential,
         known_hosts_path,
         command_rx,
+        flow_rx,
         SshSessionOutput {
             sink,
             replay,

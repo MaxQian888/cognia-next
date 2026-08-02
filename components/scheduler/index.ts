@@ -10,6 +10,10 @@ export { SchedulerSidebar, SchedulerSidebarContent } from "./scheduler-sidebar"
 export { SchedulerShell, SCHEDULER_PANEL_STORAGE_KEY } from "./scheduler-shell"
 export { BackfillDialog } from "./backfill-dialog"
 export { SchedulerDashboardView } from "./scheduler-dashboard-view"
+export { SchedulerOverviewSummary } from "./scheduler-overview-summary"
+export type { SchedulerOverviewSummaryProps } from "./scheduler-overview-summary"
+export { OccurrenceList } from "./occurrence-list"
+export type { OccurrenceListProps } from "./occurrence-list"
 
 // Detail components (new)
 export { TaskDetailView } from "./task-detail-view"

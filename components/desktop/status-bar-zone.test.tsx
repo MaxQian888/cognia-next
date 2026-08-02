@@ -12,6 +12,9 @@ jest.mock("@/components/desktop/status-bar-connectivity", () => ({
 jest.mock("@/components/desktop/status-bar-sync", () => ({
   StatusBarSync: () => <div data-testid="seg-sync" />,
 }))
+jest.mock("@/components/desktop/status-bar-terminal", () => ({
+  StatusBarTerminal: () => <div data-testid="seg-terminal" />,
+}))
 jest.mock("@/components/desktop/status-bar-perf", () => ({
   StatusBarPerf: () => <div data-testid="seg-perf" />,
 }))

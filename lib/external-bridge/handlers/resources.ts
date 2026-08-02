@@ -15,6 +15,7 @@ import { listAllWikiArticles, getWikiArticleBySlug } from "@/lib/db/wiki-article
 import { listSkills, getSkill } from "@/lib/db/skills"
 import { listCharacters, getCharacter } from "@/lib/db/characters"
 import type { BridgeScope } from "@/types/wiki"
+import { SELF_CORPUS_ID } from "@/types/wiki"
 import { parseResourceUri } from "../mcp-server/resource-uri"
 
 export { parseResourceUri } from "../mcp-server/resource-uri"
@@ -109,7 +110,7 @@ export async function scopeForResourceUri(uri: string): Promise<BridgeScope | un
   if (!parts) return undefined
   switch (parts.kind) {
     case "wiki": {
-      const article = await getWikiArticleBySlug(parts.id)
+      const article = await getWikiArticleBySlug(SELF_CORPUS_ID, parts.id)
       if (!article) return undefined
       return article.scope === "cognia-self" ? "wiki:cognia" : "wiki:user-repo"
     }
@@ -132,7 +133,7 @@ export async function readResource(uri: string): Promise<ResourceContent | undef
   if (!parts) return undefined
   switch (parts.kind) {
     case "wiki": {
-      const article = await getWikiArticleBySlug(parts.id)
+      const article = await getWikiArticleBySlug(SELF_CORPUS_ID, parts.id)
       if (!article) return undefined
       return { uri, mimeType: "text/markdown", text: article.contentMd }
     }

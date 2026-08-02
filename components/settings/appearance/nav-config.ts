@@ -12,6 +12,7 @@ import {
   AccessibilityIcon,
   BlocksIcon,
   ImageIcon,
+  MousePointer2Icon,
   PackageIcon,
   PaintbrushIcon,
   PaletteIcon,
@@ -31,6 +32,7 @@ export type AppearancePanelId =
   | "wallpaper"
   | "typography"
   | "components"
+  | "cursor"
   | "personalization"
   | "a11y"
   | "advanced"
@@ -66,6 +68,7 @@ export const APPEARANCE_NAV_GROUPS: readonly AppearanceNavGroup[] = [
       { id: "wallpaper", icon: ImageIcon },
       { id: "typography", icon: TypeIcon },
       { id: "components", icon: BlocksIcon },
+      { id: "cursor", icon: MousePointer2Icon },
       { id: "personalization", icon: UserRoundIcon },
     ],
   },

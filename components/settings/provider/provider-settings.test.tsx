@@ -299,6 +299,7 @@ jest.mock("./provider-detail-panel", () => ({
     configTab,
     modelsTab,
     costTab,
+    diagnosticsTab,
     advancedTab,
     isDefault,
     isCustom,
@@ -310,6 +311,7 @@ jest.mock("./provider-detail-panel", () => ({
     configTab?: React.ReactNode
     modelsTab?: React.ReactNode
     costTab?: React.ReactNode
+    diagnosticsTab?: React.ReactNode
     advancedTab?: React.ReactNode
     isDefault?: boolean
     isCustom?: boolean
@@ -341,6 +343,7 @@ jest.mock("./provider-detail-panel", () => ({
       <div data-testid="provider-detail-config-tab">{configTab}</div>
       <div data-testid="provider-detail-models-tab">{modelsTab}</div>
       <div data-testid="provider-detail-cost-tab">{costTab}</div>
+      <div data-testid="provider-detail-diagnostics-tab">{diagnosticsTab}</div>
       <div data-testid="provider-detail-advanced-tab">{advancedTab}</div>
     </div>
   ),
@@ -565,11 +568,9 @@ jest.mock("./provider-models-tab", () => ({
 jest.mock("./provider-cost-tab", () => ({ ProviderCostTab: () => null }))
 jest.mock("./provider-parameters-tab", () => ({ ProviderParametersTab: () => null }))
 jest.mock("./routing-tab", () => ({ RoutingTab: () => null }))
-jest.mock("./health-tab", () => ({
-  HealthTab: (props: Record<string, unknown>) => (
-    <button data-testid="mock-health-test" onClick={() => (props.onTestConnection as () => void)()}>
-      health-test
-    </button>
+jest.mock("./provider-diagnostics-tab", () => ({
+  ProviderDiagnosticsTab: ({ providerId }: { providerId: string }) => (
+    <div data-testid="mock-provider-diagnostics">{providerId}</div>
   ),
 }))
 
@@ -1064,24 +1065,35 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     })
     render(<ProviderSettings />)
     const advancedTab = screen.getByTestId("provider-detail-advanced-tab")
-    expect(advancedTab.querySelector('[data-tab="parameters"]')).toHaveTextContent(
+    expect(advancedTab).toHaveTextContent(
       "Configure this provider in the Config tab to enable parameters."
     )
   })
 
-  it("routes the Health tab test connection through the hook", () => {
+  it("lays Advanced out as flat sections rather than a tab strip inside a tab", () => {
+    // Tabs nested inside a tab hid their own state from the outer navigation:
+    // leaving the panel on Routing and coming back looked like Parameters had
+    // vanished, with nothing on screen explaining why.
     mockHookState = makeHookState({
       filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
       selectedProviderId: "openai",
     })
     render(<ProviderSettings />)
-    const healthTrigger = screen
-      .getByTestId("provider-detail-advanced-tab")
-      .querySelector('[data-value="health"]')
-    expect(healthTrigger).toBeTruthy()
-    fireEvent.click(healthTrigger as Element)
-    fireEvent.click(screen.getByTestId("mock-health-test"))
-    expect(mockHookState.testProvider).toHaveBeenCalledWith("openai")
+    const advancedTab = screen.getByTestId("provider-detail-advanced-tab")
+    expect(advancedTab.querySelector('[data-tab="parameters"]')).toBeNull()
+    expect(advancedTab.querySelector('[data-slot="collapsible-trigger"]')).toBeInTheDocument()
+  })
+
+  it("promotes Diagnostics to a top-level provider detail slot", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "openai",
+    })
+    render(<ProviderSettings />)
+    expect(screen.getByTestId("provider-detail-diagnostics-tab")).toHaveTextContent("openai")
+    expect(
+      screen.getByTestId("provider-detail-advanced-tab").querySelector('[data-value="health"]')
+    ).toBeNull()
   })
 
   it("renders the custom-provider edit flow", () => {
@@ -1323,20 +1335,16 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     await waitFor(() => expect(mockHookState.testProvider).toHaveBeenCalledWith("openai"))
   })
 
-  it("routes a failed Health tab test connection", async () => {
+  it("does not route legacy Health actions after Diagnostics promotion", () => {
     mockHookState = makeHookState({
       filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
       selectedProviderId: "openai",
     })
-    mockHookState.testResults.openai = { success: false, message: "fail" }
-    mockHookState.testProvider = jest.fn(() => Promise.resolve({ success: false, message: "fail" }))
     render(<ProviderSettings />)
-    const healthTrigger = screen
-      .getByTestId("provider-detail-advanced-tab")
-      .querySelector('[data-value="health"]')
-    fireEvent.click(healthTrigger as Element)
-    fireEvent.click(screen.getByTestId("mock-health-test"))
-    await waitFor(() => expect(mockHookState.testProvider).toHaveBeenCalledWith("openai"))
+    expect(screen.getByTestId("mock-provider-diagnostics")).toHaveTextContent("openai")
+    expect(
+      screen.getByTestId("provider-detail-advanced-tab").querySelector('[data-value="health"]')
+    ).toBeNull()
   })
 
   it("adds and removes API keys when no key pool exists", () => {

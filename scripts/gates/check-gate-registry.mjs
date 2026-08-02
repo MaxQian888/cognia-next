@@ -72,6 +72,7 @@ export const EXEMPTIONS = {
   "audit:unreachable-components:baseline":
     "writer — regenerates the unreachable-component baseline",
   "rust:clippy:baseline": "writer — regenerates the clippy baseline",
+  "check:sdk-surface:write": "writer — re-triages the Agent SDK surface manifest after a bump",
   "i18n:sort": "writer — the check half is i18n:sort:check",
 
   // --- deliberately unregistered checks ---
@@ -124,6 +125,7 @@ export const EXEMPTIONS = {
   "audit:unreachable-components:test": "covered by scripts:test:gates",
   "lint:static-export:test": "covered by scripts:test:gates",
   "clean:cache:test": "covered by scripts:test:build",
+  "terminal-host:prepare:test": "covered by scripts:test:build",
   "clean:webpack-cache:test": "covered by scripts:test:build",
   "share:wallpapers:test": "covered by scripts:test:build",
   "skills:build:test": "covered by scripts:test:build",
@@ -135,6 +137,10 @@ export const EXEMPTIONS = {
   "plugin-convert:check:test": "covered by scripts:test:plugin",
   "plugin:scaffold:test": "covered by scripts:test:plugin",
   "clean:db:test": "covered by scripts:test:ci",
+  // scripts:test:ci globs scripts/dev/*.test.mjs. The `agent:proxy:test`
+  // script itself also does a cargo build, which the aggregate does not — but
+  // the assertions it guards are the ones in the .test.mjs, and those run.
+  "agent:proxy:test": "covered by scripts:test:ci",
   "e2e:serve:test": "covered by scripts:test:ci",
   "test:coverage:changed:test": "covered by scripts:test:ci",
   "test:coverage:merge:test": "covered by scripts:test:ci",

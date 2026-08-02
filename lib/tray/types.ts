@@ -13,6 +13,8 @@ export type TrayNativeAction =
   | "show"
   | "hide"
   | "toggle-window"
+  /** Toggle the tray quick panel (`src-tauri/src/tray/panel.rs`). */
+  | "tray-panel-toggle"
   | "new-chat"
   | "settings"
   | "open-logs"

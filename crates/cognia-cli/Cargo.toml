@@ -11,7 +11,7 @@ name = "cognia"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4", features = ["derive", "wrap_help"] }
+clap = { version = "4", features = ["derive", "env", "wrap_help"] }
 ed25519-dalek = "2"
 rand = "0.8"
 base64 = "0.22"
@@ -59,6 +59,8 @@ ctrlc = "3"
 # the sticky status panel. `default-features = false` keeps timezone
 # parsing & serde out of the binary — we only need `Local::now()`.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+cognia-observability = { path = "../cognia-observability" }
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tempfile = "3"

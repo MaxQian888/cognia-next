@@ -30,6 +30,13 @@ import type {
   ProviderProfile,
   TransportProfile,
 } from "@cognia/provider-types/provider-profile"
+import type {
+  ProviderBalanceSnapshot,
+  ProviderDiagnosticJob,
+  ProviderDiagnosticSample,
+  ProviderDiagnosticsRefreshState,
+  ProviderEndpointChange,
+} from "@cognia/provider-types/provider-diagnostics"
 import type { ProfileStoreMetaRow } from "./provider-profiles"
 import type { AgentCompatibilityRecordRow } from "./agent-compatibility"
 import type { BackupHistoryRow } from "./backup-history"
@@ -56,7 +63,20 @@ import type {
   PluginMarketplaceSourceRow,
   PluginDexieMeta,
 } from "./plugin-types"
-import type { WikiArticle, WikiSection, WikiManifest, McpAuditLogRow } from "@/types/wiki"
+import type {
+  WikiArticle,
+  WikiSection,
+  WikiManifest,
+  McpAuditLogRow,
+  WikiCorpus,
+  WikiCorpusManifest,
+  WikiBuildJob,
+  WikiStagedArticle,
+  WikiStagedSection,
+} from "@/types/wiki"
+import { SELF_CORPUS_ID } from "@/types/wiki"
+// Pure, import-free digest — safe to call from the v142 `.upgrade()` callback.
+import { hashFileHashes } from "@/lib/wiki/manifest-hash"
 import type {
   ProviderLimitsRow,
   SubscriptionBalanceRow,
@@ -144,6 +164,7 @@ import type {
 } from "./provider-catalog"
 import type { OpenRouterCatalogRow } from "./openrouter-catalog"
 import type { SessionStateRow } from "./session-state"
+import type { SkillRecordingRow } from "./skill-recordings"
 import type { TrustedPublisherRow } from "./trusted-publishers"
 import type { TtsProviderKeyRow } from "@cognia/tts/types"
 import type {
@@ -359,8 +380,21 @@ export class CogniaDB extends Dexie {
   // rows by `lib/db/mcp-audit-log.ts`.
   wikiArticles!: Table<WikiArticle, string>
   wikiSections!: Table<WikiSection, string>
+  // LEGACY, scope-keyed. Superseded by `wikiCorpusManifest` in v142 — a scope
+  // primary key cannot express "many user repos", and Dexie cannot repoint a
+  // primary key in place. Kept (not dropped) so a v142 rollback still finds
+  // its rows; nothing writes to it after v142.
   wikiManifest!: Table<WikiManifest, string>
   mcpAuditLog!: Table<McpAuditLogRow, string>
+  // v142 — corpus model (ADR-0008 Phase 3). See `lib/db/wiki-corpora.ts`,
+  // `lib/db/wiki-build-jobs.ts`, and `lib/db/wiki-corpus-manifest.ts`.
+  wikiCorpora!: Table<WikiCorpus, string>
+  wikiCorpusManifest!: Table<WikiCorpusManifest, string>
+  wikiBuildJobs!: Table<WikiBuildJob, string>
+  // Staging rows for an in-flight build, keyed by `buildId`. Promoted to the
+  // live tables in one transaction on success; never read by search.
+  wikiArticlesStaging!: Table<WikiStagedArticle, string>
+  wikiSectionsStaging!: Table<WikiStagedSection, string>
   // v18 — Platform Connectors tables. Indexed columns are declared in the v18
   // .stores block below; the per-row types live in `./connector-types.ts`.
   adapterInstances!: Table<AdapterInstanceRow, string>
@@ -3113,6 +3147,211 @@ export class CogniaDB extends Dexie {
         })
     })
 
+    // v139 — Unified action review (ADR-0102). Additive only; no upgrade hook,
+    // because the table is new.
+    //
+    // Deliberately ONE table. Cross-host handoff (ADR-0103) and the PR chat
+    // workspace (ADR-0105) each claim their own later version alongside their
+    // accessor module, rather than being batched here: a table declared before
+    // anything can read it is the "built but dormant" defect this repo keeps
+    // hitting. Version numbers are cheap and append-only (129 and 133 are
+    // already burned); a dormant table is not.
+    //
+    // `actionReviewReceipts` is the first durable home for an approval
+    // decision. Query columns are FLATTENED off the nested receipt by
+    // `toReceiptRow` (lib/db/action-review-receipts.ts): six single axes plus
+    // the two compounds the audit UI pages through, and a multiEntry
+    // `surfaceIds` so "every credential-auth decision this quarter" is an index
+    // hit rather than a full-table filter. `expiresAt` is the 90-day retention
+    // watermark, indexed so the sweeper is a range delete — and stamped per
+    // row, so changing the retention constant never re-dates existing rows.
+    this.version(139).stores({
+      actionReviewReceipts:
+        "&id, decidedAt, expiresAt, outcome, authority, tier, channel, sessionId, runId, projectId, [channel+decidedAt], [sessionId+decidedAt], *surfaceIds",
+    })
+
+    // v140 — Provider diagnostics control plane. Additive history, balance,
+    // scheduler-state, and endpoint rollback tables; no historical rows need
+    // rewriting and legacy subscription snapshots remain intact.
+    this.version(140).stores({
+      providerDiagnosticJobs: "&id, providerId, status, startedAt, [providerId+startedAt]",
+      providerDiagnosticSamples:
+        "&id, jobId, targetId, providerId, modelId, status, startedAt, [providerId+startedAt], [targetId+startedAt]",
+      providerBalanceSnapshots:
+        "&id, providerId, sourceId, accountId, fetchedAt, [providerId+fetchedAt], [sourceId+fetchedAt]",
+      providerDiagnosticsRefreshState:
+        "&sourceId, providerId, status, nextDueAt, [providerId+nextDueAt]",
+      providerEndpointChanges: "&id, providerId, appliedAt, rolledBackAt, [providerId+appliedAt]",
+    })
+
+    // v141 — Skill recorder source versions (ADR-0106). Additive only; no
+    // upgrade hook, because the table is new.
+    //
+    // DEVICE-LOCAL BY CONSTRUCTION. This table appears in none of the
+    // backup / sync / export allow-lists, and `lib/db/skill-recordings.test.ts`
+    // asserts that rather than leaving the omission to be noticed later. A
+    // recording is a video of the user's screen in all but name.
+    //
+    // The row holds the user's review edits and counts — never the capture. The
+    // trace and every frame live in the native bundle under the app-data
+    // directory, addressed by `bundleId`. That is what keeps a saved source
+    // version immutable (re-opening replays edits over an untouched bundle) and
+    // what keeps a 400-step recording from putting hundreds of megabytes of PNG
+    // into IndexedDB.
+    //
+    // `[skillId+createdAt]` is the compound the "Recording versions" tab pages
+    // through, newest first.
+    this.version(141).stores({
+      skillRecordings: "&id, skillId, status, updatedAt, [skillId+createdAt]",
+    })
+
+    // v142 — Epic 4: user-repo wiki corpora, terminal inbound review, and the
+    // materialization outbox (ADR-0008 Phases 3–6).
+    //
+    // Three things happen here, and all three are additive-or-widening so a
+    // rollback to v141 still finds every pre-existing row where it left it:
+    //
+    //  1. CORPUS ISOLATION. `wikiArticles.slug` was `&slug` — unique across the
+    //     whole table. That was fine while `cognia-self` was the only corpus,
+    //     and becomes a write collision the moment two repos each contain a
+    //     `lib/utils`. The unique moves to `&[corpusId+slug]`; `slug` stays as
+    //     a plain (non-unique) index so legacy slug-only lookups still resolve.
+    //     Every wiki/RAG query must pass an explicit `corpusId` — there is
+    //     deliberately no cross-corpus fallback, because silently answering
+    //     from the wrong repo is worse than answering nothing.
+    //
+    //     `wikiManifest` is keyed by `scope`, which cannot express "many user
+    //     repos". Dexie cannot repoint a primary key in place (same constraint
+    //     that produced `hostSyncCursors` in v130), so `wikiCorpusManifest` is
+    //     a new table and the legacy rows are copied, not moved.
+    //
+    //  2. TERMINAL REVIEW STATE. `inboundDrafts.status` allowed the triple
+    //     `pending | accepted | discarded`, with no rule about what may follow
+    //     what. It becomes `pending → accepted | rejected`, both terminal. The
+    //     historical `discarded` value is rewritten to `rejected` here so the
+    //     union has exactly one spelling for "the operator said no".
+    //
+    //  3. MATERIALIZATION OUTBOX. Accepting a draft has to flip its status and
+    //     enqueue the work that turns it into a memory / Skill / note in ONE
+    //     transaction, or a crash between the two silently drops the accept.
+    //     `inboundMaterializations` is keyed by `draftId`, which makes the
+    //     enqueue idempotent by construction: a retried accept overwrites its
+    //     own row instead of queueing the work twice.
+    this.version(142)
+      .stores({
+        // `&[corpusId+slug]` is the new uniqueness rule; `slug` survives as a
+        // non-unique index. `[corpusId+module]` backs the per-repo module list.
+        wikiArticles:
+          "&id, slug, corpusId, scope, module, pageRank, generatedAt, [scope+module], &[corpusId+slug], [corpusId+module]",
+        wikiSections: "&id, articleId, corpusId, [articleId+sectionIndex]",
+        wikiCorpora: "&id, kind, enabled, createdAt",
+        wikiCorpusManifest: "&corpusId, scope, lastBuildAt",
+        wikiBuildJobs: "&id, corpusId, status, queuedAt, [corpusId+queuedAt], [corpusId+status]",
+        // Staging is keyed by `buildId` so tearing down a cancelled build is a
+        // range delete. No unique slug index here: a staged build may legally
+        // hold a slug that the live corpus also holds, right up until the swap.
+        wikiArticlesStaging: "&id, buildId, corpusId, [buildId+slug], [buildId+module]",
+        wikiSectionsStaging: "&id, buildId, articleId, [articleId+sectionIndex]",
+        // `[status+createdAt]` drives the review queue (pending, newest first).
+        // `canonicalHash` is the dedup probe: the distiller refuses to create a
+        // second draft for content it has already queued, so a crawler that
+        // re-reads the same page and an IDE scanner that replays the same log
+        // cannot flood the operator's queue with the same item.
+        inboundDrafts: "&id, kind, status, createdAt, canonicalHash, [status+createdAt]",
+        // Primary key IS the draft id — see (3) above.
+        inboundMaterializations: "&draftId, status, kind, queuedAt, [status+queuedAt]",
+        knowledgeNotes: "&id, createdAt, sourceDraftId, *tags",
+      })
+      .upgrade(async (tx) => {
+        // (1) Backfill `corpusId`. Only `cognia-self` was ever buildable before
+        // v142 (`user-repo` was the deferred Phase 3), so `scope` is the honest
+        // source of truth and falls back to the self corpus for rows that
+        // predate the field entirely.
+        const articleCorpus = new Map<string, string>()
+        await tx
+          .table("wikiArticles")
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            const corpusId = (row.corpusId as string) || (row.scope as string) || SELF_CORPUS_ID
+            row.corpusId = corpusId
+            articleCorpus.set(row.id as string, corpusId)
+          })
+
+        // Sections denormalize their parent's corpus. A section whose article
+        // is already gone is an orphan from a partial delete; it gets the self
+        // corpus rather than an undefined index entry that no query can reach.
+        await tx
+          .table("wikiSections")
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            row.corpusId =
+              (row.corpusId as string) ||
+              articleCorpus.get(row.articleId as string) ||
+              SELF_CORPUS_ID
+          })
+
+        // Copy (do not move) the scope-keyed manifests into the corpus-keyed
+        // table. `manifestHash` is computed now so a full-rebuild confirmation
+        // token can be bound to it on the very first post-upgrade estimate.
+        const legacyManifests = (await tx.table("wikiManifest").toArray()) as WikiManifest[]
+        if (legacyManifests.length > 0) {
+          await tx.table("wikiCorpusManifest").bulkPut(
+            legacyManifests.map((m) => ({
+              corpusId: m.scope === "cognia-self" ? SELF_CORPUS_ID : m.scope,
+              scope: m.scope,
+              fileHashes: m.fileHashes ?? {},
+              lastBuildAt: m.lastBuildAt ?? 0,
+              articleCount: m.articleCount ?? 0,
+              generatorVersion: m.generatorVersion ?? "",
+              manifestHash: hashFileHashes(m.fileHashes ?? {}),
+            }))
+          )
+        }
+
+        // (2) One spelling for "the operator said no".
+        await tx
+          .table("inboundDrafts")
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            if (row.status === "discarded") row.status = "rejected"
+          })
+      })
+
+    // v143 — Epic 5: sandbox connections gain a provider/driver split.
+    //
+    // The pre-v143 row was Docker-shaped (`image`/`host`/`port`/`containerId`
+    // at the top level). It now carries `provider` × `driver` plus a
+    // provider-specific `config`, a normalized lifecycle `state` and a
+    // capability matrix, so cua.ai Cloud and Lume connections are describable
+    // without a second table.
+    //
+    // The mapping itself lives in `lib/sandbox/connection-migration.ts` — pure
+    // and unit-tested there — so this callback only walks the table. It is
+    // idempotent: `migrateSandboxConnectionRows` returns already-migrated rows
+    // untouched and reports `changed: 0`, so a re-run after a downgrade/upgrade
+    // cycle neither rewrites nor clobbers a config the user has since edited.
+    //
+    // The four legacy top-level fields are deliberately NOT dropped: they are
+    // dual-written for one compatibility release so a downgrade to the previous
+    // build still finds a working Docker row.
+    this.version(143)
+      .stores({
+        // `provider` and `state` are indexed so the connections tab can filter
+        // without a full scan once several providers coexist.
+        sandboxConnections: "&id, name, provider, state, createdAt, updatedAt",
+      })
+      .upgrade(async (tx) => {
+        const { migrateSandboxConnectionRows } = await import("@/lib/sandbox/connection-migration")
+        const table = tx.table("sandboxConnections")
+        const rows = (await table.toArray()) as Parameters<
+          typeof migrateSandboxConnectionRows
+        >[0][number][]
+        if (rows.length === 0) return
+        const { rows: migrated, changed } = migrateSandboxConnectionRows(rows)
+        if (changed === 0) return
+        await table.bulkPut(migrated)
+      })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -3120,6 +3359,10 @@ export class CogniaDB extends Dexie {
     }
   }
 
+  // v141 — Skill recorder source versions (ADR-0106). Provenance + review
+  // edits only; the capture itself lives in the native bundle. See
+  // `lib/db/skill-recordings.ts`.
+  skillRecordings!: Table<SkillRecordingRow, string>
   sessionState!: Table<SessionStateRow, string>
   tts_provider_keys!: Table<TtsProviderKeyRow, string>
   openVsxCache!: Table<OpenVsxCacheRow, string>
@@ -3176,6 +3419,16 @@ export class CogniaDB extends Dexie {
   // v74 — Terminal durable history + unattended-exec audit.
   terminalHistory!: Table<TerminalHistoryRow, string>
   unattendedExecAudit!: Table<UnattendedExecAuditRow, string>
+  // v139 — Unified action-review receipts (ADR-0102). One durable row per
+  // reviewed action across every decision point. See
+  // `lib/db/action-review-receipts.ts`.
+  actionReviewReceipts!: Table<import("./action-review-receipts").ActionReviewReceiptRow, string>
+  // v140 — Provider diagnostics and balance history.
+  providerDiagnosticJobs!: Table<ProviderDiagnosticJob, string>
+  providerDiagnosticSamples!: Table<ProviderDiagnosticSample, string>
+  providerBalanceSnapshots!: Table<ProviderBalanceSnapshot, string>
+  providerDiagnosticsRefreshState!: Table<ProviderDiagnosticsRefreshState, string>
+  providerEndpointChanges!: Table<ProviderEndpointChange, string>
   // v75 — Provider cost rollups. See `lib/db/provider-cost-daily.ts`.
   providerCostDaily!: Table<ProviderCostDailyRow, string>
   // v76 — Semantic tool routes. See `lib/db/tool-routes.ts`.
@@ -3192,6 +3445,15 @@ export class CogniaDB extends Dexie {
   fleetSessions!: Table<import("./fleet-sessions").FleetSessionHistoryRow, string>
   // v98 — External Bridge inbound-write review queue. See `lib/db/inbound-drafts.ts`.
   inboundDrafts!: Table<import("./inbound-drafts").InboundDraftRow, string>
+  // v142 — accept-side outbox, keyed by draft id so a retried accept
+  // overwrites its own row instead of queueing the work twice. See
+  // `lib/db/inbound-materializations.ts`.
+  inboundMaterializations!: Table<
+    import("./inbound-materializations").InboundMaterializationRow,
+    string
+  >
+  // v142 — the `note` materialization target. See `lib/db/knowledge-notes.ts`.
+  knowledgeNotes!: Table<import("./knowledge-notes").KnowledgeNoteRow, string>
   // v99 — Inbound gateway durable request log. See `lib/db/gateway-request-log.ts`.
   gatewayRequestLog!: Table<import("@/types/gateway").GatewayRequestLogRow, string>
   // v101 — Optical-compaction archives (ADR-0063). See `lib/db/optical-archives.ts`.
@@ -3258,6 +3520,8 @@ export type { PetSpritePackRow } from "./pet-sprite-packs"
 export type { TerminalHistoryRow } from "./terminal-history"
 export type { ProviderCostDailyRow } from "./provider-cost-daily"
 export type { UnattendedExecAuditRow } from "./terminal-audit"
+export type { ActionReviewReceiptRow } from "./action-review-receipts"
+export type { SkillRecordingRow, SkillRecordingStatus } from "./skill-recordings"
 export type {
   ConversationLabelRow,
   ConversationAssignmentEventRow,

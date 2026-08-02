@@ -99,6 +99,165 @@ test("streams model events and a terminal completion", async () => {
   ])
 })
 
+test("streams declarative adapter chunks through the LanguageModelV3 contract", async () => {
+  const events = []
+  const spec = { kind: "openai-compatible-variant", urlTemplate: "https://example.test" }
+  let received
+  const handler = createFeatureCallHandler({
+    emit: (event) => events.push(event),
+    resolveProtocolAdapter: (protocol, adapterSpec) => {
+      assert.equal(protocol, "plugin:variant")
+      assert.equal(adapterSpec, spec)
+      return {
+        async start(request) {
+          received = request
+          return {
+            fullStream: (async function* () {
+              yield { type: "text-delta", text: "hello" }
+              yield {
+                type: "finish",
+                finishReason: "stop",
+                usage: { promptTokens: 3, completionTokens: 2 },
+              }
+            })(),
+          }
+        },
+      }
+    },
+  })
+
+  await handler.call({
+    type: "feature_call",
+    requestId: "variant-1",
+    operation: "language-stream",
+    providerId: "plugin-provider",
+    model: "model-1",
+    credentials: { protocol: "plugin:variant", apiKey: "ephemeral" },
+    protocolAdapterSpec: spec,
+    options: {
+      prompt: [{ role: "user", content: [{ type: "text", text: "diagnostic" }] }],
+      maxOutputTokens: 64,
+    },
+  })
+
+  assert.deepEqual(received.messages, [
+    { role: "user", content: [{ type: "text", text: "diagnostic" }] },
+  ])
+  assert.equal(received.modelParams.maxOutputTokens, 64)
+  assert.equal(received.credentials.apiKey, "ephemeral")
+  assert.deepEqual(
+    events.filter((event) => event.type === "feature_call_stream").map((event) => event.part.type),
+    ["text-start", "text-delta", "text-end", "finish"]
+  )
+  assert.deepEqual(events.at(-2).part.usage, {
+    inputTokens: { total: 3, noCache: 3, cacheRead: undefined, cacheWrite: undefined },
+    outputTokens: { total: 2, text: 2, reasoning: undefined },
+  })
+  assert.deepEqual(events.at(-1), { type: "feature_call_stream_end", requestId: "variant-1" })
+})
+
+test("reads cache/reasoning counts from the canonical AI SDK token-detail objects", async () => {
+  // AI SDK 7 removes the deprecated top-level `cachedInputTokens` /
+  // `cacheCreationInputTokens` / `reasoningTokens` mirrors; only the
+  // `*TokenDetails` objects survive, and they must still normalize.
+  const events = []
+  const handler = createFeatureCallHandler({
+    emit: (event) => events.push(event),
+    resolveProtocolAdapter: () => ({
+      async start() {
+        return {
+          fullStream: (async function* () {
+            yield {
+              type: "finish",
+              finishReason: "stop",
+              usage: {
+                inputTokens: 100,
+                outputTokens: 40,
+                inputTokenDetails: { cacheReadTokens: 60, cacheWriteTokens: 25 },
+                outputTokenDetails: { reasoningTokens: 15 },
+              },
+            }
+          })(),
+        }
+      },
+    }),
+  })
+
+  await handler.call({
+    type: "feature_call",
+    requestId: "details-1",
+    operation: "language-stream",
+    providerId: "plugin-provider",
+    model: "model-1",
+    credentials: { protocol: "plugin:variant", apiKey: "ephemeral" },
+    protocolAdapterSpec: { kind: "openai-compatible-variant", urlTemplate: "https://example.test" },
+    options: { prompt: [{ role: "user", content: [{ type: "text", text: "diagnostic" }] }] },
+  })
+
+  assert.deepEqual(events.at(-2).part.usage, {
+    inputTokens: { total: 100, noCache: 40, cacheRead: 60, cacheWrite: 25 },
+    outputTokens: { total: 40, text: 25, reasoning: 15 },
+  })
+})
+
+test("correlates code adapter chunks and aborts their renderer bridge", async () => {
+  const events = []
+  const handler = createFeatureCallHandler({ emit: (event) => events.push(event) })
+  const pending = handler.call({
+    type: "feature_call",
+    requestId: "code-1",
+    operation: "language-stream",
+    providerId: "plugin-provider",
+    model: "model-1",
+    credentials: { protocol: "plugin:custom" },
+    protocolAdapterSpec: { kind: "code", pluginId: "plugin", adapterId: "custom" },
+    options: { prompt: [{ role: "user", content: [{ type: "text", text: "diagnostic" }] }] },
+  })
+
+  await new Promise((resolve) => setImmediate(resolve))
+  const exec = events.find((event) => event.type === "protocol_adapter_exec")
+  assert.equal(exec.sessionId, "feature:code-1")
+  assert.equal(
+    handler.handleProtocolAdapterMessage({
+      type: "protocol_adapter_chunk",
+      sessionId: exec.sessionId,
+      execId: exec.execId,
+      chunk: { type: "text-delta", text: "native" },
+    }),
+    true
+  )
+  handler.handleProtocolAdapterMessage({
+    type: "protocol_adapter_done",
+    sessionId: exec.sessionId,
+    execId: exec.execId,
+    usage: { promptTokens: 2, completionTokens: 1 },
+  })
+  await pending
+  assert.equal(
+    events.some(
+      (event) => event.type === "feature_call_stream" && event.part.type === "text-delta"
+    ),
+    true
+  )
+
+  const aborted = handler.call({
+    type: "feature_call",
+    requestId: "code-2",
+    operation: "language-stream",
+    model: "model-1",
+    credentials: { protocol: "plugin:custom" },
+    protocolAdapterSpec: { kind: "code", pluginId: "plugin", adapterId: "custom" },
+    options: { prompt: [] },
+  })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(handler.abort("code-2"), true)
+  await aborted
+  assert.equal(
+    events.some((event) => event.type === "protocol_adapter_cancel" && event.reason === "aborted"),
+    true
+  )
+})
+
 test("abort cancels the correlated request without affecting another call", async () => {
   const events = []
   const handler = createFeatureCallHandler({

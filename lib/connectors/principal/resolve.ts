@@ -13,13 +13,12 @@
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { FeishuPrincipalRow, FeishuTenantRow } from "@/lib/db/connector-types"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
-import { ACCOUNT_DB_PREFIX } from "@/lib/accounts/account-db"
+import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import {
   getFeishuPrincipal,
   getFeishuTenant,
   touchFeishuPrincipalVerification,
 } from "@/lib/db/feishu-principals"
-import { getDb } from "@/lib/db/schema"
 import { isLarkPrincipalRegistryEnabled } from "../feature-flags"
 
 /**
@@ -27,7 +26,6 @@ import { isLarkPrincipalRegistryEnabled } from "../feature-flags"
  * `cli/src/serve/account.ts` and `src-tauri/src/bin/cognia-server.rs` (lib
  * code cannot import from cli/).
  */
-const DEFAULT_LOCAL_ACCOUNT_ID = "local_acct_a"
 
 export interface IdentityScope {
   tenantKey?: string
@@ -110,20 +108,17 @@ export function readIdentityScope(
 }
 
 /**
- * Account scope this runtime is currently serving. The brain/desktop operates
- * exactly one account database at a time, so the active Dexie database name
- * IS the authoritative scope every registry lookup runs in. Falls back to the
- * headless default for the legacy (pre-multi-account) database name.
+ * Account scope this runtime is currently serving.
+ *
+ * Delegates to `lib/accounts/active-account-id`, which is where the logic now
+ * lives so callers outside this module graph (the dock's account-scoped layout
+ * keys) can ask the same question without importing connector machinery. Kept
+ * as a re-export rather than removed: this name is what the connector call
+ * sites read, and "which account is this Lark event for" is a connectors
+ * concern even when the answer comes from elsewhere.
  */
 export function getActiveRuntimeAccountId(): string {
-  try {
-    const name = getDb().name
-    if (name.startsWith(ACCOUNT_DB_PREFIX)) return name.slice(ACCOUNT_DB_PREFIX.length)
-  } catch {
-    // getDb() throws outside the browser/brain runtime (SSR pre-render);
-    // resolution never runs there, but keep the fallback total.
-  }
-  return process.env.COGNIA_LOCAL_ACCOUNT_ID ?? DEFAULT_LOCAL_ACCOUNT_ID
+  return getActiveAccountId()
 }
 
 // Throttle lastVerifiedAt writes to once per principal per hour.

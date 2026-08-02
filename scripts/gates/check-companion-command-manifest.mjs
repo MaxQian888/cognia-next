@@ -76,8 +76,26 @@ export function compareCommandSets(manifest, registered, legacyRpc) {
     if (command.since === 1 && !legacyRpc.has(command.name)) {
       errors.push(`since:1 descriptor is not in the v1 RPC allowlist: ${command.name}`)
     }
+    // The reverse direction. A descriptor is how a companion *discovers* a
+    // command, so one left behind after its handler was deleted is worse than a
+    // missing descriptor: the client finds the command, calls it, and gets a
+    // dispatch error it cannot distinguish from an outage.
+    if (!isBacked(command.name, registered, legacyRpc)) {
+      errors.push(`descriptor has no handler — delete it or register one: ${command.name}`)
+    }
   }
   return errors
+}
+
+/**
+ * Whether some dispatcher can actually answer this command.
+ *
+ * `plugin_*` names are declared by plugins at runtime through
+ * `anthropicTools[].executeIpc.invoke`, so they are dispatched dynamically and
+ * cannot appear in either static set.
+ */
+function isBacked(name, registered, legacyRpc) {
+  return registered.has(name) || legacyRpc.has(name) || name.startsWith("plugin_")
 }
 
 function main() {

@@ -265,3 +265,15 @@ describe("BaseTerminalSession info / id passthrough", () => {
     expect(session.id).toBe("test-session")
   })
 })
+
+describe("BaseTerminalSession flow control", () => {
+  it("defaults to an inert, self-describing no-op", async () => {
+    // Rule 7: the dormancy is documented on the type, labelled in the UI
+    // (`outputThrottledBuffered`), and pinned here. Transports without
+    // end-to-end flow control degrade to renderer-side buffering only.
+    const session = makeSession()
+    expect(session.supportsFlowControl).toBe(false)
+    await expect(session.setFlowControl(true)).resolves.toBe(false)
+    await expect(session.setFlowControl(false)).resolves.toBe(false)
+  })
+})

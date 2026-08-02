@@ -14,9 +14,25 @@ jest.mock("next/navigation", () => ({
 }))
 
 let transportKind: "tauri-channel" | "ws" | "unsupported" = "tauri-channel"
+// The dock now reads the reactive hook rather than calling the resolver during
+// render, so the stub moves with it. `canSpawn` is derived the same way the
+// real hook derives it: "is there a spawn chain", not "is this the local PTY".
+jest.mock("@/hooks/terminal/use-terminal-transport", () => ({
+  useTerminalTransport: () => ({
+    kind: transportKind,
+    canSpawn: transportKind !== "unsupported",
+    isLocalPty: transportKind === "tauri-channel",
+  }),
+}))
 jest.mock("@/lib/terminal/pick-transport", () => ({
   selectTerminalTransport: () => transportKind,
+  selectTerminalTransportChain: () => (transportKind === "unsupported" ? [] : [transportKind]),
   terminalAvailable: () => transportKind !== "unsupported",
+}))
+
+let platformKind: "tauri" | "mobile" | "web" = "tauri"
+jest.mock("@/hooks/use-platform", () => ({
+  usePlatform: () => platformKind,
 }))
 
 const mockSpawnFromDock = jest.fn(async (..._args: unknown[]) => ({
@@ -31,6 +47,11 @@ jest.mock("@/lib/terminal/spawn-orchestrator", () => ({
   killFromDock: (...args: unknown[]) => mockKillFromDock(...(args as [])),
   detachFromDock: (...args: unknown[]) => mockDetachFromDock(...(args as [])),
 }))
+
+// The dock delegates shell / profile / cwd precedence to `spawnDefaultTerminal`
+// (shared with the title bar's Terminal → New). Keep the real module so those
+// precedence assertions still exercise it — it calls the mocked
+// `spawnFromDock` above.
 
 // xterm and its addons get pulled in transitively through
 // `<TerminalInstance>` — mock the heavy modules so we don't load them.
@@ -75,8 +96,8 @@ class MockResizeObserver {
 ;(global as unknown as { ResizeObserver: typeof MockResizeObserver }).ResizeObserver =
   MockResizeObserver
 
-jest.mock("@/lib/terminal/session-registry", () => ({
-  getLiveSession: () => ({
+jest.mock("@/lib/terminal/session-registry", () => {
+  const liveSession = {
     info: { id: "s-1" },
     onData: jest.fn(() => () => undefined),
     onIntegration: jest.fn(() => () => undefined),
@@ -86,9 +107,17 @@ jest.mock("@/lib/terminal/session-registry", () => ({
     write: jest.fn(async () => undefined),
     resize: jest.fn(async () => undefined),
     takeControl: jest.fn(async () => undefined),
+    releaseControl: jest.fn(async () => undefined),
     kill: jest.fn(async () => undefined),
-  }),
-}))
+    supportsFlowControl: false,
+    setFlowControl: jest.fn(async () => false),
+  }
+  return {
+    getLiveSession: () => liveSession,
+    // The session chip subscribes so live facts are read reactively.
+    subscribeLiveSessions: () => () => undefined,
+  }
+})
 
 import { TerminalDock } from "./terminal-dock"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
@@ -106,6 +135,7 @@ beforeEach(() => {
   mockDetachFromDock.mockClear()
   mockPush.mockClear()
   transportKind = "tauri-channel"
+  platformKind = "tauri"
 })
 
 function seedProjectAndSession(
@@ -333,11 +363,41 @@ describe("TerminalDock", () => {
 
   it("renders the mobile empty state when running under Capacitor", () => {
     transportKind = "ws"
+    platformKind = "mobile"
     seedProjectAndSession()
     render(<TerminalDock />)
     expect(screen.getByTestId("terminal-empty-state").getAttribute("data-variant")).toBe("mobile")
-    // No "+ New" button when remote isn't yet wired up (task #14).
-    expect(screen.queryByTestId("terminal-dock-new")).toBeNull()
+  })
+
+  it("renders the remote empty state when a desktop is driving a remote host", () => {
+    transportKind = "ws"
+    platformKind = "tauri"
+    seedProjectAndSession()
+    render(<TerminalDock />)
+    expect(screen.getByTestId("terminal-empty-state").getAttribute("data-variant")).toBe("remote")
+  })
+
+  it("still offers a way to create a terminal over ws", () => {
+    // Regression: the spawn affordances used to be gated on
+    // `transport === "tauri-channel"`, so a desktop driving a remote host got a
+    // dock with no way to open a terminal at all.
+    transportKind = "ws"
+    platformKind = "tauri"
+    seedProjectAndSession()
+    render(<TerminalDock />)
+    expect(screen.getByTestId("terminal-empty-state-new")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("terminal-empty-state-new"))
+    expect(mockSpawnFromDock).toHaveBeenCalled()
+  })
+
+  it("keeps clearing available on every transport", () => {
+    // `clearScreen()` is pure xterm; gating it on the local PTY meant a
+    // remote-host user could not clear their own screen.
+    transportKind = "ws"
+    platformKind = "tauri"
+    seedProjectAndSession({ sessionId: "s-1" })
+    render(<TerminalDock />)
+    expect(screen.getByTestId("terminal-dock-clear")).toBeInTheDocument()
   })
 
   it("renders the unsupported empty state in plain browser", () => {

@@ -4,9 +4,10 @@
 // for the active session. Renders nothing when there's no active session.
 
 import { useTranslations } from "next-intl"
+import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
 import { Button } from "@/components/ui/button"
+import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
-import { DownloadIcon } from "lucide-react"
 import { SingleExportDialog } from "@/components/data/export/single-export-dialog"
 import type { ChatSession } from "@cognia/agent-config-types"
 
@@ -28,11 +29,11 @@ export function SingleExportTrigger({ session, variant = "icon" }: Props) {
         aria-label={t("singleTitle")}
         tooltip={t("singleTitle")}
       >
-        <DownloadIcon className="size-4" />
+        <AnimatedActionIcon icon={AnimatedDownloadIcon} size={16} />
       </TooltipIconButton>
     ) : (
       <Button variant="outline" size="sm">
-        <DownloadIcon className="mr-1.5 size-4" />
+        <AnimatedActionIcon icon={AnimatedDownloadIcon} size={16} data-icon="inline-start" />
         {t("singleTitle")}
       </Button>
     )

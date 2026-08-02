@@ -19,6 +19,7 @@ import { resolveLspServers } from "@/lib/lsp/resolve-config"
 import { readProjectLspFile } from "@/lib/lsp/project-file-reader"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import { setActiveSandboxTier } from "@/lib/sandbox/microvm-bridge"
+import { resolveSandboxSessionBinding, validateSandboxSessionBinding } from "@/lib/sandbox/binding"
 import { setActiveSandboxPolicy } from "@/lib/sandbox/policy-bridge"
 import { setActiveSandboxConfine } from "@/lib/claude/sandbox-confine-state"
 import {
@@ -32,6 +33,7 @@ import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import {
   activeEffectiveSkillIds,
   listEnabledSkillsByIds,
+  listSkillsByIds,
   recordSkillUsage,
   renderSkillsCatalog,
   renderSkillsSection,
@@ -962,6 +964,15 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     if (wantedIds.length) {
       skills = await listEnabledSkillsByIds(wantedIds)
     }
+  }
+  // ADR-0106 controlled trial. The recorded skill is saved `disabled` on
+  // purpose — enabling it is the user's separate act after the trial — so it
+  // cannot come through the resolution above, which honours that flag. Loading
+  // it by id here is what makes the trial actually exercise the skill instead
+  // of opening an empty chat; it replaces the set rather than joining it, which
+  // is the "nothing else can explain the result" property the trial is for.
+  if (session?.trialSkillId) {
+    skills = await listSkillsByIds([session.trialSkillId])
   }
   // Bump usage counters for the skills that actually made it into the prompt.
   // Fire-and-forget: a failed write here shouldn't block the send.
@@ -2312,6 +2323,23 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       loggers.app.warn("failed to append SlashCommand built-in tool", { error: String(err) })
     }
   }
+  // Project-scoped vector memory (vector_search / vector_add_document /
+  // vector_delete_document). Opt-in, and only manifested when the tools can
+  // actually run: they need the native sqlite-vec store (desktop) AND a linked
+  // project to scope collections to. Advertising them without both would hand
+  // the model three tools that can only ever return an error.
+  if (appSettings?.selfInvokeTools?.vector === true) {
+    try {
+      const vectorProjectId = session?.projectId ?? ctx.activeProject?.id
+      const { isTauri } = await import("@/lib/tauri")
+      if (vectorProjectId && isTauri()) {
+        const { buildVectorManifestEntries } = await import("@/lib/claude/vector-builtin-tools")
+        opts.pluginTools = [...(opts.pluginTools ?? []), ...buildVectorManifestEntries()]
+      }
+    } catch (err) {
+      loggers.app.warn("failed to append vector built-in tools", { error: String(err) })
+    }
+  }
   // Team-collaboration tools — only on a team dispatch session, opt-in. Lets a
   // teammate message peers / publish-read the blackboard / open-vote consensus /
   // delegate during its turn (the cognia analogue of Claude Code SendMessage).
@@ -2463,8 +2491,32 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // the app default. Stamped onto the microvm-bridge so the
     // `cognia-sandboxed-tools` plugin can route this session's exec
     // calls to e2b when the user opts into microVM isolation.
-    const sandboxTier: "os" | "microvm" = character?.sandboxTier ?? appSettings?.sandboxTier ?? "os"
-    setActiveSandboxTier(session?.id, sandboxTier)
+    // Epic 5 — the tier and the Computer Use target are resolved together into
+    // one binding, so a `cua-desktop` tier cannot end up driving a remote GUI
+    // while Bash still runs on the host. An unusable binding (the tier needs a
+    // connection and none is selected) is reported, never silently downgraded:
+    // the user asked for isolation and must not lose it quietly.
+    const sandboxBinding = resolveSandboxSessionBinding({
+      session: {
+        sandboxTier: session?.sandboxTier,
+        computerUseTarget: session?.computerUseTarget,
+      },
+      character: {
+        sandboxTier: character?.sandboxTier,
+        computerUseTarget: character?.computerUseTarget,
+      },
+      appSettings: { sandboxTier: appSettings?.sandboxTier },
+    })
+    const bindingCheck = validateSandboxSessionBinding(sandboxBinding)
+    if (!bindingCheck.ok) {
+      loggers.app.warn("unusable sandbox binding", {
+        sessionId: session?.id,
+        violation: bindingCheck.violation,
+        shellTier: sandboxBinding.shellTier,
+        computerTarget: sandboxBinding.computerTarget,
+      })
+    }
+    setActiveSandboxTier(session?.id, sandboxBinding.shellTier)
     // ADR-0028 — resolve the resource/network ceiling (character beats app)
     // and stamp it so `cognia-sandboxed-tools` can clamp each call to it.
     const resolvedSandboxPolicy = character?.sandboxPolicy ?? appSettings?.sandboxPolicy ?? null

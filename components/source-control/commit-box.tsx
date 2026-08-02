@@ -72,7 +72,10 @@ export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitB
         // Read the paths fresh so this callback needn't depend on a new array
         // each render.
         const paths = useGitStore.getState().status?.changes.map((c) => c.path) ?? []
-        if (paths.length > 0) await actions.stage(paths)
+        if (paths.length > 0) {
+          const stageFailure = await actions.stage(paths)
+          if (stageFailure) return
+        }
       }
       const failure = await actions.commit(draft, { amend, signoff })
       if (failure?.kind === "identityRequired") {

@@ -2,7 +2,8 @@
 
 import { useMemo, useState, useCallback } from "react"
 import { useTranslations } from "next-intl"
-import { AlertCircle, Copy, Check, Maximize2, Code2, RefreshCw } from "lucide-react"
+import { AlertCircle, Maximize2, Code2, RefreshCw } from "lucide-react"
+import { CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
@@ -79,7 +80,7 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
               aria-label={t("copyLatex")}
               tooltip={t("copyLatex")}
             >
-              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              <CopyFeedbackIcon copied={copied} size={14} />
             </TooltipIconButton>
           </div>
         </div>
@@ -121,7 +122,7 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
             aria-label={t("copyLatex")}
             tooltip={t("copyLatex")}
           >
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            <CopyFeedbackIcon copied={copied} size={14} />
           </TooltipIconButton>
 
           <TooltipIconButton
@@ -166,7 +167,7 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
                   aria-label={t("copyLatex")}
                   tooltip={t("copyLatex")}
                 >
-                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                  <CopyFeedbackIcon copied={copied} size={14} />
                 </TooltipIconButton>
               </div>
             </DialogTitle>

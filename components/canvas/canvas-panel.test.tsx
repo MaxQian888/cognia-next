@@ -351,11 +351,10 @@ describe("CanvasPanel", () => {
       expect(screen.queryByTestId("canvas-language-select")).not.toBeInTheDocument()
     })
 
-    it("reduces the enabled Workbench toolbar to direct save and command actions", () => {
-      window.localStorage.setItem(
-        "cognia-canvas-feature-flags-v1",
-        JSON.stringify({ "contextWorkbench.v1": true })
-      )
+    it("reduces the toolbar to direct save and command actions", () => {
+      // The AI action menu and the format toolbar moved into the workbench's
+      // `ai-actions` / `properties` panels; the editor toolbar keeps only the
+      // two actions that belong beside the caret.
       seedDoc("markdown")
       renderWithProviders(<CanvasPanel />)
 

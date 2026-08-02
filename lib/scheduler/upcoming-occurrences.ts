@@ -162,6 +162,50 @@ export function groupOccurrencesByDay(occurrences: Occurrence[]): OccurrenceDay[
   return days
 }
 
+/**
+ * Every projected run of a single task inside one bucket (normally one day).
+ * Collapsing per task is what keeps a high-frequency trigger (every 5 minutes)
+ * from rendering as N visually identical rows in the calendar / timeline.
+ */
+export interface OccurrenceTaskGroup {
+  taskId: string
+  taskName: string
+  taskType: ScheduledTaskType
+  triggerType: ScheduledTask["trigger"]["type"]
+  status: ScheduledTaskStatus
+  /** Ascending, de-duplicated run instants for this task in the bucket. */
+  times: Date[]
+}
+
+/**
+ * Collapse a sorted occurrence list into one entry per task, preserving the
+ * input order (i.e. groups are ordered by each task's earliest run). Exact
+ * duplicate instants for the same task are dropped — two triggers can project
+ * onto the same minute, and the user should see that run once.
+ */
+export function groupOccurrencesByTask(occurrences: Occurrence[]): OccurrenceTaskGroup[] {
+  const byTask = new Map<string, OccurrenceTaskGroup>()
+
+  for (const occ of occurrences) {
+    const existing = byTask.get(occ.taskId)
+    if (!existing) {
+      byTask.set(occ.taskId, {
+        taskId: occ.taskId,
+        taskName: occ.taskName,
+        taskType: occ.taskType,
+        triggerType: occ.triggerType,
+        status: occ.status,
+        times: [occ.date],
+      })
+      continue
+    }
+    if (existing.times.some((d) => d.getTime() === occ.date.getTime())) continue
+    existing.times.push(occ.date)
+  }
+
+  return Array.from(byTask.values())
+}
+
 /** Map of `YYYY-MM-DD` → occurrence count, for calendar density rendering. */
 export function countOccurrencesByDay(occurrences: Occurrence[]): Map<string, number> {
   const counts = new Map<string, number>()

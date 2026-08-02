@@ -40,6 +40,7 @@
   "globalDescription": "The application's main layout failed to load. Try recovering, or close the window using the title bar.",
   "globalTitle": "Cognia stopped working",
   "goHome": "Back to home",
+  "hideStack": "Hide stack trace",
   "openLogs": "Open logs",
   "recentErrors": {
     "cascadeHint": "Several errors occurred together — this may be a cascading failure.",
@@ -53,6 +54,7 @@
     "reportIssue": "Report issue"
   },
   "retry": "Try again",
+  "showStack": "Show stack trace",
   "title": "Something went wrong",
   "traceTitle": "Error details",
   "tryAgainWhenOnline": "Try again"

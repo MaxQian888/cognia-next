@@ -1,0 +1,34 @@
+{
+	admin off
+}
+
+{$COGNIA_OPS_DOMAIN} {
+	tls {$ACME_EMAIL} {
+		client_auth {
+			mode verify_if_given
+			trust_pool file /run/cognia-controller-secrets/agent-ca.crt.pem
+		}
+	}
+
+	@agent path /v1/agent/connect
+	handle @agent {
+		@withoutAgentCertificate expression `{tls_client_fingerprint} == ""`
+		respond @withoutAgentCertificate 401
+		reverse_proxy cognia-ops-controller:8080 {
+			header_up -X-Cognia-Mtls-Verified
+			header_up -X-Cognia-Client-Cert-Sha256
+			header_up -X-Cognia-Proxy-Authorization
+			header_up X-Cognia-Mtls-Verified SUCCESS
+			header_up X-Cognia-Client-Cert-Sha256 {tls_client_fingerprint}
+			header_up X-Cognia-Proxy-Authorization {file./run/cognia-controller-secrets/agent-proxy-token}
+		}
+	}
+
+	handle {
+		reverse_proxy cognia-ops-controller:8080 {
+			header_up -X-Cognia-Mtls-Verified
+			header_up -X-Cognia-Client-Cert-Sha256
+			header_up -X-Cognia-Proxy-Authorization
+		}
+	}
+}

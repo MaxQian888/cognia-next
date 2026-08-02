@@ -1123,22 +1123,11 @@ pub async fn automation_kill_switch(
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
 ) -> std::result::Result<(), String> {
-    state.gate.engage_kill_switch();
-    // Persist `enabled == false` so a reload / any later bulk save reflects the
-    // stopped state instead of a stale on-disk `enabled: true` (defense in depth
-    // against the stale-save resume path).
-    super::persist::save_settings(&state.gate.settings());
-    // The kill switch also clears any "Always allow this session" grants —
-    // engaging the switch should drop ALL trust, not just freeze the engine.
-    state.consent.clear_session_grants();
-    // Drop the screen-off virtual display too (restores the prior topology) —
-    // engaging the switch should hand the screen back immediately.
-    state
-        .virtual_display
-        .force_release(ReleaseReason::KillSwitch);
-    // Abort any in-flight skill recording — the switch must stop the global
-    // input hook + screen capture immediately, not just freeze driving.
-    state.recorder.cancel(&app);
+    // Every trigger — this command, the tray item, the global hotkey — goes
+    // through one helper, so "what does the kill switch do?" has a single
+    // answer. See `kill_switch::engage` for the table of what each path used to
+    // do instead.
+    super::kill_switch::engage(&app, &state, super::kill_switch::KillSwitchCause::Renderer);
     Ok(())
 }
 

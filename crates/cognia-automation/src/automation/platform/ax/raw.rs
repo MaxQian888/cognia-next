@@ -57,6 +57,15 @@ pub fn element_identity(el: &AXUIElement) -> usize {
     el_ref(el) as usize
 }
 
+/// The element's `AXParent`, or `None` at the top of the hierarchy.
+///
+/// Needed to build a locator recipe for an element we were handed rather than
+/// walked down to (`find`, `pick_at_point`, `get_focus`): the recipe is a path
+/// from the window root, so it has to be reconstructed upwards.
+pub fn parent(el: &AXUIElement) -> Option<AXUIElement> {
+    copy_element_attr(el, "AXParent")
+}
+
 /// Read only the requested AXChildren slice. Calling the high-level
 /// `children()` accessor copies the entire collection before the traversal can
 /// apply its node budget, which is unsafe for 10k+ node WebView/Electron trees.

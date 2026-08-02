@@ -96,6 +96,7 @@ cognia-terminal = { path = "../crates/cognia-terminal" }
 # Background-job supervisor — the non-interactive sibling of cognia-terminal.
 # Owns `bash(run_in_background)` and scheduled-task background work.
 cognia-jobs = { path = "../crates/cognia-jobs" }
+cognia-observability = { path = "../crates/cognia-observability" }
 # ADR-0067 Tier B — subscription vault/providers (ADR-0025); `subscription/`
 # stays as an app-side facade holding the top-level command surface.
 cognia-subscription = { path = "../crates/cognia-subscription" }
@@ -208,7 +209,7 @@ async-trait = "0.1"
 parking_lot = "0.12"
 # ADR-0059 R13 — bollard (docker) and kube moved to
 # `crates/cognia-external-agent` (ADR-0067); the `container-exec` / `k8s-exec`
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.37", features = ["backup", "bundled"] }
 matrix-sdk-crypto = { version = "0.18.0", default-features = false }
 matrix-sdk-sqlite = { version = "0.18.0", default-features = false, features = ["crypto-store", "bundled"] }
 ruma = { version = "0.16.0", features = ["client-api-c", "events", "rand"] }
@@ -242,6 +243,7 @@ tokio-socks = "0.5"
 tokio-rustls = "0.26"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 futures-util = { version = "0.3", default-features = false }
+rquickjs = "0.12.1"
 bytes = "1"
 
 # Vector cloud backends (ADR-0022, qdrant/milvus/pinecone/chroma/weaviate) moved

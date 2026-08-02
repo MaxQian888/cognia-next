@@ -4,6 +4,10 @@
 //
 // Called once on app boot from `app/layout.tsx` (via `SubscriptionInitializer`).
 // Steps:
+//   0. Bail out when there is no host to migrate against. Plain browser mode
+//      with no paired/configured cognia-server has no keyring at all, so
+//      `subscription_init` can only reject with the WebStubTransport's
+//      "tauri-only command from web mode" error — noisy, and never actionable.
 //   1. Invoke `subscription_init` on the Rust side. Returns one outcome per
 //      provider. Rust handles all keyring I/O — silent on the renderer side.
 //   2. If any provider was actually `Migrated`, fire a single Sonner toast
@@ -18,6 +22,8 @@
 
 import { toast } from "sonner"
 
+import { isCapacitor, isTauri } from "@/lib/platform/detect"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import type { MigrationOutcome } from "@/types/subscription"
 import { subscriptionInit } from "./transport"
 
@@ -28,6 +34,22 @@ export interface SubscriptionInitResult {
   migratedCount: number
   toastShown: boolean
   error?: string
+  /**
+   * True when no host backend was reachable, so nothing was invoked. Distinct
+   * from `error` — this is the expected steady state of plain web mode, not a
+   * failure.
+   */
+  skipped?: boolean
+}
+
+/**
+ * Whether a host capable of serving `subscription_*` commands exists: the Tauri
+ * desktop shell, the Capacitor mobile shell, or a browser wired to a
+ * cognia-server (build-time URL or an existing pairing). Same predicate the
+ * transport picker uses to choose a real transport over `WebStubTransport`.
+ */
+function hasSubscriptionHost(): boolean {
+  return isTauri() || isCapacitor() || hasWebCompanionTarget()
 }
 
 /**
@@ -49,6 +71,11 @@ export async function subscriptionInitOnce(
   } = {}
 ): Promise<SubscriptionInitResult> {
   const storage = options.storage ?? defaultStorage()
+
+  // Web mode with no backend: there is no keyring to migrate. Skip silently.
+  if (!hasSubscriptionHost()) {
+    return { outcomes: [], migratedCount: 0, toastShown: false, skipped: true }
+  }
 
   let outcomes: MigrationOutcome[]
   try {

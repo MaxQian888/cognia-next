@@ -5,7 +5,7 @@
 // and rasterized to PNG (html2canvas-pro) for quick image sharing.
 
 import type { SessionUsageRow } from "@/lib/db/session-usage"
-import { aggregateByModel, effectiveCostUsd } from "@/lib/usage/session-analytics"
+import { effectiveCostUsd, localDay, topModelByTokens } from "@/lib/usage/session-analytics"
 import { formatCost, formatDuration, formatTokens } from "@/types/system/usage"
 import { THEMES, type ThemeId, type ThemeTokens } from "@/lib/export/html/syntax-themes"
 import { getStylePreset } from "@/lib/export/html/style-presets"
@@ -22,7 +22,11 @@ export interface UsageCardStats {
   turns: number
   /** Distinct sessions represented in the rows. */
   sessions: number
-  /** Distinct calendar days (UTC) with at least one turn. */
+  /**
+   * Distinct LOCAL calendar days with at least one turn — the same day
+   * bucketing `aggregateByDay` / the welcome dashboard use, so a turn at 23:00
+   * counts toward the day the user remembers spending it in every view.
+   */
   activeDays: number
   /** Model with the highest token volume, or null when empty. */
   topModel: string | null
@@ -50,18 +54,12 @@ export function collectUsageCardStats(rows: readonly SessionUsageRow[]): UsageCa
     costUsd += effectiveCostUsd(r)
     durationMs += r.durationMs
     sessions.add(r.sessionId)
-    days.add(new Date(r.at).toISOString().slice(0, 10))
+    days.add(localDay(r.at))
     if (from == null || r.at < from) from = r.at
     if (to == null || r.at > to) to = r.at
   }
 
-  const byModel = aggregateByModel(rows)
-  const topModel =
-    byModel.length > 0
-      ? [...byModel].sort(
-          (a, b) => b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens)
-        )[0].model
-      : null
+  const topModel = topModelByTokens(rows)
 
   return {
     totalTokens: inputTokens + outputTokens + cacheReadTokens,

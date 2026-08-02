@@ -13,12 +13,14 @@ import {
   type RecentSessionEntry,
   type WelcomeSection,
 } from "./empty-state"
+import { WelcomeStats } from "./welcome/welcome-stats"
 import { DiagnosticCard, InlineError } from "@/components/error/diagnostic-card"
 import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 import { MessageList } from "./message-list"
 import { RunStatusBar } from "./run-status-bar"
 import { PlanApprovalDock } from "@/components/agent/plan/plan-approval-dock"
 import { PlanTrackerDock } from "@/components/agent/plan/plan-tracker-dock"
+import { PlanComposerDock } from "@/components/agent/plan/plan-composer-dock"
 import { useRunRecordPersistence } from "@/hooks/chat/use-run-record-persistence"
 import { useStableCallback } from "@/hooks/ui/use-stable-callback"
 import { FollowUpSuggestions } from "./follow-up-suggestions"
@@ -286,6 +288,11 @@ export function ChatPane({
     void save({ welcomeHidden: { ...settings?.welcomeHidden, [section]: true } })
   }, [])
 
+  // Usage dashboard — only on the generic chat welcome. Surfaces that replace
+  // the welcome copy entirely (the workflow-editor chat tab passes
+  // `emptyState`) get their own framing and would read as off-topic with it.
+  const statsSlot = emptyState ? undefined : <WelcomeStats />
+
   if (!activeSession) {
     return (
       <EmptyChatState
@@ -297,6 +304,7 @@ export function ChatPane({
         hideSamples={welcomeExtras?.hideSamples}
         headerExtraSlot={welcomeExtras?.header}
         quickActionsSlot={welcomeExtras?.quickActions}
+        statsSlot={statsSlot}
         hiddenSections={welcomeHidden}
         onDismissSection={handleDismissSection}
       />
@@ -457,6 +465,7 @@ export function ChatPane({
                 characterSamples={characterSamples}
                 aiSamples={aiStarters}
                 override={emptyState}
+                statsSlot={statsSlot}
                 hiddenSections={welcomeHidden}
                 onDismissSection={handleDismissSection}
               />
@@ -498,6 +507,11 @@ export function ChatPane({
             {/* Executing/paused plans surface the live tracker in the same slot
                 (statuses are mutually exclusive with awaiting_approval). */}
             {boundId && <PlanTrackerDock sessionId={boundId} />}
+            {/* Third mutually-exclusive state for this slot: planning, with no
+                plan yet — offer to hand-author one (PlanSource "manual"). */}
+            {boundId && (
+              <PlanComposerDock sessionId={boundId} characterId={activeSession?.characterId} />
+            )}
             <WorkspaceChangesCard session={activeSession} />
             {runStatusEl}
             {composerEl}

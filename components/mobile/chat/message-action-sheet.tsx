@@ -14,8 +14,6 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import {
-  BookmarkIcon,
-  CopyIcon,
   GitBranchIcon,
   Loader2Icon,
   PencilIcon,
@@ -32,6 +30,9 @@ import { toast } from "sonner"
 import type { UIMessage } from "ai"
 
 import { Button } from "@/components/ui/button"
+import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
+import { BookmarkIcon as AnimatedBookmarkIcon } from "@/components/ui/bookmark"
+import { CopyIcon as AnimatedCopyIcon } from "@/components/ui/copy"
 import { Textarea } from "@/components/ui/textarea"
 import {
   AlertDialog,
@@ -341,7 +342,7 @@ export function MessageActionSheet({
         ) : (
         <StaggeredRows>
           <Row
-            icon={<CopyIcon className="size-4" />}
+            icon={<AnimatedActionIcon icon={AnimatedCopyIcon} size={16} />}
             label={t("copy")}
             onClick={onCopy}
             disabled={busy || !text}
@@ -370,7 +371,12 @@ export function MessageActionSheet({
           />
           <Row
             icon={
-              <BookmarkIcon className={isBookmarked ? "size-4 fill-current text-yellow-500" : "size-4"} />
+              <AnimatedActionIcon
+                icon={AnimatedBookmarkIcon}
+                size={16}
+                animateOnChange={isBookmarked}
+                className={isBookmarked ? "fill-current text-yellow-500" : undefined}
+              />
             }
             label={isBookmarked ? t("bookmarkRemove") : t("bookmark")}
             onClick={onBookmark}

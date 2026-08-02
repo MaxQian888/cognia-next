@@ -34,6 +34,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AttachmentEmpty } from "@/components/ai-elements/attachments"
+import { AnalyzingImage } from "@/components/loading-ui/analyzing-image"
 import { FilePartPreview } from "@/components/chat/message-parts/file-part-preview"
 import { ImageLightbox } from "@/components/chat/renderers/image-lightbox"
 import { IMAGE_MAX_LONG_EDGE } from "@/lib/chat/attachments/dispatch"
@@ -182,10 +183,20 @@ export function AttachmentPreviewSheet(props: AttachmentPreviewSheetProps) {
               <p className="mb-2 text-xs text-muted-foreground">{t("preview.modelHint")}</p>
               <ScrollArea className="max-h-[60vh] pr-2">
                 {state?.status === "extracting" ? (
-                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Loader2Icon className="size-3.5 animate-spin" aria-hidden />
-                    {t("extracting")}
-                  </p>
+                  // A <div>, not a <p>: the image indicator is itself a div, and
+                  // React rejects that nesting.
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    {/* Same indicator the chip shows for this attachment, so
+                        opening the panel mid-wait is visually continuous. */}
+                    {isImage ? (
+                      // The sentence beside it already says this, so the
+                      // indicator's own status role is suppressed here.
+                      <AnalyzingImage label={t("analyzing")} className="size-4" aria-hidden />
+                    ) : (
+                      <Loader2Icon className="size-3.5 animate-spin" aria-hidden />
+                    )}
+                    {isImage ? t("analyzing") : t("extracting")}
+                  </div>
                 ) : isImage ? (
                   <div className="space-y-3">
                     {target?.url ? (

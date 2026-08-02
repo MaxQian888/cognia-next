@@ -237,7 +237,14 @@ describe("config helpers", () => {
     await saveCompanionConfig(MOCK_CONFIG)
     __resetCompanionConfigCacheForTests()
     expect(loadCompanionConfig()).toBeNull()
-    const hydrated = { ...MOCK_CONFIG, targetId: MOCK_CONFIG.deviceId }
+    // The credential book files the pairing under the active account and hands
+    // that namespace back on the way out, so a round-tripped config now carries
+    // `accountId` even when the caller never set one (ADR-0097).
+    const hydrated = {
+      ...MOCK_CONFIG,
+      targetId: MOCK_CONFIG.deviceId,
+      accountId: "acct_transport",
+    }
     expect(await hydrateCompanionConfig()).toEqual(hydrated)
     expect(loadCompanionConfig()).toEqual(hydrated)
   })

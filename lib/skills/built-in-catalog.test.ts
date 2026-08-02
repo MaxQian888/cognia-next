@@ -15,10 +15,31 @@ describe("built-in skills catalog", () => {
       "goal-loop-execution",
       "im-auto-reply",
       "ocr-extraction",
+      "plugin-authoring",
       "plugin-conversion",
       "web-research",
       "workflow-authoring",
     ])
+  })
+
+  it("registers plugin authoring as an opt-in skill with its required tools", () => {
+    const entry = getCatalogSkill("plugin-authoring")!
+    expect(entry.allowedTools).toEqual(["Read", "Glob", "Grep", "Write", "Edit", "Bash"])
+    expect(entry.surface).toEqual([])
+    expect(entry.content).toContain("cognia plugin contract")
+    expect(entry.content).toContain("--point <id>")
+    expect(entry.content).toContain("--point-kind <kind>")
+    expect(entry.content).toContain("--permission <permission>")
+    expect(entry.content).toContain("formFactor")
+    expect(entry.content).toContain("deprecated")
+    expect(entry.content).toContain("plugin-owned i18n")
+    expect(entry.content).toContain("shared React")
+    expect(entry.content).toContain("vscode-extension")
+    expect(entry.content).toContain("wasm")
+    expect(entry.content).toContain("support=experimental")
+    expect(entry.content).toContain("cognia plugin sync-types")
+    expect(entry.content).toContain("scaffolded public `cognia` module")
+    expect(entry.content).toContain("only when the user explicitly requests")
   })
 
   it("every entry has a name, non-empty body, and a surface array", () => {

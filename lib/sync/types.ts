@@ -116,13 +116,20 @@ export type SyncOutcome = { ok: true; result: SyncResult } | { ok: false; failur
  */
 export interface SyncCursorRow {
   /**
-   * Which host this watermark belongs to — the device id that host issued at
-   * pair time (v130). Part of the compound primary key `[serverKey+table]`.
+   * Which host this watermark belongs to — the host's **cursor namespace**,
+   * `{accountNamespace}:{hostId}` (ADR-0097 D13; v130 keyed it by the device id
+   * the host issued at pair time). Part of the compound primary key
+   * `[serverKey+table]`.
    *
    * Before this existed the cursor was keyed by table alone, so a client that
    * paired to a different host resumed from the previous host's watermark and
    * asked the new one for everything since a timestamp that meant nothing
-   * there, blending two machines' data into one local store.
+   * there, blending two machines' data into one local store. Keying by the
+   * *device* id then over-corrected: it is minted per pairing, so re-pairing to
+   * the same desktop also read as a different host and forced a full re-pull.
+   *
+   * Rows written by a pre-namespace build are adopted on first run — see
+   * `companion-sync.ts:adoptLegacyCursorKeys`.
    */
   serverKey: string
   /** Part of the compound primary key — the SyncableTable name. */

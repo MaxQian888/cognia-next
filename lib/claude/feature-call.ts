@@ -35,10 +35,11 @@ interface FeatureCallDependencies {
   randomUUID: () => string
 }
 
-interface SidecarLanguageModelConfig {
+export interface SidecarLanguageModelConfig {
   modelId: string
   providerId?: string
   credentials: FeatureCallCredentials
+  protocolAdapterSpec?: FeatureCallRequest["protocolAdapterSpec"]
 }
 
 type SidecarEmbeddingModelConfig = SidecarLanguageModelConfig
@@ -140,6 +141,9 @@ export function createSidecarFeatureCallClient(deps: FeatureCallDependencies) {
           providerId: config.providerId ?? "bedrock",
           model: config.modelId,
           credentials: config.credentials,
+          ...(config.protocolAdapterSpec
+            ? { protocolAdapterSpec: config.protocolAdapterSpec }
+            : {}),
           options: serializableOptions(options),
         }
         return (await requestResult(request, options.abortSignal)) as LanguageModelV3GenerateResult
@@ -166,6 +170,9 @@ export function createSidecarFeatureCallClient(deps: FeatureCallDependencies) {
           providerId: config.providerId ?? "bedrock",
           model: config.modelId,
           credentials: config.credentials,
+          ...(config.protocolAdapterSpec
+            ? { protocolAdapterSpec: config.protocolAdapterSpec }
+            : {}),
           options: serializableOptions(options),
         }
         try {
@@ -218,9 +225,18 @@ export function createBedrockSidecarLanguageModel(
   return defaultClient.languageModel(config)
 }
 
+/** Generic sidecar-backed model used by provider diagnostics for real streaming. */
+export function createSidecarLanguageModel(config: SidecarLanguageModelConfig): LanguageModelV3 {
+  return defaultClient.languageModel(config)
+}
+
 export function createBedrockSidecarEmbeddingModel(
   config: SidecarEmbeddingModelConfig
 ): EmbeddingModelV3 {
+  return defaultClient.embeddingModel(config)
+}
+
+export function createSidecarEmbeddingModel(config: SidecarEmbeddingModelConfig): EmbeddingModelV3 {
   return defaultClient.embeddingModel(config)
 }
 

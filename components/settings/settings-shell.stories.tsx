@@ -35,3 +35,18 @@ export default meta
 type Story = StoryObj<SettingsShellProps>
 
 export const Default: Story = {}
+
+/**
+ * The three sections that moved from card stacks to master/detail. They only
+ * look like Providers when the shell puts them in its fill-height branch, and
+ * that branch is chosen by section id — so it is only visible from the shell,
+ * never from the section's own story. `?section=` is read through
+ * `useSearchParams`, which @storybook/nextjs mocks from this query object.
+ */
+const atSection = (section: string): Story => ({
+  parameters: { nextjs: { appDirectory: true, navigation: { query: { section } } } },
+})
+
+export const AgentRuntime = atSection("agent-runtime")
+export const AgentModes = atSection("agent-modes")
+export const Memory = atSection("memory")

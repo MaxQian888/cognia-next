@@ -83,6 +83,27 @@ describe("createSession — without default preset", () => {
     expect(session.systemPrompt).toBeUndefined()
   })
 
+  it("persists the recorder's controlled-trial skill alongside the session-disable list", async () => {
+    // ADR-0106. `trialSkillId` is what makes the send path load a skill that is
+    // still `disabled`; dropping it here would silently turn the trial back
+    // into an empty chat, which is exactly the bug it was added to fix.
+    const session = await createSession({
+      title: "Skill trial",
+      trialSkillId: "rec-1",
+      disabledSkillIds: ["other-a"],
+    })
+    expect(session.trialSkillId).toBe("rec-1")
+    await expect(getSession(session.id)).resolves.toMatchObject({
+      trialSkillId: "rec-1",
+      disabledSkillIds: ["other-a"],
+    })
+  })
+
+  it("leaves trialSkillId unset on an ordinary session", async () => {
+    const session = await createSession({ title: "Test" })
+    expect(session.trialSkillId).toBeUndefined()
+  })
+
   it("persists an Integration Inbox binding independently from platformBinding", async () => {
     const integrationBinding = {
       pluginId: "github-delivery",

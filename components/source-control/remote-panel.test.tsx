@@ -48,6 +48,23 @@ describe("RemotePanel", () => {
     expect(gitRemotes).toHaveBeenCalledTimes(2)
   })
 
+  it("keeps remote input intact and does not reload after a failed add", async () => {
+    const actions = makeActions()
+    actions.remoteAdd.mockResolvedValue({ kind: "commandFailed", detail: "duplicate remote" })
+    render(<RemotePanel open rootDir="/repo" onOpenChange={() => {}} actions={actions} />)
+    await waitFor(() => expect(gitRemotes).toHaveBeenCalled())
+    fireEvent.change(screen.getByTestId("remote-name"), { target: { value: "upstream" } })
+    fireEvent.change(screen.getByTestId("remote-url"), { target: { value: "https://e/r.git" } })
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("remote-add"))
+    })
+
+    expect(screen.getByTestId("remote-name")).toHaveValue("upstream")
+    expect(screen.getByTestId("remote-url")).toHaveValue("https://e/r.git")
+    expect(gitRemotes).toHaveBeenCalledTimes(1)
+  })
+
   it("disables add until name + url are filled", async () => {
     render(<RemotePanel open rootDir="/repo" onOpenChange={() => {}} actions={makeActions()} />)
     await waitFor(() => expect(gitRemotes).toHaveBeenCalled())

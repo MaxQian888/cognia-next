@@ -1,20 +1,28 @@
 "use client"
 
 /**
- * Canvas Side Panels — replaces MemberList in the Canvas guild. Hosts
- * the Suggestions / History / Comments / Collaboration / Execution
- * tabs to the right of the editor. Tabs show badge counts, content
- * panels render inline where feasible, and empty states use consistent
- * centered icon + description + CTA patterns.
+ * Canvas Side Panels — the Canvas guild's right rail, a `ContextWorkbench`
+ * host (ADR-0083).
+ *
+ * One shell. The pre-0083 Tabs container that used to switch between
+ * Suggestions / History / Comments / Collaboration / Execution is gone; each of
+ * those is a panel definition below, grouped onto the shared activity rail, and
+ * routing lives in `contextWorkbenchStore`. The panel *bodies* (`SuggestionsHost`,
+ * `HistoryHost`, `CollaborationHost`, `ExecutionHost`, `CanvasOutlinePanel`) are
+ * unchanged.
+ *
+ * Comments are the one surface that did change owner: the canvas-only
+ * `CommentPanel` over `stores/canvas/comment-store` was superseded by the
+ * cross-resource `ContextCommentsPanel` over `lib/db/context-comments`. The
+ * store itself stays — `lib/plugin/api/canvas-api.ts` and `lib/canvas/dexie-bridge.ts`
+ * are still its consumers.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { AnimatePresence, motion } from "motion/react"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { motion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Empty,
   EmptyContent,
@@ -22,7 +30,6 @@ import {
   EmptyHeader,
   EmptyMedia,
 } from "@/components/ui/empty"
-import { cn } from "@/lib/utils"
 import {
   Bug,
   Expand,
@@ -41,17 +48,14 @@ import {
   InfoIcon,
 } from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
-import { useCommentStore } from "@/stores/canvas/comment-store"
-import { useCanvasLayoutStore, type CanvasRightTab } from "@/stores/canvas/canvas-layout-store"
-import { mobileTransition, STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
+import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { SuggestionsPanel } from "./suggestions-panel"
 import { VersionHistoryPanel } from "./version-history-panel"
-import { CommentPanel } from "./comment-panel"
 import { CollaborationPanel } from "./collaboration-panel"
 import { CodeExecutionPanel } from "./code-execution-panel"
 import { CanvasOutlinePanel, countCanvasSymbols, parseCanvasSymbols } from "./canvas-outline-panel"
 import { useCanvasCodeExecution } from "@/hooks/canvas"
-import { useContextWorkbenchSurfaceFlag } from "@/hooks/context-workbench/use-context-workbench-surface-flag"
 import { useCanvasFeatureFlag } from "@/hooks/canvas/use-canvas-feature-flag"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { ContextWorkbench } from "@/components/context-workbench/context-workbench"
@@ -80,37 +84,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
-/**
- * Container-width threshold (driven by a ResizeObserver on the side-panel
- * frame) at which the tab labels collapse to icon-only. Intentionally
- * distinct from `useIsMobile()`'s 768 px viewport threshold — even on a
- * wide viewport the right rail can be narrow when the user has both
- * rails uncollapsed, so the icon-only swap is local to this panel rather
- * than mirroring the global mobile breakpoint.
- */
-export const CANVAS_SIDE_PANELS_ICON_ONLY_BREAKPOINT = 280
-
 export interface CanvasSidePanelsProps {
   mobile?: boolean
-  /**
-   * The shell has shrunk this column to the activity rail. Only the Workbench
-   * surface honours it — the legacy rail predates the persistent minibar and
-   * exists solely as a one-release rollback path.
-   */
+  /** The shell has shrunk this column to the activity rail. */
   railOnly?: boolean
 }
 
 export function CanvasSidePanels({ mobile = false, railOnly = false }: CanvasSidePanelsProps) {
-  const enabled = useContextWorkbenchSurfaceFlag("canvas")
-  return enabled ? (
-    <CanvasContextWorkbench mobile={mobile} railOnly={railOnly} />
-  ) : (
-    <LegacyCanvasSidePanels />
-  )
+  return <CanvasContextWorkbench mobile={mobile} railOnly={railOnly} />
 }
 
 function CanvasContextWorkbench({ mobile, railOnly }: { mobile: boolean; railOnly: boolean }) {
   const tWorkbench = useTranslations("contextWorkbench")
+  const tPanels = useTranslations("canvas.panels")
   const workbenchInstanceId = useContextWorkbenchInstanceId("canvas")
   const activeId = useArtifactStore((state) => state.activeCanvasId)
   const documents = useArtifactStore((state) => state.canvasDocuments)
@@ -374,7 +360,20 @@ function CanvasContextWorkbench({ mobile, railOnly }: { mobile: boolean; railOnl
     ]
   )
 
-  if (!activeId || !document) return <LegacyCanvasSidePanels />
+  // No document to describe, so there is no resource to build a workbench
+  // around. The rail would render a row of buttons that all lead nowhere, so
+  // show the hint instead — the same one the pre-workbench rail showed here.
+  if (!activeId || !document) {
+    return (
+      <div className="flex h-full min-h-0 min-w-0 flex-col" data-testid="canvas-side-panels-empty">
+        <Empty className="border-0 p-4 text-xs">
+          <EmptyHeader>
+            <EmptyDescription className="text-xs">{tPanels("emptyHint")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </div>
+    )
+  }
 
   const resource: ContextResource = {
     kind: "canvas-document",
@@ -481,249 +480,6 @@ function CanvasWorkbenchActions() {
   )
 }
 
-function LegacyCanvasSidePanels() {
-  const t = useTranslations("canvas.panels")
-  const activeId = useArtifactStore((s) => s.activeCanvasId)
-  const activeRightTab = useCanvasLayoutStore((s) => s.activeRightTab)
-  const setActiveRightTab = useCanvasLayoutStore((s) => s.setActiveRightTab)
-
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const [iconOnly, setIconOnly] = useState(false)
-
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el || typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (!entry) return
-      setIconOnly(entry.contentRect.width < CANVAS_SIDE_PANELS_ICON_ONLY_BREAKPOINT)
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
-
-  const documents = useArtifactStore((s) => s.canvasDocuments)
-  const getCanvasVersions = useArtifactStore((s) => s.getCanvasVersions)
-  const getCommentsForDocument = useCommentStore((s) => s.getCommentsForDocument)
-
-  const tabBadges = useMemo(() => {
-    const doc = documents[activeId ?? ""]
-    const suggestions = doc?.aiSuggestions ?? []
-    const versions = getCanvasVersions(activeId ?? "")
-    const comments = getCommentsForDocument(activeId ?? "")
-    return {
-      suggestions: suggestions.filter((s) => s.status === "pending").length,
-      history: versions.length,
-      comments: comments.filter((c: { resolvedAt?: unknown }) => c.resolvedAt == null).length,
-      collaboration: 0,
-      execution: 0,
-      outline: countCanvasSymbols(parseCanvasSymbols(doc)),
-    }
-  }, [activeId, documents, getCanvasVersions, getCommentsForDocument])
-
-  if (!activeId) {
-    return (
-      <div ref={containerRef} className="flex h-full min-h-0 min-w-0 flex-col">
-        <Empty className="border-0 p-4 text-xs">
-          <EmptyHeader>
-            <EmptyDescription className="text-xs">{t("emptyHint")}</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      </div>
-    )
-  }
-
-  // Wrap each tab's host in a motion container so the rail fades + stagger
-  // animates rather than snapping when the user switches tabs. Radix already
-  // unmounts inactive TabsContent, so AnimatePresence + per-tab key drives
-  // both the enter animation and the underlying stagger.
-  const tabContentMotionProps = {
-    variants: STAGGER_CONTAINER,
-    initial: "initial",
-    animate: "animate",
-    exit: "exit",
-    transition: mobileTransition("fast"),
-    className: "h-full",
-  } as const
-
-  return (
-    <div ref={containerRef} className="flex h-full min-h-0 min-w-0 flex-col">
-      <PluginExtensionSlot
-        point="canvas.sidebar"
-        className="flex flex-col gap-1 border-b bg-muted/20 px-2 py-1 empty:hidden"
-      />
-      <Tabs
-        value={activeRightTab}
-        onValueChange={(value) => setActiveRightTab(value as CanvasRightTab)}
-        className="flex h-full min-h-0 flex-col"
-      >
-        <TabsList className="flex h-auto w-full justify-start gap-0 rounded-none border-b bg-muted/30 p-0">
-          <PanelTab
-            value="suggestions"
-            icon={<Lightbulb className="size-3.5" />}
-            label={t("suggestions", { default: "Suggestions" })}
-            iconOnly={iconOnly}
-            badge={tabBadges.suggestions}
-          />
-          <PanelTab
-            value="history"
-            icon={<HistoryIcon className="size-3.5" />}
-            label={t("history", { default: "History" })}
-            iconOnly={iconOnly}
-            badge={tabBadges.history}
-          />
-          <PanelTab
-            value="comments"
-            icon={<MessageSquare className="size-3.5" />}
-            label={t("comments", { default: "Comments" })}
-            iconOnly={iconOnly}
-            badge={tabBadges.comments}
-          />
-          <PanelTab
-            value="collaboration"
-            icon={<Users className="size-3.5" />}
-            label={t("collaboration", { default: "Collab" })}
-            iconOnly={iconOnly}
-            badge={tabBadges.collaboration}
-          />
-          <PanelTab
-            value="execution"
-            icon={<Play className="size-3.5" />}
-            label={t("execution", { default: "Run" })}
-            iconOnly={iconOnly}
-            badge={tabBadges.execution}
-          />
-          <PanelTab
-            value="outline"
-            icon={<ListTree className="size-3.5" />}
-            label={t("outline", { default: "Outline" })}
-            iconOnly={iconOnly}
-            badge={tabBadges.outline}
-          />
-        </TabsList>
-
-        <AnimatePresence mode="wait" initial={false}>
-          <TabsContent
-            key="suggestions"
-            value="suggestions"
-            className="m-0 flex-1 min-h-0 overflow-hidden"
-          >
-            <motion.div
-              key="suggestions"
-              data-testid="canvas-tab-motion-suggestions"
-              {...tabContentMotionProps}
-            >
-              <SuggestionsHost documentId={activeId} />
-            </motion.div>
-          </TabsContent>
-          <TabsContent key="history" value="history" className="m-0 flex-1 min-h-0 overflow-hidden">
-            <motion.div
-              key="history"
-              data-testid="canvas-tab-motion-history"
-              {...tabContentMotionProps}
-            >
-              <HistoryHost documentId={activeId} />
-            </motion.div>
-          </TabsContent>
-          <TabsContent
-            key="comments"
-            value="comments"
-            className="m-0 flex-1 min-h-0 overflow-hidden"
-          >
-            <motion.div
-              key="comments"
-              data-testid="canvas-tab-motion-comments"
-              {...tabContentMotionProps}
-            >
-              <CommentsHost documentId={activeId} />
-            </motion.div>
-          </TabsContent>
-          <TabsContent
-            key="collaboration"
-            value="collaboration"
-            className="m-0 flex-1 min-h-0 overflow-hidden"
-          >
-            <motion.div
-              key="collaboration"
-              data-testid="canvas-tab-motion-collaboration"
-              {...tabContentMotionProps}
-            >
-              <CollaborationHost documentId={activeId} />
-            </motion.div>
-          </TabsContent>
-          <TabsContent
-            key="execution"
-            value="execution"
-            className="m-0 flex-1 min-h-0 overflow-hidden"
-          >
-            <motion.div
-              key="execution"
-              data-testid="canvas-tab-motion-execution"
-              {...tabContentMotionProps}
-            >
-              <ExecutionHost documentId={activeId} />
-            </motion.div>
-          </TabsContent>
-          <TabsContent key="outline" value="outline" className="m-0 flex-1 min-h-0 overflow-hidden">
-            <motion.div
-              key="outline"
-              data-testid="canvas-tab-motion-outline"
-              {...tabContentMotionProps}
-            >
-              <CanvasOutlinePanel documentId={activeId} />
-            </motion.div>
-          </TabsContent>
-        </AnimatePresence>
-      </Tabs>
-    </div>
-  )
-}
-
-interface PanelTabProps {
-  value: string
-  icon: React.ReactNode
-  label: string
-  iconOnly: boolean
-  badge?: number
-}
-
-function PanelTab({ value, icon, label, iconOnly, badge }: PanelTabProps) {
-  const showBadge = badge !== undefined && badge > 0
-  const trigger = (
-    <TabsTrigger
-      value={value}
-      aria-label={label}
-      className={cn(
-        "h-9 flex-1 rounded-none border-b-2 border-transparent text-xs data-[state=active]:border-primary data-[state=active]:bg-background",
-        iconOnly ? "px-1" : "px-2"
-      )}
-    >
-      <span className="flex items-center justify-center gap-1.5">
-        {icon}
-        {!iconOnly && <span className="truncate">{label}</span>}
-        {showBadge && (
-          <Badge
-            variant="default"
-            className="ml-0.5 h-3.5 min-w-[14px] rounded-full px-1 py-0 text-[9px] font-medium leading-none"
-          >
-            {badge > 99 ? "99+" : badge}
-          </Badge>
-        )}
-      </span>
-    </TabsTrigger>
-  )
-  if (!iconOnly) return trigger
-  return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-      <TooltipContent side="bottom">
-        {label}
-        {showBadge && ` (${badge})`}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
 /**
  * Wraps the Cognia SuggestionsPanel with the active document's
  * suggestions list pulled from the artifact store.
@@ -826,46 +582,6 @@ function HistoryHost({ documentId }: { documentId: string }) {
 function AutoSaveTag() {
   const tRoot = useTranslations("canvas")
   return <>{tRoot("autoTag")}</>
-}
-
-/**
- * Renders the Cognia CommentPanel inside a Sheet trigger button.
- */
-function CommentsHost({ documentId }: { documentId: string }) {
-  const t = useTranslations("canvas.panels")
-  const getCommentsForDocument = useCommentStore((s) => s.getCommentsForDocument)
-  const comments = getCommentsForDocument(documentId)
-  const unresolved = comments.filter((c) => c.resolvedAt == null)
-
-  if (comments.length === 0) {
-    return (
-      <Empty className="h-full border-0">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <MessageSquare />
-          </EmptyMedia>
-          <EmptyDescription className="text-xs">{t("commentsEmpty")}</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    )
-  }
-
-  return (
-    <div className="space-y-2 p-3">
-      <p className="text-xs text-muted-foreground">
-        {t("commentsSummary", { count: comments.length, unresolved: unresolved.length })}
-      </p>
-      <CommentPanel
-        documentId={documentId}
-        trigger={
-          <Button size="sm" variant="outline" className="w-full text-xs">
-            <MessageSquare className="mr-2 size-3.5" />
-            {t("openComments", { default: "Open comments" })}
-          </Button>
-        }
-      />
-    </div>
-  )
 }
 
 /**

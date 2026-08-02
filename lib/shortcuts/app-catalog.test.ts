@@ -42,3 +42,31 @@ describe("app-catalog", () => {
     expect(getDefaultAcceptedChords("does.not.exist")).toEqual([])
   })
 })
+
+describe("skills.record", () => {
+  it("is registered as a desktop-only app shortcut", () => {
+    // `when: "platform.tauri"` is what makes it inert in the web build with no
+    // extra guard at the call site.
+    const descriptor = getAppShortcutDescriptor("skills.record")
+    expect(descriptor).toMatchObject({
+      scope: "app",
+      category: "app.skills",
+      defaultChord: "ctrl+alt+r",
+      when: "platform.tauri",
+      labelKey: "settings.shortcuts.catalog.skillsRecord",
+    })
+  })
+
+  it("does not collide with another catalog entry", () => {
+    const chords = APP_SHORTCUT_CATALOG.filter(
+      (d) => d.id !== "skills.record" && d.defaultChord === "ctrl+alt+r"
+    )
+    expect(chords).toEqual([])
+  })
+
+  it("is not a bare letter like its panel-scoped siblings", () => {
+    // The other `skills.*` chords are scoped by the panel's mount; this one is
+    // global, so a bare letter would swallow typing on every route.
+    expect(getDefaultAcceptedChords("skills.record")).toEqual(["ctrl+alt+r"])
+  })
+})

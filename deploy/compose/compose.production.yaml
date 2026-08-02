@@ -1,0 +1,78 @@
+# Production override for any Linux VM or bare-metal host.
+# Usage: docker compose -f docker-compose.yml -f compose.production.yaml --profile server up -d --wait
+# Every *_IMAGE value is validated by scripts/validate-deployment-target.mjs and must use @sha256:.
+services:
+  signaling:
+    image: ${SIGNALING_IMAGE:?set a digest-pinned SIGNALING_IMAGE}
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid,nodev
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 128
+    cpus: 0.50
+    mem_limit: 256m
+    logging: &production-logging
+      driver: json-file
+      options: { max-size: 10m, max-file: "5", compress: "true" }
+
+  share:
+    image: ${SHARE_IMAGE:?set a digest-pinned SHARE_IMAGE}
+    environment:
+      SHARE_UPLOAD_SECRET: ""
+      SHARE_UPLOAD_SECRET_FILE: /run/secrets/share_upload_secret
+    secrets: [share_upload_secret]
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid,nodev
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 128
+    cpus: 0.50
+    mem_limit: 512m
+    logging: *production-logging
+
+  cognia-server:
+    image: ${COGNIA_SERVER_IMAGE:?set a digest-pinned COGNIA_SERVER_IMAGE}
+    environment:
+      COGNIA_MASTER_KEY: ""
+      COGNIA_MASTER_KEY_FILE: /run/cognia-secrets/master-key
+      COGNIA_MASTER_KEY_DIR: /run/cognia-secrets/master-keys
+      COGNIA_BACKUP_KEY_DIR: /run/cognia-secrets/backup-keys
+      COGNIA_BACKUP_KEY_VERSION: ${COGNIA_CONFIG_REVISION:?set COGNIA_CONFIG_REVISION}
+      COGNIA_S3_ACCESS_KEY_FILE: /run/cognia-secrets/s3-access-key
+      COGNIA_S3_SECRET_KEY_FILE: /run/cognia-secrets/s3-secret-key
+      COGNIA_S3_ENDPOINT: ${COGNIA_S3_ENDPOINT:?set COGNIA_S3_ENDPOINT}
+      COGNIA_S3_REGION: ${COGNIA_S3_REGION:-auto}
+      COGNIA_S3_BUCKET: ${COGNIA_S3_BUCKET:?set COGNIA_S3_BUCKET}
+      COGNIA_S3_PATH_STYLE: ${COGNIA_S3_PATH_STYLE:-false}
+      COGNIA_BACKUP_PREFIX: ${COGNIA_BACKUP_PREFIX:-cognia}
+      COGNIA_REQUIRE_OBJECT_BACKUP: "true"
+      COGNIA_RUNNER_IMAGE: ${COGNIA_RUNNER_IMAGE:?set a digest-pinned COGNIA_RUNNER_IMAGE}
+      COGNIA_WORKSPACE_RUNTIME_IMAGE: ${COGNIA_WORKSPACE_RUNTIME_IMAGE:?set a digest-pinned COGNIA_WORKSPACE_RUNTIME_IMAGE}
+      COGNIA_CONFIG_REVISION: ${COGNIA_CONFIG_REVISION:?set COGNIA_CONFIG_REVISION}
+      COGNIA_METRICS_OPERATOR_TOKEN_FILE: /run/cognia-secrets/metrics-operator-token
+    volumes:
+      - ${COGNIA_SECRET_ROOT:?set COGNIA_SECRET_ROOT}:/run/cognia-secrets:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g,nosuid,nodev
+      - /run:size=64m,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    pids_limit: 1024
+    cpus: 4.0
+    mem_limit: 8g
+    stop_grace_period: 300s
+    healthcheck:
+      test: [CMD, curl, -kfsS, https://localhost:27890/api/v1/readyz]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 60s
+    logging: *production-logging
+
+secrets:
+  share_upload_secret:
+    file: ${SHARE_UPLOAD_SECRET_FILE:?set SHARE_UPLOAD_SECRET_FILE}

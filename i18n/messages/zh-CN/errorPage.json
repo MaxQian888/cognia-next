@@ -40,6 +40,7 @@
   "globalDescription": "应用程序的主布局加载失败。可以尝试恢复，或通过标题栏关闭窗口。",
   "globalTitle": "Cognia 已停止工作",
   "goHome": "返回首页",
+  "hideStack": "收起调用栈",
   "openLogs": "打开日志",
   "recentErrors": {
     "cascadeHint": "短时间内发生了多个错误——这可能是连锁故障。",
@@ -53,6 +54,7 @@
     "reportIssue": "报告问题"
   },
   "retry": "重试",
+  "showStack": "查看调用栈",
   "title": "出错了",
   "traceTitle": "错误详情",
   "tryAgainWhenOnline": "重试"

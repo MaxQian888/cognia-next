@@ -4,7 +4,9 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { UIMessage } from "ai"
 import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual"
 import { useTranslations } from "next-intl"
-import { BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, ListTreeIcon } from "lucide-react"
+import { ChevronLeftIcon, ChevronRightIcon, ListTreeIcon } from "lucide-react"
+import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
+import { BookmarkIcon as AnimatedBookmarkIcon } from "@/components/ui/bookmark"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -554,7 +556,12 @@ export const ConversationTimeline = memo(function ConversationTimeline({
                 onClick={() => setOnlyBookmarked((v) => !v)}
                 data-testid="timeline-filter-bookmarked"
               >
-                <BookmarkIcon className={cn("size-3.5", onlyBookmarked && "fill-current")} />
+                <AnimatedActionIcon
+                  icon={AnimatedBookmarkIcon}
+                  size={14}
+                  animateOnChange={onlyBookmarked}
+                  className={onlyBookmarked ? "fill-current" : undefined}
+                />
               </Button>
               <Button
                 variant="ghost"

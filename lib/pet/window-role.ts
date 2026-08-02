@@ -15,7 +15,8 @@
 
 import { isTauri } from "@/lib/platform/detect"
 
-export type PetWindowRole = "main" | "overlay" | "popup" | "island" | "selection-toolbar" | "web"
+export type PetWindowRole =
+  "main" | "overlay" | "popup" | "island" | "selection-toolbar" | "tray-panel" | "web"
 
 /** Label given to the desktop-pet overlay window by the Rust `open_pet_window`. */
 export const PET_WINDOW_LABEL = "pet"
@@ -35,6 +36,12 @@ export const ISLAND_WINDOW_LABEL = "island"
 
 /** Label for the transient system text-selection toolbar window. */
 export const SELECTION_TOOLBAR_WINDOW_LABEL = "selection-toolbar"
+
+/**
+ * Label given to the tray quick-panel popover by the Rust `open_tray_panel`.
+ * Kept in lockstep with `tray/panel.rs:TRAY_PANEL_LABEL`.
+ */
+export const TRAY_PANEL_WINDOW_LABEL = "tray-panel"
 
 interface TauriInternalsShape {
   metadata?: {
@@ -79,6 +86,7 @@ export function getPetWindowRole(
   if (label === PET_POPUP_WINDOW_LABEL) return "popup"
   if (label === ISLAND_WINDOW_LABEL) return "island"
   if (label === SELECTION_TOOLBAR_WINDOW_LABEL) return "selection-toolbar"
+  if (label === TRAY_PANEL_WINDOW_LABEL) return "tray-panel"
   return "main"
 }
 
@@ -91,7 +99,13 @@ export function getPetWindowRole(
  * would double-award XP).
  */
 export function isSecondaryOverlayRole(role: PetWindowRole): boolean {
-  return role === "overlay" || role === "popup" || role === "island" || role === "selection-toolbar"
+  return (
+    role === "overlay" ||
+    role === "popup" ||
+    role === "island" ||
+    role === "selection-toolbar" ||
+    role === "tray-panel"
+  )
 }
 
 /**

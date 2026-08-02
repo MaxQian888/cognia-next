@@ -147,6 +147,7 @@
         "label": "沙盒化 Bash / Edit / Write"
       },
       "tier": {
+        "cuaDesktop": "绑定的沙箱桌面",
         "description": "覆盖应用默认值。选择继承时使用 设置 → 沙盒 中的默认。",
         "inherit": "继承应用默认",
         "label": "沙盒层级",

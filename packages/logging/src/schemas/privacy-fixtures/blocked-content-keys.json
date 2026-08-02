@@ -1,0 +1,22 @@
+{
+  "name": "blocked content keys are removed and named",
+  "debugSession": false,
+  "input": {
+    "message": "Tool call finished",
+    "data": {
+      "prompt": "summarize this document",
+      "toolOutput": "the document says ...",
+      "toolName": "read_file",
+      "durationMs": 12
+    }
+  },
+  "expected": {
+    "payload": {
+      "message": "Tool call finished",
+      "data": { "toolName": "read_file", "durationMs": 12 }
+    },
+    "removedFields": ["payload.data.prompt", "payload.data.toolOutput"],
+    "capturePolicy": "metadata-only",
+    "contentCaptured": false
+  }
+}

@@ -99,7 +99,7 @@ describe("/model, /agents, /mcp open settings panels", () => {
 })
 
 describe("/permissions handler — cycles modes", () => {
-  it("starts at null and cycles forward", async () => {
+  it("starts at null and cycles the SAFE core only", async () => {
     const cycle: (string | null)[] = []
     let cur: string | null = null
     for (let i = 0; i < 5; i++) {
@@ -110,7 +110,16 @@ describe("/permissions handler — cycles modes", () => {
       cur = c._modes[0] ?? null
       cycle.push(cur)
     }
-    expect(cycle).toEqual(["acceptEdits", "plan", "bypassPermissions", null, "acceptEdits"])
+    // `bypassPermissions` must never appear: a key-repeat may not silently
+    // escalate the session into a danger mode (permission-mode-meta.ts).
+    expect(cycle).toEqual(["acceptEdits", "plan", null, "acceptEdits", "plan"])
+    expect(cycle).not.toContain("bypassPermissions")
+  })
+
+  it("de-escalates out of a power mode instead of cycling within it", async () => {
+    const c = ctx({ currentPermissionMode: "bypassPermissions" as never })
+    await find("permissions").handler!(c)
+    expect(c._modes).toEqual([null])
   })
 })
 
@@ -127,11 +136,16 @@ describe("/permission-mode handler", () => {
     expect(c._modes).toEqual([null])
   })
 
-  it.each(["acceptEdits", "plan", "bypassPermissions"])("sets %s directly", async (mode) => {
-    const c = ctx({ args: mode })
-    await find("permission-mode").handler!(c)
-    expect(c._modes).toEqual([mode])
-  })
+  // Explicit selection is the sanctioned route to EVERY mode, including the
+  // advanced ones the quick cycle withholds.
+  it.each(["acceptEdits", "plan", "bypassPermissions", "auto", "dontAsk"])(
+    "sets %s directly",
+    async (mode) => {
+      const c = ctx({ args: mode })
+      await find("permission-mode").handler!(c)
+      expect(c._modes).toEqual([mode])
+    }
+  )
 
   it("rejects an unknown mode with a system message", async () => {
     const c = ctx({ args: "weird" })

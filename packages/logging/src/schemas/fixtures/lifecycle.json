@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "eventId": "01J9V0S8Q8K3M6ZP4WD5X2N7IJ",
+  "occurredAt": "2026-08-01T09:16:05.000Z",
+  "kind": "lifecycle",
+  "severity": "error",
+  "name": "recovery.checkpoint.failed",
+  "code": "recovery.checkpoint.failed",
+  "scope": {
+    "tenantId": "tenant-acme",
+    "installationId": "install-0002",
+    "runtime": "tauri",
+    "processId": "main-43",
+    "module": "recovery",
+    "buildId": "build-2026-08-01-01",
+    "appVersion": "0.1.0"
+  },
+  "correlation": {},
+  "privacy": {
+    "redactionVersion": "privacy-v1-2026-08-01",
+    "capturePolicy": "metadata-only",
+    "contentCaptured": false,
+    "removedFields": []
+  },
+  "delivery": {
+    "spoolSequence": 1,
+    "flushWatermark": 0
+  },
+  "payload": {
+    "message": "Recovery checkpoint failed",
+    "data": { "subsystem": "plugins", "reasonCode": "plugins.probe_failed" },
+    "phase": "checkpoint"
+  }
+}

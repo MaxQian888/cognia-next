@@ -15,7 +15,7 @@ import { useRouter } from "next/navigation"
 import { useLiveQuery } from "dexie-react-hooks"
 import { ExternalLinkIcon } from "lucide-react"
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
@@ -119,121 +119,111 @@ export function SidecarTab() {
   }
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">{t("title")}</CardTitle>
-          <CardDescription className="text-xs">{t("description")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <dl className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
-            <div>
-              <dt className="text-xs text-muted-foreground">{t("statusLabel")}</dt>
-              <dd className="mt-1">
-                {!desktop ? (
-                  <Badge variant="outline">{t("webOnly")}</Badge>
-                ) : ready === true ? (
-                  <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
-                    {t("running")}
-                  </Badge>
-                ) : ready === false ? (
-                  <Badge variant="outline" className="bg-destructive/15 text-destructive">
-                    {t("stopped")}
-                  </Badge>
-                ) : (
-                  <Badge variant="outline">{t("checking")}</Badge>
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">{t("sdkSessionLabel")}</dt>
-              <dd className="mt-1 truncate font-mono text-xs">{sdkSessionId ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">{t("sdkVersionLabel")}</dt>
-              <dd className="mt-1 flex items-center gap-1 font-mono text-xs">
-                {sidecarInfo.sdkVersion ? (
-                  <a
-                    href={`https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk/v/${sidecarInfo.sdkVersion}`}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="inline-flex items-center gap-0.5 underline-offset-4 hover:underline"
-                    data-testid="sidecar-sdk-version"
-                  >
-                    {sidecarInfo.sdkVersion}
-                    <ExternalLinkIcon className="size-3" />
-                  </a>
-                ) : (
-                  <span className="text-muted-foreground">—</span>
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">{t("sidecarVersionLabel")}</dt>
-              <dd className="mt-1 font-mono text-xs">
-                {sidecarInfo.sidecarVersion ?? <span className="text-muted-foreground">—</span>}
-              </dd>
-            </div>
-          </dl>
-
-          <div className="flex flex-col gap-2 md:flex-row md:items-center">
-            <Button
-              onClick={() => void handleRestart()}
-              disabled={!desktop || busy}
-              aria-disabled={!desktop || busy}
-              aria-label={t("restartBtn")}
-            >
-              {t("restartBtn")}
-            </Button>
-            {!desktop && (
-              <p className="text-xs text-muted-foreground" role="status">
-                {t("desktopOnlyHint")}
-              </p>
-            )}
+    <SettingsStack>
+      <SettingsBlock title={t("title")} description={t("description")}>
+        <dl className="grid grid-cols-1 gap-3 text-sm @md/settings-stack:grid-cols-2">
+          <div>
+            <dt className="text-xs text-muted-foreground">{t("statusLabel")}</dt>
+            <dd className="mt-1">
+              {!desktop ? (
+                <Badge variant="outline">{t("webOnly")}</Badge>
+              ) : ready === true ? (
+                <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                  {t("running")}
+                </Badge>
+              ) : ready === false ? (
+                <Badge variant="outline" className="bg-destructive/15 text-destructive">
+                  {t("stopped")}
+                </Badge>
+              ) : (
+                <Badge variant="outline">{t("checking")}</Badge>
+              )}
+            </dd>
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">{t("countsTitle")}</CardTitle>
-          <CardDescription className="text-xs">{t("countsDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <CountTile
-              label={t("countSessions")}
-              value={sessionCount}
-              onClick={() => goTo("agent-runtime", { agentRuntimeTab: "sessions" })}
-              testId="count-tile-sessions"
-            />
-            <CountTile
-              label={t("countSlashCommands")}
-              value={slashCommandCount}
-              onClick={() => goTo("slash-commands")}
-              testId="count-tile-slash-commands"
-            />
-            <CountTile
-              label={t("countHooks")}
-              value={null}
-              hint={t("countHooksHint")}
-              onClick={() => goTo("hooks")}
-              testId="count-tile-hooks"
-            />
-            <CountTile
-              label={t("countMcpServers")}
-              value={`${mcpEnabledCount}/${mcpTotalCount}`}
-              onClick={() => goTo("mcp")}
-              testId="count-tile-mcp"
-            />
+          <div>
+            <dt className="text-xs text-muted-foreground">{t("sdkSessionLabel")}</dt>
+            <dd className="mt-1 truncate font-mono text-xs">{sdkSessionId ?? "—"}</dd>
           </div>
-        </CardContent>
-      </Card>
+          <div>
+            <dt className="text-xs text-muted-foreground">{t("sdkVersionLabel")}</dt>
+            <dd className="mt-1 flex items-center gap-1 font-mono text-xs">
+              {sidecarInfo.sdkVersion ? (
+                <a
+                  href={`https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk/v/${sidecarInfo.sdkVersion}`}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center gap-0.5 underline-offset-4 hover:underline"
+                  data-testid="sidecar-sdk-version"
+                >
+                  {sidecarInfo.sdkVersion}
+                  <ExternalLinkIcon className="size-3" />
+                </a>
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted-foreground">{t("sidecarVersionLabel")}</dt>
+            <dd className="mt-1 font-mono text-xs">
+              {sidecarInfo.sidecarVersion ?? <span className="text-muted-foreground">—</span>}
+            </dd>
+          </div>
+        </dl>
+
+        <div className="flex flex-col gap-2 @md/settings-stack:flex-row @md/settings-stack:items-center">
+          <Button
+            onClick={() => void handleRestart()}
+            disabled={!desktop || busy}
+            aria-disabled={!desktop || busy}
+            aria-label={t("restartBtn")}
+          >
+            {t("restartBtn")}
+          </Button>
+          {!desktop && (
+            <p className="text-xs text-muted-foreground" role="status">
+              {t("desktopOnlyHint")}
+            </p>
+          )}
+        </div>
+      </SettingsBlock>
+
+      <SettingsBlock title={t("countsTitle")} description={t("countsDescription")}>
+        {/* Jump-off counters: one divided strip, so four numbers do not arrive
+            as four floating cards inside the runtime pane. */}
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border/60 @md/settings-stack:grid-cols-4">
+          <CountTile
+            label={t("countSessions")}
+            value={sessionCount}
+            onClick={() => goTo("agent-runtime", { agentRuntimeTab: "sessions" })}
+            testId="count-tile-sessions"
+          />
+          <CountTile
+            label={t("countSlashCommands")}
+            value={slashCommandCount}
+            onClick={() => goTo("slash-commands")}
+            testId="count-tile-slash-commands"
+          />
+          <CountTile
+            label={t("countHooks")}
+            value={null}
+            hint={t("countHooksHint")}
+            onClick={() => goTo("hooks")}
+            testId="count-tile-hooks"
+          />
+          <CountTile
+            label={t("countMcpServers")}
+            value={`${mcpEnabledCount}/${mcpTotalCount}`}
+            onClick={() => goTo("mcp")}
+            testId="count-tile-mcp"
+          />
+        </div>
+      </SettingsBlock>
 
       <SdkCapabilitiesCard />
 
       <CliSyncCard />
-    </div>
+    </SettingsStack>
   )
 }
 
@@ -251,7 +241,7 @@ function CountTile({ label, value, hint, onClick, testId }: CountTileProps) {
     <button
       type="button"
       onClick={onClick}
-      className="rounded-md border bg-card p-3 text-left transition-colors hover:bg-accent focus:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="bg-background p-3 text-left transition-colors hover:bg-accent focus:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:-outline-offset-2"
       data-testid={testId}
     >
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>

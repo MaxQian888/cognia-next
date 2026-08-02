@@ -2,6 +2,37 @@ import { createSidecarFeatureCallClient, validateOpenCodeV2Discovery } from "./f
 import type { ClaudeEvent } from "@cognia/agent-config-types"
 
 describe("sidecar feature-call LanguageModelV3 proxy", () => {
+  it("forwards a protocol adapter spec for a diagnostic-compatible custom provider", async () => {
+    const calls: Array<Record<string, unknown> | undefined> = []
+    const client = createSidecarFeatureCallClient({
+      randomUUID: () => "custom-stream",
+      subscribe: async () => () => undefined,
+      call: async (_command, args) => {
+        calls.push(args)
+      },
+    })
+    const spec = {
+      kind: "openai-compatible-variant" as const,
+      urlTemplate: "{baseURL}/chat/completions",
+      responsePaths: { textDelta: "choices.0.delta.content" },
+    }
+    const model = client.languageModel({
+      modelId: "custom-model",
+      providerId: "custom-provider",
+      credentials: { protocol: "plugin:custom", baseURL: "https://gateway.example/v1" },
+      protocolAdapterSpec: spec,
+    })
+
+    await model.doStream({ prompt: [] } as never)
+
+    expect(calls[0]).toEqual({
+      request: expect.objectContaining({
+        requestId: "custom-stream",
+        protocolAdapterSpec: spec,
+      }),
+    })
+  })
+
   it("correlates generate results while sending only default-chain selection metadata", async () => {
     const calls: Array<[string, Record<string, unknown> | undefined]> = []
     let listener: ((event: ClaudeEvent) => void) | undefined

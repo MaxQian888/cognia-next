@@ -17,6 +17,7 @@ import { __resetDbForTesting } from "@/lib/db/schema"
 
 function envelope(sequence: number, attemptId = "a1"): AgentEventEnvelope {
   return {
+    schemaVersion: 1,
     eventId: `s1:${attemptId}:${sequence}`,
     sequence,
     sessionId: "s1",

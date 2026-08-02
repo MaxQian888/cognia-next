@@ -68,4 +68,27 @@ describe("appendPlanContext", () => {
     expect(out).toBe("base")
     expect(out).not.toContain("john.doe@example.com")
   })
+
+  it("skips injection when PII hides in step params the section never renders", () => {
+    // The structured gate's reason for existing: `renderPlanSystemSection`
+    // prints titles/descriptions only, so a check on the rendered text alone
+    // would ship this `tool_call` input straight to the model.
+    const pii = plan("executing")
+    pii.steps = [
+      {
+        id: "s1",
+        title: "email the customer",
+        kind: "tool_call",
+        status: "in_progress",
+        order: 0,
+        dependencies: [],
+        params: {
+          kind: "tool_call",
+          toolName: "send_mail",
+          input: { to: "john.doe@example.com" },
+        },
+      },
+    ]
+    expect(appendPlanContext({ appendSystemPrompt: "base", activePlan: pii })).toBe("base")
+  })
 })

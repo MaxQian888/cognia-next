@@ -131,5 +131,8 @@
   "webCardDesc": "网络搜索与抓取（web_search / web_fetch）。默认开启——浏览器与 CLI 均可用。web_search 需要在 设置 → 搜索 中配置 provider。",
   "webCardTitle": "网络",
   "webNativeAnthropicDesc": "在 Anthropic 链路下，改用 Claude 内置的 WebSearch / WebFetch（服务端抽取 + 引用），而非多 provider 工具。其他 provider 仍用多 provider 工具。",
-  "webNativeAnthropicTitle": "使用 Anthropic 原生网络工具"
+  "webNativeAnthropicTitle": "使用 Anthropic 原生网络工具",
+  "vectorToolDesc": "让 Agent 在当前项目的向量记忆中存取文档。集合按关联项目隔离；未关联项目的会话无法使用这些工具。",
+  "vectorToolDesktopOnly": "需要桌面端——向量记忆运行在本机原生向量库上。",
+  "vectorToolTitle": "向量记忆工具"
 }

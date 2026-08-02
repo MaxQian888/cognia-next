@@ -19,6 +19,17 @@ const VOLATILE_KEYS = new Set([
   "attemptId",
   "providerAttemptId",
   "turnId",
+  // Contract-encoding metadata, not execution configuration. The same route,
+  // model, host and credential describe the same execution whether the spec
+  // is serialised as v1 or v2, so `specVersion` must not change identity —
+  // otherwise every in-flight run's fingerprint stops matching at the upgrade
+  // boundary and recovery/ticket-remint comparisons all miss.
+  "specVersion",
+  // `capabilities.support` is derived from `runtimeAdapter` + the effective
+  // capability set, both of which are already hashed. Including it would add
+  // no information while churning the fingerprint every time a capability
+  // gains a verdict.
+  "support",
 ])
 
 function canonicalize(value: unknown): unknown {

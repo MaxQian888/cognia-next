@@ -291,7 +291,7 @@ describe("AgentTeamEditor", () => {
     render(<AgentTeamEditor team={team("/repo")} />)
     // Tree open → openFile.
     ;(captured.tree as { onOpenFile: (r: string) => void }).onOpenFile("a.ts")
-    expect(editorState.openFile).toHaveBeenCalledWith("a.ts")
+    expect(editorState.openFile).toHaveBeenCalledWith("a.ts", undefined)
     // Tabs select/close/saveAll wired to the hook.
     const tabs = captured.tabs as {
       onSelect: (r: string) => void

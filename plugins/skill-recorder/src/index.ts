@@ -1,21 +1,34 @@
 /**
- * Skill Recorder — built-in plugin (record-and-replay).
+ * Skill Recorder — built-in plugin.
  *
- * Registers:
- *   * a `/record-skill` slash command that opens the recorder modal (the
- *     verified-mounted plugin UI surface; see `ctx.modal`),
- *   * a read-only `record_skill_status` agent tool so an agent can answer
- *     "is a recording running?".
+ * This plugin is the recorder's **permission and feature owner**, not its UI.
+ * Its manifest declares the three native grants (`native:input`,
+ * `native:screen`, `media:image:write`) that a recording needs, and its enabled
+ * state is what `record_preflight` reads to decide whether recording is allowed
+ * at all.
  *
- * Desktop-only: recording needs a native global input hook. On a non-Tauri
- * runtime the slash command returns a "desktop only" message and the tool
- * returns `{ ok: false }` rather than throwing.
+ * The UI moved out deliberately. The recorder is a five-stage flow with a
+ * floating always-on-top controller, crash recovery, and four entry points on
+ * four different routes — none of which fits inside `ctx.modal`, and all of
+ * which need the same live state. So this file does three small things:
+ *
+ *   1. publishes availability, so every entry point (Skills toolbar, command
+ *      palette, `/record-skill`, the `skills.record` shortcut) disappears when
+ *      the plugin is disabled — without any of them importing plugin internals;
+ *   2. routes its declared `record-skill` command to the global recorder;
+ *   3. exposes a read-only `record_skill_status` agent tool.
+ *
+ * Desktop-only: recording needs a native global input hook. The manifest marks
+ * browser and mobile `blocked`, so `activate` never runs there.
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { isTauri } from "@/lib/tauri"
 import { recordStatus } from "@/lib/skills/recording/recorder-client"
-import { RecordSkillModal } from "./ui/record-skill-modal"
+import {
+  clearRecorderAvailability,
+  setRecorderAvailability,
+} from "@/lib/skills/recording/recorder-availability"
 import manifestJson from "../plugin.json"
 
 const definition: PluginDefinition = {
@@ -26,6 +39,10 @@ const definition: PluginDefinition = {
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("skill-recorder plugin activated")
+
+    // Publish before anything else: the entry points read this to decide
+    // whether to render at all.
+    setRecorderAvailability({ available: true, pluginId: ctx.pluginId })
 
     ctx.agent?.registerTool?.({
       name: "record_skill_status",
@@ -44,8 +61,27 @@ const definition: PluginDefinition = {
           return { ok: false as const, error: "desktop-only" }
         }
         try {
+          // The store is the authority on flow phase; the native status is the
+          // authority on whether capture is actually running. Prefer the store
+          // when it has a session, so "paused" and "reviewing" are not reported
+          // as "not recording".
+          const { recorderStatusSnapshot } = await import("@/stores/skills/recorder-store")
+          const local = recorderStatusSnapshot()
+          if (local.phase !== "idle") {
+            return {
+              ok: true as const,
+              recording: local.recording,
+              phase: local.phase,
+              stepCount: local.stepCount,
+            }
+          }
           const status = await recordStatus()
-          return { ok: true as const, recording: status.recording, stepCount: status.stepCount }
+          return {
+            ok: true as const,
+            recording: status.recording,
+            phase: status.phase ?? "idle",
+            stepCount: status.stepCount,
+          }
         } catch (err) {
           return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
         }
@@ -63,14 +99,16 @@ const definition: PluginDefinition = {
           ctx.ui?.showToast?.("Skill recording is desktop-only.", "error")
           return true
         }
-        if (!ctx.modal) {
-          ctx.ui?.showToast?.("The recorder UI is unavailable in this surface.", "error")
-          return true
-        }
-        ctx.modal.openModal(RecordSkillModal)
+        const { openRecorder } = await import("@/stores/skills/recorder-store")
+        openRecorder("plugin-command")
         return true
       },
     }
+  },
+  deactivate: async () => {
+    // Withdraws every entry point at once. Without this the toolbar button and
+    // the shortcut would survive a disable and fail at the preflight instead.
+    clearRecorderAvailability()
   },
 }
 

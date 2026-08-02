@@ -131,7 +131,16 @@ jest.mock("@/stores/settings", () => ({
   ),
 }))
 jest.mock("@/stores/terminal/terminal-store", () => {
-  const state = { sessions: { "s-1": { promptBoundaries: [], cwd: "/proj" } } }
+  const state = {
+    sessions: { "s-1": { promptBoundaries: [], cwd: "/proj" } },
+    // Backpressure flag map + its setter — the instance reads the flag for the
+    // session chip and clears it on teardown.
+    outputThrottled: {} as Record<string, boolean>,
+    setOutputThrottled: jest.fn((id: string, throttled: boolean) => {
+      if (throttled) state.outputThrottled[id] = true
+      else delete state.outputThrottled[id]
+    }),
+  }
   const useTerminalStore = Object.assign(
     jest.fn((selector: (s: unknown) => unknown) => selector(state)),
     { getState: () => state }
@@ -150,7 +159,7 @@ class MockResizeObserver {
 
 const sessionRegistry: {
   current: {
-    onData: jest.Mock
+    onData: jest.Mock<() => void, [(data: Uint8Array) => void]>
     onIntegration: jest.Mock
     onExit: jest.Mock
     onControlState: jest.Mock
@@ -159,12 +168,16 @@ const sessionRegistry: {
     resize: jest.Mock
     kill: jest.Mock
     takeControl: jest.Mock
+    setFlowControl: jest.Mock<Promise<boolean>, [paused: boolean]>
     info: { id: string; sandboxed?: boolean }
   } | null
 } = { current: null }
 
 jest.mock("@/lib/terminal/session-registry", () => ({
   getLiveSession: () => sessionRegistry.current,
+  // The session chip subscribes so live facts (controller, sandbox, degraded
+  // integration) stop being read stale during render.
+  subscribeLiveSessions: () => () => undefined,
 }))
 
 // Controllable autocomplete hook — the hook internals are unit-tested
@@ -212,10 +225,10 @@ import { Terminal as MockTerminal } from "@xterm/xterm"
 import { TerminalInstance } from "./terminal-instance"
 import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
 
-function makeFakeSession() {
+function makeFakeSession(): NonNullable<(typeof sessionRegistry)["current"]> {
   return {
     info: { id: "s-1" },
-    onData: jest.fn(() => () => undefined),
+    onData: jest.fn<() => void, [(data: Uint8Array) => void]>(() => () => undefined),
     onIntegration: jest.fn(() => () => undefined),
     onExit: jest.fn(() => () => undefined),
     onControlState: jest.fn(() => () => undefined),
@@ -224,6 +237,7 @@ function makeFakeSession() {
     resize: jest.fn(async () => undefined),
     kill: jest.fn(async () => undefined),
     takeControl: jest.fn(async () => undefined),
+    setFlowControl: jest.fn<Promise<boolean>, [paused: boolean]>(async () => true),
   }
 }
 
@@ -408,6 +422,40 @@ describe("TerminalInstance", () => {
     expect(mockTermInstance.dispose).toHaveBeenCalled()
   })
 
+  it("releases host flow control after an in-flight pause when unmounted", async () => {
+    let emitData: ((data: Uint8Array) => void) | null = null
+    let resolvePause: ((supported: boolean) => void) | null = null
+    const session = makeFakeSession()
+    session.onData.mockImplementation((listener: (data: Uint8Array) => void) => {
+      emitData = listener
+      return () => undefined
+    })
+    session.setFlowControl.mockImplementation((paused: boolean) => {
+      if (!paused) return Promise.resolve(true)
+      return new Promise<boolean>((resolve) => {
+        resolvePause = resolve
+      })
+    })
+    sessionRegistry.current = session
+
+    const { unmount } = render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+
+    act(() => {
+      emitData?.(new Uint8Array(5 * 1024 * 1024))
+    })
+    await flushAsync()
+    expect(session.setFlowControl).toHaveBeenCalledWith(true)
+
+    unmount()
+    await act(async () => {
+      resolvePause?.(true)
+      await Promise.resolve()
+    })
+
+    expect(session.setFlowControl).toHaveBeenLastCalledWith(false)
+  })
+
   it("does nothing when the session is not in the registry", async () => {
     sessionRegistry.current = null
     render(<TerminalInstance sessionId="missing" />)
@@ -466,13 +514,20 @@ describe("TerminalInstance", () => {
       controlListener({ role: "viewer", controllerId: "phone-2", reason: "takeover" })
       gapListener({ requestedAfter: 2, firstAvailable: 8, lastAvailable: 20 })
     })
-    expect(screen.getByTestId("terminal-read-only-state")).toBeInTheDocument()
-    expect(screen.getByTestId("terminal-replay-gap-state")).toBeInTheDocument()
+    // Both states now live in the one auto-collapsing session chip rather than
+    // a permanent badge stack across the top of the terminal.
+    expect(screen.getByTestId("terminal-session-chip")).toBeInTheDocument()
     expect(mockTermInstance.writeln).toHaveBeenCalledWith(
       expect.stringContaining("Earlier terminal output is unavailable")
     )
+
+    fireEvent.click(screen.getByTestId("terminal-session-chip"))
+    const details = screen.getByTestId("terminal-session-chip-details")
+    expect(details.querySelector('[data-state-key="readOnly"]')).not.toBeNull()
+    expect(details.querySelector('[data-state-key="replayGap"]')).not.toBeNull()
+
     const confirm = jest.spyOn(window, "confirm").mockReturnValueOnce(true)
-    fireEvent.click(screen.getByText("Take control"))
+    fireEvent.click(screen.getByTestId("terminal-chip-take-control"))
     expect(session.takeControl).toHaveBeenCalled()
     confirm.mockRestore()
   })

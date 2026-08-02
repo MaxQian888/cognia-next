@@ -1,0 +1,39 @@
+[Unit]
+Description=Cognia provider-neutral deploy agent
+Documentation=https://github.com/maxqian888/cognia
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=cognia-agent
+Group=cognia-agent
+ExecStart=/usr/local/bin/cognia-deploy-agent --config /etc/cognia/deploy-agent.yaml run
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+UMask=0077
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+ReadOnlyPaths=/etc/cognia
+ReadWritePaths=/var/lib/cognia-agent
+
+[Install]
+WantedBy=multi-user.target
