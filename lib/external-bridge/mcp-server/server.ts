@@ -18,7 +18,7 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mc
 import { completable } from "@modelcontextprotocol/sdk/server/completable.js"
 import { z } from "zod"
 import type { BridgeScope, ExternalBridgeSettings } from "@/types/wiki"
-import { ALL_BRIDGE_SCOPES } from "@/types/wiki"
+import { ALL_BRIDGE_SCOPES, SELF_CORPUS_ID } from "@/types/wiki"
 import { listAllWikiArticles, getWikiArticleBySlug } from "@/lib/db/wiki-articles"
 import { listSkills, getSkill } from "@/lib/db/skills"
 import { listCharacters, getCharacter } from "@/lib/db/characters"
@@ -1162,7 +1162,7 @@ function registerWikiResource(server: McpServer, settingsGetter: SettingsGetter)
         })
         throw new Error(`malformed resource uri '${uri.href}'`)
       }
-      const article = await getWikiArticleBySlug(parts.id)
+      const article = await getWikiArticleBySlug(SELF_CORPUS_ID, parts.id)
       const requiredScope: BridgeScope =
         article?.scope === "cognia-self" ? "wiki:cognia" : "wiki:user-repo"
       const check = checkScope(s, requiredScope)

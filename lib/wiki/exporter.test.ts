@@ -13,6 +13,7 @@ import {
   type WriteFs,
 } from "./exporter"
 import { createWikiArticle } from "@/lib/db/wiki-articles"
+import { SELF_CORPUS_ID } from "@/types/wiki"
 import type { WikiArticleDraft } from "@/lib/db/wiki-articles"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import type { WikiArticle } from "@/types/wiki"
@@ -41,6 +42,7 @@ function articleDraft(overrides: Partial<WikiArticleDraft> = {}): WikiArticleDra
     title: overrides.title ?? "lib/foo overview",
     module: overrides.module ?? "lib/foo",
     scope: overrides.scope ?? "cognia-self",
+    corpusId: overrides.corpusId ?? SELF_CORPUS_ID,
     pageRank: overrides.pageRank ?? 0.5,
     summary: overrides.summary ?? "summary text",
     sectionIds: overrides.sectionIds ?? [],
@@ -118,6 +120,7 @@ describe("renderArticleMdx", () => {
   function art(overrides: Partial<WikiArticle> = {}): WikiArticle {
     return {
       id: "x",
+      corpusId: overrides.corpusId ?? SELF_CORPUS_ID,
       slug: overrides.slug ?? "lib-foo",
       title: overrides.title ?? "lib/foo overview",
       module: overrides.module ?? "lib/foo",
@@ -181,6 +184,7 @@ describe("renderIndexMdx", () => {
     const articles = [
       {
         id: "a",
+        corpusId: SELF_CORPUS_ID,
         slug: "a",
         title: "A",
         module: "lib/a",
@@ -197,6 +201,7 @@ describe("renderIndexMdx", () => {
       },
       {
         id: "b",
+        corpusId: SELF_CORPUS_ID,
         slug: "b",
         title: "B",
         module: "lib/b",

@@ -12,6 +12,7 @@ import { UNTRUSTED_OPEN } from "../untrusted"
 import { createWikiArticle } from "@/lib/db/wiki-articles"
 import { bulkCreateWikiSections } from "@/lib/db/wiki-sections"
 import type { WikiArticleDraft } from "@/lib/db/wiki-articles"
+import { SELF_CORPUS_ID } from "@/types/wiki"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 
 beforeEach(async () => {
@@ -27,6 +28,7 @@ function articleDraft(overrides: Partial<WikiArticleDraft> = {}): WikiArticleDra
     title: overrides.title ?? "lib/foo",
     module: overrides.module ?? "lib/foo",
     scope: overrides.scope ?? "cognia-self",
+    corpusId: overrides.corpusId ?? SELF_CORPUS_ID,
     pageRank: overrides.pageRank ?? 0.5,
     summary: overrides.summary ?? "summary",
     sectionIds: overrides.sectionIds ?? [],
@@ -47,6 +49,7 @@ async function seedArticleWithSections(
   await bulkCreateWikiSections(
     sections.map((s, i) => ({
       articleId: article.id,
+      corpusId: SELF_CORPUS_ID,
       sectionIndex: i,
       headingPath: [`Section ${i}`],
       bodyMd: s.body,

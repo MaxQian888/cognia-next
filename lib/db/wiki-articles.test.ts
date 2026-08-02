@@ -24,6 +24,7 @@ import {
 import { bulkCreateWikiSections } from "./wiki-sections"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 import type { WikiArticle } from "@/types/wiki"
+import { SELF_CORPUS_ID } from "@/types/wiki"
 import type { WikiArticleDraft } from "./wiki-articles"
 
 beforeEach(async () => {
@@ -39,6 +40,7 @@ function makeDraft(overrides: Partial<WikiArticleDraft> = {}): WikiArticleDraft 
     title: overrides.title ?? "lib/foo — overview",
     module: overrides.module ?? "lib/foo",
     scope: overrides.scope ?? "cognia-self",
+    corpusId: overrides.corpusId ?? SELF_CORPUS_ID,
     pageRank: overrides.pageRank ?? 0.5,
     summary: overrides.summary ?? "summary text",
     sectionIds: overrides.sectionIds ?? [],
@@ -85,9 +87,9 @@ describe("wiki-articles CRUD", () => {
 
   it("getWikiArticleBySlug finds by slug index", async () => {
     await createWikiArticle(makeDraft({ slug: "needle" }))
-    const found = await getWikiArticleBySlug("needle")
+    const found = await getWikiArticleBySlug(SELF_CORPUS_ID, "needle")
     expect(found?.slug).toBe("needle")
-    const missing = await getWikiArticleBySlug("nope")
+    const missing = await getWikiArticleBySlug(SELF_CORPUS_ID, "nope")
     expect(missing).toBeUndefined()
   })
 
@@ -132,6 +134,7 @@ describe("wiki-articles CRUD", () => {
     await bulkCreateWikiSections([
       {
         articleId: article.id,
+        corpusId: SELF_CORPUS_ID,
         sectionIndex: 0,
         headingPath: ["intro"],
         bodyMd: "intro",
@@ -139,6 +142,7 @@ describe("wiki-articles CRUD", () => {
       },
       {
         articleId: article.id,
+        corpusId: SELF_CORPUS_ID,
         sectionIndex: 1,
         headingPath: ["details"],
         bodyMd: "details",
@@ -156,8 +160,22 @@ describe("wiki-articles CRUD", () => {
     const b = await createWikiArticle(makeDraft({ slug: "b", scope: "cognia-self" }))
     await createWikiArticle(makeDraft({ slug: "c", scope: "user-repo" }))
     await bulkCreateWikiSections([
-      { articleId: a.id, sectionIndex: 0, headingPath: ["x"], bodyMd: "x", sourceRefs: [] },
-      { articleId: b.id, sectionIndex: 0, headingPath: ["y"], bodyMd: "y", sourceRefs: [] },
+      {
+        articleId: a.id,
+        corpusId: SELF_CORPUS_ID,
+        sectionIndex: 0,
+        headingPath: ["x"],
+        bodyMd: "x",
+        sourceRefs: [],
+      },
+      {
+        articleId: b.id,
+        corpusId: SELF_CORPUS_ID,
+        sectionIndex: 0,
+        headingPath: ["y"],
+        bodyMd: "y",
+        sourceRefs: [],
+      },
     ])
     const removed = await deleteAllWikiArticlesForScope("cognia-self")
     expect(removed).toBe(2)

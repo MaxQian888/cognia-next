@@ -23,6 +23,7 @@ export type WikiSectionDraft = Omit<WikiSection, "id"> & Partial<Pick<WikiSectio
 export async function createWikiSection(draft: WikiSectionDraft): Promise<WikiSection> {
   const row: WikiSection = {
     id: draft.id ?? newId(),
+    corpusId: draft.corpusId,
     articleId: draft.articleId,
     sectionIndex: draft.sectionIndex,
     headingPath: draft.headingPath,
@@ -37,6 +38,7 @@ export async function bulkCreateWikiSections(drafts: WikiSectionDraft[]): Promis
   if (drafts.length === 0) return []
   const rows: WikiSection[] = drafts.map((draft) => ({
     id: draft.id ?? newId(),
+    corpusId: draft.corpusId,
     articleId: draft.articleId,
     sectionIndex: draft.sectionIndex,
     headingPath: draft.headingPath,

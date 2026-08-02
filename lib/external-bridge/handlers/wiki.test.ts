@@ -8,6 +8,7 @@
 import "fake-indexeddb/auto"
 import { __TESTING__, wikiRead, wikiSearch } from "./wiki"
 import { createWikiArticle } from "@/lib/db/wiki-articles"
+import { SELF_CORPUS_ID } from "@/types/wiki"
 import type { WikiArticleDraft } from "@/lib/db/wiki-articles"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 
@@ -24,6 +25,7 @@ function draft(overrides: Partial<WikiArticleDraft> = {}): WikiArticleDraft {
     title: overrides.title ?? "lib/foo overview",
     module: overrides.module ?? "lib/foo",
     scope: overrides.scope ?? "cognia-self",
+    corpusId: overrides.corpusId ?? SELF_CORPUS_ID,
     pageRank: overrides.pageRank ?? 0.5,
     summary: overrides.summary ?? "summary",
     sectionIds: overrides.sectionIds ?? [],

@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Knowledge storage now separates one indexed repository from another, and the inbound review queue gains a decision that sticks. Generated wiki articles are keyed by corpus rather than by slug alone, so two repositories that both contain a `lib/utils` no longer collide — every wiki and RAG lookup must now name the repository it is asking about, and none of them silently fall back to answering from a different one. Rebuilds write to a staging area and swap in only after they succeed, so a rebuild that fails or is cancelled leaves the previous articles exactly where they were instead of having emptied them to make room; a rebuild can also be paused and cancelled, and resumes from where it stopped rather than restarting the corpus. Reviewing an externally contributed lesson, skill draft, or note is now a final decision — accept or reject, with no third spelling of "no" left over from earlier builds — and accepting a draft records the follow-up work in the same write that records the decision, so an accepted item can no longer be quietly dropped without a trace to retry from.
