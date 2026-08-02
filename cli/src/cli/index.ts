@@ -13,6 +13,7 @@ import { chatCommand as defaultChat } from "./chat"
 import { logtoCommand as defaultLogto } from "./logto-command"
 import { larkCommand as defaultLark } from "./lark-command"
 import { evalCommand as defaultEval } from "./eval-command"
+import { durabilityCommand as defaultDurability } from "./durability-command"
 import { serveCommand as defaultServe } from "../serve/serve-command"
 import { realOutput, type OutputSink } from "./output"
 import { VERSION } from "../version"
@@ -43,6 +44,11 @@ Usage:
                      Feishu identity registry admin for headless installs
                      (COGNIA_SERVICE_TOKEN / COGNIA_SERVER_URL /
                       COGNIA_LARK_ADAPTER_ID via env)
+  cognia-agent durability <verify|migrate|recover|rollback|finalize>
+                     --account <id> [--home dir] [--json]
+                     [--to journal|sqlite|<generation>] [--from auto|snapshot|journal|sqlite]
+                     [--activate] [--generation id] [--confirm]
+                     headless persistence: inspect, migrate, recover, roll back
   cognia-agent serve [--server-url u] [--account id] [--home dir]
                      [--flush-debounce ms]           headless brain for cognia-server
                      (COGNIA_SERVER_URL / COGNIA_SERVICE_TOKEN / COGNIA_BRIDGE_URL /
@@ -82,6 +88,7 @@ const KNOWN_COMMANDS = new Set([
   "logto",
   "lark",
   "eval",
+  "durability",
 ])
 
 export interface MainDeps {
@@ -95,6 +102,7 @@ export interface MainDeps {
   serve?: typeof defaultServe
   lark?: typeof defaultLark
   eval?: typeof defaultEval
+  durability?: typeof defaultDurability
   out?: OutputSink
 }
 
@@ -157,6 +165,8 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       return (deps.lark ?? defaultLark)(args, { out })
     case "eval":
       return (deps.eval ?? defaultEval)(args, { out })
+    case "durability":
+      return (deps.durability ?? defaultDurability)(args, { out })
     default:
       out.error(`unknown command "${args.command}"\n\n${HELP}`)
       return 2

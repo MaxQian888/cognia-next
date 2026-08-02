@@ -40,10 +40,14 @@ export const BOOLEAN_FLAGS = new Set([
   // spelling of the same switch; both are accepted so muscle memory works.
   "bypass",
   "dangerously-skip-permissions",
+  // `durability recover --activate` / `durability finalize --confirm` — both
+  // gate an irreversible step and must never swallow the next token.
+  "activate",
+  "confirm",
 ])
 
 /** Commands whose first extra positional is a subcommand, not free content. */
-export const GROUPED_COMMANDS = new Set(["auth", "config", "logto", "lark", "eval"])
+export const GROUPED_COMMANDS = new Set(["auth", "config", "logto", "lark", "eval", "durability"])
 
 const SHORT_ALIAS: Record<string, string> = {
   h: "help",
