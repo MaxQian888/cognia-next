@@ -2,10 +2,11 @@
 
 import React, { useState, useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { Search, RefreshCw, Loader2, ArrowUpDown, X, PlugZap } from "lucide-react"
+import { Search, RefreshCw, Loader2, ArrowUpDown, X, PlugZap, CheckCheck, Ban } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
@@ -148,11 +149,21 @@ function ModelCard({
   const showCapsPlaceholder = metadataLoading && caps.length === 0
 
   return (
-    <div className="rounded-lg border p-3 flex flex-col gap-2">
+    <div
+      data-enabled={isEnabled || undefined}
+      className={cn(
+        "flex min-w-0 flex-col gap-2 rounded-xl border p-3 transition-colors",
+        isEnabled
+          ? "border-primary/40 bg-primary/[0.04]"
+          : "bg-card hover:border-foreground/20 hover:bg-muted/40"
+      )}
+    >
       <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-col">
-          <div className="flex items-center gap-1.5">
-            <span className="font-semibold text-sm leading-tight">{model.name}</span>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="min-w-0 truncate text-sm font-semibold leading-tight">
+              {model.name}
+            </span>
             {statusVariant && model.status && (
               <Badge variant={statusVariant} className="text-[10px] px-1.5 py-0 capitalize">
                 {model.status}
@@ -179,9 +190,17 @@ function ModelCard({
               </Badge>
             )}
           </div>
-          {model.family && (
-            <span className="text-[11px] text-muted-foreground">{model.family}</span>
-          )}
+          {/* The model *id* is what the user types into routing, aliases and
+              the CLI — it used to be visible nowhere on the card. */}
+          <div className="flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
+            <span className="truncate font-mono">{model.id}</span>
+            {model.family && (
+              <>
+                <span aria-hidden>·</span>
+                <span className="truncate">{model.family}</span>
+              </>
+            )}
+          </div>
         </div>
         <Switch
           checked={isEnabled}
@@ -344,9 +363,6 @@ export function ProviderModelsTab({
     onEnabledModelsChange(enabledModels.filter((id) => !filteredIds.includes(id)))
   }
 
-  const handleEnableSelected = handleSelectAll
-  const handleDisableSelected = handleDeselectAll
-
   const sortLabel = t(
     `modelsTab.sort${sort.charAt(0).toUpperCase()}${sort.slice(1)}` as
       | "modelsTab.sortDefault"
@@ -356,162 +372,190 @@ export function ProviderModelsTab({
   )
 
   return (
-    <div className="flex flex-col gap-3 py-2">
-      {/* Top bar: search + refresh */}
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t("modelsTab.searchPlaceholder")}
-            className="pl-8"
-          />
-        </div>
-        <Button variant="outline" size="sm" onClick={onRefreshModels} disabled={isRefreshing}>
-          {isRefreshing ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <RefreshCw className="h-4 w-4 mr-2" />
-          )}
-          {t("modelsTab.refreshModels")}
-        </Button>
-        {onTestConnection && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onTestConnection}
-            disabled={isTesting}
-            data-testid="models-tab-test-connection"
-          >
-            {isTesting ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <PlugZap className="h-4 w-4 mr-2" />
+    /* Two bands: a pinned toolbar and a scroller. The tab used to be one long
+       scrolling document inside the detail panel's pane-wide `ScrollArea`, so
+       scrolling to a model 40 rows down took the search box, the capability
+       filters and the batch actions off-screen with it. The toolbar is now a
+       `shrink-0` sibling of the list and only the list moves. */
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="models-tab">
+      {/* ── Pinned toolbar ──────────────────────────────────────────────── */}
+      <div className="flex shrink-0 flex-col gap-2.5 border-b px-4 py-3">
+        {/* Search + provider-level actions. Wraps rather than overflowing: on a
+            narrow pane the buttons drop to their own line instead of being
+            clipped by the right edge. */}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <div className="relative min-w-[9rem] flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("modelsTab.searchPlaceholder")}
+              className="h-9 pl-8"
+            />
+          </div>
+          <div className="flex min-w-0 shrink-0 items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9"
+              onClick={onRefreshModels}
+              disabled={isRefreshing}
+            >
+              {isRefreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              <span className="truncate">{t("modelsTab.refreshModels")}</span>
+            </Button>
+            {onTestConnection && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9"
+                onClick={onTestConnection}
+                disabled={isTesting}
+                data-testid="models-tab-test-connection"
+              >
+                {isTesting ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <PlugZap className="mr-2 h-4 w-4" />
+                )}
+                <span className="truncate">{t("testConnection")}</span>
+              </Button>
             )}
-            {t("testConnection")}
-          </Button>
-        )}
-      </div>
+          </div>
+        </div>
 
-      {/* Filter toolbar — only when models exist */}
-      {models.length > 0 && (
-        <div className="flex flex-col gap-2">
-          {/* Capability chips */}
-          {availableCaps.length > 0 && (
-            <div
-              className="flex flex-wrap items-center gap-1.5"
-              role="group"
-              aria-label={t("modelsTab.capabilities")}
-            >
-              {availableCaps.map((cap) => {
-                const active = capFilters.includes(cap)
-                return (
-                  <Button
-                    key={cap}
-                    type="button"
-                    size="sm"
-                    variant={active ? "secondary" : "outline"}
-                    aria-pressed={active}
-                    className={cn("h-6 px-2 text-xs font-normal capitalize")}
-                    onClick={() => toggleCap(cap)}
-                  >
-                    {cap}
-                  </Button>
-                )
-              })}
-            </div>
-          )}
+        {models.length > 0 && (
+          <>
+            {/* Capability chips — wrap, never clip. */}
+            {availableCaps.length > 0 && (
+              <div
+                className="flex min-w-0 flex-wrap items-center gap-1.5"
+                role="group"
+                aria-label={t("modelsTab.capabilities")}
+              >
+                {availableCaps.map((cap) => {
+                  const active = capFilters.includes(cap)
+                  return (
+                    <Button
+                      key={cap}
+                      type="button"
+                      size="sm"
+                      variant={active ? "secondary" : "outline"}
+                      aria-pressed={active}
+                      className={cn(
+                        "h-6 max-w-full px-2 text-xs font-normal capitalize",
+                        active && "border-primary/40"
+                      )}
+                      onClick={() => toggleCap(cap)}
+                    >
+                      <span className="truncate">{cap}</span>
+                    </Button>
+                  )
+                })}
+              </div>
+            )}
 
-          {/* Toggles: enabled-only + sort + clear */}
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant={enabledOnly ? "secondary" : "ghost"}
-              aria-pressed={enabledOnly}
-              className="h-7 px-2 text-xs"
-              onClick={() => setEnabledOnly((prev) => !prev)}
-            >
-              {t("modelsTab.enabledOnly")}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-xs"
-              onClick={cycleSort}
-            >
-              <ArrowUpDown className="mr-1.5 h-3.5 w-3.5" />
-              {t("modelsTab.sortBy", { label: sortLabel })}
-            </Button>
-            {hasActiveFilters && (
+            {/* View controls + batch actions + count, on one wrapping row. The
+                batch pair used to be a second toolbar carrying four buttons,
+                two of which ("Enable/Disable Selected") ran the exact same
+                handlers as the other two — same action, two names. */}
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <Button
+                type="button"
+                size="sm"
+                variant={enabledOnly ? "secondary" : "ghost"}
+                aria-pressed={enabledOnly}
+                className="h-7 px-2 text-xs"
+                onClick={() => setEnabledOnly((prev) => !prev)}
+              >
+                {t("modelsTab.enabledOnly")}
+              </Button>
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
-                className="h-7 px-2 text-xs text-muted-foreground"
-                onClick={clearFilters}
+                className="h-7 px-2 text-xs"
+                onClick={cycleSort}
               >
-                <X className="mr-1 h-3.5 w-3.5" />
-                {t("modelsTab.clearFilters")}
+                <ArrowUpDown className="mr-1.5 h-3.5 w-3.5" />
+                <span className="truncate">{t("modelsTab.sortBy", { label: sortLabel })}</span>
               </Button>
-            )}
-            <span className="ml-auto text-xs text-muted-foreground" role="status">
-              {t("modelsTab.countSummary", {
-                shown: filtered.length,
-                total: models.length,
-                enabled: enabledTotal,
-              })}
-            </span>
+              <span className="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={handleSelectAll}
+              >
+                <CheckCheck className="mr-1.5 h-3.5 w-3.5" />
+                <span className="truncate">{t("modelsTab.selectAll")}</span>
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={handleDeselectAll}
+              >
+                <Ban className="mr-1.5 h-3.5 w-3.5" />
+                <span className="truncate">{t("modelsTab.deselectAll")}</span>
+              </Button>
+              {hasActiveFilters && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs text-muted-foreground"
+                  onClick={clearFilters}
+                >
+                  <X className="mr-1 h-3.5 w-3.5" />
+                  <span className="truncate">{t("modelsTab.clearFilters")}</span>
+                </Button>
+              )}
+              <span className="ml-auto shrink-0 text-xs text-muted-foreground" role="status">
+                {t("modelsTab.countSummary", {
+                  shown: filtered.length,
+                  total: models.length,
+                  enabled: enabledTotal,
+                })}
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ── Scrolling model list ────────────────────────────────────────── */}
+      <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block">
+        {filtered.length > 0 ? (
+          <div className="grid grid-cols-1 gap-2.5 p-4 @2xl/provider-pane:grid-cols-2">
+            {filtered.map((model) => (
+              <ModelCard
+                key={model.id}
+                model={model}
+                isEnabled={enabledModels.includes(model.id)}
+                onToggle={handleToggle}
+                contextLabel={t("modelsTab.contextWindow")}
+                knowledgeLabel={t("modelsTab.knowledgeCutoff")}
+                updatedLabel={t("modelsTab.updated")}
+                maxOutputLabel={t("modelsTab.maxOutput")}
+                openWeightsLabel={t("modelsTab.openWeights")}
+                formatModes={(count) => t("modelsTab.modes", { count })}
+                metadataLoading={metadataLoading}
+                diagnosticStatus={diagnosticStatusByModel[model.id]}
+              />
+            ))}
           </div>
-        </div>
-      )}
-
-      {/* Batch operations toolbar — only when models exist */}
-      {models.length > 0 && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="ghost" size="sm" onClick={handleSelectAll}>
-            {t("modelsTab.selectAll")}
-          </Button>
-          <Button variant="ghost" size="sm" onClick={handleDeselectAll}>
-            {t("modelsTab.deselectAll")}
-          </Button>
-          <span className="mx-1 text-muted-foreground/40 select-none">|</span>
-          <Button variant="ghost" size="sm" onClick={handleEnableSelected}>
-            {t("modelsTab.batchEnable")}
-          </Button>
-          <Button variant="ghost" size="sm" onClick={handleDisableSelected}>
-            {t("modelsTab.batchDisable")}
-          </Button>
-        </div>
-      )}
-
-      {/* Model grid */}
-      {filtered.length > 0 ? (
-        <div className="grid grid-cols-1 gap-3 @2xl/provider-pane:grid-cols-2">
-          {filtered.map((model) => (
-            <ModelCard
-              key={model.id}
-              model={model}
-              isEnabled={enabledModels.includes(model.id)}
-              onToggle={handleToggle}
-              contextLabel={t("modelsTab.contextWindow")}
-              knowledgeLabel={t("modelsTab.knowledgeCutoff")}
-              updatedLabel={t("modelsTab.updated")}
-              maxOutputLabel={t("modelsTab.maxOutput")}
-              openWeightsLabel={t("modelsTab.openWeights")}
-              formatModes={(count) => t("modelsTab.modes", { count })}
-              metadataLoading={metadataLoading}
-              diagnosticStatus={diagnosticStatusByModel[model.id]}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-          {t("modelsTab.noModels")}
-        </div>
-      )}
+        ) : (
+          <div className="flex items-center justify-center px-4 py-12 text-sm text-muted-foreground">
+            {t("modelsTab.noModels")}
+          </div>
+        )}
+      </ScrollArea>
     </div>
   )
 }

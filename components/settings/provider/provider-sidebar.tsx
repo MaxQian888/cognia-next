@@ -117,29 +117,36 @@ export function ProviderSidebar({
         {addButton}
       </div>
 
-      {/* Category filters — horizontally scrollable so the labels never squash
-          into each other on a narrow rail. */}
+      {/* Category filters. These used to sit in an `overflow-x-auto` strip with
+          a `w-max` list, which meant the last tab ("Custom") was simply cut off
+          by the rail's right edge with no visible affordance — the strip looked
+          like broken layout rather than something scrollable. The tabs now
+          *divide* the rail instead of overflowing it: each trigger flexes to an
+          equal share and truncates, so all six stay reachable at any width. */}
       <div className="min-w-0 border-b px-3 py-2">
         <Tabs value={categoryFilter} onValueChange={onCategoryChange} className="min-w-0">
-          <div className="-mx-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <TabsList className="inline-flex h-8 w-max">
-              {CATEGORY_KEYS.map((key) => (
-                <TabsTrigger key={key} value={key} className="shrink-0 whitespace-nowrap px-2.5">
-                  {t(`categories.${key}`)}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </div>
+          <TabsList className="flex h-8 w-full min-w-0">
+            {CATEGORY_KEYS.map((key) => (
+              <TabsTrigger
+                key={key}
+                value={key}
+                title={t(`categories.${key}`)}
+                className="min-w-0 flex-1 truncate px-1 text-xs"
+              >
+                <span className="truncate">{t(`categories.${key}`)}</span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
         </Tabs>
       </div>
 
-      {/* Status filter */}
+      {/* Status filter — same treatment: share the width, never exceed it. */}
       <div
         className="min-w-0 border-b px-3 py-2"
         role="group"
         aria-label={t("sidebar.statusLabel")}
       >
-        <div className="-mx-1 flex items-center gap-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex min-w-0 items-center gap-1">
           {STATUS_FILTERS.map(({ value, key }) => (
             <Button
               key={value}
@@ -147,13 +154,14 @@ export function ProviderSidebar({
               size="sm"
               variant={statusFilter === value ? "secondary" : "ghost"}
               aria-pressed={statusFilter === value}
-              className={cn("h-7 shrink-0 whitespace-nowrap px-2 text-xs")}
+              title={t(`sidebar.${key}`)}
+              className={cn("h-7 min-w-0 flex-1 px-1 text-xs")}
               onClick={() => {
                 setStatusFilter(value)
                 onStatusFilterChange?.(value)
               }}
             >
-              {t(`sidebar.${key}`)}
+              <span className="truncate">{t(`sidebar.${key}`)}</span>
             </Button>
           ))}
         </div>
@@ -163,8 +171,16 @@ export function ProviderSidebar({
           `overflow-y-auto`: every dialog in this feature already uses it, so a
           raw OS scrollbar here made the rail and the dialogs look like two
           different products. `min-h-0` keeps it shrinkable inside the flex
-          column. */}
-      <ScrollArea className="min-h-0 flex-1 overflow-x-hidden p-1">
+          column.
+
+          `[&_[data-slot=scroll-area-viewport]>div]:!block`: Radix wraps the
+          viewport's children in a `display:table` div, which sizes to its
+          *content* rather than to the viewport — so a row whose status badge
+          and name did not fit pushed the whole list wider than the rail and got
+          clipped by the right edge. Forcing that wrapper back to `block` makes
+          rows respect the rail width and truncate instead. Same fix as
+          `components/desktop/channel-list.tsx`. */}
+      <ScrollArea className="min-h-0 flex-1 overflow-x-hidden p-1 [&_[data-slot=scroll-area-viewport]>div]:!block">
         {visibleProviders.length === 0 ? (
           filtersNarrowTheList ? (
             // A filtered-to-nothing list used to render as a blank box with no

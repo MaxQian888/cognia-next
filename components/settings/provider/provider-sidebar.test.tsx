@@ -96,12 +96,26 @@ describe("ProviderSidebar", () => {
     }
   })
 
-  it("makes the category tab strip horizontally scrollable instead of squashing labels", () => {
+  it("fits the category tab strip to the rail instead of overflowing it", () => {
     const { container } = render(<ProviderSidebar {...defaultProps} />)
     const list = container.querySelector('[data-slot="tabs-list"]')
-    // Auto width + nowrap triggers = the strip can overflow and scroll.
-    expect(list).toHaveClass("w-max")
-    expect(list?.parentElement).toHaveClass("overflow-x-auto")
+    // The strip used to be `w-max` inside an `overflow-x-auto` wrapper, so the
+    // last category was clipped by the rail's right edge with no visible
+    // scroll affordance. Triggers now share the width and truncate.
+    expect(list).toHaveClass("w-full", "min-w-0")
+    expect(list).not.toHaveClass("w-max")
+    const triggers = container.querySelectorAll('[data-slot="tabs-trigger"]')
+    expect(triggers.length).toBeGreaterThan(0)
+    triggers.forEach((trigger) => expect(trigger).toHaveClass("min-w-0", "flex-1"))
+  })
+
+  it("keeps the provider rows inside the rail width", () => {
+    // Radix wraps the scroll viewport's children in a `display:table` div that
+    // sizes to content, which let a wide row push the list past the rail edge.
+    const { container } = render(<ProviderSidebar {...defaultProps} />)
+    expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass(
+      "[&_[data-slot=scroll-area-viewport]>div]:!block"
+    )
   })
 
   describe("empty list", () => {

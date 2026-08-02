@@ -10,6 +10,12 @@ import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { hasBrandIcon } from "@/components/icons/brand-icon"
 import { ProviderIcon } from "@/components/providers/ai/provider-icon"
+import { cn } from "@/lib/utils"
+
+/** Tab order. A tab renders only when its slot is filled (Config is always on). */
+const TAB_KEYS = ["config", "models", "cost", "diagnostics", "advanced"] as const
+
+type TabKey = (typeof TAB_KEYS)[number]
 
 interface ProviderDetailPanelProvider {
   id: string
@@ -61,6 +67,20 @@ export function ProviderDetailPanel({
   advancedTab,
 }: ProviderDetailPanelProps) {
   const t = useTranslations("providers")
+  const [activeTab, setActiveTab] = React.useState<string>("config")
+
+  const slots: Record<Exclude<TabKey, "config">, React.ReactNode> = {
+    models: modelsTab,
+    cost: costTab,
+    diagnostics: diagnosticsTab,
+    advanced: advancedTab,
+  }
+  // A provider swap can take the active tab's slot away with it (local engines
+  // ship Config only). Derive the effective tab instead of syncing state in an
+  // effect, so the panel never lands on a tab that has no trigger to leave it.
+  const visibleTabs = TAB_KEYS.filter((key) => key === "config" || slots[key] != null)
+  const activeTabValue = visibleTabs.includes(activeTab as TabKey) ? activeTab : "config"
+  const modelsTabActive = activeTabValue === "models"
 
   if (provider === null) {
     return (
@@ -179,18 +199,33 @@ export function ProviderDetailPanel({
         </div>
       </div>
 
-      {/* Tabs */}
-      <Tabs defaultValue="config" className="flex flex-1 flex-col overflow-hidden">
+      {/* Tabs. Controlled, because the Models tab is scroll-owning: the shared
+          `ScrollArea` below has to be taken out of the layout entirely while
+          Models is active, or it would claim half the pane as an empty box. */}
+      <Tabs
+        value={activeTabValue}
+        onValueChange={setActiveTab}
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
+      >
         {/* A tab appears only when its slot is filled. Local inference engines
             have no cloud models/cost/routing story, so they render just Config
             — and still keep the shared header (enable switch, default badge,
             status) instead of replacing the whole panel with a foreign shell. */}
-        <TabsList className="w-full shrink-0 justify-start rounded-none border-b bg-transparent px-4">
-          <TabsTrigger value="config">{t("tabs.config")}</TabsTrigger>
-          {modelsTab && <TabsTrigger value="models">{t("tabs.models")}</TabsTrigger>}
-          {costTab && <TabsTrigger value="cost">{t("tabs.cost")}</TabsTrigger>}
-          {diagnosticsTab && <TabsTrigger value="diagnostics">{t("tabs.diagnostics")}</TabsTrigger>}
-          {advancedTab && <TabsTrigger value="advanced">{t("tabs.advanced")}</TabsTrigger>}
+        {/* Triggers divide the pane rather than overflowing it: `min-w-0` +
+            `truncate` let a label give up width on a narrow pane instead of
+            pushing the strip past the right edge, where it was clipped with no
+            scroll affordance. `title` keeps the full label reachable. */}
+        <TabsList className="flex w-full min-w-0 shrink-0 justify-start rounded-none border-b bg-transparent px-4">
+          {visibleTabs.map((key) => (
+            <TabsTrigger
+              key={key}
+              value={key}
+              title={t(`tabs.${key}`)}
+              className="min-w-0 flex-1 px-1.5"
+            >
+              <span className="truncate">{t(`tabs.${key}`)}</span>
+            </TabsTrigger>
+          ))}
         </TabsList>
         {/* Themed `ScrollArea`, matching this feature's dialogs — a native
             scrollbar here made the pane and the dialogs look unrelated.
@@ -201,16 +236,23 @@ export function ProviderDetailPanel({
             here, once, rather than in each of Config / Models / Cost / Advanced.
             Container queries still resolve against `@container/provider-pane`
             one level up, so the cost tab's `@3xl` grid is unaffected. */}
-        <ScrollArea className="min-h-0 flex-1">
+        {/* The Models tab owns its own scrolling: its toolbar (search, refresh,
+            filters, batch actions) has to stay pinned while only the model list
+            moves, which is impossible from inside a single pane-wide
+            `ScrollArea`. So it renders as a fill-height flex child and every
+            other tab keeps the shared scroller below. */}
+        {modelsTab && (
+          <TabsContent value="models" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col overflow-hidden">
+              {modelsTab}
+            </div>
+          </TabsContent>
+        )}
+        <ScrollArea className={cn("min-h-0 flex-1", modelsTabActive && "hidden")}>
           <div className="mx-auto w-full max-w-4xl">
             <TabsContent value="config" className="m-0 p-4">
               {configTab ?? <div>{t("detailPanel.configPlaceholder")}</div>}
             </TabsContent>
-            {modelsTab && (
-              <TabsContent value="models" className="m-0 p-4">
-                {modelsTab}
-              </TabsContent>
-            )}
             {costTab && (
               <TabsContent value="cost" className="m-0 p-4">
                 {costTab}

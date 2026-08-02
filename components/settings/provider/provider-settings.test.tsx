@@ -1065,9 +1065,23 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     })
     render(<ProviderSettings />)
     const advancedTab = screen.getByTestId("provider-detail-advanced-tab")
-    expect(advancedTab.querySelector('[data-tab="parameters"]')).toHaveTextContent(
+    expect(advancedTab).toHaveTextContent(
       "Configure this provider in the Config tab to enable parameters."
     )
+  })
+
+  it("lays Advanced out as flat sections rather than a tab strip inside a tab", () => {
+    // Tabs nested inside a tab hid their own state from the outer navigation:
+    // leaving the panel on Routing and coming back looked like Parameters had
+    // vanished, with nothing on screen explaining why.
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "openai",
+    })
+    render(<ProviderSettings />)
+    const advancedTab = screen.getByTestId("provider-detail-advanced-tab")
+    expect(advancedTab.querySelector('[data-tab="parameters"]')).toBeNull()
+    expect(advancedTab.querySelector('[data-slot="collapsible-trigger"]')).toBeInTheDocument()
   })
 
   it("promotes Diagnostics to a top-level provider detail slot", () => {

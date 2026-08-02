@@ -348,10 +348,25 @@ describe("ProviderModelsTab", () => {
     expect(called).not.toContain("o1")
   })
 
-  it("shows Enable Selected and Disable Selected buttons", () => {
+  // "Enable Selected" / "Disable Selected" were removed: they ran the exact
+  // same handlers as Select All / Deselect All — one action under two names.
+  it("no longer duplicates the batch actions under a second pair of names", () => {
     render(<ProviderModelsTab {...defaultProps} />)
-    expect(screen.getByText("Enable Selected")).toBeInTheDocument()
-    expect(screen.getByText("Disable Selected")).toBeInTheDocument()
+    expect(screen.queryByText("Enable Selected")).not.toBeInTheDocument()
+    expect(screen.queryByText("Disable Selected")).not.toBeInTheDocument()
+  })
+
+  // ── 7b. Toolbar stays pinned; only the list scrolls ───────────────────────
+
+  it("keeps the toolbar out of the scroller so only the model list moves", () => {
+    const { container } = render(<ProviderModelsTab {...defaultProps} />)
+    const scroller = container.querySelector('[data-slot="scroll-area"]')
+    expect(scroller).toBeInTheDocument()
+    // Search + batch actions live above the scroller, not inside it.
+    expect(scroller).not.toContainElement(screen.getByTestId("search-input"))
+    expect(scroller).not.toContainElement(screen.getByText("Select All").closest("button"))
+    // The model cards do live inside it.
+    expect(scroller).toContainElement(screen.getByText("GPT-4o"))
   })
 
   // ── 8. models.dev metadata: status badge, knowledge cutoff, updated ────────

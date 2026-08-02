@@ -4,7 +4,17 @@ import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { createPortal } from "react-dom"
-import { Plus, Menu, Settings, Key, Globe, PlugZap, Loader2 } from "lucide-react"
+import {
+  Plus,
+  Menu,
+  Settings,
+  Key,
+  Globe,
+  PlugZap,
+  Loader2,
+  Route,
+  SlidersHorizontal,
+} from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -21,7 +31,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ProviderSection, ProviderSectionStack } from "./provider-section"
 import {
   Select,
   SelectContent,
@@ -360,7 +370,6 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
   const [showQuickAdd, setShowQuickAdd] = useState(false)
   const [customDialogOpen, setCustomDialogOpen] = useState(false)
   const [editingCustomId, setEditingCustomId] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<"parameters" | "routing">("parameters")
   const [compareOpen, setCompareOpen] = useState(false)
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
   const [testingConnection, setTestingConnection] = useState<Record<string, boolean>>({})
@@ -1072,7 +1081,9 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                 // these slots stay empty and the tabs simply don't render.
                 modelsTab={
                   isLocalProvider ? undefined : isCustom ? (
-                    <div className="text-sm text-muted-foreground">
+                    // The Models slot is fill-height (it owns its own scroller),
+                    // so these text fallbacks bring their own padding.
+                    <div className="p-4 text-sm text-muted-foreground">
                       {t("customProviderModelsManaged") ||
                         "Custom-provider models are managed inside the provider editor."}
                     </div>
@@ -1097,7 +1108,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                       )}
                     />
                   ) : (
-                    <div className="text-sm text-muted-foreground">
+                    <div className="p-4 text-sm text-muted-foreground">
                       {t("noModelsAvailable") || "No models available."}
                     </div>
                   )
@@ -1117,19 +1128,17 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                 }
                 advancedTab={
                   isLocalProvider ? undefined : (
-                    <Tabs
-                      value={activeTab}
-                      onValueChange={(v) => setActiveTab(v as typeof activeTab)}
-                    >
-                      <TabsList>
-                        <TabsTrigger value="parameters">
-                          {t("tabs.parameters" as never) as string}
-                        </TabsTrigger>
-                        <TabsTrigger value="routing">
-                          {t("tabs.routing" as never) as string}
-                        </TabsTrigger>
-                      </TabsList>
-                      <TabsContent value="parameters">
+                    /* Flat sections, not a nested tab strip. Tabs inside a tab
+                       made "Advanced" a second navigation level whose state was
+                       invisible from the outside — a user who left the panel on
+                       Routing came back to it with no indication why Parameters
+                       had disappeared. Both are now on one page, each foldable. */
+                    <ProviderSectionStack>
+                      <ProviderSection
+                        collapsible
+                        icon={SlidersHorizontal}
+                        title={t("tabs.parameters" as never) as string}
+                      >
                         {selectedSettings ? (
                           <ProviderParametersTab
                             providerId={selectedId}
@@ -1141,11 +1150,16 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                               "Configure this provider in the Config tab to enable parameters."}
                           </div>
                         )}
-                      </TabsContent>
-                      <TabsContent value="routing">
+                      </ProviderSection>
+                      <ProviderSection
+                        collapsible
+                        defaultOpen={false}
+                        icon={Route}
+                        title={t("tabs.routing" as never) as string}
+                      >
                         <RoutingTab />
-                      </TabsContent>
-                    </Tabs>
+                      </ProviderSection>
+                    </ProviderSectionStack>
                   )
                 }
               />
