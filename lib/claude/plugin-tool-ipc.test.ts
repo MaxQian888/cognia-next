@@ -8,10 +8,12 @@ import {
   __setWebToolDepsForTesting,
   __setSkillToolDepsForTesting,
   __setSlashToolDepsForTesting,
+  __setVectorToolDepsForTesting,
   handlePluginToolExec,
   type PluginToolExecRequest,
   type PluginToolResolver,
 } from "./plugin-tool-ipc"
+import type { VectorToolRunDeps } from "./vector-builtin-tools"
 // Static imports so these share the SAME module instance the top-level
 // `handlePluginToolExec` closes over (sibling describes call jest.resetModules,
 // which would make a dynamic import resolve a different registry instance).
@@ -594,6 +596,83 @@ describe("handlePluginToolExec — Skill / SlashCommand built-ins", () => {
     expect(dispatch).toHaveBeenCalledWith("/status", { sessionId: "sess-Z" })
     expect(response.result).toBe("ran")
     expect(response.error).toBeUndefined()
+  })
+})
+
+describe("handlePluginToolExec — vector built-ins", () => {
+  afterEach(() => {
+    __setVectorToolDepsForTesting(null)
+    __setPluginToolResolverForTesting(null)
+  })
+
+  function makeVectorDeps(overrides: Partial<VectorToolRunDeps> = {}): VectorToolRunDeps {
+    return {
+      service: {
+        search: jest.fn(async () => [{ id: "d1", content: "hit", score: 0.8 }]),
+        addDocument: jest.fn(async (_c, input) => ({ id: input.id, createdCollection: true })),
+        deleteDocument: jest.fn(async () => ({ deleted: true })),
+      },
+      resolveProjectId: () => "proj-1",
+      hasPermission: () => true,
+      newDocumentId: () => "gen-1",
+      ...overrides,
+    }
+  }
+
+  it.each(["vector_search", "vector_add_document", "vector_delete_document"])(
+    "routes %s ahead of the plugin registry",
+    async (name) => {
+      const execute = jest.fn()
+      __setPluginToolResolverForTesting({ getTool: () => ({ pluginId: "x", execute }) })
+      __setVectorToolDepsForTesting(makeVectorDeps)
+      const args =
+        name === "vector_search"
+          ? { query: "hi" }
+          : name === "vector_add_document"
+            ? { content: "hi" }
+            : { id: "d1" }
+      const response = await handlePluginToolExec(makeRequest({ name, args }))
+      expect(execute).not.toHaveBeenCalled()
+      expect(response.error).toBeUndefined()
+      expect(response.result).toMatchObject({ ok: true })
+    }
+  )
+
+  it("passes the session id through so the project is resolved from context", async () => {
+    const resolveProjectId = jest.fn(() => "proj-1")
+    __setVectorToolDepsForTesting(() => makeVectorDeps({ resolveProjectId }))
+    await handlePluginToolExec(
+      makeRequest({ name: "vector_search", args: { query: "hi" }, sessionId: "sess-V" })
+    )
+    expect(resolveProjectId).toHaveBeenCalledWith("sess-V")
+  })
+
+  it("scopes the store call to the resolved project's namespace", async () => {
+    const deps = makeVectorDeps()
+    __setVectorToolDepsForTesting(() => deps)
+    await handlePluginToolExec(makeRequest({ name: "vector_search", args: { query: "hi" } }))
+    expect(deps.service.search).toHaveBeenCalledWith(
+      "project_proj-1__documents",
+      "hi",
+      expect.anything()
+    )
+  })
+
+  it("returns a structured refusal (not an error) when a permission is missing", async () => {
+    __setVectorToolDepsForTesting(() => makeVectorDeps({ hasPermission: () => false }))
+    const response = await handlePluginToolExec(
+      makeRequest({ name: "vector_search", args: { query: "hi" } })
+    )
+    expect(response.error).toBeUndefined()
+    expect(response.result).toMatchObject({ ok: false, code: "permission" })
+  })
+
+  it("does not claim tool names that merely start with vector_", async () => {
+    const execute = jest.fn().mockResolvedValue("from plugin")
+    __setPluginToolResolverForTesting({ getTool: () => ({ pluginId: "x", execute }) })
+    const response = await handlePluginToolExec(makeRequest({ name: "vector_reindex", args: {} }))
+    expect(execute).toHaveBeenCalled()
+    expect(response.result).toBe("from plugin")
   })
 })
 

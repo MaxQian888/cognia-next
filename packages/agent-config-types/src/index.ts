@@ -2213,6 +2213,14 @@ export interface AppSettings {
      * Default false.
      */
     teamCollaboration?: boolean
+    /**
+     * Expose the project-scoped vector-memory tools (`vector_search`,
+     * `vector_add_document`, `vector_delete_document`) to the agent. Default
+     * false. Desktop only — they run against the native sqlite-vec store and
+     * are refused off the Tauri shell. Collections are scoped to the session's
+     * linked project; a session with no project cannot use them.
+     */
+    vector?: boolean
   }
   /**
    * Desktop → cognia CLI storage sync (ADR: CLI ↔ APP storage unification).

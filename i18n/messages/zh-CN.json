@@ -7366,6 +7366,7 @@
     "globalDescription": "应用程序的主布局加载失败。可以尝试恢复，或通过标题栏关闭窗口。",
     "globalTitle": "Cognia 已停止工作",
     "goHome": "返回首页",
+    "hideStack": "收起调用栈",
     "openLogs": "打开日志",
     "recentErrors": {
       "cascadeHint": "短时间内发生了多个错误——这可能是连锁故障。",
@@ -7379,6 +7380,7 @@
       "reportIssue": "报告问题"
     },
     "retry": "重试",
+    "showStack": "查看调用栈",
     "title": "出错了",
     "traceTitle": "错误详情",
     "tryAgainWhenOnline": "重试"
@@ -14987,6 +14989,19 @@
       "refineUnavailable": "无法优化——未配置用于后台任务的模型。",
       "sourceLabel": "来源：{source}",
       "title": "审阅计划"
+    },
+    "composer": {
+      "cancel": "取消",
+      "create": "创建计划",
+      "createFailed": "无法创建计划。",
+      "description": "每行一个步骤。批准前仍可重新排序和编辑步骤。",
+      "openLabel": "编写计划",
+      "stepCount": "{count, plural, =0 {尚无步骤} other {# 个步骤}}",
+      "stepsLabel": "步骤",
+      "stepsPlaceholder": "审查调用方\n替换适配器\n更新测试",
+      "title": "编写计划",
+      "titleLabel": "计划标题",
+      "titlePlaceholder": "迁移认证模块"
     },
     "status": {
       "approved": "已批准",
@@ -30259,6 +30274,9 @@
       "webClone": "对在线网页做快照——下载其 HTML 以及全部 CSS/JS/图片/字体资源，打包成自包含单文件或目录 bundle，可选做组件提取与框架代码生成。产物写入工作区。",
       "webCloneConvert": "对已有的本地快照（目录 bundle 或单 HTML 文件）做组件提取 + 框架代码生成，无需重新抓取。生成 Vue/React/Angular/Svelte/jQuery 组件。"
     },
+    "vectorToolDesc": "让 Agent 在当前项目的向量记忆中存取文档。集合按关联项目隔离；未关联项目的会话无法使用这些工具。",
+    "vectorToolDesktopOnly": "需要桌面端——向量记忆运行在本机原生向量库上。",
+    "vectorToolTitle": "向量记忆工具",
     "webAllowPrivateDesc": "允许 web_fetch 访问 localhost 及内网主机（10.x、192.168.x、169.254.x 云元数据）。默认关闭以阻断 SSRF——仅在可信的本地开发时开启。",
     "webAllowPrivateTitle": "允许私有 / 本地地址",
     "webAlwaysDistillDesc": "即使没有问题，也先用工具模型处理每个抓取的网页再交给智能体——智能体不会读到原始网页文本，从而收窄提示注入面。需已配置模型；每次抓取成本略增。",

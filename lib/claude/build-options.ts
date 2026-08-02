@@ -2322,6 +2322,23 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       loggers.app.warn("failed to append SlashCommand built-in tool", { error: String(err) })
     }
   }
+  // Project-scoped vector memory (vector_search / vector_add_document /
+  // vector_delete_document). Opt-in, and only manifested when the tools can
+  // actually run: they need the native sqlite-vec store (desktop) AND a linked
+  // project to scope collections to. Advertising them without both would hand
+  // the model three tools that can only ever return an error.
+  if (appSettings?.selfInvokeTools?.vector === true) {
+    try {
+      const vectorProjectId = session?.projectId ?? ctx.activeProject?.id
+      const { isTauri } = await import("@/lib/tauri")
+      if (vectorProjectId && isTauri()) {
+        const { buildVectorManifestEntries } = await import("@/lib/claude/vector-builtin-tools")
+        opts.pluginTools = [...(opts.pluginTools ?? []), ...buildVectorManifestEntries()]
+      }
+    } catch (err) {
+      loggers.app.warn("failed to append vector built-in tools", { error: String(err) })
+    }
+  }
   // Team-collaboration tools — only on a team dispatch session, opt-in. Lets a
   // teammate message peers / publish-read the blackboard / open-vote consensus /
   // delegate during its turn (the cognia analogue of Claude Code SendMessage).

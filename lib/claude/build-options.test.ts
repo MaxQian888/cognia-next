@@ -139,6 +139,15 @@ jest.mock("@/lib/skills/surface-activation", () => {
   return { ...actual, selectSurfaceSkills: jest.fn(actual.selectSurfaceSkills) }
 })
 
+// Desktop probe. Defaults to `false` — the same value the real `isTauri()`
+// returns under Jest — so every pre-existing expectation is unchanged; the
+// desktop-only vector tools flip it per-test.
+jest.mock("@/lib/tauri", () => ({
+  ...jest.requireActual("@/lib/tauri"),
+  isTauri: jest.fn(() => false),
+}))
+
+import { isTauri } from "@/lib/tauri"
 import { buildAgentModeSessionUpdate } from "@/lib/agent"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import {
@@ -4151,6 +4160,65 @@ describe("agent self-invocation tools (Skill / SlashCommand)", () => {
       appSettings: { selfInvokeTools: { slashCommand: true } } as AppSettings,
     })
     expect(toolNames(opts)).toContain("SlashCommand")
+  })
+
+  describe("project-scoped vector memory", () => {
+    const VECTOR_TOOLS = ["vector_search", "vector_add_document", "vector_delete_document"]
+    const isTauriMock = isTauri as jest.Mock
+
+    afterEach(() => {
+      isTauriMock.mockReturnValue(false)
+    })
+
+    it("does not surface the vector tools by default (opt-in)", async () => {
+      isTauriMock.mockReturnValue(true)
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1", characterId: "c1", projectId: "p1" }),
+        character: makeChar({ id: "c1" }),
+      })
+      for (const tool of VECTOR_TOOLS) expect(toolNames(opts)).not.toContain(tool)
+    })
+
+    it("appends all three tools on desktop with a linked project", async () => {
+      isTauriMock.mockReturnValue(true)
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1", characterId: "c1", projectId: "p1" }),
+        character: makeChar({ id: "c1" }),
+        appSettings: { selfInvokeTools: { vector: true } } as AppSettings,
+      })
+      for (const tool of VECTOR_TOOLS) expect(toolNames(opts)).toContain(tool)
+    })
+
+    it("does NOT append them off the desktop shell — they cannot run there", async () => {
+      isTauriMock.mockReturnValue(false)
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1", characterId: "c1", projectId: "p1" }),
+        character: makeChar({ id: "c1" }),
+        appSettings: { selfInvokeTools: { vector: true } } as AppSettings,
+      })
+      for (const tool of VECTOR_TOOLS) expect(toolNames(opts)).not.toContain(tool)
+    })
+
+    it("does NOT append them without a linked project — collections would be unscoped", async () => {
+      isTauriMock.mockReturnValue(true)
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1", characterId: "c1" }),
+        character: makeChar({ id: "c1" }),
+        appSettings: { selfInvokeTools: { vector: true } } as AppSettings,
+      })
+      for (const tool of VECTOR_TOOLS) expect(toolNames(opts)).not.toContain(tool)
+    })
+
+    it("falls back to the active project when the session has none", async () => {
+      isTauriMock.mockReturnValue(true)
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1", characterId: "c1" }),
+        character: makeChar({ id: "c1" }),
+        appSettings: { selfInvokeTools: { vector: true } } as AppSettings,
+        activeProject: makeProject([{ path: "/tmp/p" }]),
+      })
+      for (const tool of VECTOR_TOOLS) expect(toolNames(opts)).toContain(tool)
+    })
   })
 
   it("appends team-collaboration tools only on a team session with the flag on", async () => {

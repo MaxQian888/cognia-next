@@ -131,5 +131,8 @@
   "webCardDesc": "Web search and fetch (web_search / web_fetch). On by default — works in the browser and the CLI. web_search needs a provider configured in Settings → Search.",
   "webCardTitle": "Web",
   "webNativeAnthropicDesc": "On the Anthropic path, use Claude's built-in WebSearch / WebFetch (server-side extraction + citations) instead of the multi-provider tools. Other providers keep the multi-provider tools.",
-  "webNativeAnthropicTitle": "Use native Anthropic web tools"
+  "webNativeAnthropicTitle": "Use native Anthropic web tools",
+  "vectorToolDesc": "Let the agent store and recall documents in the current project's vector memory. Collections are scoped to the linked project; a session without one cannot use these tools.",
+  "vectorToolDesktopOnly": "Requires the desktop app — vector memory runs on the local native vector store.",
+  "vectorToolTitle": "Vector memory tools"
 }

@@ -11,6 +11,7 @@ const setWebToolsAlwaysDistill = jest.fn()
 const setSkillToolEnabled = jest.fn()
 const setSlashCommandToolEnabled = jest.fn()
 const setTeamCollaborationToolEnabled = jest.fn()
+const setVectorToolEnabled = jest.fn()
 const toggleAlwaysAllow = jest.fn()
 
 jest.mock("next-intl", () => ({
@@ -48,6 +49,7 @@ const settingsState = {
   setSkillToolEnabled,
   setSlashCommandToolEnabled,
   setTeamCollaborationToolEnabled,
+  setVectorToolEnabled,
   toggleAlwaysAllow,
 }
 
@@ -65,6 +67,7 @@ describe("ToolSettingsSection", () => {
     setSkillToolEnabled.mockClear()
     setSlashCommandToolEnabled.mockClear()
     setTeamCollaborationToolEnabled.mockClear()
+    setVectorToolEnabled.mockClear()
     toggleAlwaysAllow.mockClear()
     isTauriMock.mockReturnValue(true)
     settingsState.settings.webTools = { enabled: true }
@@ -118,6 +121,26 @@ describe("ToolSettingsSection", () => {
     render(<ToolSettingsSection />)
     expect(screen.getByLabelText("toggleAriaLabel:skillToolTitle")).not.toBeDisabled()
     expect(screen.getByLabelText("toggleAriaLabel:slashToolTitle")).not.toBeDisabled()
+  })
+
+  it("toggles the vector-memory tools", () => {
+    render(<ToolSettingsSection />)
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:vectorToolTitle"))
+    expect(setVectorToolEnabled).toHaveBeenCalledWith(true)
+  })
+
+  it("disables the vector-memory toggle off-desktop and says why", () => {
+    isTauriMock.mockReturnValue(false)
+    render(<ToolSettingsSection />)
+    expect(screen.getByLabelText("toggleAriaLabel:vectorToolTitle")).toBeDisabled()
+    expect(screen.getByText("vectorToolDesktopOnly")).toBeInTheDocument()
+    expect(screen.queryByText("vectorToolDesc")).not.toBeInTheDocument()
+  })
+
+  it("describes the vector-memory tools on desktop", () => {
+    render(<ToolSettingsSection />)
+    expect(screen.getByText("vectorToolDesc")).toBeInTheDocument()
+    expect(screen.getByLabelText("toggleAriaLabel:vectorToolTitle")).not.toBeDisabled()
   })
 
   it("calls setWebToolsNativeOnAnthropic when the native sub-toggle is flipped", () => {

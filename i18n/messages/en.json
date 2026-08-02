@@ -7366,6 +7366,7 @@
     "globalDescription": "The application's main layout failed to load. Try recovering, or close the window using the title bar.",
     "globalTitle": "Cognia stopped working",
     "goHome": "Back to home",
+    "hideStack": "Hide stack trace",
     "openLogs": "Open logs",
     "recentErrors": {
       "cascadeHint": "Several errors occurred together — this may be a cascading failure.",
@@ -7379,6 +7380,7 @@
       "reportIssue": "Report issue"
     },
     "retry": "Try again",
+    "showStack": "Show stack trace",
     "title": "Something went wrong",
     "traceTitle": "Error details",
     "tryAgainWhenOnline": "Try again"
@@ -14987,6 +14989,19 @@
       "refineUnavailable": "Can't refine — no model is configured for background tasks.",
       "sourceLabel": "Source: {source}",
       "title": "Review plan"
+    },
+    "composer": {
+      "cancel": "Cancel",
+      "create": "Create plan",
+      "createFailed": "Could not create the plan.",
+      "description": "One step per line. You can reorder and edit the steps before approving.",
+      "openLabel": "Write a plan",
+      "stepCount": "{count, plural, =0 {No steps yet} one {# step} other {# steps}}",
+      "stepsLabel": "Steps",
+      "stepsPlaceholder": "Audit the callers\nSwap the adapter\nUpdate the tests",
+      "title": "Write a plan",
+      "titleLabel": "Plan title",
+      "titlePlaceholder": "Migrate the auth module"
     },
     "status": {
       "approved": "Approved",
@@ -30259,6 +30274,9 @@
       "webClone": "Snapshot a live web page — download its HTML plus all CSS/JS/image/font assets into a self-contained single file or a directory bundle, with optional component extraction + framework codegen. Writes into the workspace.",
       "webCloneConvert": "Run component extraction + framework codegen on an existing local snapshot (bundle directory or single HTML) without re-fetching. Generates Vue/React/Angular/Svelte/jQuery components."
     },
+    "vectorToolDesc": "Let the agent store and recall documents in the current project's vector memory. Collections are scoped to the linked project; a session without one cannot use these tools.",
+    "vectorToolDesktopOnly": "Requires the desktop app — vector memory runs on the local native vector store.",
+    "vectorToolTitle": "Vector memory tools",
     "webAllowPrivateDesc": "Let web_fetch reach localhost and private-network hosts (10.x, 192.168.x, 169.254.x cloud metadata). Off by default to block SSRF — enable only for trusted local development.",
     "webAllowPrivateTitle": "Allow private / local addresses",
     "webAlwaysDistillDesc": "Run every fetched page through the utility model before the agent sees it, even without a question — the agent never reads raw page text, narrowing the prompt-injection surface. Needs a configured model; slightly more cost per fetch.",
