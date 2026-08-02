@@ -176,6 +176,14 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     category: "chat",
     handler: async (ctx) => {
       await ctx.startNewSession()
+      // Pushed AFTER the switch so the marker lands at the top of the new
+      // session. Without it `/clear` was completely silent: the box emptied,
+      // the session changed, and nothing in the transcript said why.
+      ctx.pushSystemMessage({
+        kind: "slash-result",
+        commandId: "clear",
+        summary: "Started a fresh session — the previous one was archived.",
+      })
     },
   },
   {
@@ -497,6 +505,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     argumentHint: "<fact>",
     handler: async (ctx) => {
       const result = await dispatchRememberCommand(ctx)
+      if (result?.block) ctx.pushSystemMessage(result.block)
       if (result?.system) ctx.pushSystemMessage(result.system)
       if (result?.openMemory) ctx.openSettings("memory")
     },

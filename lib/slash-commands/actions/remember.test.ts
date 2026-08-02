@@ -74,7 +74,15 @@ describe("dispatchRememberCommand", () => {
         scope: "global",
       })
     )
-    expect(res?.system).toContain("I'll remember")
+    // A successful capture is a one-line confirmation, so it returns the chip
+    // block INSTEAD of prose — pushing both would post two system messages.
+    expect(res?.system).toBeUndefined()
+    expect(res?.block).toMatchObject({
+      kind: "slash-result",
+      commandId: "remember",
+      args: "I always use pnpm",
+    })
+    expect(res?.block?.summary).toContain("global")
   })
 
   it("passes characterId only for character scope", async () => {
@@ -95,7 +103,7 @@ describe("dispatchRememberCommand", () => {
     const res = await dispatchRememberCommand(ctx({ args: "fact", activeSessionId: null }))
     expect(mockGetSession).not.toHaveBeenCalled()
     expect(mockConsolidate).toHaveBeenCalled()
-    expect(res?.system).toContain("I'll remember")
+    expect(res?.block).toMatchObject({ kind: "slash-result", commandId: "remember" })
   })
 
   it("swallows consolidation errors", async () => {

@@ -99,6 +99,9 @@ import { useApplyPreset } from "@/hooks/chat/use-apply-preset"
 import { useEffectiveCwd } from "@/hooks/chat/use-effective-cwd"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import { ContextChipBar } from "./composer/context-chip-bar"
+import { CommandQueueBar } from "./composer/command-queue-bar"
+import { CommandHintBar } from "./composer/command-hint-bar"
+import { ComposerCheatsheet } from "./composer/composer-cheatsheet"
 import { ComposerAttachMenu } from "./composer/attach-menu"
 import { nextPermissionMode } from "./permission-mode-indicator"
 import { useResolvedConnectorMode } from "./use-resolved-connector-mode"
@@ -132,7 +135,13 @@ import {
 } from "@/lib/slash-commands/system-blocks"
 import { parseSegments, splitMentionSegments } from "@/lib/slash-commands/parse-segments"
 import { pillDeleteRange } from "./composer-pill-delete"
-import { runSegments } from "@/lib/slash-commands/run-segments"
+import { runSegments, type CommandError } from "@/lib/slash-commands/run-segments"
+import {
+  isMemoryTargetAvailable,
+  memoryTargetKey,
+  parseMemoryTargetKey,
+  type ComposerMemoryTarget,
+} from "@/lib/chat/memory-target"
 import { useComposerCommandStore } from "@/stores/chat/composer-command-store"
 import { ComposerChipOverlay, TEXTAREA_TYPOGRAPHY } from "./composer-chip-overlay"
 import { ComposerGhostText } from "./composer/composer-ghost-text"
@@ -144,7 +153,10 @@ import { executeShell, formatShellResult } from "@/lib/shell/exec"
 import { runInTerminalDock } from "@/lib/terminal/run-in-dock"
 import { detectInteractiveCommand } from "@/lib/claude/permissions/interactive-command"
 import { isTauri } from "@/lib/tauri"
-import { appendMemory, type MemoryScope } from "@/lib/files/memory"
+import { appendMemory } from "@/lib/files/memory"
+// `rememberFact` is imported lazily at its call site, not here: it pulls in the
+// Dexie session schema and the redaction package, which every composer test
+// otherwise has to mock just to render the box.
 import { useUpdateSession } from "@/lib/data-hooks/context"
 import { loggers } from "@cognia/logging"
 import { impact, notify } from "@/lib/capacitor/haptics"
@@ -319,7 +331,16 @@ interface InnerProps {
   ) => boolean | Promise<boolean>
   onStop: () => void | Promise<void>
   onCommand: (cmd: SlashCommand, args: string) => Promise<boolean>
-  onSubmitMemory: (scope: MemoryScope, text: string) => Promise<boolean>
+  onSubmitMemory: (target: ComposerMemoryTarget, text: string) => Promise<boolean>
+  /**
+   * Run a `!shell` line. Lives here (rather than being inferred from the
+   * outgoing text in the outer `handleSubmit`) so the `!` mode is decided from
+   * the ORIGINAL input: `/clear\n!ls` must not run a shell command just because
+   * stripping the command left `!ls` as the outgoing prose.
+   */
+  onSubmitShell: (command: string) => Promise<boolean>
+  /** Open the shortcut cheatsheet (bound to `?` on an empty input). */
+  onOpenCheatsheet: () => void
   handleRef?: Ref<ComposerHandle>
   /** Non-zero when the session has pending connector drafts to review. */
   pendingDraftCount?: number
@@ -473,6 +494,9 @@ function ComposerInner(props: InnerProps) {
   const [pastedBlocks, setPastedBlocks] = useState<Record<string, string>>({})
   const pasteSeq = useRef(0)
   const isDragging = dragDepth > 0
+  // Per-command failures from the last multi-command submit. Surfaced as
+  // failed-state pills on the command queue bar; cleared when the user edits.
+  const [commandErrors, setCommandErrors] = useState<CommandError[]>([])
 
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const permissionMode = useChatStore((s) => s.permissionMode)
@@ -616,9 +640,18 @@ function ComposerInner(props: InnerProps) {
   // Shell-style ↑/↓ recall of previously sent messages for this session.
   const history = useInputHistory(sessionId)
 
+  // Lets `detectTrigger` tell a chained command (`/compact /cl`) from a path
+  // argument (`/add-dir /usr/loc`): only a token that could still become a real
+  // command name takes the popover anchor.
+  const hasCommandPrefix = useCallback(
+    (query: string) => slashCommands.some((c) => c.name.startsWith(query)),
+    [slashCommands]
+  )
+
   const trigger = useMemo<ComposerTrigger | null>(() => {
     const tg = detectTrigger(controller.textInput.value, caret, {
       mentionMode: resolvedMentionMode,
+      hasCommandPrefix,
     })
     if (!tg) return null
     if (
@@ -629,18 +662,45 @@ function ComposerInner(props: InnerProps) {
       return null
     }
     return tg
-  }, [controller.textInput.value, caret, popoverDismissed, resolvedMentionMode])
+  }, [controller.textInput.value, caret, popoverDismissed, resolvedMentionMode, hasCommandPrefix])
 
   useEffect(() => {
     if (!popoverDismissed) return
     const tg = detectTrigger(controller.textInput.value, caret, {
       mentionMode: resolvedMentionMode,
+      hasCommandPrefix,
     })
     if (!tg || tg.kind !== popoverDismissed.kind || tg.tokenStart !== popoverDismissed.tokenStart) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPopoverDismissed(null)
     }
-  }, [controller.textInput.value, caret, popoverDismissed, resolvedMentionMode])
+  }, [controller.textInput.value, caret, popoverDismissed, resolvedMentionMode, hasCommandPrefix])
+
+  // Drop one staged command from the input. Works on the absolute segment
+  // range, then eats a single adjoining separator so removing the middle of
+  // `/a /b /c` doesn't leave a double space (or a blank line for line-per-
+  // command batches).
+  const removeCommandSegment = useCallback(
+    (start: number, end: number) => {
+      const value = controller.textInput.value
+      let cutEnd = end
+      if (value[cutEnd] === " ") cutEnd += 1
+      else if (value[cutEnd] === "\r" && value[cutEnd + 1] === "\n") cutEnd += 2
+      else if (value[cutEnd] === "\n") cutEnd += 1
+      const next = value.slice(0, start) + value.slice(cutEnd)
+      controller.textInput.setInput(next)
+      setCaret(start)
+      setCommandErrors([])
+      requestAnimationFrame(() => {
+        const ta = textareaRef.current
+        if (ta) {
+          ta.setSelectionRange(start, start)
+          ta.focus()
+        }
+      })
+    },
+    [controller.textInput]
+  )
 
   const dismissPopover = useCallback(() => {
     if (trigger) {
@@ -757,8 +817,21 @@ function ComposerInner(props: InnerProps) {
           toast.error(tMemory("needsLine"))
           return
         }
-        const ok = await props.onSubmitMemory(item.scope, text)
-        if (ok) controller.textInput.clear()
+        if (!isMemoryTargetAvailable(item.target, isDesktop)) {
+          toast.error(tMemory("desktopOnly"))
+          return
+        }
+        const ok = await props.onSubmitMemory(item.target, text)
+        // Clear only the consumed FIRST line — the `#` mode never owned the
+        // rest of the message, and wiping it here silently discarded any
+        // commands or prose the user had typed on later lines.
+        if (ok) {
+          const value = controller.textInput.value
+          const newline = value.indexOf("\n")
+          const rest = newline === -1 ? "" : value.slice(newline + 1)
+          controller.textInput.setInput(rest)
+          setCaret(0)
+        }
         dismissPopover()
       } else {
         // Mention-style picks (file / agent / subagent / skill / preset /
@@ -786,6 +859,7 @@ function ComposerInner(props: InnerProps) {
     },
     [
       trigger,
+      isDesktop,
       controller.textInput,
       addReferencedPath,
       insertReplacement,
@@ -937,24 +1011,60 @@ function ComposerInner(props: InnerProps) {
       // Record the exact typed text for ↑/↓ recall (before any command stripping).
       history.record(text)
 
-      // Multi-command: the live `segments` memo already split this input into
-      // ordered command / text segments. A `!shell` / `#memory` whole-message
-      // prefix is left to the outer handleSubmit (the parser ignores those). When
-      // the message contains one or more line-start `/commands`, run them in
-      // order: action handlers execute via `props.onCommand` (context-rich,
-      // self-toasting), template commands expand inline, and the leftover prose is
-      // what gets sent.
-      const hasCommand = segments.some((s) => s.kind === "command")
+      // ── `!shell` / `#memory` first-line modes ────────────────────────────
+      // Decided from the ORIGINAL input, never from the post-command outgoing
+      // text: `/clear\n!ls` must NOT shell out just because stripping `/clear`
+      // left `!ls` behind. And the mode claims only its FIRST LINE — exactly
+      // what `detectTrigger` and the popover have always previewed — so lines
+      // 2+ continue through the normal command/prose pipeline below.
+      const modeChar = text[0]
+      let pipelineText = text
+      let modeRan = false
+      if (modeChar === "!" || modeChar === "#") {
+        const newline = text.indexOf("\n")
+        const modeLine = (newline === -1 ? text : text.slice(0, newline)).slice(1).trim()
+        pipelineText = newline === -1 ? "" : text.slice(newline + 1)
+        modeRan = true
+        if (modeChar === "!") {
+          await props.onSubmitShell(modeLine)
+        } else if (!modeLine) {
+          toast.error(tMemory("needsLine"))
+        } else {
+          // Bare `#note` + Enter repeats the last destination instead of
+          // demanding a popover pick every single time. The availability guard
+          // matters here as much as on the pick path: a target chosen on the
+          // desktop shell can be replayed in the browser, where the CLAUDE.md
+          // file scopes have no Tauri command behind them.
+          const remembered = parseMemoryTargetKey(
+            useComposerCommandStore.getState().lastMemoryTargetKey
+          )
+          if (!remembered) toast.info(tMemory("pickScope"))
+          else if (!isMemoryTargetAvailable(remembered, isDesktop)) {
+            toast.error(tMemory("desktopOnly"))
+          } else await props.onSubmitMemory(remembered, modeLine)
+        }
+      }
+
+      // Multi-command: `segments` is the live memo over the whole input; when a
+      // first-line mode consumed line 1 we re-parse just the remainder so the
+      // consumed line can't also be sent as prose. When the message contains one
+      // or more line-start `/commands`, run them in order: action handlers
+      // execute via `props.onCommand` (context-rich), template commands expand
+      // inline, and the leftover prose is what gets sent.
+      const pipelineSegments = modeRan
+        ? parseSegments(pipelineText, (name) => commandMap.has(name))
+        : segments
+      const hasCommand = pipelineSegments.some((s) => s.kind === "command")
       if (hasCommand) {
         // Remember every runnable command sent (covers typed-not-picked ones).
         // Skip disabled/coming-soon commands so they can't pollute Recent — the
         // pick path already guards them before noteCommandUsed.
-        for (const seg of segments) {
+        for (const seg of pipelineSegments) {
           if (seg.kind === "command" && !commandMap.get(seg.name)?.disabled) {
             noteCommandUsed(seg.name)
           }
         }
-        const { outgoingText, overrides, ranAction } = await runSegments(segments, {
+        const { outgoingText, overrides, ranAction, errors } = await runSegments(pipelineSegments, {
           commandMap,
           runAction: async (command, args) => {
             await props.onCommand(command, args)
@@ -962,6 +1072,19 @@ function ComposerInner(props: InnerProps) {
           applyTemplate,
         })
         useChatStore.getState().setPendingCommandOverrides(overrides)
+        // A failed command in a batch used to vanish: `runSegments` isolates the
+        // throw into `errors` precisely so the rest of the batch still runs, but
+        // nothing read the array. Report it once, aggregated — N toasts for a
+        // three-command chain would be worse than one.
+        setCommandErrors(errors)
+        if (errors.length > 0) {
+          toast.error(
+            tCommands("batchFailed", {
+              count: errors.length,
+              names: errors.map((e) => `/${e.name}`).join(", "),
+            })
+          )
+        }
         // Only send a turn when there is prose or attachments. An action-only
         // batch (e.g. `/clear`) mutates client state and sends nothing — mirroring
         // today's "action command clears the input, no turn" behavior.
@@ -972,9 +1095,10 @@ function ComposerInner(props: InnerProps) {
             filesToSend,
             precomputed
           )
-        } else if (!ranAction) {
-          // Defensive: no prose, no files, no action — nothing was dispatched,
-          // so restore the optimistically-cleared input rather than lose it.
+        } else if (!ranAction && !modeRan) {
+          // Defensive: no prose, no files, no action, no first-line mode —
+          // nothing was dispatched, so restore the optimistically-cleared input
+          // rather than lose it.
           restoreInputAfterFailure()
           return
         }
@@ -986,7 +1110,18 @@ function ComposerInner(props: InnerProps) {
         return
       }
 
-      const sent = await props.onSubmit(expandPastes(text, pasteMap), filesToSend, precomputed)
+      // A first-line mode that consumed the entire input has already done its
+      // work — don't also send an empty turn.
+      if (modeRan && pipelineText.trim().length === 0 && filesToSend.length === 0) {
+        finalizeSend()
+        return
+      }
+
+      const sent = await props.onSubmit(
+        expandPastes(pipelineText, pasteMap),
+        filesToSend,
+        precomputed
+      )
       if (sent) finalizeSend()
       else {
         restoreInputAfterFailure()
@@ -1009,6 +1144,9 @@ function ComposerInner(props: InnerProps) {
     }
   }, [
     controller.textInput,
+    tCommands,
+    tMemory,
+    isDesktop,
     attachments,
     staged,
     props,
@@ -1049,6 +1187,13 @@ function ComposerInner(props: InnerProps) {
   const onStopTurn = props.onStop
   const onKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+      // `?` opens the shortcut cheatsheet — but ONLY on a completely empty
+      // input, so it never swallows a question mark the user is typing.
+      if (e.key === "?" && controller.textInput.value.length === 0) {
+        e.preventDefault()
+        props.onOpenCheatsheet()
+        return
+      }
       // Shift+Tab cycles permission mode regardless of popover state.
       if (e.key === "Tab" && e.shiftKey) {
         e.preventDefault()
@@ -1214,6 +1359,7 @@ function ComposerInner(props: InnerProps) {
       sendOnEnter,
       turnStatus,
       onStopTurn,
+      props,
     ]
   )
 
@@ -1230,6 +1376,9 @@ function ComposerInner(props: InnerProps) {
       if (ghostOverlayRef.current) ghostOverlayRef.current.style.transform = offset
       // Typing exits history-recall mode so the next ↑ starts from the newest.
       history.noteEdit()
+      // Last submit's per-command failures describe text the user has now
+      // changed — drop them rather than leave stale red pills on the queue bar.
+      setCommandErrors((current) => (current.length > 0 ? [] : current))
     },
     [controller.textInput, history]
   )
@@ -1662,6 +1811,11 @@ function ComposerInner(props: InnerProps) {
           plan-mode banner could otherwise push the input off the bottom of the
           screen. Each band still animates its own height inside it. */}
       <div className="max-h-[40vh] overflow-y-auto overscroll-contain">
+        <CommandQueueBar
+          segments={segments}
+          errors={commandErrors}
+          onRemove={removeCommandSegment}
+        />
         <ContextChipBar
           onRunOcr={handleRunOcrForPanel}
           ocrBusy={ocr.status === "running"}
@@ -1999,6 +2153,12 @@ function ComposerInner(props: InnerProps) {
         </div>
       </div>
 
+      <CommandHintBar
+        trigger={desktopTrigger}
+        commandMap={commandMap}
+        value={controller.textInput.value}
+      />
+
       <PluginExtensionSlot point="chat.input.below" className="px-1 pt-1 empty:hidden" />
 
       <ComposerPopover
@@ -2208,6 +2368,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     tokens: number
     resolve: (ok: boolean) => void
   } | null>(null)
+  // Shortcut cheatsheet. Owned here (not in `ComposerInner`) because the
+  // onboarding chip row that links to it lives at this level, while the `?`
+  // shortcut that opens it lives in the inner key handler.
+  const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
 
   // Poll pending drafts when in draft mode
   useEffect(() => {
@@ -2328,20 +2492,41 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   )
 
   const handleMemorySubmit = useCallback(
-    async (scope: MemoryScope, text: string): Promise<boolean> => {
+    async (target: ComposerMemoryTarget, text: string): Promise<boolean> => {
+      const noteUsed = () =>
+        useComposerCommandStore.getState().noteMemoryTargetUsed(memoryTargetKey(target))
+      if (target.target === "store") {
+        // ADR-0069 long-term memory — the SAME write path `/remember` uses, so
+        // the PII gate and the consolidator can't be bypassed here.
+        const { rememberFact } = await import("@/lib/memory/write/remember-fact")
+        const result = await rememberFact({
+          text,
+          scope: target.scope,
+          sessionId: session?.id ?? null,
+        })
+        if (result.ok) {
+          noteUsed()
+          toast.success(tMemory("storedInMemory", { scope: tMemory(`scope.${target.scope}`) }))
+          return true
+        }
+        loggers.chat.warn("memory store write refused", { reason: result.reason })
+        toast.error(tMemory(`storeError.${result.reason}`))
+        return false
+      }
       try {
         // Project memory is written at <cwd>/CLAUDE.md — confine the write to
         // the working dir so a stray cwd can't escape it. User scope ignores it.
-        const path = await appendMemory(scope, text, cwd, cwd ? [cwd] : null)
+        const path = await appendMemory(target.scope, text, cwd, cwd ? [cwd] : null)
+        noteUsed()
         toast.success(tMemory("appended", { path }))
         return true
       } catch (err) {
-        loggers.chat.error("memory append failed", err, { scope, cwd })
+        loggers.chat.error("memory append failed", err, { scope: target.scope, cwd })
         toast.error(err instanceof Error ? err.message : tMemory("failed"))
         return false
       }
     },
-    [cwd, tMemory]
+    [cwd, tMemory, session]
   )
 
   const handleSubmit = useCallback(
@@ -2351,14 +2536,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       precomputed?: ReadonlyMap<string, ExtractedAttachment>
     ) => {
       const trimmed = text.trim()
-      if (trimmed.startsWith("!")) {
-        await handleBashSubmit(trimmed.slice(1))
-        return true
-      }
-      if (trimmed.startsWith("#")) {
-        toast.info(tMemory("pickScope"))
-        return true
-      }
+      // NOTE: `!shell` / `#memory` are NOT detected here any more. They are
+      // first-line modes decided from the ORIGINAL input inside `ComposerInner`
+      // (see `onSubmitShell` / `onSubmitMemory`); sniffing the prefix off this
+      // post-command text meant `/clear\n!ls` executed a shell command.
 
       // ── Platform connector short-circuit ─────────────────────────────────
       // When a session is platform-bound, branch on the resolved mode before
@@ -2524,12 +2705,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     },
     [
       onSend,
-      handleBashSubmit,
       clearReferencedPaths,
       clearContextSelections,
       pushSystemMessage,
       tAttach,
-      tMemory,
       tWebSearch,
       session,
       resolvedMode,
@@ -2601,6 +2780,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               onStop={onStop}
               onCommand={handleSlashCommand}
               onSubmitMemory={handleMemorySubmit}
+              onSubmitShell={handleBashSubmit}
+              onOpenCheatsheet={() => setCheatsheetOpen(true)}
               handleRef={ref}
               pendingDraftCount={pendingDrafts.length}
               mentionMode={mentionMode}
@@ -2644,10 +2825,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                 }
               />
             )}
-            <HelperHints />
+            <HelperHints onOpenCheatsheet={() => setCheatsheetOpen(true)} />
           </StagedAttachmentsProvider>
         </PromptInputProvider>
       </div>
+
+      <ComposerCheatsheet open={cheatsheetOpen} onOpenChange={setCheatsheetOpen} />
 
       {/* Draft review dialog — shown when the session has pending connector drafts */}
       <Dialog open={draftDialogOpen} onOpenChange={setDraftDialogOpen}>

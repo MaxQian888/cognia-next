@@ -4,10 +4,23 @@
 // the most useful shortcuts.
 
 import { useTranslations } from "next-intl"
+import { KeyboardIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { useChatStore, useSessionHasMessages } from "@/stores/chat"
 
-export function HelperHints() {
+export interface HelperHintsProps {
+  /**
+   * Open the full shortcut cheatsheet. The sheet itself is mounted by the
+   * composer, not here, so it stays reachable (via `?` on an empty input) long
+   * after this onboarding row has retired.
+   */
+  onOpenCheatsheet?: () => void
+}
+
+// No `= {}` default on the parameter: it makes the whole parameter optional,
+// which Storybook's `Meta<typeof HelperHints>` resolves to `never` args. Every
+// field is optional, so `<HelperHints />` still type-checks.
+export function HelperHints({ onOpenCheatsheet }: HelperHintsProps) {
   const t = useTranslations("chat.composer.helperHints")
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const hasMessages = useSessionHasMessages(activeSessionId)
@@ -16,7 +29,8 @@ export function HelperHints() {
   // same three sentences under the composer, hundreds of times a day, for a
   // user who learned them on day one. Gated on the empty state instead: an
   // unstarted conversation is exactly when "press Enter to send" is news, and
-  // the first reply retires it.
+  // the first reply retires it. The cheatsheet deliberately does NOT get a
+  // permanent button here for the same reason — `?` keeps it reachable.
   if (hasMessages) return null
 
   return (
@@ -31,6 +45,17 @@ export function HelperHints() {
         {t("tryPrefix")} <code className="font-mono">/</code> <code className="font-mono">@</code>{" "}
         <code className="font-mono">!</code> <code className="font-mono">#</code>
       </Hint>
+      {onOpenCheatsheet ? (
+        <button
+          type="button"
+          onClick={onOpenCheatsheet}
+          data-testid="composer-cheatsheet-trigger"
+          className="flex items-center gap-1 rounded-full border border-transparent px-2 py-0.5 text-[10px] underline-offset-2 hover:underline"
+        >
+          <KeyboardIcon className="size-3" aria-hidden />
+          {t("cheatsheetLabel")}
+        </button>
+      ) : null}
     </div>
   )
 }

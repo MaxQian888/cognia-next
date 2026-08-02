@@ -29,6 +29,7 @@ import {
   BlocksIcon,
   BookMarkedIcon,
   BoxIcon,
+  BrainIcon,
   CircleHelpIcon,
   CornerDownRightIcon,
   FileCode2Icon,
@@ -65,6 +66,13 @@ import {
   type SlashGroup,
 } from "./composer-popover-groups"
 import { cn } from "@/lib/utils"
+import {
+  COMPOSER_MEMORY_TARGETS,
+  isMemoryTargetAvailable,
+  memoryTargetKey,
+  type ComposerMemoryTarget,
+} from "@/lib/chat/memory-target"
+import { usePlatform } from "@/hooks/use-platform"
 import { loggers } from "@cognia/logging"
 import {
   AgentMentionRow,
@@ -94,7 +102,13 @@ export type PopoverItem =
       replaceEnd: number
     }
   | { kind: "file"; entry: WorkspaceEntry }
-  | { kind: "memory"; scope: "project" | "user"; preview: string }
+  | {
+      kind: "memory"
+      target: ComposerMemoryTarget
+      preview: string
+      /** False when the shell can't perform this write (file scopes off desktop). */
+      available: boolean
+    }
   | { kind: "agent"; target: MentionTarget }
   | { kind: "subagent"; target: SubagentMentionTarget }
   | { kind: "skill"; skill: SkillMentionTarget }
@@ -196,6 +210,9 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   const t = useTranslations("chat.composer.popover")
   const tMemory = useTranslations("chat.composer.memory")
   const tAgent = useTranslations("agentTeamsWorkspace.chat.composer")
+  // File-scoped memory writes go through a Tauri command, so the two CLAUDE.md
+  // rows are inert off the desktop shell.
+  const isDesktop = usePlatform() === "tauri"
   const [highlight, setHighlight] = useState(0)
   const [slashSearch, setSlashSearch] = useState<string | null>(null)
   const listRef = useRef<HTMLUListElement>(null)
@@ -336,11 +353,17 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     }
     if (trigger.kind === "memory") {
       const preview = trigger.query.trim() || tMemory("emptyPreview")
+      // Four destinations: the two ADR-0069 long-term store scopes (all
+      // platforms) then the two CLAUDE.md file scopes (desktop only). `#` used
+      // to reach only the files, so there was no way to put a fact where
+      // `/remember` puts it and `/memory list` reads it.
       return {
-        items: [
-          { kind: "memory", scope: "project", preview },
-          { kind: "memory", scope: "user", preview },
-        ],
+        items: COMPOSER_MEMORY_TARGETS.map((target) => ({
+          kind: "memory" as const,
+          target,
+          preview,
+          available: isMemoryTargetAvailable(target, isDesktop),
+        })),
         loading: false,
         error: null,
         emptyMessage: "",
@@ -441,6 +464,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     fileList,
     t,
     tMemory,
+    isDesktop,
     tAgent,
     mentionables,
     chatAgents,
@@ -819,7 +843,7 @@ function itemKey(item: PopoverItem, idx: number): string {
     return `slash-argument-${item.command.name}-${item.value}`
   }
   if (item.kind === "file") return `file-${item.entry.absolutePath}`
-  if (item.kind === "memory") return `memory-${item.scope}`
+  if (item.kind === "memory") return `memory-${memoryTargetKey(item.target)}`
   if (item.kind === "agent") return `agent-${item.target.id}`
   if (item.kind === "subagent") return `subagent-${item.target.id}`
   if (item.kind === "skill") return `skill-${item.skill.id}`
@@ -950,13 +974,20 @@ const ItemRow = memo(function ItemRow({
     )
   }
   if (item.kind === "memory") {
+    const isStore = item.target.target === "store"
     return (
       <>
-        <BookMarkedIcon className="size-4 shrink-0 text-muted-foreground" />
-        <span className="font-medium">
-          {item.scope === "project" ? tMemory("projectLabel") : tMemory("userLabel")}
+        {isStore ? (
+          <BrainIcon className="size-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <BookMarkedIcon className="size-4 shrink-0 text-muted-foreground" />
+        )}
+        <span className={cn("font-medium", !item.available && "text-muted-foreground")}>
+          {tMemory(`targetLabel.${memoryTargetKey(item.target)}`)}
         </span>
-        <span className="ml-auto truncate text-xs text-muted-foreground">{item.preview}</span>
+        <span className="ml-auto truncate text-xs text-muted-foreground">
+          {item.available ? item.preview : tMemory("desktopOnly")}
+        </span>
       </>
     )
   }

@@ -94,7 +94,18 @@ describe("dispatchMemorySubcommand", () => {
     expect(res?.system).toMatch(/archived/)
   })
 
-  it("falls through on unknown subcommands", async () => {
-    expect(await dispatchMemorySubcommand(ctx({ args: "frobnicate" }))).toBeNull()
+  // Regression: this used to return null, which made `/memory <unknown>` a
+  // silent black hole — the builtin handler did nothing, `ranAction` stayed
+  // true, so no turn was sent AND the composer cleared the user's text.
+  it("returns a usage card for an unknown subcommand instead of null", async () => {
+    const res = await dispatchMemorySubcommand(ctx({ args: "frobnicate" }))
+    expect(res).not.toBeNull()
+    expect(res?.system).toContain("frobnicate")
+    expect(res?.system).toContain("/memory list")
+  })
+
+  it("points an unknown subcommand at the write commands", async () => {
+    const res = await dispatchMemorySubcommand(ctx({ args: "save this thing" }))
+    expect(res?.system).toContain("/remember")
   })
 })
