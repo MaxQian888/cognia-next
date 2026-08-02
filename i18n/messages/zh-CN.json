@@ -19223,7 +19223,10 @@
     "workflowScriptReadOnlyTitle": "工作流托管任务",
     "workflowTriggerNotFound": "未找到该工作流触发器。",
     "workingDir": "工作目录",
-    "yes": "是"
+    "yes": "是",
+    "showLess": "显示更少",
+    "stackTrace": "堆栈跟踪",
+    "code": "代码："
   },
   "searchCache": {
     "allProviders": "全部 Provider",

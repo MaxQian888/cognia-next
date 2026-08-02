@@ -1,38 +1,38 @@
 "use client"
 
 /**
- * SchedulerDashboardView - Default overview shown when no task is selected
- * Displays aggregate stats, execution chart, upcoming tasks, and recent executions.
+ * SchedulerDashboardView - Default overview shown when no task is selected.
+ *
+ * The overview is laid out as one page of hairline-separated blocks — a
+ * headline summary band ({@link SchedulerOverviewSummary}), the live execution
+ * monitor, the 7-day chart, then upcoming ↔ recent side by side — rather than
+ * the stack of eleven nested cards it used to be. Nested `Card` surfaces are
+ * flattened via {@link FLAT_PANEL} so a widget's own chrome doesn't reappear.
  */
 
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import {
-  Activity,
-  Pause,
-  Zap,
-  BarChart3,
-  CheckCircle,
-  XCircle,
-  Clock,
-  ArrowRight,
-  Calendar,
-} from "lucide-react"
-import { Card, CardContent } from "@/components/ui/card"
+import { Activity, CheckCircle, XCircle, Clock, ArrowRight, Calendar } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ScheduledTask, TaskExecution, TaskStatistics } from "@/types/scheduler"
-import { SCHEDULED_ITEM_KINDS, type ScheduledItemKind } from "@/types/scheduler/unified"
+import type { ScheduledItemKind } from "@/types/scheduler/unified"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 import { formatDuration, formatRelativeTime } from "@/lib/scheduler/format-utils"
 import { useSchedulerDashboardView } from "@/hooks/scheduler/use-scheduler-dashboard-view"
 import { TaskExecutionChart } from "./task-execution-chart"
 import { UnifiedRecentRuns } from "./unified-recent-runs"
 import { ExecutionMonitorPanel } from "@/components/execution/execution-monitor-panel"
-import { StatCard } from "./stat-card"
+import { SchedulerOverviewSummary } from "./scheduler-overview-summary"
 import { SchedulerDashboardViewToggle } from "./scheduler-dashboard-view-toggle"
 import { SchedulerCalendarView } from "./scheduler-calendar-view"
 import { SchedulerTimelineView } from "./scheduler-timeline-view"
 import { staticIf, viewSwitchVariants } from "./scheduler-motion"
+
+/** Flattens a nested `Card` surface so the overview reads as one page. */
+const FLAT_PANEL = "border-0 bg-transparent p-0 shadow-none [&>[data-slot=card-content]]:p-0"
+
+/** Hairline rule + breathing room — the overview's only block separator. */
+const OVERVIEW_BLOCK = "mt-5 border-t border-border/50 pt-5"
 
 export interface SchedulerDashboardViewProps {
   statistics: TaskStatistics | null
@@ -61,46 +61,6 @@ export interface SchedulerDashboardViewProps {
 }
 
 // ---------------------------------------------------------------------------
-// Success rate ring indicator
-// ---------------------------------------------------------------------------
-
-interface SuccessRingProps {
-  successRate: number
-}
-
-function SuccessRing({ successRate }: SuccessRingProps) {
-  return (
-    <svg className="h-10 w-10 -rotate-90" viewBox="0 0 36 36" aria-hidden="true">
-      <circle
-        cx="18"
-        cy="18"
-        r="15"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3"
-        className="text-muted/30"
-      />
-      <circle
-        cx="18"
-        cy="18"
-        r="15"
-        fill="none"
-        strokeWidth="3"
-        strokeDasharray={`${successRate * 0.942} 100`}
-        strokeLinecap="round"
-        className={
-          successRate >= 90
-            ? "stroke-green-500"
-            : successRate >= 70
-              ? "stroke-yellow-500"
-              : "stroke-red-500"
-        }
-      />
-    </svg>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // Status icon for recent executions
 // ---------------------------------------------------------------------------
 
@@ -121,45 +81,32 @@ function ExecutionStatusIcon({ status }: { status: TaskExecution["status"] }) {
 // Main component
 // ---------------------------------------------------------------------------
 
-interface KindSummaryStripProps {
-  countsByKind?: Record<ScheduledItemKind, number>
-  activeCountsByKind?: Record<ScheduledItemKind, number>
-}
-
-function KindSummaryStrip({ countsByKind, activeCountsByKind }: KindSummaryStripProps) {
-  const t = useTranslations("scheduler")
-  if (!countsByKind) return null
+/**
+ * Section wrapper for the overview: a hairline rule + small caps heading is
+ * what separates the blocks now, instead of every block being its own card.
+ */
+function OverviewSection({
+  title,
+  icon,
+  action,
+  children,
+  testid,
+}: {
+  title: string
+  icon: React.ReactNode
+  action?: React.ReactNode
+  children: React.ReactNode
+  testid?: string
+}) {
   return (
-    <div
-      data-testid="kind-summary-strip"
-      className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6"
-    >
-      {SCHEDULED_ITEM_KINDS.map((kind) => {
-        const total = countsByKind[kind] ?? 0
-        const active = activeCountsByKind?.[kind] ?? 0
-        const muted = total === 0
-        return (
-          <div
-            key={kind}
-            data-testid={`kind-summary-${kind}`}
-            className={cn(
-              "flex items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-xs",
-              muted ? "opacity-60 border-border/30" : "border-border/60 bg-card/50"
-            )}
-          >
-            <span className="truncate font-medium">{t(`kindFilter.${kind}`) || kind}</span>
-            <span className="flex items-center gap-1.5">
-              <span className="tabular-nums">{total}</span>
-              {!muted && (
-                <span className="text-[10px] text-green-500 tabular-nums">
-                  {active} {t("active") || "active"}
-                </span>
-              )}
-            </span>
-          </div>
-        )
-      })}
-    </div>
+    <section data-testid={testid} className={OVERVIEW_BLOCK}>
+      <div className="mb-3 flex items-center gap-2">
+        {icon}
+        <h3 className="text-sm font-semibold">{title}</h3>
+        {action && <div className="ml-auto">{action}</div>}
+      </div>
+      {children}
+    </section>
   )
 }
 
@@ -203,160 +150,99 @@ function OverviewBody({
 
   if (!statistics) return null
 
-  const successRate =
-    statistics.totalExecutions > 0
-      ? Math.round((statistics.successfulExecutions / statistics.totalExecutions) * 100)
-      : 0
-
-  const successRateColor =
-    successRate >= 90 ? "text-green-500" : successRate >= 70 ? "text-yellow-500" : "text-red-500"
-
   return (
-    <div className="space-y-5">
-      <KindSummaryStrip countsByKind={countsByKind} activeCountsByKind={activeCountsByKind} />
+    <div>
+      <SchedulerOverviewSummary
+        statistics={statistics}
+        countsByKind={countsByKind}
+        activeCountsByKind={activeCountsByKind}
+      />
       {/* Live cross-subsystem execution monitor (chat + headless legs + active
-          workflow runs + scheduler executions), governed by the ExecutionBroker. */}
-      <ExecutionMonitorPanel />
-      {/* Stats cards row */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
-        {/* Total Tasks */}
-        <StatCard
-          label={t("totalTasks") || "Total Tasks"}
-          value={statistics.totalTasks}
-          icon={<BarChart3 className="h-5 w-5 text-muted-foreground" aria-hidden="true" />}
-          valueClassName="text-foreground"
-          accentGradient="from-border to-border/50"
-          iconBgClassName="bg-muted/50"
-        />
+          workflow runs + scheduler executions), governed by the ExecutionBroker.
+          Flattened: it brings its own heading, so it only needs the rule. */}
+      <div className={OVERVIEW_BLOCK}>
+        <ExecutionMonitorPanel className={FLAT_PANEL} />
+      </div>
 
-        {/* Active */}
-        <StatCard
-          label={t("activeTasks") || "Active"}
-          value={statistics.activeTasks}
-          icon={<Activity className="h-5 w-5 text-green-500" aria-hidden="true" />}
-          valueClassName="text-green-500"
-          accentGradient="from-green-500 to-emerald-400"
-          iconBgClassName="bg-green-500/10"
-        />
-
-        {/* Paused */}
-        <StatCard
-          label={t("pausedTasks") || "Paused"}
-          value={statistics.pausedTasks}
-          icon={<Pause className="h-5 w-5 text-yellow-500" aria-hidden="true" />}
-          valueClassName="text-yellow-500"
-          accentGradient="from-yellow-500 to-amber-400"
-          iconBgClassName="bg-yellow-500/10"
-        />
-
-        {/* Executions */}
-        <StatCard
-          label={t("totalExecutions") || "Executions"}
-          value={statistics.totalExecutions}
-          icon={<Zap className="h-5 w-5 text-blue-500" aria-hidden="true" />}
-          valueClassName="text-blue-500"
-          accentGradient="from-blue-500 to-sky-400"
-          iconBgClassName="bg-blue-500/10"
-        />
-
-        {/* Success Rate with ring */}
-        <StatCard
-          label={t("successRate") || "Success Rate"}
-          value={`${successRate}%`}
-          icon={<SuccessRing successRate={successRate} />}
-          valueClassName={successRateColor}
-          accentGradient={
-            successRate >= 90
-              ? "from-green-500 to-emerald-400"
-              : successRate >= 70
-                ? "from-yellow-500 to-amber-400"
-                : "from-red-500 to-rose-400"
-          }
-          iconBgClassName="bg-transparent"
+      {/* Execution chart — all executions, no taskId filter. Also self-titled. */}
+      <div className={OVERVIEW_BLOCK}>
+        <TaskExecutionChart
+          executions={recentExecutions}
+          className="rounded-none border-0 bg-transparent p-0"
         />
       </div>
 
-      {/* Execution chart — all executions, no taskId filter */}
-      <TaskExecutionChart executions={recentExecutions} />
+      {/* Upcoming ↔ recent, side by side and separated by a rule rather than
+          by two more boxes. */}
+      <div className="grid grid-cols-1 gap-x-8 lg:grid-cols-2 lg:divide-x lg:divide-border/50">
+        <OverviewSection
+          testid="overview-upcoming"
+          title={t("upcomingTasks")}
+          icon={<Calendar className="h-4 w-4 text-blue-500" aria-hidden="true" />}
+        >
+          {upcomingTasks.length === 0 ? (
+            <p className="py-4 text-center text-xs text-muted-foreground">{t("noUpcomingTasks")}</p>
+          ) : (
+            <div className="space-y-0.5">
+              {upcomingTasks.slice(0, 5).map((task) => (
+                <button
+                  key={task.id}
+                  onClick={() => onSelectTask(task.id)}
+                  className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-muted/50"
+                >
+                  <div
+                    className={cn(
+                      "h-2 w-2 shrink-0 rounded-full",
+                      task.status === "active" ? "bg-green-500" : "bg-yellow-500"
+                    )}
+                  />
+                  <p className="flex-1 truncate text-xs font-medium">{task.name}</p>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">
+                    {formatRelativeTime(task.nextRunAt)}
+                  </span>
+                  <ArrowRight
+                    className="h-3 w-3 shrink-0 text-muted-foreground/50"
+                    aria-hidden="true"
+                  />
+                </button>
+              ))}
+            </div>
+          )}
+        </OverviewSection>
 
-      {/* Bottom two-column grid */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {/* Upcoming Tasks card */}
-        <Card className="border-border/50 bg-card/80">
-          <CardContent className="p-4">
-            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
-              <Calendar className="h-4 w-4 text-blue-500" aria-hidden="true" />
-              {t("upcomingTasks") || "Upcoming Tasks"}
-            </h3>
-
-            {upcomingTasks.length === 0 ? (
+        {/* Unified (cross-kind) when `onSelectRun` is provided by the page;
+            otherwise the app-only slice so legacy callers keep working. */}
+        {onSelectRun ? (
+          <div className={cn(OVERVIEW_BLOCK, "lg:pl-8")}>
+            <UnifiedRecentRuns limit={5} onSelectRun={onSelectRun} className={FLAT_PANEL} />
+          </div>
+        ) : (
+          <OverviewSection
+            testid="overview-recent"
+            title={t("recentExecutions")}
+            icon={<Activity className="h-4 w-4 text-purple-500" aria-hidden="true" />}
+          >
+            {recentExecutions.length === 0 ? (
               <p className="py-4 text-center text-xs text-muted-foreground">
-                {t("noUpcomingTasks") || "No upcoming tasks"}
+                {t("noRecentExecutions")}
               </p>
             ) : (
               <div className="space-y-0.5">
-                {upcomingTasks.slice(0, 5).map((task) => (
-                  <button
-                    key={task.id}
-                    onClick={() => onSelectTask(task.id)}
-                    className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-muted/50"
-                  >
-                    <div
-                      className={cn(
-                        "h-2 w-2 shrink-0 rounded-full",
-                        task.status === "active" ? "bg-green-500" : "bg-yellow-500"
-                      )}
-                    />
-                    <p className="flex-1 truncate text-xs font-medium">{task.name}</p>
+                {recentExecutions.slice(0, 5).map((exec) => (
+                  <div key={exec.id} className="flex items-center gap-3 rounded-lg px-2 py-2">
+                    <ExecutionStatusIcon status={exec.status} />
+                    <p className="flex-1 truncate text-xs font-medium">{exec.taskName}</p>
                     <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {formatRelativeTime(task.nextRunAt)}
+                      {formatDuration(exec.duration)}
                     </span>
-                    <ArrowRight
-                      className="h-3 w-3 shrink-0 text-muted-foreground/50"
-                      aria-hidden="true"
-                    />
-                  </button>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">
+                      {formatRelativeTime(exec.completedAt ?? exec.startedAt)}
+                    </span>
+                  </div>
                 ))}
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Recent Executions card — unified (cross-kind) when onSelectRun is
-            provided by the page; otherwise falls back to the app-only slice so
-            legacy callers/tests keep their existing behavior. */}
-        {onSelectRun ? (
-          <UnifiedRecentRuns limit={5} onSelectRun={onSelectRun} />
-        ) : (
-          <Card className="border-border/50 bg-card/80">
-            <CardContent className="p-4">
-              <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
-                <Activity className="h-4 w-4 text-purple-500" aria-hidden="true" />
-                {t("recentExecutions") || "Recent Executions"}
-              </h3>
-
-              {recentExecutions.length === 0 ? (
-                <p className="py-4 text-center text-xs text-muted-foreground">
-                  {t("noRecentExecutions") || "No recent executions"}
-                </p>
-              ) : (
-                <div className="space-y-0.5">
-                  {recentExecutions.slice(0, 5).map((exec) => (
-                    <div key={exec.id} className="flex items-center gap-3 rounded-lg px-2 py-2">
-                      <ExecutionStatusIcon status={exec.status} />
-                      <p className="flex-1 truncate text-xs font-medium">{exec.taskName}</p>
-                      <span className="shrink-0 text-[11px] text-muted-foreground">
-                        {formatDuration(exec.duration)}
-                      </span>
-                      <span className="shrink-0 text-[11px] text-muted-foreground">
-                        {formatRelativeTime(exec.completedAt ?? exec.startedAt)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          </OverviewSection>
         )}
       </div>
     </div>

@@ -3,6 +3,7 @@ import {
   countOccurrencesByDay,
   dayKey,
   groupOccurrencesByDay,
+  groupOccurrencesByTask,
   type Occurrence,
 } from "./upcoming-occurrences"
 import type { ScheduledTask, TaskTrigger } from "@/types/scheduler"
@@ -168,10 +169,55 @@ describe("countOccurrencesByDay", () => {
   })
 })
 
-function occ(iso: string): Occurrence {
+describe("groupOccurrencesByTask", () => {
+  it("collapses a task's repeated runs into one group, ordered by first run", () => {
+    const groups = groupOccurrencesByTask([
+      occ("2026-01-05T09:00:00", "a", "Alpha"),
+      occ("2026-01-05T09:05:00", "b", "Beta"),
+      occ("2026-01-05T09:10:00", "a", "Alpha"),
+    ])
+    expect(groups.map((g) => g.taskId)).toEqual(["a", "b"])
+    expect(groups[0].times.map((d) => d.getMinutes())).toEqual([0, 10])
+    expect(groups[1].times).toHaveLength(1)
+  })
+
+  it("carries the task metadata onto the group", () => {
+    const [group] = groupOccurrencesByTask([occ("2026-01-05T09:00:00", "a", "Alpha")])
+    expect(group).toMatchObject({
+      taskId: "a",
+      taskName: "Alpha",
+      taskType: "chat",
+      triggerType: "cron",
+      status: "active",
+    })
+  })
+
+  it("drops an exact duplicate instant for the same task", () => {
+    const groups = groupOccurrencesByTask([
+      occ("2026-01-05T09:00:00", "a", "Alpha"),
+      occ("2026-01-05T09:00:00", "a", "Alpha"),
+    ])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].times).toHaveLength(1)
+  })
+
+  it("keeps the same instant when it belongs to different tasks", () => {
+    const groups = groupOccurrencesByTask([
+      occ("2026-01-05T09:00:00", "a", "Alpha"),
+      occ("2026-01-05T09:00:00", "b", "Beta"),
+    ])
+    expect(groups).toHaveLength(2)
+  })
+
+  it("returns an empty list for no occurrences", () => {
+    expect(groupOccurrencesByTask([])).toEqual([])
+  })
+})
+
+function occ(iso: string, taskId = "x", taskName = "X"): Occurrence {
   return {
-    taskId: "x",
-    taskName: "X",
+    taskId,
+    taskName,
     taskType: "chat",
     triggerType: "cron",
     status: "active",

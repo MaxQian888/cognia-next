@@ -78,12 +78,33 @@ describe("SchedulerCalendarView", () => {
     expect(screen.getByText("calendar.noRuns")).toBeInTheDocument()
   })
 
+  it("defaults to the real clock when no `now` is injected", () => {
+    render(<SchedulerCalendarView tasks={[]} onSelectTask={jest.fn()} />)
+    expect(screen.getByTestId("scheduler-calendar-view")).toBeInTheDocument()
+    expect(screen.getByText("calendar.noRuns")).toBeInTheDocument()
+  })
+
+  it("caps the density dots and reports the overflow count", () => {
+    // Hourly cron → 24 runs on the selected day, well past the 3-dot cap.
+    const tasks = [task("hourly", "Hourly", { type: "cron", cronExpression: "0 * * * *" })]
+    render(<SchedulerCalendarView tasks={tasks} onSelectTask={jest.fn()} now={FROM} />)
+    const density = screen.getAllByTestId("calendar-density")[0]
+    expect(density.textContent).toMatch(/^\+\d+$/)
+    // …and the day panel still shows the task once, not 24 times.
+    expect(screen.getAllByTestId("calendar-occ-hourly")).toHaveLength(1)
+  })
+
   it("navigates months", () => {
     const tasks = [task("daily", "Daily Brief", { type: "cron", cronExpression: "0 9 * * *" })]
     render(<SchedulerCalendarView tasks={tasks} onSelectTask={jest.fn()} now={FROM} />)
     fireEvent.click(screen.getByTestId("calendar-next-month"))
     // February 2026 grid → Feb 1 cell present.
     expect(screen.getByTestId("calendar-day-2026-02-01")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("calendar-prev-month"))
+    expect(screen.getByTestId("calendar-day-2026-01-05")).toBeInTheDocument()
+    // Stepping back past "now" leaves a grid with no projected runs.
+    fireEvent.click(screen.getByTestId("calendar-prev-month"))
+    expect(screen.getByTestId("calendar-day-2025-12-01")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("calendar-today"))
     expect(screen.getByTestId("calendar-day-2026-01-05")).toBeInTheDocument()
   })

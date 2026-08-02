@@ -19223,7 +19223,10 @@
     "workflowScriptReadOnlyTitle": "Workflow-managed task",
     "workflowTriggerNotFound": "Workflow trigger not found.",
     "workingDir": "Working Directory",
-    "yes": "Yes"
+    "yes": "Yes",
+    "showLess": "Show less",
+    "stackTrace": "Stack trace",
+    "code": "code:"
   },
   "searchCache": {
     "allProviders": "All providers",

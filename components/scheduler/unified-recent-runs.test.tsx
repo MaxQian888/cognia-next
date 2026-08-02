@@ -88,4 +88,12 @@ describe("UnifiedRecentRuns", () => {
     const row = screen.getByTestId("unified-run-row-app:1") as HTMLButtonElement
     expect(row.disabled).toBe(true)
   })
+
+  it("merges className onto the outer surface so the overview can flatten it", () => {
+    mockRuns = [makeRun({ unifiedId: "app:1" })]
+    const { container } = render(<UnifiedRecentRuns className="border-0 bg-transparent" />)
+    const card = container.querySelector('[data-slot="card"]')!
+    expect(card.className).toContain("border-0")
+    expect(card.className).toContain("bg-transparent")
+  })
 })
