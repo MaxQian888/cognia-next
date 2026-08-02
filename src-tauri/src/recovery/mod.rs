@@ -144,10 +144,7 @@ mod tests {
     fn a_supervisor_without_recovery_gets_no_verdict() {
         // The supervisor must fall back to its own backoff rather than treat a
         // missing verdict as "do not restart".
-        assert_eq!(
-            child_failure_with(None, RecoverySubsystem::Sidecar),
-            None
-        );
+        assert_eq!(child_failure_with(None, RecoverySubsystem::Sidecar), None);
         assert!(!subsystem_disabled_with(None, RecoverySubsystem::Sidecar));
     }
 
