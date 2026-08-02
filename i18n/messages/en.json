@@ -24331,6 +24331,10 @@
           "wiki": {
             "description": "Rebuild and lint schedules",
             "label": "Wiki maintenance"
+          },
+          "inbound": {
+            "label": "Inbound review",
+            "description": "Approve what outside agents contribute"
           }
         },
         "mobileTrigger": "Panels",
@@ -24522,6 +24526,57 @@
         "toastClean": "Wiki is clean — {count, plural, one {# article} other {# articles}}, no issues.",
         "toastLintFailed": "Lint failed: {message}",
         "toastLinted": "Lint done: {orphans} orphans, {broken} broken."
+      },
+      "inbound": {
+        "title": "Inbound review",
+        "description": "Lessons, skill drafts, and notes contributed from outside Cognia. Nothing here changes anything until you accept it.",
+        "empty": "Nothing to review.",
+        "filterAria": "Filter by review status",
+        "filter": {
+          "pending": "Pending",
+          "accepted": "Accepted",
+          "rejected": "Rejected",
+          "all": "All"
+        },
+        "kind": {
+          "lesson": "Lesson",
+          "skill": "Skill draft",
+          "note": "Note"
+        },
+        "status": {
+          "pending": "Pending",
+          "accepted": "Accepted",
+          "rejected": "Rejected"
+        },
+        "origin": {
+          "mcp": "MCP client",
+          "ide-scanner": "IDE scanner",
+          "crawler": "Crawler"
+        },
+        "untrustedLabel": "Submitted from outside Cognia — treat as untrusted",
+        "accept": "Accept",
+        "reject": "Reject",
+        "cancel": "Cancel",
+        "retry": "Retry",
+        "retryAria": "Retry processing {title}",
+        "retryFailed": "Retry failed.",
+        "detailAria": "Show details for {title}",
+        "editAria": "Edit the submitted content of {title}",
+        "pendingCount": "{count} awaiting review",
+        "acceptConfirmTitle": "Accept this submission?",
+        "acceptConfirmDesc": {
+          "lesson": "This becomes a long-term memory. Accepting is final — it cannot be undone from here.",
+          "skill": "This becomes a skill, created disabled so it cannot run until you enable it yourself. Accepting is final — it cannot be undone from here.",
+          "note": "This is filed as a knowledge note. Accepting is final — it cannot be undone from here."
+        },
+        "rejectConfirmTitle": "Reject this submission?",
+        "rejectConfirmDesc": "The draft is kept for the record but is never applied. Rejecting is final — it cannot be undone from here.",
+        "rejectionReason": "Reason: {reason}",
+        "producedId": "Created: {id}",
+        "materializeFailed": "Could not be applied after {attempts} attempt(s): {error}",
+        "toastAccepted": "Accepted. It will be applied shortly.",
+        "toastRejected": "Rejected.",
+        "toastRetried": "Applied."
       }
     },
     "finder": {

@@ -33,7 +33,7 @@ import type {
 } from "@/components/settings/common/settings-panel-nav"
 import { ALL_BRIDGE_SCOPES, type BridgeScope } from "@/types/wiki"
 
-export type BridgePanelId = "server" | "scopes" | "wiki" | "setup" | "audit"
+export type BridgePanelId = "server" | "scopes" | "wiki" | "inbound" | "setup" | "audit"
 
 export type BridgeNavGroupId = "serviceGroup" | "contentGroup" | "accessGroup"
 
@@ -51,7 +51,10 @@ export const BRIDGE_NAV_GROUPS: readonly BridgeNavGroup[] = [
   },
   {
     id: "contentGroup",
-    items: [{ id: "wiki", icon: BookOpenIcon }],
+    items: [
+      { id: "wiki", icon: BookOpenIcon },
+      { id: "inbound", icon: InboxIcon },
+    ],
   },
   {
     id: "accessGroup",

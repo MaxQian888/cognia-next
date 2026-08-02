@@ -3253,7 +3253,11 @@ export class CogniaDB extends Dexie {
         wikiArticlesStaging: "&id, buildId, corpusId, [buildId+slug], [buildId+module]",
         wikiSectionsStaging: "&id, buildId, articleId, [articleId+sectionIndex]",
         // `[status+createdAt]` drives the review queue (pending, newest first).
-        inboundDrafts: "&id, kind, status, createdAt, [status+createdAt]",
+        // `canonicalHash` is the dedup probe: the distiller refuses to create a
+        // second draft for content it has already queued, so a crawler that
+        // re-reads the same page and an IDE scanner that replays the same log
+        // cannot flood the operator's queue with the same item.
+        inboundDrafts: "&id, kind, status, createdAt, canonicalHash, [status+createdAt]",
         // Primary key IS the draft id — see (3) above.
         inboundMaterializations: "&draftId, status, kind, queuedAt, [status+queuedAt]",
         knowledgeNotes: "&id, createdAt, sourceDraftId, *tags",

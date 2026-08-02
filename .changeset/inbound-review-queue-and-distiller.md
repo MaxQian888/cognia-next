@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Contributions from outside Cognia now have a review screen and a single, consistent path in. Settings → External Bridge gains an Inbound review panel listing every lesson, skill draft, and note submitted by an external coding agent, showing the submitted text in full, clearly marked as coming from outside and never rendered as though Cognia wrote it. You can edit the content before accepting, and both accepting and rejecting are final and say so before you commit. An accepted lesson becomes a long-term memory, an accepted note is filed as a knowledge note, and an accepted skill is created **disabled** — approving a contribution is not the same as letting it run, so enabling it stays a separate decision of yours. If the follow-up work fails, the row says why and offers a retry rather than quietly reversing the decision you already made. Repeat submissions of the same content are folded into the existing entry instead of filling the queue, personal information is stripped out before anything is stored or sent to a model, and submissions are never sent to a model unless that is separately permitted.

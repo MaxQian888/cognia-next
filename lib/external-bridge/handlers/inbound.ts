@@ -7,63 +7,81 @@
  *   • `save_skill_draft`  — a proposed skill (name + instructions).
  *   • `ingest_note`       — a free-form note / snippet to file for later.
  *
- * None of these mutate live Cognia state. Every submission lands in the
- * `inboundDrafts` review queue (`status: "pending"`) for the operator (a future
- * review UI / `InboundDistiller`) to accept or discard. The submitted body is
- * wrapped in `<untrusted_content>` tags (ADR-0008 R7) so any downstream
- * consumer treats it as untrusted (prompt-injection defence). All three are
- * gated behind the single `inbound:write` scope (default OFF).
+ * None of these mutate live Cognia state. Every submission goes through the
+ * shared `InboundDistiller` (`lib/inbound/distiller.ts`) — the same pipeline the
+ * IDE scanners and the crawler use — and lands in the `inboundDrafts` review
+ * queue as `pending` for the operator to accept or reject. Only acceptance
+ * materializes anything, and that happens in `lib/inbound/materializer.ts`.
  *
- * Pure handlers — validation + a Dexie write. The MCP server layer
- * (`lib/external-bridge/mcp-server`) owns the permission gate + audit log.
+ * These handlers deliberately hold no pipeline logic of their own: validation,
+ * dedup, PII redaction, and `<untrusted_content>` fencing (ADR-0008 R7) all
+ * live in the distiller, so a fourth producer cannot be added later with a
+ * subtly different — or absent — set of protections. All three tools are gated
+ * behind the single `inbound:write` scope (default OFF); the MCP server layer
+ * (`lib/external-bridge/mcp-server`) owns that gate and the audit log.
  */
 
-import { addInboundDraft, type InboundDraftKind } from "@/lib/db/inbound-drafts"
-import { wrapUntrusted } from "../untrusted"
+import type { InboundDraftKind } from "@/lib/db/inbound-drafts"
+import {
+  DENY_MODEL_GATE,
+  distillInbound,
+  MAX_INBOUND_BODY_CHARS,
+  MAX_INBOUND_TITLE_CHARS,
+  type DistillDeps,
+  type InboundGate,
+} from "@/lib/inbound/distiller"
 
-/** Max characters accepted for a submitted body — bounds a hostile submission. */
-export const MAX_INBOUND_BODY_CHARS = 100_000
-/** Max characters kept for a title. */
-export const MAX_INBOUND_TITLE_CHARS = 200
+export { MAX_INBOUND_BODY_CHARS, MAX_INBOUND_TITLE_CHARS }
 
 export interface InboundWriteResult {
   ok: true
   draftId: string
   kind: InboundDraftKind
   status: "pending"
+  /**
+   * True when an equivalent draft was already queued and this submission was
+   * folded into it. Reported rather than hidden so a scanner or crawler can
+   * tell "recorded" from "already had it" without re-reading the queue.
+   */
+  duplicate: boolean
 }
 
-function requireText(value: string, field: string, max: number): string {
-  const trimmed = (value ?? "").trim()
-  if (trimmed.length === 0) {
-    throw new Error(`${field} must not be empty`)
-  }
-  if (trimmed.length > max) {
-    throw new Error(`${field} exceeds ${max} characters`)
-  }
-  return trimmed
+/**
+ * Distiller wiring for the MCP surface.
+ *
+ * No classifier and a deny-all model gate: an MCP submission arrives already
+ * structured (the tool schema supplies the title and the kind), so there is
+ * nothing for a classification pass to add, and sending an external agent's
+ * text to a model to learn that would be an unrequested outbound call on the
+ * user's account. The scanners and crawler — whose input is unstructured — are
+ * where a classifier earns its keep.
+ */
+function mcpDeps(overrides?: Partial<DistillDeps>): DistillDeps {
+  return { gate: DENY_MODEL_GATE, ...overrides }
 }
 
-async function persist(
+async function submit(
   kind: InboundDraftKind,
   title: string,
   body: string,
   metadata: Record<string, unknown> | undefined,
-  source: string | undefined
+  source: string | undefined,
+  // Named after the tool's own parameters so a validation error tells the
+  // calling agent which argument to fix.
+  fieldLabels: { title: string; body: string },
+  deps?: Partial<DistillDeps>
 ): Promise<InboundWriteResult> {
-  const id = crypto.randomUUID()
-  await addInboundDraft({
-    id,
-    kind,
-    status: "pending",
-    // `title` is already validated to be non-empty and ≤ MAX_INBOUND_TITLE_CHARS.
-    title,
-    body: wrapUntrusted(body),
-    metadata,
-    source: source?.slice(0, 200),
-    createdAt: Date.now(),
-  })
-  return { ok: true, draftId: id, kind, status: "pending" }
+  const outcome = await distillInbound(
+    { kind, title, body, origin: "mcp", metadata, source, fieldLabels },
+    mcpDeps(deps)
+  )
+  if (outcome.status === "duplicate") {
+    return { ok: true, draftId: outcome.draftId, kind, status: "pending", duplicate: true }
+  }
+  if (outcome.status === "rejected") {
+    throw new Error(outcome.reason)
+  }
+  return { ok: true, draftId: outcome.draft.id, kind, status: "pending", duplicate: false }
 }
 
 export interface RecordLessonInput {
@@ -73,11 +91,20 @@ export interface RecordLessonInput {
   source?: string
 }
 
-export async function recordLesson(input: RecordLessonInput): Promise<InboundWriteResult> {
-  const title = requireText(input.title, "title", MAX_INBOUND_TITLE_CHARS)
-  const lesson = requireText(input.lesson, "lesson", MAX_INBOUND_BODY_CHARS)
+export async function recordLesson(
+  input: RecordLessonInput,
+  deps?: Partial<DistillDeps>
+): Promise<InboundWriteResult> {
   const tags = input.tags?.map((t) => t.trim()).filter(Boolean)
-  return persist("lesson", title, lesson, tags?.length ? { tags } : undefined, input.source)
+  return submit(
+    "lesson",
+    input.title,
+    input.lesson,
+    tags?.length ? { tags } : undefined,
+    input.source,
+    { title: "title", body: "lesson" },
+    deps
+  )
 }
 
 export interface SaveSkillDraftInput {
@@ -88,18 +115,21 @@ export interface SaveSkillDraftInput {
   source?: string
 }
 
-export async function saveSkillDraft(input: SaveSkillDraftInput): Promise<InboundWriteResult> {
-  const name = requireText(input.name, "name", MAX_INBOUND_TITLE_CHARS)
-  const instructions = requireText(input.instructions, "instructions", MAX_INBOUND_BODY_CHARS)
+export async function saveSkillDraft(
+  input: SaveSkillDraftInput,
+  deps?: Partial<DistillDeps>
+): Promise<InboundWriteResult> {
   const metadata: Record<string, unknown> = {}
   if (input.description?.trim()) metadata.description = input.description.trim()
   if (input.trigger?.trim()) metadata.trigger = input.trigger.trim()
-  return persist(
+  return submit(
     "skill",
-    name,
-    instructions,
+    input.name,
+    input.instructions,
     Object.keys(metadata).length ? metadata : undefined,
-    input.source
+    input.source,
+    { title: "name", body: "instructions" },
+    deps
   )
 }
 
@@ -110,9 +140,20 @@ export interface IngestNoteInput {
   source?: string
 }
 
-export async function ingestNote(input: IngestNoteInput): Promise<InboundWriteResult> {
-  const title = requireText(input.title, "title", MAX_INBOUND_TITLE_CHARS)
-  const note = requireText(input.note, "note", MAX_INBOUND_BODY_CHARS)
+export async function ingestNote(
+  input: IngestNoteInput,
+  deps?: Partial<DistillDeps>
+): Promise<InboundWriteResult> {
   const metadata = input.url?.trim() ? { url: input.url.trim() } : undefined
-  return persist("note", title, note, metadata, input.source)
+  return submit(
+    "note",
+    input.title,
+    input.note,
+    metadata,
+    input.source,
+    { title: "title", body: "note" },
+    deps
+  )
 }
+
+export type { InboundGate }

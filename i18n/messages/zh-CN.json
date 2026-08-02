@@ -24331,6 +24331,10 @@
           "wiki": {
             "description": "重建与检查计划",
             "label": "Wiki 维护"
+          },
+          "inbound": {
+            "label": "入站审核",
+            "description": "审批外部智能体的贡献"
           }
         },
         "mobileTrigger": "面板",
@@ -24522,6 +24526,57 @@
         "toastClean": "Wiki 无问题 —— 共 {count} 篇文章。",
         "toastLintFailed": "检查失败：{message}",
         "toastLinted": "检查完成：{orphans} 个孤儿页，{broken} 处失效链接。"
+      },
+      "inbound": {
+        "title": "入站审核",
+        "description": "来自 Cognia 之外的经验、技能草稿与笔记。在你接受之前，这里的内容不会改变任何东西。",
+        "empty": "没有待审核的内容。",
+        "filterAria": "按审核状态筛选",
+        "filter": {
+          "pending": "待审核",
+          "accepted": "已接受",
+          "rejected": "已拒绝",
+          "all": "全部"
+        },
+        "kind": {
+          "lesson": "经验",
+          "skill": "技能草稿",
+          "note": "笔记"
+        },
+        "status": {
+          "pending": "待审核",
+          "accepted": "已接受",
+          "rejected": "已拒绝"
+        },
+        "origin": {
+          "mcp": "MCP 客户端",
+          "ide-scanner": "IDE 扫描",
+          "crawler": "抓取任务"
+        },
+        "untrustedLabel": "由 Cognia 之外提交——请视为不可信内容",
+        "accept": "接受",
+        "reject": "拒绝",
+        "cancel": "取消",
+        "retry": "重试",
+        "retryAria": "重新处理 {title}",
+        "retryFailed": "重试失败。",
+        "detailAria": "展开 {title} 的详情",
+        "editAria": "编辑 {title} 的提交内容",
+        "pendingCount": "{count} 条待审核",
+        "acceptConfirmTitle": "接受这条提交？",
+        "acceptConfirmDesc": {
+          "lesson": "它将成为一条长期记忆。接受后不可在此撤销。",
+          "skill": "它将成为一个技能，并以「已禁用」创建——在你亲自启用之前不会运行。接受后不可在此撤销。",
+          "note": "它将归档为一条知识笔记。接受后不可在此撤销。"
+        },
+        "rejectConfirmTitle": "拒绝这条提交？",
+        "rejectConfirmDesc": "草稿会留存备查，但永远不会被应用。拒绝后不可在此撤销。",
+        "rejectionReason": "原因：{reason}",
+        "producedId": "已创建：{id}",
+        "materializeFailed": "尝试 {attempts} 次后仍无法应用：{error}",
+        "toastAccepted": "已接受，稍后应用。",
+        "toastRejected": "已拒绝。",
+        "toastRetried": "已应用。"
       }
     },
     "finder": {
