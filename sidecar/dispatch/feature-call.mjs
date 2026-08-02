@@ -125,13 +125,23 @@ function adapterUsageToLanguageModelUsage(usage = {}) {
     numberOrUndefined(usage.completionTokens) ??
     numberOrUndefined(usage.outputTokens?.total) ??
     numberOrUndefined(usage.outputTokens)
+  // `cachedInputTokens` / `cacheCreationInputTokens` / `reasoningTokens` are the
+  // AI SDK's deprecated top-level mirrors, removed in v7 — keep them as the
+  // first candidate for adapter payloads that still use those names, but fall
+  // through to the canonical `*TokenDetails` objects (populated since v6) before
+  // the repo's own nested shape.
   const cacheRead =
-    numberOrUndefined(usage.cachedInputTokens) ?? numberOrUndefined(usage.inputTokens?.cacheRead)
+    numberOrUndefined(usage.cachedInputTokens) ??
+    numberOrUndefined(usage.inputTokenDetails?.cacheReadTokens) ??
+    numberOrUndefined(usage.inputTokens?.cacheRead)
   const cacheWrite =
     numberOrUndefined(usage.cacheCreationInputTokens) ??
+    numberOrUndefined(usage.inputTokenDetails?.cacheWriteTokens) ??
     numberOrUndefined(usage.inputTokens?.cacheWrite)
   const reasoning =
-    numberOrUndefined(usage.reasoningTokens) ?? numberOrUndefined(usage.outputTokens?.reasoning)
+    numberOrUndefined(usage.reasoningTokens) ??
+    numberOrUndefined(usage.outputTokenDetails?.reasoningTokens) ??
+    numberOrUndefined(usage.outputTokens?.reasoning)
   return {
     inputTokens: {
       total: input,

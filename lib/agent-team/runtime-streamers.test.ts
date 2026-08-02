@@ -110,6 +110,39 @@ describe("createCompositeStreamer (Claude path)", () => {
     expect(events.find((e) => e.kind === "done")).toBeDefined()
   })
 
+  it("passes the system prompt as a top-level instructions list, not a bare string", async () => {
+    // AI SDK 7 renames `system` to `instructions` and takes a
+    // SystemModelMessage list so per-segment providerOptions survive.
+    mockedStreamText.mockReturnValue({
+      textStream: makeAsyncIterable(["ok"]),
+      usage: Promise.resolve({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
+    })
+
+    const streamer = createCompositeStreamer({
+      claude: { model: {} as never, systemPrompt: "Be a teammate." },
+      external: {} as ExternalAgentStreamerHooks,
+    })
+    await collect(
+      streamer.stream({
+        runtime: "claude",
+        prompt: "hi",
+        target: {
+          kind: "virtual",
+          id: "__virtual_claude__",
+          name: "claude",
+          runtime: "claude",
+          description: "",
+        },
+        signal: new AbortController().signal,
+      })
+    )
+
+    const call = mockedStreamText.mock.calls[0][0]
+    expect(call.system).toEqual([{ role: "system", content: "Be a teammate." }])
+    expect(call.messages).toEqual([{ role: "user", content: "hi" }])
+    expect(call).not.toHaveProperty("allowSystemInMessages")
+  })
+
   it("passes conversation history as a messages array to streamText", async () => {
     mockedStreamText.mockReturnValue({
       textStream: makeAsyncIterable(["ok"]),

@@ -430,6 +430,91 @@ describe("AI Provider API", () => {
       expect(mockStreamText).not.toHaveBeenCalled()
     })
 
+    it("hoists a leading system message out of messages into instructions", async () => {
+      // AI SDK 7 rejects `{ role: "system" }` inside `messages`, and plugin
+      // histories routinely lead with one.
+      const api = createAIProviderAPI(testPluginId)
+
+      await collectChunks(
+        api.chat([
+          { role: "system", content: "You are terse." },
+          { role: "user", content: "Hello" },
+        ])
+      )
+
+      expect(mockStreamText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          system: [{ role: "system", content: "You are terse." }],
+          messages: [{ role: "user", content: "Hello" }],
+        })
+      )
+      expect(mockStreamText.mock.calls[0][0]).not.toHaveProperty("allowSystemInMessages")
+    })
+
+    it("keeps a mid-history system message in place and opts it back in", async () => {
+      const api = createAIProviderAPI(testPluginId)
+
+      await collectChunks(
+        api.chat([
+          { role: "user", content: "Hello" },
+          { role: "system", content: "Switch to bullet points." },
+        ])
+      )
+
+      expect(mockStreamText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: [
+            { role: "user", content: "Hello" },
+            { role: "system", content: "Switch to bullet points." },
+          ],
+          allowSystemInMessages: true,
+        })
+      )
+    })
+
+    it("maps the plugin-facing maxTokens onto the AI SDK maxOutputTokens option", async () => {
+      // `maxTokens` has not been an AI SDK option since v5 — the cap used to be
+      // silently dropped, leaving plugin output unbounded.
+      const api = createAIProviderAPI(testPluginId)
+
+      await collectChunks(api.chat([{ role: "user", content: "Hello" }], { maxTokens: 256 }))
+
+      expect(mockStreamText).toHaveBeenCalledWith(expect.objectContaining({ maxOutputTokens: 256 }))
+      expect(mockStreamText.mock.calls[0][0]).not.toHaveProperty("maxTokens")
+    })
+
+    it("forwards the remaining sampling options under their AI SDK names", async () => {
+      const api = createAIProviderAPI(testPluginId)
+
+      await collectChunks(
+        api.chat([{ role: "user", content: "Hello" }], {
+          temperature: 0.3,
+          topP: 0.9,
+          stop: ["</end>"],
+        })
+      )
+
+      expect(mockStreamText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          temperature: 0.3,
+          topP: 0.9,
+          stopSequences: ["</end>"],
+        })
+      )
+    })
+
+    it("omits sampling options the caller did not set", async () => {
+      const api = createAIProviderAPI(testPluginId)
+
+      await collectChunks(api.chat([{ role: "user", content: "Hello" }], { stop: [] }))
+
+      const call = mockStreamText.mock.calls[0][0]
+      expect(call).not.toHaveProperty("temperature")
+      expect(call).not.toHaveProperty("topP")
+      expect(call).not.toHaveProperty("stopSequences")
+      expect(call).not.toHaveProperty("maxOutputTokens")
+    })
+
     it("should forward an abort signal to the underlying stream", async () => {
       const api = createAIProviderAPI(testPluginId)
       const controller = new AbortController()

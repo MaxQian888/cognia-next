@@ -17,6 +17,7 @@
  */
 
 import { streamText, type LanguageModel } from "ai"
+import { partitionPrompt } from "@/lib/ai/prompt-partition"
 import type { RuntimeStreamEvent, RuntimeStreamer } from "./team-runtime-dispatcher"
 import type { MentionTarget } from "./runtime-targets"
 import type { TeammateRuntime } from "@/types/agent/agent-team"
@@ -57,8 +58,9 @@ export async function* claudeStream(
 
   const result = streamText({
     model: options.model,
-    system: options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
-    messages,
+    // System content travels in the top-level instructions option — AI SDK 7
+    // rejects `{ role: "system" }` inside `messages`.
+    ...partitionPrompt(messages, options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT),
     abortSignal: signal,
   })
 

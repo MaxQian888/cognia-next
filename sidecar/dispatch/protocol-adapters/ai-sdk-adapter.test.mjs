@@ -288,6 +288,62 @@ test("start passes model/messages/params through to streamText verbatim", async 
   assert.equal(captured.stopWhen, undefined)
 })
 
+test("start hoists leading system messages out of messages, cacheControl intact", async () => {
+  // AI SDK 7 rejects `{ role: "system" }` inside `messages`. dispatch/ai-sdk.mjs
+  // plants up to three Anthropic cache breakpoints on separate leading system
+  // messages; each must arrive with its own providerOptions.
+  const cacheControl = { anthropic: { cacheControl: { type: "ephemeral" } } }
+  let captured = null
+  const fakeStreamText = (args) => {
+    captured = args
+    return { fullStream: (async function* () {})(), usage: Promise.resolve({}) }
+  }
+  await makeAiSdkAdapter("anthropic").start({
+    model: "claude-x",
+    messages: [
+      { role: "system", content: "base", providerOptions: cacheControl },
+      { role: "system", content: "append", providerOptions: cacheControl },
+      { role: "system", content: "per-turn tail" },
+      { role: "user", content: "hi" },
+    ],
+    credentials: { apiKey: "k" },
+    streamTextFn: fakeStreamText,
+  })
+
+  assert.deepEqual(captured.system, [
+    { role: "system", content: "base", providerOptions: cacheControl },
+    { role: "system", content: "append", providerOptions: cacheControl },
+    { role: "system", content: "per-turn tail" },
+  ])
+  assert.deepEqual(captured.messages, [{ role: "user", content: "hi" }])
+  assert.equal(captured.allowSystemInMessages, undefined)
+})
+
+test("start opts a mid-history system message back in instead of reordering it", async () => {
+  let captured = null
+  const fakeStreamText = (args) => {
+    captured = args
+    return { fullStream: (async function* () {})(), usage: Promise.resolve({}) }
+  }
+  await makeAiSdkAdapter("openai").start({
+    model: "gpt-x",
+    messages: [
+      { role: "system", content: "base" },
+      { role: "user", content: "hi" },
+      { role: "system", content: "mid" },
+    ],
+    credentials: { apiKey: "k" },
+    streamTextFn: fakeStreamText,
+  })
+
+  assert.deepEqual(captured.system, [{ role: "system", content: "base" }])
+  assert.deepEqual(captured.messages, [
+    { role: "user", content: "hi" },
+    { role: "system", content: "mid" },
+  ])
+  assert.equal(captured.allowSystemInMessages, true)
+})
+
 test("start wires tools + the maxSteps stop condition when tools exist", async () => {
   let captured = null
   const fakeStreamText = (args) => {

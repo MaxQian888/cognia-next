@@ -28,6 +28,7 @@
  */
 
 import { generateText, type ModelMessage } from "ai"
+import { partitionPrompt } from "@/lib/ai/prompt-partition"
 import { getProviderModel } from "@cognia/provider-core/core/client"
 import { loggers } from "@cognia/logging"
 
@@ -209,7 +210,9 @@ export async function handleSendChatRequest(payload: LmSendRequestPayload): Prom
   }))
   const result = await generateText({
     model,
-    messages,
+    // Extensions send a flat history that may lead with a system turn; AI SDK 7
+    // rejects `{ role: "system" }` inside `messages`.
+    ...partitionPrompt(messages),
     temperature: payload.options?.temperature,
     // Honor the extension's per-request output cap (previously silently dropped),
     // falling back to the model's BASE_MODELS budget so output is always bounded.

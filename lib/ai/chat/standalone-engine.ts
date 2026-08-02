@@ -18,6 +18,7 @@
 import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai"
 
 import { composeSystem } from "@/lib/ai/agent/agent-executor"
+import { partitionPrompt } from "@/lib/ai/prompt-partition"
 import { createFeatureProviderModel } from "@/lib/ai/provider-consumption"
 import { browserDirectHeaders, getStreamingFetch } from "@/lib/runtime/streaming-fetch"
 import type { ClaudeEvent, SendOptions } from "@cognia/agent-config-types"
@@ -108,7 +109,12 @@ export async function runStandaloneTurn(params: StandaloneTurnParams): Promise<v
 
       const system = composeSystem(sendOptions.systemPrompt, sendOptions.appendSystemPrompt)
       const modelMessages = await convertToModelMessages(messages)
-      if (fallbackAttempt && !hasNoLeakingPiiDeep({ system, messages: modelMessages })) {
+      // System content travels in the top-level instructions option — AI SDK 7
+      // rejects `{ role: "system" }` inside `messages`. Gate the partitioned
+      // payload rather than the pre-split pair so the PII check covers exactly
+      // what is handed to the provider.
+      const partitioned = partitionPrompt(modelMessages, system)
+      if (fallbackAttempt && !hasNoLeakingPiiDeep(partitioned)) {
         throw new Error(
           "Provider fallback was blocked because the full conversation contains private data."
         )
@@ -131,8 +137,7 @@ export async function runStandaloneTurn(params: StandaloneTurnParams): Promise<v
       try {
         const result = stream({
           model,
-          ...(system ? { system } : {}),
-          messages: modelMessages,
+          ...partitioned,
           abortSignal: signal,
           ...(resolvedTools
             ? { tools: resolvedTools.tools, stopWhen: stepCountIs(STANDALONE_MAX_STEPS) }

@@ -21,7 +21,8 @@
  * available, so callers can degrade gracefully.
  */
 
-import { streamText } from "ai"
+import { streamText, type ModelMessage } from "ai"
+import { partitionPrompt } from "@/lib/ai/prompt-partition"
 import {
   createFeatureProviderModel,
   createProviderSettingsSnapshot,
@@ -731,23 +732,33 @@ export async function runCompletionRail(
       ? config.model
       : undefined
   const providerVisiblePayload: Record<string, unknown> = {}
-  if (config.priorMessages && config.priorMessages.length > 0) {
-    providerVisiblePayload.messages = [
-      ...config.priorMessages.map((message) => ({
-        role: message.role,
-        content: message.content,
-      })),
-      { role: "user", content: prompt },
-    ]
-  } else {
-    providerVisiblePayload.prompt = prompt
-  }
   const system = composeSystem(
     config.systemPrompt,
     config.appendSystem,
     structuredInstruction(config.outputFormat)
   )
-  if (system) providerVisiblePayload.system = system
+  if (config.priorMessages && config.priorMessages.length > 0) {
+    // System content travels in the top-level instructions option — AI SDK 7
+    // rejects `{ role: "system" }` inside `messages`, and `priorMessages` is an
+    // arbitrary caller-supplied history that may lead with one.
+    Object.assign(
+      providerVisiblePayload,
+      partitionPrompt(
+        [
+          ...config.priorMessages.map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+          { role: "user", content: prompt },
+        ] as ModelMessage[],
+        system
+      )
+    )
+  } else {
+    providerVisiblePayload.prompt = prompt
+    if (system) providerVisiblePayload.system = system
+  }
+  // Gates the exact payload handed to the provider, instructions included.
   if (!hasNoLeakingPiiDeep(providerVisiblePayload)) {
     throw new Error("executeAgent: outbound prompt rejected by the PII gate")
   }

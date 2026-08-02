@@ -156,6 +156,50 @@ test("streams declarative adapter chunks through the LanguageModelV3 contract", 
   assert.deepEqual(events.at(-1), { type: "feature_call_stream_end", requestId: "variant-1" })
 })
 
+test("reads cache/reasoning counts from the canonical AI SDK token-detail objects", async () => {
+  // AI SDK 7 removes the deprecated top-level `cachedInputTokens` /
+  // `cacheCreationInputTokens` / `reasoningTokens` mirrors; only the
+  // `*TokenDetails` objects survive, and they must still normalize.
+  const events = []
+  const handler = createFeatureCallHandler({
+    emit: (event) => events.push(event),
+    resolveProtocolAdapter: () => ({
+      async start() {
+        return {
+          fullStream: (async function* () {
+            yield {
+              type: "finish",
+              finishReason: "stop",
+              usage: {
+                inputTokens: 100,
+                outputTokens: 40,
+                inputTokenDetails: { cacheReadTokens: 60, cacheWriteTokens: 25 },
+                outputTokenDetails: { reasoningTokens: 15 },
+              },
+            }
+          })(),
+        }
+      },
+    }),
+  })
+
+  await handler.call({
+    type: "feature_call",
+    requestId: "details-1",
+    operation: "language-stream",
+    providerId: "plugin-provider",
+    model: "model-1",
+    credentials: { protocol: "plugin:variant", apiKey: "ephemeral" },
+    protocolAdapterSpec: { kind: "openai-compatible-variant", urlTemplate: "https://example.test" },
+    options: { prompt: [{ role: "user", content: [{ type: "text", text: "diagnostic" }] }] },
+  })
+
+  assert.deepEqual(events.at(-2).part.usage, {
+    inputTokens: { total: 100, noCache: 40, cacheRead: 60, cacheWrite: 25 },
+    outputTokens: { total: 40, text: 25, reasoning: 15 },
+  })
+})
+
 test("correlates code adapter chunks and aborts their renderer bridge", async () => {
   const events = []
   const handler = createFeatureCallHandler({ emit: (event) => events.push(event) })

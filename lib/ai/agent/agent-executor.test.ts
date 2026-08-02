@@ -192,12 +192,15 @@ describe("executeAgent", () => {
           systemPrompt: "system",
         })
       ).rejects.toThrow("outbound prompt rejected by the PII gate")
+      // The gate sees the partitioned payload — i.e. exactly what would be
+      // handed to the provider, with the system prompt hoisted out of
+      // `messages` into the top-level instructions list.
       expect(mockHasNoLeakingPiiDeep).toHaveBeenCalledWith({
         messages: [
           { role: "assistant", content: "context" },
           { role: "user", content: "contact alice@example.com" },
         ],
-        system: "system",
+        system: [{ role: "system", content: "system" }],
       })
       expect(mockPlanRoute).not.toHaveBeenCalled()
       expect(mockStreamText).not.toHaveBeenCalled()

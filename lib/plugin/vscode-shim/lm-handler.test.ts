@@ -149,6 +149,46 @@ describe("lm-handler — sendChatRequest", () => {
     )
   })
 
+  it("hoists a leading system message out of messages into instructions", async () => {
+    // AI SDK 7 rejects `{ role: "system" }` inside `messages`; extensions send a
+    // flat history that commonly leads with one.
+    await handleSendChatRequest({
+      extensionId: "ext",
+      modelId: "claude-opus-4-7",
+      messages: [
+        { role: "system", content: "You are a code reviewer." },
+        { role: "user", content: "review this" },
+      ],
+    })
+
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: [{ role: "system", content: "You are a code reviewer." }],
+        messages: [{ role: "user", content: "review this" }],
+      })
+    )
+    expect(generateTextMock.mock.calls[0][0]).not.toHaveProperty("allowSystemInMessages")
+  })
+
+  it("keeps a mid-history system message in place and opts it back in", async () => {
+    await handleSendChatRequest({
+      extensionId: "ext",
+      modelId: "claude-opus-4-7",
+      messages: [
+        { role: "user", content: "review this" },
+        { role: "system", content: "Be brief now." },
+      ],
+    })
+
+    const call = generateTextMock.mock.calls[0][0]
+    expect(call).not.toHaveProperty("system")
+    expect(call.allowSystemInMessages).toBe(true)
+    expect(call.messages).toEqual([
+      { role: "user", content: "review this" },
+      { role: "system", content: "Be brief now." },
+    ])
+  })
+
   it("forwards the explicit maxOutputTokens option to generateText", async () => {
     await handleSendChatRequest({
       extensionId: "ext",

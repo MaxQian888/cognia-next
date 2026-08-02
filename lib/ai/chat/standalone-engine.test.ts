@@ -313,8 +313,13 @@ describe("runStandaloneTurn", () => {
       streamTextImpl: streamSpy as never,
       sendOptions: { systemPrompt: "SYS" } as SendOptions,
     }).promise
+    // The composed prompt travels as a SystemModelMessage list, not a bare
+    // string, so per-segment providerOptions survive the AI SDK 7 split.
     expect(streamSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ system: "SYS", model: { __model: true } })
+      expect.objectContaining({
+        system: [{ role: "system", content: "SYS" }],
+        model: { __model: true },
+      })
     )
   })
 
