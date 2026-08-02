@@ -1,0 +1,169 @@
+{
+  "name": "ten uninterrupted healthy minutes clear every budget and keep the audit",
+  "buildId": "build-2026-08-01-01",
+  "steps": [
+    {
+      "at": 0,
+      "op": "unhealthyStart"
+    },
+    {
+      "at": 1000,
+      "op": "rendererFailure"
+    },
+    {
+      "at": 2000,
+      "op": "childFailure",
+      "subsystem": "sidecar"
+    },
+    {
+      "at": 60000,
+      "op": "heartbeat"
+    },
+    {
+      "at": 60001,
+      "op": "checkpoint",
+      "subsystem": "database",
+      "success": true
+    },
+    {
+      "at": 60002,
+      "op": "checkpoint",
+      "subsystem": "plugins",
+      "success": true
+    },
+    {
+      "at": 60003,
+      "op": "checkpoint",
+      "subsystem": "sidecar",
+      "success": true
+    },
+    {
+      "at": 60004,
+      "op": "checkpoint",
+      "subsystem": "connectors",
+      "success": true
+    },
+    {
+      "at": 60005,
+      "op": "checkpoint",
+      "subsystem": "workflow",
+      "success": true
+    },
+    {
+      "at": 60006,
+      "op": "checkpoint",
+      "subsystem": "external-agent",
+      "success": true
+    },
+    {
+      "at": 300000,
+      "op": "healthyTick"
+    },
+    {
+      "at": 720000,
+      "op": "healthyTick"
+    }
+  ],
+  "expected": {
+    "schemaVersion": 1,
+    "buildId": "build-2026-08-01-01",
+    "mode": "normal",
+    "unhealthyStarts": [],
+    "checkpoints": [
+      {
+        "subsystem": "database",
+        "status": "passed",
+        "at": 1785000060001
+      },
+      {
+        "subsystem": "plugins",
+        "status": "passed",
+        "at": 1785000060002
+      },
+      {
+        "subsystem": "sidecar",
+        "status": "passed",
+        "at": 1785000060003
+      },
+      {
+        "subsystem": "connectors",
+        "status": "passed",
+        "at": 1785000060004
+      },
+      {
+        "subsystem": "workflow",
+        "status": "passed",
+        "at": 1785000060005
+      },
+      {
+        "subsystem": "external-agent",
+        "status": "passed",
+        "at": 1785000060006
+      }
+    ],
+    "rendererReload": {
+      "automaticReloadsDisabled": false
+    },
+    "childRestarts": {},
+    "disabledSubsystems": [],
+    "rendererAlive": true,
+    "audit": [
+      {
+        "at": 1785000000000,
+        "code": "recovery.start.unhealthy",
+        "success": false,
+        "reasonCode": "start.first_failure"
+      },
+      {
+        "at": 1785000001000,
+        "code": "recovery.renderer.reload"
+      },
+      {
+        "at": 1785000002000,
+        "code": "recovery.child.restart",
+        "subsystem": "sidecar",
+        "reasonCode": "child.attempt_1"
+      },
+      {
+        "at": 1785000060001,
+        "code": "recovery.checkpoint.passed",
+        "subsystem": "database",
+        "success": true
+      },
+      {
+        "at": 1785000060002,
+        "code": "recovery.checkpoint.passed",
+        "subsystem": "plugins",
+        "success": true
+      },
+      {
+        "at": 1785000060003,
+        "code": "recovery.checkpoint.passed",
+        "subsystem": "sidecar",
+        "success": true
+      },
+      {
+        "at": 1785000060004,
+        "code": "recovery.checkpoint.passed",
+        "subsystem": "connectors",
+        "success": true
+      },
+      {
+        "at": 1785000060005,
+        "code": "recovery.checkpoint.passed",
+        "subsystem": "workflow",
+        "success": true
+      },
+      {
+        "at": 1785000060006,
+        "code": "recovery.checkpoint.passed",
+        "subsystem": "external-agent",
+        "success": true
+      },
+      {
+        "at": 1785000720000,
+        "code": "recovery.stable"
+      }
+    ]
+  }
+}

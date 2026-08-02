@@ -18263,6 +18263,48 @@
       "unlockVault": "Unlock Vault"
     }
   },
+  "safeMode": {
+    "title": "Cognia started in diagnostics mode",
+    "description": "The app failed to start twice in a row, so plugins, connectors and background work are held back until each subsystem passes its health check.",
+    "buildFooter": "Build {buildId}",
+    "suspect": {
+      "title": "Suspected cause",
+      "subsystem": "The {subsystem} subsystem failed its health check.",
+      "unknownSubsystem": "No single subsystem was identified."
+    },
+    "checkpoints": {
+      "title": "Subsystem health checks",
+      "description": "Each check is read-only. A failure stops the ones after it, because they depend on it.",
+      "running": "Running health checks",
+      "empty": "No health checks have run yet."
+    },
+    "status": {
+      "pending": "Not checked yet",
+      "passed": "Passed",
+      "failed": "Failed",
+      "skipped": "Skipped",
+      "disabled": "Kept off"
+    },
+    "subsystem": {
+      "database": "Local database",
+      "plugins": "Plugins",
+      "sidecar": "Agent sidecar",
+      "connectors": "Platform connectors",
+      "workflow": "Workflows",
+      "external-agent": "External agents"
+    },
+    "actions": {
+      "retry": "Retry",
+      "keepDisabled": "Keep off"
+    },
+    "available": {
+      "title": "Available while in diagnostics mode",
+      "description": "Your local data stays readable, and you can export a report or a backup before trying again.",
+      "logs": "Open logs and crash reports",
+      "backup": "Backup and export",
+      "about": "About and reset"
+    }
+  },
   "scheduler": {
     "action": "Action",
     "actionApp": "App",

@@ -219,6 +219,59 @@ switches. A rollback never deletes local incidents or rewrites an existing V1 sp
 | WP-6    | `/logs`, settings, CLI/TUI, plugin SDK                                              | Product surfaces owner    | Responsive/a11y/E2E and contract pack tests       | Legacy readers/settings link         |
 | WP-7    | CI matrix, Helm, SLO/performance gates, rollout cleanup                             | Release engineering owner | Nightly/RC and rollback drill                     | Hold rollout                         |
 
+## 10a. Implementation record
+
+Landed slices, in the plan's dependency order. Status is per work package; a package
+is complete only when its acceptance and rollback checks pass, so partially-landed
+packages stay `in progress` with their remaining scope named.
+
+| Package | Status      | Landed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Remaining                                                                                                                                                                                                                                                          |
+| ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| WP-1    | In progress | Schema-derived Rust `ObservabilityEventV1` (`crates/cognia-observability/src/event.rs`) with parity tests that read the checked-in JSON Schema; shared golden fixtures (`packages/logging/src/schemas/fixtures/`) replayed by Rust and TypeScript; shared privacy corpus (`schemas/privacy-fixtures/`) and the Rust privacy gate (`src/privacy.rs`); native writer with host-injected immutable scope (`src/writer.rs`)                                                                                                                                            | Route Tauri logging/crash capture, CLI/TUI, sidecar, plugin host, Capacitor, connector/workflow/external-agent and diagnostic-server workers through the writer; truthful capability probes; `observability:contract:check` and `observability:writer-audit` gates |
+| WP-2    | In progress | Native bounded spool (`src/spool.rs`) — monotonic sequences, watermarks, byte/event bounds, `warn+` protection, atomic restart recovery, time-bounded drains, per-severity durability tiers                                                                                                                                                                                                                                                                                                                                                                        | Extend to CLI/sidecar/plugin-host/mobile writers; the resumable upload state machine shared by desktop and CLI; the two independent consent settings                                                                                                               |
+| WP-3    | In progress | `RecoveryStateV1` + transitions (`src/recovery.rs`), atomic build-keyed persistence (`src/recovery_store.rs`), Tauri controller/commands/boot wiring (`src-tauri/src/recovery/`), shared golden scenarios (`schemas/recovery-fixtures/`), typed IPC client (`lib/tauri/recovery.ts`), six read-only probes (`lib/recovery/`), renderer boot gate and diagnostics shell; budget callers — the white-screen watchdog spends the renderer reload budget and the sidecar supervisor the child restart budget, and `spawn` refuses a subsystem recovery is holding back | Real-process E2E matrix; child-failure callers for the remaining supervised subsystems (external-agent, workflow, connectors)                                                                                                                                      |
+| WP-4–7  | Not started | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Full scope                                                                                                                                                                                                                                                         |
+
+Four decisions were made during implementation; none changes an ADR-0102 choice.
+
+- **`recovery_boot_get` and `recovery_heartbeat` are additional commands** beside the
+  three named in §4. The boot decision needs a read path before initializers mount, and
+  the healthy timer cannot start without a renderer liveness signal. Both are additive.
+- **The renderer runs the probe sequence on a normal boot too**, not only in safe mode.
+  The healthy timer requires every enabled checkpoint to pass; without checkpoints on a
+  healthy boot the failure budgets would never clear.
+- **`recovery_boot_get` answers from the live mode, not the frozen cold-start decision.**
+  A renderer that exhausts its reload budget mid-session flips the process into safe mode
+  and is then reloaded — and the reloaded webview asks this same question. Answering from
+  the boot-time struct would send it straight back into the app tree that just died, so
+  the safe shell would be reachable only by restarting the app, which is exactly what a
+  white-screen loop prevents. `previousSessionUnhealthy` stays as recorded.
+- **The controller is published process-wide (`recovery::controller()`) in addition to
+  Tauri state.** The supervisors that need the child restart budget cannot reach Tauri
+  state: the sidecar's reader runs on a detached task holding only a `SidecarHost`, and
+  the headless server binary has no `AppHandle` at all. A budget enforceable only when a
+  webview happens to exist would be absent from the configurations that need it most.
+
+Two supervision details are worth recording, because they are the difference between the
+budgets being enforced and merely being implemented.
+
+- **Only unexpected sidecar exits are charged.** `CrashBackoff` charges every exit, which
+  is right for a counter that resets the moment the child announces ready. The recovery
+  budget only clears after ten healthy minutes, so charging deliberate restarts would
+  disable the sidecar after four ordinary "restart" clicks. `kill_sidecar` latches the
+  exit as intentional; the ready watchdog — which kills because of a genuine failure —
+  reports the failure itself before killing.
+- **`ChildAction::Disable` is enforced in `spawn`, not just recorded.** A subsystem
+  recovery is holding back (budget exhausted, or the operator chose "keep off") is refused
+  with a message pointing at the diagnostics screen. `recovery_retry` clears both the
+  disabled set and the restart counter, so the shell's Retry button is what makes the
+  path reachable again.
+
+The previous TypeScript transition module (`packages/logging/src/recovery-policy.ts`) was
+deleted rather than adapted. It implemented the full state machine and had no callers, so
+the capability matrix advertised a recovery path that could never fire. Its replacement
+(`recovery-state.ts`) holds wire types and read-only selectors only.
+
 ## 11. Decisions and review record
 
 All material decisions in ADR-0102 were approved by the requester on 2026-08-01. No open

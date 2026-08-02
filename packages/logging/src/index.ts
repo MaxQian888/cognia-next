@@ -67,6 +67,13 @@ export {
 } from "./observability-event"
 
 export {
+  OBSERVABILITY_GOLDEN_FIXTURES,
+  maximalGoldenFixture,
+  minimalGoldenFixture,
+  type ObservabilityGoldenFixture,
+} from "./observability-event-fixtures"
+
+export {
   CLIENT_PRIVACY_MANIFEST_V1,
   applyObservabilityPrivacy,
   createLocalDebugCaptureSession,
@@ -113,17 +120,27 @@ export {
 } from "./transports/observability-spool-transport"
 
 export {
-  createRecoveryState,
-  recordChildFailure,
-  recordHealthyCheckpoint,
-  recordRendererFailure,
-  recordSubsystemCheckpoint,
-  recordUnhealthyStart,
-  type ChildRecoveryAction,
+  RECOVERY_ORDER,
+  allEnabledCheckpointsPassed,
+  automaticReloadsDisabled,
+  checkpointFor,
+  isRecoverySubsystem,
+  nextCheckpoint,
+  recentRecoveryAudit,
+  recoveryProgress,
+  recoverySuspect,
+  requiresSafeShell,
+  type CheckpointResult,
+  type CheckpointStatus,
   type RecoveryAuditEntry,
+  type RecoveryBoot,
   type RecoveryMode,
-  type RecoveryState,
-} from "./recovery-policy"
+  type RecoveryProgress,
+  type RecoveryStateV1,
+  type RecoverySubsystem,
+  type RecoverySuspect,
+  type RendererReloadBudget,
+} from "./recovery-state"
 
 export {
   assembleDiagnosticIncident,

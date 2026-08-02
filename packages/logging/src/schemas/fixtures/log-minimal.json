@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "eventId": "01J9V0S8Q8K3M6ZP4WD5X2N7AB",
+  "occurredAt": "2026-08-01T09:15:00.000Z",
+  "kind": "log",
+  "severity": "info",
+  "name": "app.started",
+  "code": "log.app",
+  "scope": {
+    "tenantId": "tenant-local",
+    "installationId": "install-0001",
+    "runtime": "browser",
+    "processId": "renderer-1",
+    "module": "app",
+    "buildId": "build-2026-08-01-01",
+    "appVersion": "0.1.0"
+  },
+  "correlation": {},
+  "privacy": {
+    "redactionVersion": "privacy-v1-2026-08-01",
+    "capturePolicy": "metadata-only",
+    "contentCaptured": false,
+    "removedFields": []
+  },
+  "delivery": {
+    "spoolSequence": 1,
+    "flushWatermark": 0
+  },
+  "payload": {
+    "message": "Application started"
+  }
+}

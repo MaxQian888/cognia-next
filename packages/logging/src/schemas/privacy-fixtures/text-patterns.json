@@ -1,0 +1,29 @@
+{
+  "name": "bearer tokens, emails and filesystem paths are redacted in free text",
+  "debugSession": false,
+  "input": {
+    "message": "Retry for user@example.com failed",
+    "data": {
+      "header": "Authorization: Bearer abc123def456",
+      "path": "/Users/alice/Documents/notes.txt",
+      "windowsPath": "C:\\Users\\alice\\notes.txt",
+      "safe": "no sensitive text here",
+      "nested": ["/home/bob/report.pdf", "plain"]
+    }
+  },
+  "expected": {
+    "payload": {
+      "message": "Retry for [REDACTED_EMAIL] failed",
+      "data": {
+        "header": "Authorization: [REDACTED]",
+        "path": "[REDACTED_PATH]",
+        "windowsPath": "[REDACTED_PATH]",
+        "safe": "no sensitive text here",
+        "nested": ["[REDACTED_PATH]", "plain"]
+      }
+    },
+    "removedFields": [],
+    "capturePolicy": "metadata-only",
+    "contentCaptured": false
+  }
+}

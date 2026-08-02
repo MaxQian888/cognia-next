@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "eventId": "01J9V0S8Q8K3M6ZP4WD5X2N7EF",
+  "occurredAt": "2026-08-01T09:15:02.000Z",
+  "kind": "span",
+  "severity": "debug",
+  "name": "gateway.request",
+  "code": "span.gateway.request",
+  "scope": {
+    "tenantId": "tenant-acme",
+    "installationId": "install-0002",
+    "runtime": "sidecar",
+    "processId": "sidecar-7",
+    "module": "gateway",
+    "buildId": "build-2026-08-01-01",
+    "appVersion": "0.1.0"
+  },
+  "correlation": {
+    "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b8-01",
+    "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+    "spanId": "00f067aa0ba902b8",
+    "parentSpanId": "00f067aa0ba902b7"
+  },
+  "privacy": {
+    "redactionVersion": "privacy-v1-2026-08-01",
+    "capturePolicy": "metadata-only",
+    "contentCaptured": false,
+    "removedFields": []
+  },
+  "delivery": {
+    "spoolSequence": 43,
+    "flushWatermark": 40
+  },
+  "payload": {
+    "message": "gateway.request",
+    "durationMs": 87.5,
+    "phase": "end"
+  }
+}

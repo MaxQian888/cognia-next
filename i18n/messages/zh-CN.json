@@ -18263,6 +18263,48 @@
       "unlockVault": "解锁 Vault"
     }
   },
+  "safeMode": {
+    "title": "Cognia 已进入诊断模式",
+    "description": "应用连续两次启动失败，因此插件、连接器和后台任务将暂停，直到各子系统通过健康检查。",
+    "buildFooter": "构建 {buildId}",
+    "suspect": {
+      "title": "疑似原因",
+      "subsystem": "{subsystem} 子系统未通过健康检查。",
+      "unknownSubsystem": "未能定位到具体子系统。"
+    },
+    "checkpoints": {
+      "title": "子系统健康检查",
+      "description": "每项检查均为只读。某项失败会中断其后的检查，因为它们依赖于它。",
+      "running": "正在执行健康检查",
+      "empty": "尚未执行任何健康检查。"
+    },
+    "status": {
+      "pending": "尚未检查",
+      "passed": "已通过",
+      "failed": "未通过",
+      "skipped": "已跳过",
+      "disabled": "保持关闭"
+    },
+    "subsystem": {
+      "database": "本地数据库",
+      "plugins": "插件",
+      "sidecar": "Agent Sidecar",
+      "connectors": "平台连接器",
+      "workflow": "工作流",
+      "external-agent": "外部 Agent"
+    },
+    "actions": {
+      "retry": "重试",
+      "keepDisabled": "保持关闭"
+    },
+    "available": {
+      "title": "诊断模式下仍可使用",
+      "description": "本地数据仍可读取，你可以在重试前导出诊断报告或备份。",
+      "logs": "打开日志与崩溃报告",
+      "backup": "备份与导出",
+      "about": "关于与重置"
+    }
+  },
   "scheduler": {
     "action": "操作",
     "actionApp": "应用",

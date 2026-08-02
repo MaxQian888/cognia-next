@@ -85,6 +85,9 @@ mod process_registry;
 pub mod provider_profiles;
 mod proxy_config;
 mod recorder_window;
+/// ADR-0102 §4 — diagnostics-first safe mode. Owns `RecoveryStateV1`, its
+/// atomic persistence and the typed IPC the renderer's boot gate reads.
+pub mod recovery;
 // ADR-0067 follow-up — extracted to `crates/cognia-remote-control`;
 // re-aliased so `crate::remote_control::…` (gateway, generate_handler!)
 // resolves unchanged.
@@ -319,7 +322,10 @@ pub fn run() {
                     // "island": the fleet overlay recomputes its top-center
                     // placement on every open/resize; persisted coordinates
                     // would fight it (same rationale as the pet).
-                    .with_denylist(&["pet", "pet-popup", "island"])
+                    // The tray panel joins the overlay windows here: its
+                    // position is recomputed from the tray-icon anchor on every
+                    // open, so a restored one would fight the placement math.
+                    .with_denylist(&["pet", "pet-popup", "island", "tray-panel"])
                     .with_state_flags(
                         tauri_plugin_window_state::StateFlags::all()
                             & !tauri_plugin_window_state::StateFlags::FULLSCREEN
@@ -740,6 +746,13 @@ pub fn run() {
             tray::commands::tray_get_tooltip,
             tray::commands::tray_get_title,
             tray::commands::tray_register_icon,
+            tray::panel::open_tray_panel,
+            tray::panel::close_tray_panel,
+            tray::panel::toggle_tray_panel,
+            tray::panel::reveal_tray_panel,
+            tray::panel::tray_panel_resize,
+            tray::panel::tray_panel_get_config,
+            tray::panel::tray_panel_set_left_click,
             shortcuts::commands::shortcut_bind,
             shortcuts::commands::shortcut_unbind,
             shortcuts::commands::shortcut_list,
@@ -916,6 +929,11 @@ pub fn run() {
             crash::commands::crash_delete_report,
             crash::commands::crash_take_pending,
             crash::commands::crash_logging_diagnostics,
+            recovery::commands::recovery_boot_get,
+            recovery::commands::recovery_state_get,
+            recovery::commands::recovery_checkpoint_record,
+            recovery::commands::recovery_retry,
+            recovery::commands::recovery_heartbeat,
             scheduler::commands::scheduler_get_capabilities,
             scheduler::commands::scheduler_is_available,
             scheduler::commands::scheduler_is_elevated,
@@ -1535,6 +1553,42 @@ pub fn run() {
                 crash::install_app_handle(app.handle().clone());
                 let pending = crash::sentinel::take_pending();
                 crash::sentinel::mark_start();
+
+                // ADR-0102 §4 — recovery must see the sentinel verdict BEFORE
+                // any subsystem initializer runs, because its job is to decide
+                // whether they run at all. The sentinel is the sole owner of
+                // "did the previous run crash?"; recovery consumes that answer
+                // rather than forming a second opinion.
+                let controller = match recovery::diagnostics_dir() {
+                    Some(dir) => recovery::RecoveryController::open(
+                        &dir,
+                        recovery::build_id(),
+                        env!("CARGO_PKG_VERSION"),
+                    ),
+                    None => {
+                        log::warn!(
+                            "recovery: no diagnostics dir; safe mode reports unsupported this run"
+                        );
+                        recovery::RecoveryController::detached(recovery::build_id())
+                    }
+                };
+                let controller = std::sync::Arc::new(controller);
+                let boot = controller.record_start(pending.is_some());
+                if boot.requires_safe_shell {
+                    log::warn!(
+                        "recovery: entering the diagnostics shell for build {} (suspect: {:?})",
+                        boot.build_id,
+                        controller.snapshot().suspect_subsystem
+                    );
+                }
+                // Publish before managing: supervised children (the chat
+                // sidecar's detached reader task, the headless services) have
+                // no `AppHandle` to look state up with, and the sidecar can be
+                // spawned by a background job before the webview ever loads.
+                recovery::publish_controller(std::sync::Arc::clone(&controller));
+                app.manage(controller);
+                app.manage(boot);
+
                 app.manage(crash::commands::PendingCrashState::new(pending));
                 crash::context::publish_to_monitor();
             }
@@ -1735,6 +1789,45 @@ pub fn run() {
                             let visible = window.is_visible().unwrap_or(false);
                             match watchdog.poll(std::time::Instant::now(), visible) {
                                 webview_watchdog::WatchdogAction::Recover => {
+                                    // The watchdog owns *detection*; the
+                                    // recovery controller owns *policy*
+                                    // (ADR-0102 §4: one reload per five
+                                    // minutes, the second failure opening the
+                                    // one-shot safe shell, no automatic
+                                    // reloads after that until health
+                                    // recovers).
+                                    let controller = recovery::controller();
+                                    let suspended = controller.is_some_and(|controller| {
+                                        controller
+                                            .snapshot()
+                                            .renderer_reload
+                                            .automatic_reloads_disabled
+                                    });
+                                    if suspended {
+                                        // The shell is already open. Reloading
+                                        // again would flash away the very
+                                        // diagnostics screen the user is
+                                        // trying to read.
+                                        if watchdog.mark_gave_up_logged() {
+                                            log::error!(
+                                                "recovery: automatic reloads are disabled \
+                                                 until health recovers"
+                                            );
+                                        }
+                                        continue;
+                                    }
+                                    if matches!(
+                                        controller
+                                            .map(|controller| controller.record_renderer_failure()),
+                                        Some(
+                                            cognia_observability::recovery::RendererAction::OpenSafeShell
+                                        )
+                                    ) {
+                                        log::error!(
+                                            "recovery: renderer reload budget exhausted; \
+                                             reloading into the diagnostics shell"
+                                        );
+                                    }
                                     let url = watchdog.last_url();
                                     webview_watchdog::recover(&window, url.as_deref());
                                     watchdog.note_recovery(std::time::Instant::now());
@@ -1919,6 +2012,15 @@ pub fn run() {
                 // tunnel. `process_registry::teardown` is the single
                 // exhaustive list; do NOT add subsystems here instead.
                 tauri::async_runtime::block_on(process_registry::teardown(app_handle));
+                // Flush the recovery audit spool before the sentinel clears —
+                // a shutdown that loses the audit trail loses the only record
+                // of why this session entered recovery.
+                if let Some(controller) =
+                    app_handle.try_state::<std::sync::Arc<recovery::RecoveryController>>()
+                {
+                    controller.close();
+                }
+
                 // Graceful shutdown — clear the crash sentinel so the next
                 // launch doesn't mistake this clean exit for a crash.
                 crash::sentinel::mark_clean_exit();

@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "eventId": "01J9V0S8Q8K3M6ZP4WD5X2N7GH",
+  "occurredAt": "2026-08-01T09:16:00.000Z",
+  "kind": "crash",
+  "severity": "fatal",
+  "name": "native.panic",
+  "code": "crash.native.panic",
+  "scope": {
+    "tenantId": "tenant-acme",
+    "installationId": "install-0002",
+    "runtime": "tauri",
+    "processId": "main-42",
+    "module": "crash",
+    "buildId": "build-2026-08-01-01",
+    "appVersion": "0.1.0",
+    "origin": "tauri"
+  },
+  "correlation": {
+    "sessionId": "session-9"
+  },
+  "privacy": {
+    "redactionVersion": "privacy-v1-2026-08-01",
+    "capturePolicy": "metadata-only",
+    "contentCaptured": false,
+    "removedFields": ["payload.data.path"]
+  },
+  "delivery": {
+    "spoolSequence": 44,
+    "flushWatermark": 43
+  },
+  "payload": {
+    "message": "panicked at 'index out of bounds'",
+    "stack": "0: cognia_next::crash::demo\n1: core::panicking::panic",
+    "data": {
+      "artifactKind": "minidump",
+      "artifactPresent": true,
+      "reportStem": "crash-2026-08-01-091600"
+    },
+    "tags": ["native", "panic"]
+  }
+}

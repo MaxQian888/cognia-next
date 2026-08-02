@@ -1,0 +1,66 @@
+{
+  "name": "two unhealthy starts inside ten minutes enter the diagnostics shell",
+  "buildId": "build-2026-08-01-01",
+  "steps": [
+    {
+      "at": 0,
+      "op": "unhealthyStart"
+    },
+    {
+      "at": 300000,
+      "op": "unhealthyStart"
+    }
+  ],
+  "expected": {
+    "schemaVersion": 1,
+    "buildId": "build-2026-08-01-01",
+    "mode": "safe",
+    "unhealthyStarts": [1785000000000, 1785000300000],
+    "checkpoints": [
+      {
+        "subsystem": "database",
+        "status": "pending"
+      },
+      {
+        "subsystem": "plugins",
+        "status": "pending"
+      },
+      {
+        "subsystem": "sidecar",
+        "status": "pending"
+      },
+      {
+        "subsystem": "connectors",
+        "status": "pending"
+      },
+      {
+        "subsystem": "workflow",
+        "status": "pending"
+      },
+      {
+        "subsystem": "external-agent",
+        "status": "pending"
+      }
+    ],
+    "rendererReload": {
+      "automaticReloadsDisabled": false
+    },
+    "childRestarts": {},
+    "disabledSubsystems": [],
+    "rendererAlive": false,
+    "audit": [
+      {
+        "at": 1785000000000,
+        "code": "recovery.start.unhealthy",
+        "success": false,
+        "reasonCode": "start.first_failure"
+      },
+      {
+        "at": 1785000300000,
+        "code": "recovery.start.unhealthy",
+        "success": false,
+        "reasonCode": "start.second_failure_in_window"
+      }
+    ]
+  }
+}

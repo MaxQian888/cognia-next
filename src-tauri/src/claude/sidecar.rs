@@ -90,6 +90,15 @@ struct Inner {
     /// `supervision_backoff.rs`). Reset the moment the sidecar announces
     /// `ready`, advanced on every reader exit.
     backoff: CrashBackoff,
+    /// Latched by [`kill_sidecar`], consumed by [`SidecarState::note_exit`].
+    ///
+    /// `CrashBackoff` charges *every* exit, which is right for a backoff that
+    /// resets the moment the child announces ready. The recovery restart
+    /// budget (ADR-0102 §4) is not so forgiving — it only clears after ten
+    /// healthy minutes — so charging a deliberate restart against it would
+    /// disable the sidecar and drop the app into safe mode after four ordinary
+    /// "restart sidecar" clicks. Only unexpected deaths count.
+    intentional_stop: bool,
     /// Per-session hook context: the send-time cwd (for project/local scope
     /// resolution) and the in-flight tool_use map used to correlate a
     /// `tool_result` back to the tool name/input that produced it (PostToolUse).
@@ -213,13 +222,26 @@ impl SidecarState {
     /// per-session hook state (R6 — otherwise orphaned on crash), and record the
     /// failure for backoff (R4). Locks `stdin` and `inner` sequentially (never
     /// nested) so there is no lock-ordering hazard.
-    async fn note_exit(&self, now: Instant) {
+    ///
+    /// Returns whether the exit was *unexpected* — i.e. not preceded by
+    /// [`kill_sidecar`]. Only unexpected exits are charged against the recovery
+    /// restart budget; see [`Inner::intentional_stop`].
+    async fn note_exit(&self, now: Instant) -> bool {
         self.stdin.lock().await.take();
         let mut guard = self.inner.lock().await;
         guard.child = None;
         guard.ready = false;
         guard.sessions.clear();
         guard.backoff.note_failure(now);
+        !std::mem::take(&mut guard.intentional_stop)
+    }
+
+    /// Latch that the next exit was asked for, so [`note_exit`] does not charge
+    /// it against the recovery restart budget.
+    ///
+    /// [`note_exit`]: Self::note_exit
+    async fn note_intentional_stop(&self) {
+        self.inner.lock().await.intentional_stop = true;
     }
 
     /// Remaining crash-backoff window at `now`, or `None` if a respawn may
@@ -368,6 +390,19 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
 
     if state.inner.lock().await.child.is_some() {
         return Ok(());
+    }
+
+    // Recovery is holding the sidecar back — either its restart budget ran out
+    // or the operator chose "keep off" in the diagnostics shell. Both are
+    // cleared by `recovery_retry`, so the shell's Retry button is what makes
+    // this path reachable again. Checked before backoff: a held-back subsystem
+    // is a decision, not a delay, and the caller deserves to be told which.
+    if crate::recovery::is_subsystem_disabled(
+        cognia_observability::recovery::RecoverySubsystem::Sidecar,
+    ) {
+        return Err(
+            "sidecar is disabled by recovery; retry it from the diagnostics screen".to_string(),
+        );
     }
 
     // Crash-loop backoff: don't hot-respawn a sidecar that keeps dying before it
@@ -582,7 +617,14 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
             // The sidecar exited. Clear state (incl. orphaned per-session hook
             // state) and record the failure so the next spawn can back off a
             // crash loop. `note_exit` is the single sink for all of that.
-            state.note_exit(Instant::now()).await;
+            let unexpected = state.note_exit(Instant::now()).await;
+            if unexpected {
+                // ADR-0102 §4 — three automatic restarts per subsystem, then
+                // the subsystem is held back and the app enters safe mode. The
+                // local `CrashBackoff` above paces the *next* respawn; this
+                // budget is what stops an unpaceable loop.
+                report_sidecar_failure();
+            }
             log::warn!("sidecar process ended");
             host.emit(
                 SIDECAR_EVENT,
@@ -635,6 +677,12 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
                 // failure (feeding backoff). The reader's EOF handler emits the
                 // `sidecar_exited` event; we add a `log` line so the user sees
                 // *why* (avoids a duplicate `sidecar_exited`).
+                //
+                // A child that never announced ready is a genuine failure, so
+                // report it here: `kill_sidecar` latches the exit as
+                // intentional, which would otherwise let a boot that hangs
+                // forever escape the recovery restart budget entirely.
+                report_sidecar_failure();
                 kill_sidecar(state.clone()).await;
                 host.emit(
                     SIDECAR_EVENT,
@@ -892,9 +940,43 @@ async fn observe_hooks(host: Arc<dyn SidecarHost>, state: SidecarState, value: V
     }
 }
 
+/// Charge one unexpected sidecar death against the recovery restart budget and
+/// log what recovery decided.
+///
+/// The returned delay is deliberately *not* applied here: the sidecar has no
+/// respawn loop to delay (it is spawned lazily by the next `claude_send`), and
+/// `CrashBackoff` already paces that path. What this adds is the ceiling —
+/// after the fourth death `spawn` refuses, the subsystem is held back, and the
+/// app enters safe mode so the user is told rather than left with a chat box
+/// that silently never answers.
+fn report_sidecar_failure() {
+    use cognia_observability::recovery::{ChildAction, RecoverySubsystem};
+
+    match crate::recovery::report_child_failure(RecoverySubsystem::Sidecar) {
+        Some(ChildAction::Restart { attempt, .. }) => {
+            log::warn!("recovery: sidecar death {attempt} of 3 before the subsystem is held back");
+        }
+        Some(ChildAction::Disable { .. }) => {
+            log::error!(
+                "recovery: sidecar restart budget exhausted; holding the subsystem back \
+                 and entering the diagnostics shell"
+            );
+        }
+        // Recovery is not running (headless tests, no data dir). `CrashBackoff`
+        // still paces respawns, so supervision degrades rather than stops.
+        None => {}
+    }
+}
+
 /// Stop the running sidecar (drop stdin, kill the child). The next
 /// `claude_send` will respawn it. Safe to call when no sidecar is running.
+///
+/// Deliberate by definition — the resulting exit is latched as intentional so
+/// it is not charged against the recovery restart budget. The one caller that
+/// kills because of a *genuine* failure (the ready watchdog) reports that
+/// failure itself before calling this.
 pub async fn kill_sidecar(state: SidecarState) {
+    state.note_intentional_stop().await;
     // Closing stdin first lets the sidecar exit cleanly (its stdin EOF handler
     // tears down active sessions). If that doesn't work, kill_on_drop handles
     // the rest when we drop the Child below. stdin lives behind its own lock;
@@ -933,6 +1015,41 @@ mod tests {
     // The pure backoff-table tests moved to `supervision_backoff.rs` with the
     // extraction (R6); the state-level tests below still exercise the
     // SidecarState wiring around `CrashBackoff`.
+
+    #[tokio::test]
+    async fn an_unasked_for_exit_is_reported_as_unexpected() {
+        let s = SidecarState::new();
+        assert!(
+            s.note_exit(Instant::now()).await,
+            "a crash must be charged against the recovery restart budget"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_deliberate_stop_is_not_charged_to_the_restart_budget() {
+        let s = SidecarState::new();
+        s.note_intentional_stop().await;
+        assert!(!s.note_exit(Instant::now()).await);
+    }
+
+    #[tokio::test]
+    async fn the_intentional_latch_covers_exactly_one_exit() {
+        // Otherwise a single "restart sidecar" click would mask every later
+        // crash, and the budget would never fire.
+        let s = SidecarState::new();
+        s.note_intentional_stop().await;
+        assert!(!s.note_exit(Instant::now()).await);
+        assert!(s.note_exit(Instant::now()).await);
+    }
+
+    #[tokio::test]
+    async fn killing_the_sidecar_latches_the_intentional_stop() {
+        let s = SidecarState::new();
+        // No child is running; the latch must still be set, because the reader
+        // task for a child that is already dying will consume it.
+        kill_sidecar(s.clone()).await;
+        assert!(!s.note_exit(Instant::now()).await);
+    }
 
     #[tokio::test]
     async fn backoff_remaining_none_before_any_failure() {

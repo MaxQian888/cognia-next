@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "eventId": "01J9V0S8Q8K3M6ZP4WD5X2N7CD",
+  "occurredAt": "2026-08-01T09:15:01.250Z",
+  "kind": "log",
+  "severity": "warn",
+  "name": "connector.retry",
+  "code": "connector.outbound.retry",
+  "scope": {
+    "tenantId": "tenant-acme",
+    "installationId": "install-0002",
+    "runtime": "tauri",
+    "processId": "main-42",
+    "module": "connectors",
+    "pluginId": "web-tools",
+    "buildId": "build-2026-08-01-01",
+    "appVersion": "0.1.0",
+    "origin": "tauri"
+  },
+  "correlation": {
+    "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    "tracestate": "cognia=1",
+    "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+    "spanId": "00f067aa0ba902b7",
+    "parentSpanId": "0020000000000001",
+    "sessionId": "session-9",
+    "requestId": "request-9",
+    "executionId": "execution-9",
+    "workflowId": "workflow-9",
+    "stepId": "step-9"
+  },
+  "privacy": {
+    "redactionVersion": "privacy-v1-2026-08-01",
+    "capturePolicy": "metadata-only",
+    "contentCaptured": false,
+    "removedFields": ["payload.data.prompt", "payload.data.toolOutput"]
+  },
+  "delivery": {
+    "spoolSequence": 42,
+    "flushWatermark": 40
+  },
+  "payload": {
+    "message": "Outbound delivery retry scheduled",
+    "data": { "attemptDelayMs": 2000 },
+    "stack": "Error: timeout\n    at send",
+    "tags": ["connector", "retry"],
+    "phase": "retry",
+    "attempt": 2,
+    "durationMs": 1250,
+    "source": { "file": "outbound-runner.ts", "line": 128 },
+    "legacyEventId": "legacy-777"
+  }
+}
