@@ -5,6 +5,7 @@
 
 pub(crate) mod acp;
 pub(crate) mod build;
+pub(crate) mod contract;
 pub(crate) mod crash;
 pub(crate) mod dev;
 pub(crate) mod diagnostic_common;

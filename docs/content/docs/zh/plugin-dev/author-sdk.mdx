@@ -23,6 +23,40 @@ description: 面向可分发 Cognia 插件的受支持导入、运行时组合�
 
 不要导入 `@/lib`、`@/types`、`@cognia/plugin-sdk/host` 或应用私有的 `@cognia/*` 包。`host` 入口只服务一次仓库内迁移，不在 npm exports 或 tarball 中。
 
+## 契约驱动的插件开发
+
+修改 manifest 或选择运行时之前，先使用 `cognia plugin contract`。它读取生成后的 canonical catalog，因此未来新增的能力、contribution、权限、入口和路径字段无需更新人工清单即可被发现。
+
+```bash
+# 新插件：只查询 tool 与 context panel 所需契约。
+cognia plugin contract \
+  --plugin-type frontend \
+  --capability tools \
+  --contribution contextPanels \
+  --point chat.input.actions \
+  --point-kind ui-slot \
+  --permission extension:ui \
+  --json
+cognia plugin new support-panel --kind ts --json
+
+# 扩展现有插件：先检查，再查询扩展需要的记录。
+cognia plugin info . --json
+cognia plugin contract \
+  --plugin-type hybrid \
+  --capability python \
+  --contribution tools \
+  --json
+
+# 确定运行时之前，对比兼容的 runtime entry 规则。
+cognia plugin contract --plugin-type frontend --plugin-type hybrid --json
+```
+
+选择器可以重复使用。Point kind 包括 `ui-slot`、`hook`、`activation` 和 `runtime`。不带筛选时返回完整目录；带筛选时返回选中及关联的契约记录，并保留完整目录计数。v2 JSON envelope 会在 capability、contribution、permission、runtime entry 与 path field 之外返回生成后的 `pluginPoints` 目录。未知选择器会以结构化 input error 失败，命令本身不会写入文件。
+
+必须检查结果中的 `support`、`pythonExecution`、`execution`、point `status`/`stability`、`formFactor`、替代 id、permission、入口路径、最低宿主版本和路径字段契约。生成任何标记为 experimental 的行为前都要取得用户明确确认，并在完成报告中保留实验性警告。新功能不得使用 deprecated point，应改用其 `replacementId`。依赖 JavaScript 执行的 contribution 与纯 Python 或 WASM 运行时不兼容；必须在写入前停止，并仅提供契约报告的兼容类型，通常是 `frontend` 或 `hybrid`。
+
+批准后，新项目使用 `cognia plugin new ... --json`；扩展现有项目时保留无关文件。随后运行 `cognia plugin sync-types`，仅使用 `@cognia/plugin-sdk` 与 `@cognia/plugin-ui` 实现，并依次通过 `doctor`、`lint --json`、运行时测试/typecheck、`build --json` 和 `info --json`。密钥生成、签名、安装、reload、export 与发布都是需要明确请求的独立操作。
+
 ## 运行时矩阵
 
 | Manifest 类型 | 必需入口 | JavaScript 延迟 contribution | 说明 |
@@ -32,6 +66,12 @@ description: 面向可分发 Cognia 插件的受支持导入、运行时组合�
 | `hybrid` | `pythonMain`；存在 JS contribution 时还需 `main` | 提供 `main` 后允许 | 两个运行时分别加载 |
 | `wasm` | `wasmMain` 与 `wasm.apiVersion` | 拒绝 | 桌面 Component Model 宿主 |
 | `vscode-extension` | `vscodeMain`、theme、grammar、icon theme、snippet 或 language 至少一项 | 仅 VS Code contribution | 纯声明式扩展无需 `vscodeMain`；代码扩展仍需要 |
+
+## UI 扩展要求
+
+编写组件前先查询准确的 UI point。返回的 `formFactor` 是宿主布局契约：`icon` 表示方形控件，`row` 表示紧凑操作行，`block` 表示纵向堆叠区块，`panel` 表示自带滚动的完整区域。UI primitive 必须从 `@cognia/plugin-ui` 导入；`cognia plugin build` 会把它与 React 保持为 external，使插件复用宿主的 shared React 与主题。不要导入宿主组件，也不要使用 `react-dom` portal。
+
+插件自行负责展示文案。必须提供 manifest i18n，以及本地化的 accessible name、placeholder、空态/错误态和 dialog close label。`@cognia/plugin-ui` 无法读取宿主的 `next-intl` catalog。
 
 `engines.cognia` 是兼容性权威。lint/install 会拒绝未知能力，也会拒绝低于任何已声明能力目录最低版本的下界。
 

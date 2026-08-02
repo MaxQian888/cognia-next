@@ -327,6 +327,30 @@ pub(crate) enum PluginCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Inspect the canonical plugin authoring contract without changing files.
+    Contract {
+        /// Select a capability by canonical id. Repeat to select more than one.
+        #[arg(long, value_name = "ID")]
+        capability: Vec<String>,
+        /// Select a manifest contribution by canonical field. Repeatable.
+        #[arg(long, value_name = "FIELD")]
+        contribution: Vec<String>,
+        /// Select a plugin runtime type. Repeatable.
+        #[arg(long = "plugin-type", value_name = "TYPE")]
+        plugin_type: Vec<String>,
+        /// Select a canonical UI, hook, activation, or runtime point. Repeatable.
+        #[arg(long, value_name = "ID")]
+        point: Vec<String>,
+        /// Select plugin points by kind: ui-slot, hook, activation, or runtime. Repeatable.
+        #[arg(long = "point-kind", value_name = "KIND")]
+        point_kind: Vec<String>,
+        /// Select a canonical manifest permission. Repeatable.
+        #[arg(long, value_name = "PERMISSION")]
+        permission: Vec<String>,
+        /// Emit a versioned machine-readable JSON envelope.
+        #[arg(long)]
+        json: bool,
+    },
     /// Refresh the vendored `@cognia/*` TypeScript declarations in a project.
     ///
     /// `plugin new` writes these once; this rewrites them from the CLI's own
@@ -617,6 +641,38 @@ pub(crate) fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Res
                     to: Some(to),
                     dir,
                     ..Default::default()
+                },
+                json,
+                ui,
+            )
+        }
+        PluginCommand::Contract {
+            capability,
+            contribution,
+            plugin_type,
+            point,
+            point_kind,
+            permission,
+            json,
+        } => {
+            ui.flags.json = json;
+            ui.verbose(format!(
+                "running plugin contract capabilities={} contributions={} plugin_types={} points={} point_kinds={} permissions={} json={json}",
+                capability.join(","),
+                contribution.join(","),
+                plugin_type.join(","),
+                point.join(","),
+                point_kind.join(","),
+                permission.join(","),
+            ));
+            commands::contract::run(
+                commands::contract::ContractFilters {
+                    capabilities: capability,
+                    contributions: contribution,
+                    plugin_types: plugin_type,
+                    points: point,
+                    point_kinds: point_kind,
+                    permissions: permission,
                 },
                 json,
                 ui,

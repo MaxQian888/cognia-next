@@ -10,6 +10,8 @@ from cognia import (
     CapabilityContract,
     MANIFEST_CONTRIBUTIONS,
     PLUGIN_PATH_FIELD_CONTRACTS,
+    PLUGIN_POINT_CONTRACTS,
+    PLUGIN_POINT_SCHEMA_VERSION,
     RUNTIME_ENTRY_CONTRACTS,
     VALID_CAPABILITIES,
     VALID_PERMISSIONS,
@@ -87,6 +89,14 @@ def test_generated_catalog_metadata_is_public():
     assert "frontend" in VALID_PLUGIN_TYPES
     assert "ipc:call" in VALID_PERMISSIONS
     assert "context-panel" in VALID_CAPABILITIES
+    assert PLUGIN_POINT_SCHEMA_VERSION == 1
+    assert len(PLUGIN_POINT_CONTRACTS) == 275
+    composer_action = next(
+        item for item in PLUGIN_POINT_CONTRACTS if item["id"] == "chat.input.actions"
+    )
+    assert composer_action["kind"] == "ui-slot"
+    assert composer_action["formFactor"] == "row"
+    assert composer_action["permission"] == "extension:ui"
 
 
 def test_validate_unknown_is_error():

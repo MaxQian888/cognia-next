@@ -1,0 +1,2106 @@
+{
+  "schemaVersion": 1,
+  "pluginPoints": [
+    {
+      "id": "sidebar.left.top",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "icon"
+    },
+    {
+      "id": "sidebar.left.bottom",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "icon"
+    },
+    {
+      "id": "sidebar.right.top",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "panel"
+    },
+    {
+      "id": "sidebar.right.bottom",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "panel"
+    },
+    {
+      "id": "toolbar.left",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "icon"
+    },
+    {
+      "id": "toolbar.center",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "icon"
+    },
+    {
+      "id": "toolbar.right",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "icon"
+    },
+    {
+      "id": "statusbar.left",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "icon"
+    },
+    {
+      "id": "statusbar.center",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "icon"
+    },
+    {
+      "id": "statusbar.right",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "icon"
+    },
+    {
+      "id": "chat.header",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "block"
+    },
+    {
+      "id": "chat.footer",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "block"
+    },
+    {
+      "id": "chat.input.above",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "block"
+    },
+    {
+      "id": "chat.input.below",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "block"
+    },
+    {
+      "id": "chat.input.actions",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "chat.input.menu",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "chat.message.before",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "block"
+    },
+    {
+      "id": "chat.message.after",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "block"
+    },
+    {
+      "id": "chat.message.actions",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "chat.message.footer",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "chat.tool-call.actions",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "chat.message-part.actions",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "artifact.toolbar",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "artifact.actions",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "canvas.toolbar",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "canvas.sidebar",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "panel"
+    },
+    {
+      "id": "goal.toolbar",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "goal.detail.actions",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "pet.console.tab",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "panel"
+    },
+    {
+      "id": "pet.panel.actions",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "perf.panel",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "panel"
+    },
+    {
+      "id": "terminal.toolbar",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "agent.team.panel",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "panel"
+    },
+    {
+      "id": "agent.team.report",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "panel"
+    },
+    {
+      "id": "agent.teammate.actions",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "agent.team.task.actions",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "agent.team.board.toolbar",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "agent.external-session.toolbar",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "twin.panel.header",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "block"
+    },
+    {
+      "id": "twin.persona.panel",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "panel"
+    },
+    {
+      "id": "twin.settings.cards",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "block"
+    },
+    {
+      "id": "twin.overview.panel",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "panel"
+    },
+    {
+      "id": "panel.header",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "panel.footer",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "settings.general",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "block"
+    },
+    {
+      "id": "settings.appearance",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "block"
+    },
+    {
+      "id": "settings.ai",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "block"
+    },
+    {
+      "id": "settings.plugins",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "block"
+    },
+    {
+      "id": "command-palette",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "block"
+    },
+    {
+      "id": "inbox.sidebar.section",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "block"
+    },
+    {
+      "id": "inbox.conversation.actions",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "inbox.composer.actions",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "inbox.draft.actions",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
+      "id": "vscode.sidebar.view",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "panel"
+    },
+    {
+      "id": "vscode.webview.panel",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "panel"
+    },
+    {
+      "id": "vscode.activity-bar",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "icon"
+    },
+    {
+      "id": "vscode.terminal.output",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "block"
+    },
+    {
+      "id": "onLoad",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onEnable",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onDisable",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onUnload",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onInstall",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onUninstall",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onUpdate",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onSuspend",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onResume",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onConfigChange",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onA2UISurfaceCreate",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onA2UISurfaceDestroy",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onA2UIAction",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onA2UIDataChange",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onAgentStart",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onAgentStep",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onAgentComplete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onAgentError",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onMessageSend",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onMessageReceive",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onMessageDelete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onMessageEdit",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onSessionCreate",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onSessionSwitch",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onSessionDelete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onSessionRename",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onSessionClear",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onCommand",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onChatRegenerate",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onModelSwitch",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onChatModeSwitch",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onSystemPromptChange",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onScheduledTaskStart",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onScheduledTaskComplete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onScheduledTaskError",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onProjectCreate",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onProjectUpdate",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onProjectDelete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onProjectSwitch",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onGoalCreate",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onGoalUpdate",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onGoalProgress",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onGoalComplete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onGoalDelete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onPetInteract",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onPetLevelUp",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onPetEvolved",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onPetAchievementUnlocked",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onPetUnwell",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onShareLinkCreate",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onShareLinkRevoke",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onKnowledgeFileAdd",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onKnowledgeFileRemove",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onSessionLinked",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onSessionUnlinked",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onCanvasCreate",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onCanvasUpdate",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onCanvasDelete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onCanvasSwitch",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onCanvasContentChange",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onCanvasVersionSave",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onCanvasVersionRestore",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onCanvasSelection",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onArtifactCreate",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onArtifactUpdate",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onArtifactDelete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onArtifactOpen",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onArtifactClose",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onExportStart",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onExportComplete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onExportTransform",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onProjectExportStart",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onProjectExportComplete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onBuildOptions",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onStreamStart",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onStreamChunk",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onStreamEnd",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onChatError",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onTokenUsage",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onUserPromptSubmit",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onPreToolUse",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onPostToolUse",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onPreCompact",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onPostChatReceive",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onDocumentsIndexed",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onVectorSearch",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onRAGContextRetrieved",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onWorkflowStart",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onWorkflowStepComplete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onWorkflowComplete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onWorkflowError",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onWorkflowNodeStart",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onWorkflowNodeComplete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onWorkflowNodeError",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onWorkflowTriggerFired",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onSidebarToggle",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onPanelOpen",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onPanelClose",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onShortcut",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onContextMenuShow",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onScheduledTaskCreate",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onScheduledTaskUpdate",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onScheduledTaskDelete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onScheduledTaskPause",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onScheduledTaskResume",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onScheduledTaskBeforeRun",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onExternalAgentConnect",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onExternalAgentDisconnect",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onExternalAgentExecutionStart",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onExternalAgentExecutionComplete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onExternalAgentPermissionRequest",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onExternalAgentToolCall",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onExternalAgentError",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onCodeExecutionStart",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onCodeExecutionComplete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onCodeExecutionError",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onMCPServerConnect",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onMCPServerDisconnect",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onMCPToolCall",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onMCPToolResult",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onWorkflowNodeRegister",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onWorkflowNodeUnregister",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onWorkflowTriggerRegister",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onWorkflowTriggerUnregister",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onTeamStart",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onTeamPlanReady",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onTeammateClaim",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onTeammateRelease",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onTeamBudgetWarn",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onTeamComplete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onConsensusOpened",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onConsensusVoted",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onConsensusResolved",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onSharedMemoryWrite",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onSharedMemoryDelete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onTeamDelegationStart",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onTeamDelegationComplete",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onConnectorInbound",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onConnectorOutbound",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "workflow.node",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.3.0",
+      "permission": "extension:workflow"
+    },
+    {
+      "id": "workflow.trigger",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.3.0",
+      "permission": "extension:workflow"
+    },
+    {
+      "id": "workflow.task",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.3.0",
+      "permission": "extension:workflow"
+    },
+    {
+      "id": "provider.ocr",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "network:fetch"
+    },
+    {
+      "id": "provider.workspace-backend",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "process:spawn"
+    },
+    {
+      "id": "provider.message-renderer",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "extension:ui"
+    },
+    {
+      "id": "provider.ai-llm",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "network:fetch"
+    },
+    {
+      "id": "provider.ai-embedding",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "network:fetch"
+    },
+    {
+      "id": "chat.middleware",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "agent:control"
+    },
+    {
+      "id": "modal.mount",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "extension:ui"
+    },
+    {
+      "id": "scheduler.task",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "extension:workflow"
+    },
+    {
+      "id": "terminal.completion",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "terminal:completion"
+    },
+    {
+      "id": "provider.routing-strategy",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "network:fetch"
+    },
+    {
+      "id": "provider.deployment-filter",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "network:fetch"
+    },
+    {
+      "id": "provider.protocol-adapter",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "network:fetch"
+    },
+    {
+      "id": "agent.external-agent-adapter",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "agent:dispatch-external"
+    },
+    {
+      "id": "agent.tool-route",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "agent:control"
+    },
+    {
+      "id": "agent.context-provider",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "agent:control"
+    },
+    {
+      "id": "connectors.adapter",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "connectors:read"
+    },
+    {
+      "id": "subscription.balance-adapter",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "subscription:read"
+    },
+    {
+      "id": "subscription.limits-source",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "subscription:read"
+    },
+    {
+      "id": "connectors.im-rate-source",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "connectors:read"
+    },
+    {
+      "id": "chat.compaction-strategy",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "agent:control"
+    },
+    {
+      "id": "quick-action",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "extension:ui"
+    },
+    {
+      "id": "appearance.font",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "extension:ui"
+    },
+    {
+      "id": "appearance.wallpaper",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "extension:ui"
+    },
+    {
+      "id": "appearance.density-preset",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "extension:ui"
+    },
+    {
+      "id": "view.container",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "extension:ui"
+    },
+    {
+      "id": "view.tree",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "extension:ui"
+    },
+    {
+      "id": "view.webview",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "extension:ui"
+    },
+    {
+      "id": "agent.skill",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "agent:control"
+    },
+    {
+      "id": "agent.mcp-server-preset",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "agent:control"
+    },
+    {
+      "id": "agent.native-anthropic-tool",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "agent:control"
+    },
+    {
+      "id": "agent.external-agent-preset",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "agent:dispatch-external"
+    },
+    {
+      "id": "character.pack",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "agent:control"
+    },
+    {
+      "id": "agent.subagent",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "agent:dispatch"
+    },
+    {
+      "id": "agent.team-template",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "agent:dispatch"
+    },
+    {
+      "id": "agent.shared-memory-adapter",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "agent:shared-memory:read"
+    },
+    {
+      "id": "workflow.template",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.3.0",
+      "permission": "extension:workflow"
+    },
+    {
+      "id": "auth.provider",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "auth:provide"
+    },
+    {
+      "id": "agent.tool",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "a2ui.component",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "a2ui.template",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "agent.mode",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "command.slash",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "importer.format",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "exporter.format",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "appearance.theme",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "appearance.theme-pack",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "lsp.server",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "cli.tool",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "cli:execute"
+    },
+    {
+      "id": "tray.item",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "uri.handler",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "startup",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onStartup",
+      "kind": "activation",
+      "stability": "deprecated",
+      "status": "deprecated",
+      "introducedIn": "0.1.0",
+      "deprecatedIn": "0.1.0",
+      "replacementId": "startup",
+      "aliases": ["startup"]
+    },
+    {
+      "id": "onCommand:*",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onTool:*",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "onAgentTool:*",
+      "kind": "activation",
+      "stability": "deprecated",
+      "status": "deprecated",
+      "introducedIn": "0.1.0",
+      "deprecatedIn": "0.1.0",
+      "replacementId": "onTool:*"
+    },
+    {
+      "id": "onChat:*",
+      "kind": "activation",
+      "stability": "deprecated",
+      "status": "deprecated",
+      "introducedIn": "0.1.0",
+      "deprecatedIn": "0.2.0",
+      "replacementId": "onCommand:*",
+      "retirementNote": "Use hook handlers onMessageSend/onMessageReceive for chat lifecycle reactions, or onCommand:* for explicit activation."
+    },
+    {
+      "id": "onAgent:start",
+      "kind": "activation",
+      "stability": "deprecated",
+      "status": "deprecated",
+      "introducedIn": "0.1.0",
+      "deprecatedIn": "0.2.0",
+      "replacementId": "onTool:*",
+      "retirementNote": "Use hook handler onAgentStart for agent lifecycle reactions, or onTool:* for tool-driven activation."
+    },
+    {
+      "id": "onA2UI:surface",
+      "kind": "activation",
+      "stability": "deprecated",
+      "status": "deprecated",
+      "introducedIn": "0.1.0",
+      "deprecatedIn": "0.2.0",
+      "replacementId": "startup",
+      "retirementNote": "Use hook handler onA2UISurfaceCreate for surface lifecycle reactions, or startup activation to register surfaces eagerly."
+    },
+    {
+      "id": "onLanguage:*",
+      "kind": "activation",
+      "stability": "deprecated",
+      "status": "deprecated",
+      "introducedIn": "0.1.0",
+      "deprecatedIn": "0.2.0",
+      "replacementId": "startup",
+      "retirementNote": "No language-based runtime dispatch in Cognia; declare startup activation and filter inside the plugin."
+    },
+    {
+      "id": "onFile:*",
+      "kind": "activation",
+      "stability": "deprecated",
+      "status": "deprecated",
+      "introducedIn": "0.1.0",
+      "deprecatedIn": "0.2.0",
+      "replacementId": "startup",
+      "retirementNote": "No file-open runtime dispatch in Cognia; declare startup activation and filter inside the plugin."
+    },
+    {
+      "id": "onView:*",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "onWebviewPanel:*",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "onCustomEditor:*",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "onAuthenticationRequest",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "onTaskType:*",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "onFileSystem:*",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "onDebugResolve:*",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "retirementNote": "Validated as a known pattern but the sidecar's vscode-shim raises NotSupportedError at runtime — Cognia has no DAP viewport."
+    },
+    {
+      "id": "onStartupFinished",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "onUri",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "onTerminal",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "onTerminalProfile:*",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "onNotebook:*",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "onWalkthrough:*",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "onChatParticipant:*",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "onLanguageModelTool:*",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
+      "id": "workspaceContains:*",
+      "kind": "activation",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    }
+  ]
+}

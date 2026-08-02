@@ -23,6 +23,40 @@ Use the packed `@cognia/plugin-sdk` package as the only Cognia dependency in a t
 
 Never import `@/lib`, `@/types`, `@cognia/plugin-sdk/host`, or an app-private `@cognia/*` package. The `host` entry exists only for one repository migration window and is deliberately absent from npm exports and tarballs.
 
+## Contract-driven authoring
+
+Use `cognia plugin contract` before editing a manifest or choosing a runtime. It reads the generated canonical catalog, so new capabilities, contributions, permissions, entries, and path fields become discoverable without updating an authoring checklist.
+
+```bash
+# New plugin: select only the contracts needed for a tool and context panel.
+cognia plugin contract \
+  --plugin-type frontend \
+  --capability tools \
+  --contribution contextPanels \
+  --point chat.input.actions \
+  --point-kind ui-slot \
+  --permission extension:ui \
+  --json
+cognia plugin new support-panel --kind ts --json
+
+# Existing plugin: inspect first, then query the records for the extension.
+cognia plugin info . --json
+cognia plugin contract \
+  --plugin-type hybrid \
+  --capability python \
+  --contribution tools \
+  --json
+
+# Compare compatible runtime-entry rules before committing to a runtime.
+cognia plugin contract --plugin-type frontend --plugin-type hybrid --json
+```
+
+Selectors are repeatable. Point kinds are `ui-slot`, `hook`, `activation`, and `runtime`. An unfiltered query returns the complete inventory; a filtered query returns the selected and related contract records while retaining full-catalog counts. The v2 JSON envelope includes the generated `pluginPoints` catalog alongside capabilities, contributions, permissions, runtime entries, and path fields. Unknown selectors fail with a structured input error, and the command never writes files.
+
+Inspect `support`, `pythonExecution`, `execution`, point `status`/`stability`, `formFactor`, replacement ids, permissions, entry paths, minimum host versions, and path-field contracts in the result. Require explicit user confirmation before generating anything marked experimental, and carry that warning into the completion report. Do not target a deprecated point for new work; use its `replacementId`. A JavaScript-executed contribution cannot be authored for a Python-only or WASM runtime; stop before mutation and offer compatible types reported by the contract, commonly `frontend` or `hybrid`.
+
+After approval, scaffold new work with `cognia plugin new ... --json`, or preserve unrelated files when extending an existing plugin. Run `cognia plugin sync-types`, implement only against `@cognia/plugin-sdk` and `@cognia/plugin-ui`, then verify with `doctor`, `lint --json`, runtime tests/typecheck, `build --json`, and `info --json`. Key generation, signing, installation, reload, export, and publishing are separate explicit operations.
+
 ## Runtime matrix
 
 | Manifest type | Required entry | JavaScript lazy contributions | Notes |
@@ -32,6 +66,12 @@ Never import `@/lib`, `@/types`, `@cognia/plugin-sdk/host`, or an app-private `@
 | `hybrid` | `pythonMain`; `main` when JS contributions exist | allowed with `main` | Each runtime is loaded independently |
 | `wasm` | `wasmMain` and `wasm.apiVersion` | rejected | Desktop Component Model host |
 | `vscode-extension` | one of `vscodeMain`, themes, grammars, icon themes, snippets, or languages | VS Code contributions only | Declarative-only extensions do not need `vscodeMain`; code extensions do |
+
+## UI extension requirements
+
+Query the exact UI point before writing its component. The returned `formFactor` is the host layout contract: `icon` for a square control, `row` for compact actions, `block` for a stacked band, and `panel` for an owned scrolling region. Import UI primitives from `@cognia/plugin-ui`; `cognia plugin build` keeps both it and React external so the plugin uses the host's shared React and theme. Do not import host components or use `react-dom` portals.
+
+Plugins own their displayed copy. Provide manifest i18n entries and localized accessible names, placeholders, empty/error states, and dialog close labels. `@cognia/plugin-ui` cannot read the host's `next-intl` catalog.
 
 `engines.cognia` is the compatibility authority. Lint and install reject unknown capabilities and a lower bound older than any declared capability's catalog minimum.
 

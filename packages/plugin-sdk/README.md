@@ -41,7 +41,7 @@ export default definePlugin({
 - `@cognia/plugin-sdk`: all stable author types, contract metadata, and `define*` helpers.
 - `@cognia/plugin-sdk/manifest`: manifest and contribution types plus `definePlugin`.
 - `@cognia/plugin-sdk/context`: `PluginContext`, `FullPluginContext`, and callable API interfaces.
-- `@cognia/plugin-sdk/contracts`: capability, permission, runtime, and path-field metadata.
+- `@cognia/plugin-sdk/contracts`: capability, permission, runtime, path-field, and plugin-point metadata.
 - `@cognia/plugin-sdk/events`: stable event constants and event payload types.
 - `@cognia/plugin-sdk/hooks`: lifecycle hook payloads and hook interfaces.
 - `@cognia/plugin-sdk/permissions`: public permission values and permission types.
@@ -51,8 +51,11 @@ export default definePlugin({
 - `@cognia/plugin-sdk/api/tool` and `/api/native-anthropic-tool`: explicit compatibility
   subpaths resolving to the safe author surface in the published package.
 
-The npm tarball ships ESM, CJS, declarations, the language-neutral contract catalog, and
-`wit/cognia-plugin.wit`. It has no dependency on Cognia monorepo aliases or private host packages.
+The npm tarball ships ESM, CJS, declarations, the language-neutral manifest catalog,
+`contract/plugin-points.json`, and `wit/cognia-plugin.wit`. The generated point snapshot contains
+the author-facing projection of every UI, hook, activation, and runtime point, including UI form
+factors, permissions, stability, and deprecation replacements. It has no dependency on Cognia
+monorepo aliases or private host packages.
 
 ## Primary manifest contribution types
 

@@ -21,7 +21,8 @@ cargo install --locked cognia-cli
 
 | Command                                                                                                                                                                                     | Purpose                                                                                                                                             |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cognia plugin new [name] [--dir DIR] [--kind wasm\|ts\|python\|hybrid\|vscode-extension] [--author NAME] [--author-email EMAIL] [--description TEXT] [--with-keygen true\|false] [--json]` | Stamp a starter project. Default `wasm`; TypeScript, Python, hybrid, and VS Code-extension scaffolds are also available.                            |
+| `cognia plugin new [name] [--dir DIR] [--kind wasm\|ts\|python\|hybrid\|vscode-extension] [--author NAME] [--author-email EMAIL] [--description TEXT] [--with-keygen true\|false] [--json]` | Stamp a starter project. Default `ts`; WASM, Python, hybrid, and VS Code-extension scaffolds are also available.                                    |
+| `cognia plugin contract [--capability ID] [--contribution FIELD] [--plugin-type TYPE] [--point ID] [--point-kind KIND] [--permission PERMISSION] [--json]`                                  | Read the generated canonical authoring contract. Selectors are repeatable; the command never writes to the workspace.                               |
 | `cognia plugin lint [--path .] [--json]`                                                                                                                                                    | Validate `plugin.json` against the host's manifest schema. Run implicitly by `build`.                                                               |
 | `cognia plugin build [--path .] [--out P] [--skip-build] [--json]`                                                                                                                          | Dispatch on `manifest.type`: WASM → cargo-component → zip; frontend → esbuild → zip; python/hybrid/vscode-extension → package existing entry files. |
 | `cognia plugin info <bundle.zip\|directory> [--detailed] [--json]`                                                                                                                          | Inspect a built bundle or unpacked plugin directory: manifest, files, signature status, embedded `cognia:api-version`.                              |
@@ -39,6 +40,34 @@ cargo install --locked cognia-cli
 | `cognia acp`                                                                                                                                                                                | Bridge newline-delimited ACP JSON-RPC on stdin/stdout to the running cognia companion WebSocket endpoint.                                           |
 | `cognia release-key [--json]`                                                                                                                                                               | Inspect the embedded public key and policy used to verify downloaded `cognia` CLI release artifacts.                                                |
 | `cognia release-verify <artifact> --checksums <checksums.txt> [--artifact-name NAME] [--signature PATH] [--json]`                                                                           | Offline-verify a downloaded CLI release artifact against `checksums.txt` and the embedded release key policy.                                       |
+
+## Querying the authoring contract
+
+The contract command combines `packages/plugin-sdk/contract/catalog.json` with the point projection generated from `PLUGIN_POINT_CONTRACTS`. With no selectors it returns every plugin type, capability, manifest contribution, permission, runtime-entry rule, path-field contract, and UI/hook/activation/runtime point. JSON v2 uses full-catalog and selected-record counts; unknown selectors emit a structured `stage: "input"` failure and exit non-zero.
+
+```bash
+# Plan a new frontend plugin with a tool and context panel.
+cognia plugin contract \
+  --plugin-type frontend \
+  --capability tools \
+  --contribution contextPanels \
+  --point chat.input.actions \
+  --point-kind ui-slot \
+  --permission extension:ui \
+  --json
+
+# Inspect the records needed to extend an existing hybrid plugin.
+cognia plugin contract \
+  --plugin-type hybrid \
+  --capability python \
+  --contribution tools \
+  --json
+
+# Compare runtime entry rules before selecting a runtime.
+cognia plugin contract --plugin-type frontend --plugin-type hybrid --json
+```
+
+Read `support`, `pythonExecution`, `execution`, point `status`/`stability`, UI `formFactor`, replacement ids, permissions, entry paths, minimum host versions, and path rules before changing files. Treat experimental records as requiring explicit author confirmation and use the replacement for deprecated points. If a contribution requires JavaScript execution, a Python-only or WASM runtime is incompatible: select a compatible runtime such as `frontend` or `hybrid` before writing. The command reports the contract only; it never scaffolds, edits, signs, installs, or publishes a plugin.
 
 ## Typical flow — WASM plugin
 

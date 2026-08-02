@@ -1,4 +1,5 @@
 import catalog from "../../contract/catalog.json"
+import pluginPointCatalog from "../../contract/plugin-points.json"
 
 export type PluginCapabilitySupport = "supported" | "partial" | "experimental" | "blocked"
 export type PluginRuntimeKind = "javascript" | "python" | "wasm" | "vscode" | "asset"
@@ -51,7 +52,29 @@ export interface PluginPathFieldContract {
   sentinels?: readonly string[]
 }
 
+export const CANONICAL_PLUGIN_POINT_KINDS = ["ui-slot", "hook", "activation", "runtime"] as const
+
+export type AuthorPluginPointKind = (typeof CANONICAL_PLUGIN_POINT_KINDS)[number]
+export type AuthorPluginPointStability = "stable" | "experimental" | "deprecated"
+export type AuthorPluginPointStatus = "implemented" | "virtual" | "deprecated"
+export type AuthorPluginPointFormFactor = "icon" | "row" | "block" | "panel"
+
+export interface AuthorPluginPointContract {
+  id: string
+  kind: AuthorPluginPointKind
+  stability: AuthorPluginPointStability
+  status: AuthorPluginPointStatus
+  introducedIn: string
+  deprecatedIn?: string
+  replacementId?: string
+  retirementNote?: string
+  permission?: string
+  aliases?: readonly string[]
+  formFactor?: AuthorPluginPointFormFactor
+}
+
 export const PLUGIN_CONTRACT_SCHEMA_VERSION = catalog.schemaVersion
+export const PLUGIN_POINT_CONTRACT_SCHEMA_VERSION = pluginPointCatalog.schemaVersion
 export const PLUGIN_CONTRACT_MINIMUM_HOST_VERSION = catalog.minimumHostVersion
 export const CANONICAL_PLUGIN_TYPES = catalog.pluginTypes as readonly string[]
 export const CANONICAL_PLUGIN_PERMISSIONS = catalog.permissions as readonly string[]
@@ -71,3 +94,9 @@ export const PLUGIN_RUNTIME_ENTRY_CONTRACTS = catalog.runtimeEntries as Readonly
 export const CANONICAL_PLUGIN_CAPABILITIES = AUTHOR_CAPABILITY_CONTRACTS.map(
   (contract) => contract.id
 )
+export const AUTHOR_PLUGIN_POINT_CONTRACTS =
+  pluginPointCatalog.pluginPoints as readonly AuthorPluginPointContract[]
+
+export function getAuthorPluginPointContract(id: string): AuthorPluginPointContract | undefined {
+  return AUTHOR_PLUGIN_POINT_CONTRACTS.find((contract) => contract.id === id)
+}
