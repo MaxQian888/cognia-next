@@ -1,8 +1,9 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 import {
   parseSkillFile,
@@ -138,4 +139,34 @@ test("renderCatalogModule omits optional fields when absent", () => {
   assert.ok(!out.includes("tags:"))
   assert.ok(!out.includes("allowedTools:"))
   assert.match(out, /surface: \[\]/)
+})
+
+test("plugin authoring catalog entry and repository wrapper share one workflow", () => {
+  const entry = buildCatalog().find((candidate) => candidate.id === "plugin-authoring")
+  assert.ok(entry)
+  assert.deepEqual(entry.allowedTools, ["Read", "Glob", "Grep", "Write", "Edit", "Bash"])
+  assert.deepEqual(entry.surface, [])
+  assert.match(entry.content, /cognia plugin contract/)
+
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..")
+  const wrapper = readFileSync(
+    path.join(repoRoot, ".agents", "skills", "cognia-plugin-authoring", "SKILL.md"),
+    "utf8"
+  )
+  assert.match(wrapper, /\.\.\/\.\.\/\.\.\/skills\/built-in\/plugin-authoring\/SKILL\.md/)
+  assert.doesNotMatch(wrapper, /cognia plugin contract/)
+
+  const metadata = readFileSync(
+    path.join(
+      repoRoot,
+      ".agents",
+      "skills",
+      "cognia-plugin-authoring",
+      "agents",
+      "openai.yaml"
+    ),
+    "utf8"
+  )
+  assert.match(metadata, /default_prompt:.*\$cognia-plugin-authoring/)
+  assert.match(metadata, /allow_implicit_invocation: false/)
 })

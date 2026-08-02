@@ -581,19 +581,19 @@ describe("upsertSkillByCanonicalId", () => {
 })
 
 describe("seedBuiltInSkills", () => {
-  it("seeds the 5 generic + 9 functional built-ins idempotently and preserves status", async () => {
+  it("seeds the 5 generic + 10 functional built-ins idempotently and preserves status", async () => {
     await seedBuiltInSkills()
     const all = await listSkills()
     const builtIns = all.filter((s) => s.isBuiltIn)
-    // 5 generic style skills + the functional catalog (9 entries).
-    expect(builtIns.length).toBe(14)
+    // 5 generic style skills + the functional catalog (10 entries).
+    expect(builtIns.length).toBe(15)
     // Disable one, then reseed; status must be preserved.
     await setSkillStatus(builtIns[0].id, "disabled")
     await seedBuiltInSkills()
     expect((await getSkill(builtIns[0].id))?.status).toBe("disabled")
     // No duplicates introduced.
     const after = await listSkills()
-    expect(after.filter((s) => s.isBuiltIn).length).toBe(14)
+    expect(after.filter((s) => s.isBuiltIn).length).toBe(15)
   })
 
   it("seeds functional catalog skills disabled by default, keyed by canonical id", async () => {
