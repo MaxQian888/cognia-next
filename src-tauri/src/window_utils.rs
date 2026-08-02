@@ -66,9 +66,7 @@ pub fn no_activate_ex_style(current: i32) -> i32 {
 #[cfg(target_os = "windows")]
 pub fn apply_windows_no_activate<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
     use windows::Win32::Foundation::{GetLastError, SetLastError, WIN32_ERROR};
-    use windows::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongW, SetWindowLongW, GWL_EXSTYLE,
-    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongW, SetWindowLongW, GWL_EXSTYLE};
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
 
     // SAFETY: `hwnd` is a live handle owned by this process; these are ordinary

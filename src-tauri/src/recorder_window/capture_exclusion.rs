@@ -54,9 +54,7 @@ pub fn affinity_outcome(excluded: bool, applied: bool) -> AffinityOutcome {
         (_, true) => AffinityOutcome::Satisfied,
         // Un-excluding is all-or-nothing: leaving a stale affinity on a window
         // the caller asked to release is a lie, not a degraded mode.
-        (false, false) => {
-            AffinityOutcome::Failed("could not clear the window's display affinity")
-        }
+        (false, false) => AffinityOutcome::Failed("could not clear the window's display affinity"),
         // Pre-19041: exclusion is unavailable, but blacking out is not.
         (true, false) => AffinityOutcome::FallBackToBlackout,
     }
