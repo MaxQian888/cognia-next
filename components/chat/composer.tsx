@@ -443,6 +443,10 @@ function ComposerInner(props: InnerProps) {
   const attachmentPrepareCountRef = useRef(0)
   const [attachmentPrepareCount, setAttachmentPrepareCount] = useState(0)
   const isPreparingAttachments = attachmentPrepareCount > 0
+  // Tracked separately from the batch count above because only images get a
+  // placeholder chip: their decode/downscale is the slow path, and the chip's
+  // scan animation would misdescribe a document.
+  const [preparingImageCount, setPreparingImageCount] = useState(0)
   const attachmentFileCountRef = useRef(attachments.files.length)
   useEffect(() => {
     attachmentFileCountRef.current = attachments.files.length
@@ -1391,10 +1395,13 @@ function ComposerInner(props: InnerProps) {
   // --- Paste / drag for attachments -------------------------------------
   const acceptFiles = useCallback(
     async (files: FileList | File[]) => {
+      const list = [...files]
+      const imageCount = list.filter((f) => (f.type ?? "").startsWith("image/")).length
       attachmentPrepareCountRef.current += 1
       setAttachmentPrepareCount((count) => count + 1)
+      if (imageCount > 0) setPreparingImageCount((count) => count + imageCount)
       try {
-        const prepared = await prepareComposerAttachments([...files], {
+        const prepared = await prepareComposerAttachments(list, {
           maxFileSize: MAX_FILE_SIZE,
         })
         if (prepared.unsupportedCount > 0) {
@@ -1426,6 +1433,7 @@ function ComposerInner(props: InnerProps) {
       } finally {
         attachmentPrepareCountRef.current = Math.max(0, attachmentPrepareCountRef.current - 1)
         setAttachmentPrepareCount((count) => Math.max(0, count - 1))
+        if (imageCount > 0) setPreparingImageCount((count) => Math.max(0, count - imageCount))
       }
     },
     [attachments, tAttach]
@@ -1823,6 +1831,7 @@ function ComposerInner(props: InnerProps) {
           onViewOcrDetail={ocrBubbleResult ? () => setOcrBubbleOpen(true) : undefined}
           text={controller.textInput.value}
           onRemoveLink={removeLink}
+          preparingImageCount={preparingImageCount}
         />
         <Collapse>
           <DraftRestoredAttachments

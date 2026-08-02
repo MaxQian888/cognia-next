@@ -4319,7 +4319,9 @@
         "reorderAria": "拖动排序 {filename}",
         "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。",
         "tokenBadge": "{tokens} tok",
-        "unsupported": "有 {count} 个文件不受支持。"
+        "unsupported": "有 {count} 个文件不受支持。",
+        "analyzing": "正在解析图片…",
+        "preparingImages": "正在处理 {count} 张图片…"
       },
       "camera": {
         "captureAria": "拍照或添加照片",

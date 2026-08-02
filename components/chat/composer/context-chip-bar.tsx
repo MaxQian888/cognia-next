@@ -19,6 +19,7 @@ import { ReferenceChips } from "../reference-chips"
 import { ArtifactSelectionChips } from "./artifact-selection-chips"
 import { WorkflowRefChips } from "./workflow-ref-chips"
 import { AttachmentPreview, type AttachmentPreviewProps } from "./attachment-preview"
+import { PreparingImagesChip } from "./preparing-images-chip"
 import { ComposerLinkChips } from "./link-context"
 import { Collapse } from "./collapse"
 import { useStagedAttachments } from "./staged-attachment-store"
@@ -27,6 +28,11 @@ import { extractHttpUrls } from "@/lib/chat/link-context"
 export type ContextChipBarProps = AttachmentPreviewProps & {
   text?: string
   onRemoveLink?: (url: string) => void
+  /**
+   * Images being decoded/downscaled before they can be staged. They have no
+   * attachment chip yet, so the bar shows a placeholder for them.
+   */
+  preparingImageCount?: number
 }
 
 export function ContextChipBar(props: ContextChipBarProps = {}) {
@@ -51,6 +57,7 @@ export function ContextChipBar(props: ContextChipBarProps = {}) {
         <WorkflowRefChips bare />
         <ArtifactSelectionChips bare />
         <AttachmentPreview bare {...props} />
+        <PreparingImagesChip count={props.preparingImageCount ?? 0} />
         {hasLinks && props.text && props.onRemoveLink ? (
           <ComposerLinkChips text={props.text} onRemove={props.onRemoveLink} />
         ) : null}

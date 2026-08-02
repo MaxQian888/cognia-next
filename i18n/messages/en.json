@@ -4319,7 +4319,9 @@
         "reorderAria": "Reorder {filename}",
         "skipped": "{count, plural, =1 {1 attachment was} other {# attachments were}} skipped (unsupported file type).",
         "tokenBadge": "{tokens} tok",
-        "unsupported": "{count, plural, =1 {1 file isn't supported} other {# files aren't supported}}."
+        "unsupported": "{count, plural, =1 {1 file isn't supported} other {# files aren't supported}}.",
+        "analyzing": "Analyzing image…",
+        "preparingImages": "{count, plural, =1 {Preparing 1 image…} other {Preparing # images…}}"
       },
       "camera": {
         "captureAria": "Take or attach a photo",

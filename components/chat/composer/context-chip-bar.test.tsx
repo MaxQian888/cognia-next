@@ -114,6 +114,26 @@ describe("ContextChipBar", () => {
     expect(screen.queryByText(/^\d+(\.\d+)?[KMG]?B$/)).toBeNull()
   })
 
+  // Before this, the only feedback while a dropped photo was being decoded and
+  // downscaled was the send button turning into a spinner — the bar itself
+  // showed nothing, so a slow prepare looked like a dropped file.
+  it("holds a placeholder for images that are still being prepared", () => {
+    render(
+      <TooltipProvider>
+        <ContextChipBar preparingImageCount={2} />
+      </TooltipProvider>
+    )
+    expect(screen.getByTestId("composer-preparing-images")).toBeInTheDocument()
+    expect(screen.getByTestId("composer-preparing-images-label")).toHaveTextContent(
+      "Preparing 2 images…"
+    )
+  })
+
+  it("shows no placeholder once preparation settles", () => {
+    renderBar()
+    expect(screen.queryByTestId("composer-preparing-images")).not.toBeInTheDocument()
+  })
+
   it("includes recognized web links in the same context bar", () => {
     const onRemoveLink = jest.fn()
     render(
