@@ -44,6 +44,19 @@
     "sourceLabel": "Source: {source}",
     "title": "Review plan"
   },
+  "composer": {
+    "cancel": "Cancel",
+    "create": "Create plan",
+    "createFailed": "Could not create the plan.",
+    "description": "One step per line. You can reorder and edit the steps before approving.",
+    "openLabel": "Write a plan",
+    "stepCount": "{count, plural, =0 {No steps yet} one {# step} other {# steps}}",
+    "stepsLabel": "Steps",
+    "stepsPlaceholder": "Audit the callers\nSwap the adapter\nUpdate the tests",
+    "title": "Write a plan",
+    "titleLabel": "Plan title",
+    "titlePlaceholder": "Migrate the auth module"
+  },
   "status": {
     "approved": "Approved",
     "awaiting_approval": "Awaiting approval",

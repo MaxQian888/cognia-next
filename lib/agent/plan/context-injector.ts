@@ -9,6 +9,7 @@
 
 import type { AgentPlan } from "@/types/agent/plan"
 import { renderPlanSystemSection } from "./prompts"
+import { findPlanPiiLeak } from "./pii-gate"
 import { hasNoLeakingPii } from "@cognia/redact"
 import { loggers } from "@cognia/logging"
 
@@ -24,10 +25,21 @@ export function appendPlanContext(opts: {
 }): string | undefined {
   const plan = opts.activePlan
   if (!plan || plan.status !== "executing") return opts.appendSystemPrompt
-  const section = renderPlanSystemSection(plan)
   // PII red-line: the plan text is human-editable and flows straight into the
   // outbound system prompt. Skip the injection if it carries leaking PII rather
   // than send it to the model (matches the connector auto-mode safe-send gate).
+  //
+  // The structured gate runs FIRST because it scans each step's `params`
+  // deeply — a `tool_call` step can smuggle PII through an input value that
+  // `renderPlanSystemSection` never prints, so a check on the rendered text
+  // alone would wave it through. The rendered-section check then stays as the
+  // belt-and-braces pass over whatever the renderer composed.
+  const leak = findPlanPiiLeak(plan)
+  if (leak) {
+    loggers.agent.warn(`Plan context carries PII at ${leak}; skipping system-prompt injection`)
+    return opts.appendSystemPrompt
+  }
+  const section = renderPlanSystemSection(plan)
   if (!hasNoLeakingPii(section)) {
     loggers.agent.warn("Plan context carries PII; skipping system-prompt injection")
     return opts.appendSystemPrompt

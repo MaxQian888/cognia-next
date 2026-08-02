@@ -160,21 +160,11 @@ export async function captureExitPlanMode(
 ): Promise<AgentPlan | null> {
   const input = findExitPlanModeInput(evt)
   if (input == null) return null
-  // User-level plan defaults (Settings → Agent runtime → Plan mode). Best
-  // effort: capture must not fail because settings are unreadable.
-  let config: Partial<PlanConfig> | undefined
-  try {
-    const { getSettings } = await import("@/lib/db/settings")
-    const s = (await getSettings())?.planSettings
-    if (s && (s.requireApproval !== undefined || s.maxAutoRefinements !== undefined)) {
-      config = {
-        ...(s.requireApproval !== undefined ? { requireApproval: s.requireApproval } : {}),
-        ...(s.maxAutoRefinements !== undefined ? { maxAutoRefinements: s.maxAutoRefinements } : {}),
-      }
-    }
-  } catch {
-    // fall through — defaults apply
-  }
+  // User-level plan defaults (Settings → Agent runtime → Plan mode), shared
+  // with every other plan producer. Best effort: capture must not fail because
+  // settings are unreadable.
+  const { loadPlanConfigDefaults } = await import("./plan-settings")
+  const config = await loadPlanConfigDefaults()
   const planInput = planInputFromExitPlanMode(input, {
     sessionId,
     ...(characterId ? { characterId } : {}),

@@ -73,3 +73,25 @@ export function allStepsTerminal(plan: Pick<AgentPlan, "steps">): boolean {
     (s) => s.status === "completed" || s.status === "failed" || s.status === "skipped"
   )
 }
+
+/**
+ * The step the in-session driver should run next: the first non-terminal step
+ * in `order` whose dependencies have all completed.
+ *
+ * Lives here rather than in the driver so `PlanRuntime.startPlan` and
+ * `handlePlanTurnComplete` share one definition of "next" — and so it stays
+ * testable without Dexie. A step whose dependency failed or was skipped is NOT
+ * runnable (it stays pending and the plan runs out of work), which is how an
+ * in-session plan stops instead of silently jumping the broken link.
+ */
+export function nextRunnableStep(steps: PlanStep[]): PlanStep | undefined {
+  const byId = new Map(steps.map((s) => [s.id, s]))
+  return [...steps]
+    .sort((a, b) => a.order - b.order)
+    .find((step) => {
+      if (step.status === "completed" || step.status === "failed" || step.status === "skipped") {
+        return false
+      }
+      return step.dependencies.every((depId) => byId.get(depId)?.status === "completed")
+    })
+}

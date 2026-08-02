@@ -13,8 +13,16 @@
  *  - `registerAbortController()` — the driver registers its signal so a pause /
  *                       cancel can fire it before the next persist.
  *
- * Execution (`runPlan`) lands in P2; here it is a guarded stub so the lifecycle
- * is fully exercisable on its own.
+ * Two executors hang off it, chosen by `./strategy:resolvePlanStrategy`:
+ *  - `runPlan()`   — ORCHESTRATED. Compiles the plan into a VisualWorkflow and
+ *                    runs it headlessly. This is what the scheduler, remote
+ *                    control and the workflow node call, so it stays the
+ *                    unconditional entry point for headless callers.
+ *  - `startPlan()` — IN-SESSION. Marks the plan executing, moves its first step
+ *                    to `in_progress`, and hands the caller that step's turn
+ *                    text; `./turn-driver:handlePlanTurnComplete` advances from
+ *                    there, one visible chat turn per step. Chat surfaces route
+ *                    through this so an orchestrated plan is never run twice.
  *
  * Import-side singleton — one per renderer process; tests reset via
  * `__resetPlanRuntimeForTesting()`.
@@ -42,8 +50,11 @@ import {
   listPlansBySession,
   updatePlan,
 } from "@/lib/db/plans"
-import { isTauri } from "@/lib/platform/detect"
+import { loggers } from "@cognia/logging"
 import { applyStepStatus, materializeSteps } from "./steps"
+import { findPlanPiiLeak } from "./pii-gate"
+import { emitPlanCompletedSchedulerEvent, emitPlanStatus } from "./notify"
+import { resolvePlanStrategy, type PlanRunStrategy } from "./strategy"
 import type { SynthesizePlanResult } from "./synthesize-workflow"
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -399,6 +410,53 @@ class PlanRuntime {
   }
 
   /**
+   * Begin an IN-SESSION run: flip the plan to `executing` and hand back the
+   * first step's turn text for the chat surface to dispatch (ADR-0045 §2, P3).
+   *
+   * Refuses a plan the strategy resolver assigns to the orchestrator, so a
+   * caller that skipped the resolver cannot start a fan-out plan one turn at a
+   * time — it returns `{ strategy: "orchestrated" }` and the caller falls back
+   * to `runPlan` (or, in chat, to the single implementing turn).
+   *
+   * Returns `null` when the plan is missing or not in a runnable state.
+   */
+  async startPlan(planId: string): Promise<{
+    strategy: PlanRunStrategy
+    status: PlanStatus
+    stepId?: string
+    userMessage?: string
+  } | null> {
+    const plan = await getPlan(planId)
+    if (!plan) return null
+    if (plan.status !== "approved" && plan.status !== "paused" && plan.status !== "executing") {
+      return { strategy: resolvePlanStrategy(plan), status: plan.status }
+    }
+
+    const strategy = resolvePlanStrategy(plan)
+    if (strategy === "orchestrated") return { strategy, status: plan.status }
+
+    const generationId = crypto.randomUUID()
+    await updatePlan(planId, { status: "executing", generationId })
+    const executing = await getPlan(planId)
+    void emitPlanStatus(executing)
+
+    const { advancePlanToNextStep } = await import("./turn-driver")
+    const outcome = await advancePlanToNextStep(planId, generationId)
+    if (outcome.kind === "continue") {
+      return {
+        strategy,
+        status: "executing",
+        stepId: outcome.stepId,
+        userMessage: outcome.userMessage,
+      }
+    }
+    if (outcome.kind === "exit") return { strategy, status: outcome.status }
+    // no_plan | stale | aborted — the row moved under us; report what it says.
+    const after = await getPlan(planId)
+    return { strategy, status: after?.status ?? plan.status }
+  }
+
+  /**
    * Refine (replan) a plan via the planner LLM. Drives all three triggers
    * (ADR-0045 §4): `manual`, `step_failure` (auto, capped by
    * `config.maxAutoRefinements`), and `judge_deviation`. The revised steps
@@ -420,6 +478,15 @@ class PlanRuntime {
       request.trigger !== "manual" &&
       current.refinementCount >= current.config.maxAutoRefinements
     ) {
+      return current
+    }
+
+    // PII red-line (ADR-0045): a refinement call ships the WHOLE plan — titles,
+    // descriptions, step results — to the planner model. Fail-OPEN on the flow:
+    // skip the send and keep the plan rather than leaking it or destroying it.
+    const leak = findPlanPiiLeak(current)
+    if (leak) {
+      loggers.agent.warn(`Plan refinement blocked: PII at ${leak}`)
       return current
     }
 
@@ -468,8 +535,15 @@ class PlanRuntime {
     return updated
   }
 
-  /** Transition a finished run to its terminal status + log the exit event. */
-  private async finishPlanRun(planId: string, status: PlanStatus, reason?: string): Promise<void> {
+  /**
+   * Transition a finished run to its terminal status + log the exit event.
+   *
+   * Public because the in-session driver owns the terminal transition for the
+   * conversational path exactly as `runPlan` owns it for the orchestrated one —
+   * both must emit the same exit event, companion broadcast and `plan:completed`
+   * scheduler event, so a watcher cannot tell which executor ran the plan.
+   */
+  async finishPlanRun(planId: string, status: PlanStatus, reason?: string): Promise<void> {
     const current = await getPlan(planId)
     // A concurrent pause / cancel may have already moved the plan terminal —
     // don't overwrite a user-driven cancellation with a derived failure.
@@ -510,44 +584,6 @@ class PlanRuntime {
   async deletePlan(planId: string): Promise<void> {
     this.fireAbort(planId)
     await deletePlan(planId)
-  }
-}
-
-/**
- * Broadcast a plan status snapshot to companion WebSocket subscribers as a
- * `plan://status` Tauri event so a remote watcher sees transitions live.
- * Mirrors `lib/goal/runtime.ts:emitGoalStatus`: lazy Tauri import so the web
- * build stays decoupled; failures are swallowed (the Dexie write succeeded).
- */
-async function emitPlanStatus(plan: AgentPlan | null): Promise<void> {
-  if (!plan) return
-  if (!isTauri()) return
-  try {
-    const moduleId = "@tauri-apps/api/event"
-    const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
-      emit: (event: string, payload: unknown) => Promise<void>
-    }
-    await mod.emit("plan://status", {
-      planId: plan.id,
-      sessionId: plan.sessionId,
-      status: plan.status,
-    })
-  } catch {
-    // Tauri unavailable or transport hiccup — best effort.
-  }
-}
-
-/**
- * Emit a `plan:completed` scheduler event when a plan run reaches a terminal
- * status, so event-triggered scheduled tasks (and forward chains) can react.
- * Lazy import + best-effort, mirroring the goal completion linkage.
- */
-async function emitPlanCompletedSchedulerEvent(planId: string, status: PlanStatus): Promise<void> {
-  try {
-    const { emitSchedulerEvent } = await import("@/lib/scheduler/event-integration")
-    await emitSchedulerEvent("plan:completed", { planId, status }, "plan")
-  } catch {
-    // Scheduler unavailable (e.g. web-only path) — best-effort.
   }
 }
 

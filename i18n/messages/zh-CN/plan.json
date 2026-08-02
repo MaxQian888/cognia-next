@@ -44,6 +44,19 @@
     "sourceLabel": "来源：{source}",
     "title": "审阅计划"
   },
+  "composer": {
+    "cancel": "取消",
+    "create": "创建计划",
+    "createFailed": "无法创建计划。",
+    "description": "每行一个步骤。批准前仍可重新排序和编辑步骤。",
+    "openLabel": "编写计划",
+    "stepCount": "{count, plural, =0 {尚无步骤} other {# 个步骤}}",
+    "stepsLabel": "步骤",
+    "stepsPlaceholder": "审查调用方\n替换适配器\n更新测试",
+    "title": "编写计划",
+    "titleLabel": "计划标题",
+    "titlePlaceholder": "迁移认证模块"
+  },
   "status": {
     "approved": "已批准",
     "awaiting_approval": "待批准",

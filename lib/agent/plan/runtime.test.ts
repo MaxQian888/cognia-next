@@ -22,6 +22,17 @@ jest.mock("@tauri-apps/api/event", () => ({ emit: jest.fn().mockResolvedValue(un
   virtual: true,
 })
 
+// The terminal transition emits a `plan:completed` scheduler event. Left real,
+// `getTaskScheduler()` opens the scheduler's own Dexie database and leaves work
+// outstanding in fake-indexeddb, and the NEXT test's `getDb().delete()` then
+// never resolves — the whole suite hangs. Mocked here for the same reason
+// `lib/execution/event-bridge.test.ts` mocks it: the scheduler linkage is
+// `./notify`'s contract (covered in `notify.test.ts`), not the runtime's.
+const emitSchedulerEventMock = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/scheduler/event-integration", () => ({
+  emitSchedulerEvent: (...a: unknown[]) => emitSchedulerEventMock(...a),
+}))
+
 // Mock the workflow orchestrator so `runPlan` exercises its own
 // transition/synthesis/context logic without actually executing step nodes.
 const runWorkflowMock = jest.fn()
@@ -179,6 +190,19 @@ describe("lifecycle transitions", () => {
     expect((await rt.approvePlan(plan.id))?.status).toBe("cancelled")
     expect((await rt.pausePlan(plan.id))?.status).toBe("cancelled")
   })
+
+  // Every mutator is addressed by planId, and a plan can be deleted (or its
+  // session wiped) between a UI read and the click that follows. All of them
+  // must answer `null` rather than throw or write a row back into existence.
+  it("every mutator answers null for a plan id that no longer exists", async () => {
+    const rt = getPlanRuntime()
+    expect(await rt.updatePlanDraft("ghost", { title: "x" })).toBeNull()
+    expect(await rt.rejectPlan("ghost")).toBeNull()
+    expect(await rt.resumePlan("ghost")).toBeNull()
+    expect(await rt.cancelPlan("ghost")).toBeNull()
+    expect(await rt.setStepStatus("ghost", "s0", "completed")).toBeNull()
+    expect(await rt.keepPlanning("ghost")).toBeNull()
+  })
 })
 
 describe("updatePlanDraft", () => {
@@ -281,6 +305,37 @@ describe("runPlan (orchestrated)", () => {
     expect(runWorkflowMock).not.toHaveBeenCalled()
   })
 
+  it("forwards a live external abort into the run's own controller", async () => {
+    // The signal is NOT aborted at call time, so the runtime must subscribe to
+    // it — the path a user pressing stop mid-run actually takes.
+    const external = new AbortController()
+    runWorkflowMock.mockImplementation(async (input: { signal?: AbortSignal }) => {
+      external.abort()
+      return { runId: "x", status: input.signal?.aborted ? "cancelled" : "succeeded", output: null }
+    })
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))
+    await rt.runPlan(plan.id, { signal: external.signal })
+    const forwarded = runWorkflowMock.mock.calls[0][0] as { signal: AbortSignal }
+    expect(forwarded.signal.aborted).toBe(true)
+  })
+
+  it("exposes a step writer that the orchestrator's nodes persist through", async () => {
+    // The run context is how `action.plan.step.dispatch` nodes report progress;
+    // with the orchestrator mocked, drive that writer directly.
+    const { getPlanRunContext } = await import("./plan-run-context")
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))
+    runWorkflowMock.mockImplementation(async (input: { runId: string }) => {
+      const ctx = getPlanRunContext(input.runId)
+      await ctx?.writer.setStepStatus(plan.steps[0].id, "completed", { result: "done" })
+      return { runId: input.runId, status: "succeeded", output: null }
+    })
+    await rt.runPlan(plan.id)
+    const row = await rt.getPlan(plan.id)
+    expect(row?.steps[0]).toMatchObject({ status: "completed", result: "done" })
+  })
+
   it("aborts the run when an external signal is already aborted", async () => {
     runWorkflowMock.mockImplementation(async (input: { signal?: AbortSignal }) => ({
       runId: "x",
@@ -293,6 +348,77 @@ describe("runPlan (orchestrated)", () => {
     ac.abort()
     const result = await rt.runPlan(plan.id, { signal: ac.signal })
     expect(result?.status).toBe("failed") // cancelled run → not succeeded → failed
+  })
+})
+
+describe("startPlan (in-session)", () => {
+  it("flips the plan executing, starts step 1, and hands back its turn text", async () => {
+    const rt = getPlanRuntime()
+    // The default fixture is a linear agent_turn chain from `manual`, which the
+    // strategy resolver routes to the in-session driver.
+    const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))
+    const started = await rt.startPlan(plan.id)
+
+    expect(started).toMatchObject({ strategy: "in_session", status: "executing" })
+    expect(started?.userMessage).toContain("Step 1 of 2")
+    const row = await rt.getPlan(plan.id)
+    expect(row?.status).toBe("executing")
+    expect(row?.currentStepId).toBe(started?.stepId)
+    expect(row?.steps.find((s) => s.id === started?.stepId)?.status).toBe("in_progress")
+    // The orchestrator must NOT have been involved — that is the whole point of
+    // routing: one executor per plan, never both.
+    expect(runWorkflowMock).not.toHaveBeenCalled()
+  })
+
+  it("refuses an orchestrated plan instead of driving it one turn at a time", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(
+      createInput({ executionMode: "orchestrated", config: { requireApproval: false } })
+    )
+    const started = await rt.startPlan(plan.id)
+
+    expect(started).toEqual({ strategy: "orchestrated", status: "approved" })
+    // Untouched: the caller is expected to fall back to `runPlan`.
+    expect((await rt.getPlan(plan.id))?.status).toBe("approved")
+  })
+
+  it("finishes immediately when no step is runnable", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))
+    for (const step of plan.steps) await rt.setStepStatus(plan.id, step.id, "completed")
+
+    expect(await rt.startPlan(plan.id)).toEqual({ strategy: "in_session", status: "completed" })
+    expect((await rt.getPlan(plan.id))?.status).toBe("completed")
+  })
+
+  it("returns null for a missing plan and the unchanged status for a terminal one", async () => {
+    const rt = getPlanRuntime()
+    expect(await rt.startPlan("ghost")).toBeNull()
+    const plan = await rt.createPlan(createInput())
+    await rt.cancelPlan(plan.id)
+    expect(await rt.startPlan(plan.id)).toMatchObject({ status: "cancelled" })
+  })
+})
+
+describe("finishPlanRun", () => {
+  it("does not overwrite a user pause that landed while the run was ending", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))
+    await rt.startPlan(plan.id)
+    await rt.pausePlan(plan.id)
+
+    await rt.finishPlanRun(plan.id, "completed", "run settled")
+    // Paused is a user decision — a late terminal transition must not erase it.
+    expect((await rt.getPlan(plan.id))?.status).toBe("paused")
+  })
+
+  it("is a no-op on a missing or already-terminal plan", async () => {
+    const rt = getPlanRuntime()
+    await expect(rt.finishPlanRun("ghost", "completed")).resolves.toBeUndefined()
+    const plan = await rt.createPlan(createInput())
+    await rt.cancelPlan(plan.id)
+    await rt.finishPlanRun(plan.id, "completed")
+    expect((await rt.getPlan(plan.id))?.status).toBe("cancelled")
   })
 })
 
@@ -348,6 +474,23 @@ describe("refinePlan", () => {
     )
     expect(res?.refinementCount).toBe(0)
     expect(res?.steps).toHaveLength(2) // unchanged
+  })
+
+  it("blocks the planner call when the plan carries PII, keeping the plan", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(
+      createInput({ steps: [{ title: "email leak@example.com the report", kind: "agent_turn" }] })
+    )
+    const client = fakeClient('{"steps":["a","b"]}')
+    const res = await rt.refinePlan(
+      { planId: plan.id, refinementType: "repair", trigger: "manual" },
+      client as never
+    )
+    // Fail-OPEN on the flow: the plan survives untouched, only the send is skipped.
+    expect(client.complete).not.toHaveBeenCalled()
+    expect(res?.refinementCount).toBe(0)
+    expect(res?.steps).toHaveLength(1)
+    expect(res?.status).toBe("awaiting_approval")
   })
 
   it("is a no-op on cancelled/missing plans", async () => {

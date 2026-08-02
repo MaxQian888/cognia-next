@@ -14,6 +14,7 @@
 
 import type { ChatStatus, PermissionMode } from "@/stores/chat"
 import { useChatStore } from "@/stores/chat"
+import { PERMISSION_MODES, cyclePermissionMode } from "@/lib/settings/permission-mode-meta"
 import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 import {
   handleCompact,
@@ -27,6 +28,7 @@ import { seedBuiltinSlashCommands } from "./registry"
 import type { SystemMessageBlock, SlashCommandResultBlock } from "./system-blocks"
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
 import { dispatchGoalSubcommand } from "./actions/goal"
+import { dispatchPlanSubcommand } from "./actions/plan"
 import { dispatchPetSubcommand } from "./actions/pet"
 import { dispatchLoopSubcommand } from "./actions/loop"
 import { dispatchRememberCommand } from "./actions/remember"
@@ -238,14 +240,15 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "permissions",
-    description: "Cycle the permission mode (default → acceptEdits → plan → bypass).",
+    description: "Cycle the permission mode (default → acceptEdits → plan).",
     scope: "builtin",
     category: "system",
+    // Safe-core cycle only, shared with the composer chip / Shift+Tab via
+    // `cyclePermissionMode`. The power modes (bypassPermissions, auto,
+    // dontAsk) are deliberately NOT reachable by repeat-pressing a cycle —
+    // pick them explicitly with `/permission-mode <mode>`.
     handler: (ctx) => {
-      const order: (PermissionMode | null)[] = [null, "acceptEdits", "plan", "bypassPermissions"]
-      const idx = order.indexOf(ctx.currentPermissionMode)
-      const next = order[(idx + 1) % order.length]
-      ctx.setPermissionMode(next)
+      ctx.setPermissionMode(cyclePermissionMode(ctx.currentPermissionMode))
     },
   },
   {
@@ -319,36 +322,49 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
   {
     name: "permission-mode",
     description:
-      "Set permission mode directly (default | acceptEdits | plan | bypassPermissions). " +
-      "With no arg, cycles like /permissions.",
+      `Set permission mode directly (${PERMISSION_MODES.join(" | ")}). ` +
+      "With no arg, cycles the safe modes like /permissions.",
     argumentHint: "<mode?>",
-    argumentOptions: ["default", "acceptEdits", "plan", "bypassPermissions"],
+    // Explicit selection is the sanctioned route to the ADVANCED_MODES
+    // (bypassPermissions / auto / dontAsk) that the quick cycle excludes.
+    argumentOptions: [...PERMISSION_MODES],
     scope: "builtin",
     category: "system",
     handler: (ctx) => {
       const arg = ctx.args.trim()
+      // Confirm the resulting mode in the transcript. Changing the permission
+      // mode is consequential and used to leave no trace beyond the toolbar
+      // indicator, so a scrollback gave no clue when it changed.
+      const confirm = (mode: PermissionMode | null) => {
+        ctx.pushSystemMessage({
+          kind: "slash-result",
+          commandId: "permission-mode",
+          args: mode ?? "default",
+          summary: `Permission mode is now ${mode ?? "default"}.`,
+        })
+      }
       if (!arg) {
-        const order: (PermissionMode | null)[] = [null, "acceptEdits", "plan", "bypassPermissions"]
-        const idx = order.indexOf(ctx.currentPermissionMode)
-        const next = order[(idx + 1) % order.length]
+        const next = cyclePermissionMode(ctx.currentPermissionMode)
         ctx.setPermissionMode(next)
+        confirm(next)
         return
       }
-      switch (arg) {
-        case "default":
-          ctx.setPermissionMode(null)
-          return
-        case "acceptEdits":
-        case "plan":
-        case "bypassPermissions":
-          ctx.setPermissionMode(arg)
-          return
-        default:
-          ctx.pushSystemMessage(
-            `Unknown permission mode: \`${arg}\`. ` +
-              "Valid modes: default, acceptEdits, plan, bypassPermissions."
-          )
+      // `default` is stored as `null` (inherit the character/app default);
+      // every other mode in the exhaustive meta record is settable by name,
+      // including the advanced ones the cycle withholds.
+      if (arg === "default") {
+        ctx.setPermissionMode(null)
+        confirm(null)
+        return
       }
+      if ((PERMISSION_MODES as string[]).includes(arg)) {
+        ctx.setPermissionMode(arg as PermissionMode)
+        confirm(arg as PermissionMode)
+        return
+      }
+      ctx.pushSystemMessage(
+        `Unknown permission mode: \`${arg}\`. Valid modes: ${PERMISSION_MODES.join(", ")}.`
+      )
     },
   },
   {
@@ -466,6 +482,20 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
           `_Objective change prompt staged — the model will be told on the next turn._`
         )
       }
+    },
+  },
+  {
+    name: "plan",
+    description:
+      "Create or inspect the session's structured plan — decompose an objective, hand-author steps, or project a goal / team task list (ADR-0045).",
+    scope: "builtin",
+    category: "goal",
+    argumentHint:
+      "<objective | status | new <title> | <step>… | from-goal | from-team | to-team | cancel>",
+    argumentOptions: ["status", "new", "from-goal", "from-team", "to-team", "cancel"],
+    handler: async (ctx) => {
+      const result = await dispatchPlanSubcommand(ctx)
+      ctx.pushSystemMessage(result.system)
     },
   },
   {

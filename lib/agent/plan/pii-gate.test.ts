@@ -1,6 +1,6 @@
 import type { AgentPlan, PlanStep } from "@/types/agent/plan"
 import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
-import { PlanPiiLeak, assertPlanPiiSafe, findPlanPiiLeak, isPlanPiiSafe } from "./pii-gate"
+import { findPlanPiiLeak } from "./pii-gate"
 
 function step(over: Partial<PlanStep> = {}): PlanStep {
   return {
@@ -41,7 +41,6 @@ const EMAIL = "leak@example.com"
 describe("findPlanPiiLeak", () => {
   it("returns null for a clean plan", () => {
     expect(findPlanPiiLeak(plan())).toBeNull()
-    expect(isPlanPiiSafe(plan())).toBe(true)
   })
 
   it("flags the plan title", () => {
@@ -75,21 +74,5 @@ describe("findPlanPiiLeak", () => {
       })
     )
     expect(leak).toBe("step:x:params")
-  })
-})
-
-describe("assertPlanPiiSafe", () => {
-  it("is a no-op for a clean plan", () => {
-    expect(() => assertPlanPiiSafe(plan())).not.toThrow()
-  })
-
-  it("throws PlanPiiLeak naming the location", () => {
-    try {
-      assertPlanPiiSafe(plan({ title: EMAIL }))
-      throw new Error("expected throw")
-    } catch (e) {
-      expect(e).toBeInstanceOf(PlanPiiLeak)
-      expect((e as PlanPiiLeak).where).toBe("title")
-    }
   })
 })

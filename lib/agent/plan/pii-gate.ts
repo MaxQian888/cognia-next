@@ -10,18 +10,15 @@
  * The gate is a *check*, not a redactor: plans are the agent's own structured
  * output, so a leak is a signal to surface (and let the caller redact at the
  * source) rather than to silently rewrite mid-pipeline.
+ *
+ * One function, deliberately: every call site wants the LOCATION (to log what
+ * tripped) and must fail OPEN on the flow — skip the send, keep the plan. The
+ * throwing / boolean wrappers this module used to also export had no call site
+ * that wanted either shape, so they were removed rather than left dormant.
  */
 
 import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@cognia/redact"
 import type { AgentPlan, PlanStep } from "@/types/agent/plan"
-
-/** Raised when plan text carries recognised PII. */
-export class PlanPiiLeak extends Error {
-  constructor(public readonly where: string) {
-    super(`plan text carries PII at: ${where}`)
-    this.name = "PlanPiiLeak"
-  }
-}
 
 /** All the user-facing string fields of a step that could leak. */
 function stepStrings(step: PlanStep): string[] {
@@ -47,15 +44,4 @@ export function findPlanPiiLeak(plan: AgentPlan): string | null {
     if (step.params && !hasNoLeakingPiiDeep(step.params)) return `step:${step.id}:params`
   }
   return null
-}
-
-/** True when no recognised PII survives anywhere in the plan. */
-export function isPlanPiiSafe(plan: AgentPlan): boolean {
-  return findPlanPiiLeak(plan) === null
-}
-
-/** Throws {@link PlanPiiLeak} when the plan carries PII; no-op otherwise. */
-export function assertPlanPiiSafe(plan: AgentPlan): void {
-  const where = findPlanPiiLeak(plan)
-  if (where) throw new PlanPiiLeak(where)
 }

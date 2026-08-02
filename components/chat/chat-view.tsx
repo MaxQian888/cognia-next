@@ -19,6 +19,7 @@ import { MessageList } from "./message-list"
 import { RunStatusBar } from "./run-status-bar"
 import { PlanApprovalDock } from "@/components/agent/plan/plan-approval-dock"
 import { PlanTrackerDock } from "@/components/agent/plan/plan-tracker-dock"
+import { PlanComposerDock } from "@/components/agent/plan/plan-composer-dock"
 import { useRunRecordPersistence } from "@/hooks/chat/use-run-record-persistence"
 import { useStableCallback } from "@/hooks/ui/use-stable-callback"
 import { FollowUpSuggestions } from "./follow-up-suggestions"
@@ -498,6 +499,11 @@ export function ChatPane({
             {/* Executing/paused plans surface the live tracker in the same slot
                 (statuses are mutually exclusive with awaiting_approval). */}
             {boundId && <PlanTrackerDock sessionId={boundId} />}
+            {/* Third mutually-exclusive state for this slot: planning, with no
+                plan yet — offer to hand-author one (PlanSource "manual"). */}
+            {boundId && (
+              <PlanComposerDock sessionId={boundId} characterId={activeSession?.characterId} />
+            )}
             <WorkspaceChangesCard session={activeSession} />
             {runStatusEl}
             {composerEl}

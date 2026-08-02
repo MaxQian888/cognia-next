@@ -28,6 +28,7 @@ import { useSessionPlan } from "@/hooks/agent/use-session-plan"
 import { getPlanRuntime } from "@/lib/agent/plan/runtime"
 import { parsePlanText } from "@/lib/agent/plan/exit-plan-capture"
 import { resolvePlanHtmlStyle } from "@/lib/agent/plan/plan-html"
+import { resolvePlanStrategy } from "@/lib/agent/plan/strategy"
 import { materializeSteps } from "@/lib/agent/plan/steps"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { useSettingsStore } from "@/stores/settings"
@@ -142,7 +143,25 @@ export function PlanApprovalDock({
     if (busy) return
     setBusy(true)
     try {
+      // Which executor owns this plan is decided BEFORE approving, from the
+      // pure resolver — calling `startPlan` blind would hand an `orchestrated`
+      // plan to the workflow runtime while we also send an implementing turn,
+      // i.e. execute it twice.
+      const strategy = resolvePlanStrategy(plan)
       await getPlanRuntime().approvePlan(plan.id)
+      if (strategy === "in_session") {
+        // Conversational path (ADR-0045 §2): the runtime marks the plan
+        // executing + its first step in progress and hands back that step's
+        // turn text; `handlePlanTurnComplete` in the chat hook advances from
+        // there, one visible turn per step.
+        const started = await getPlanRuntime().startPlan(plan.id)
+        if (started?.strategy === "in_session" && started.userMessage) {
+          await onResume(started.userMessage, mode)
+          return
+        }
+      }
+      // Orchestrated / exit-plan-mode parity: one implementing turn that asks
+      // the model to work the approved plan through itself.
       await onResume(buildPlanApprovedPrompt(plan), mode)
       // Leave `busy` true — approvePlan flips the status so this dock unmounts.
     } catch {
