@@ -12,7 +12,7 @@ jest.mock("next-intl", () => ({
   },
 }))
 
-const setPluginEnabledMock = jest.fn(async (_id: string, _enabled: boolean) => undefined)
+const togglePluginEnabledMock = jest.fn(async (_id: string, _enabled: boolean) => ({ ok: true }))
 const mockRows: PluginRow[] = [
   {
     id: "a",
@@ -50,7 +50,10 @@ jest.mock("dexie-react-hooks", () => ({
 
 jest.mock("@/lib/db/plugins", () => ({
   listPlugins: jest.fn(() => Promise.resolve(mockRows)),
-  setPluginEnabled: (id: string, enabled: boolean) => setPluginEnabledMock(id, enabled),
+}))
+
+jest.mock("@/lib/plugin/core/toggle-plugin-enabled", () => ({
+  togglePluginEnabled: (id: string, enabled: boolean) => togglePluginEnabledMock(id, enabled),
 }))
 
 const toastMock = jest.fn()
@@ -71,7 +74,7 @@ import { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
 import { usePluginsStore } from "@/stores/plugins"
 
 beforeEach(() => {
-  setPluginEnabledMock.mockClear()
+  togglePluginEnabledMock.mockClear()
   toastMock.mockClear()
   checkForUpdatesMock.mockClear()
   installUpdateMock.mockClear()
@@ -96,12 +99,18 @@ describe("PluginBatchActionsBar", () => {
     expect(screen.getByText(/selected:2/)).toBeInTheDocument()
   })
 
-  it("disable-all toggles every selected row", () => {
+  it("disable-all toggles every selected row, one at a time", async () => {
     render(<PluginBatchActionsBar />)
     fireEvent.click(screen.getByText("disableAll"))
-    expect(setPluginEnabledMock).toHaveBeenCalledTimes(2)
-    expect(setPluginEnabledMock).toHaveBeenCalledWith("a", false)
-    expect(setPluginEnabledMock).toHaveBeenCalledWith("b", false)
+
+    // Sequential by design: each toggle now runs a real activation, and
+    // `withLifecycleLock` serializes them anyway — so only the first has fired
+    // synchronously and the rest need the microtask queue to drain.
+    expect(togglePluginEnabledMock).toHaveBeenCalledTimes(1)
+
+    await waitFor(() => expect(togglePluginEnabledMock).toHaveBeenCalledTimes(2))
+    expect(togglePluginEnabledMock).toHaveBeenCalledWith("a", false)
+    expect(togglePluginEnabledMock).toHaveBeenCalledWith("b", false)
   })
 
   it("clear-selection button empties the selection", () => {

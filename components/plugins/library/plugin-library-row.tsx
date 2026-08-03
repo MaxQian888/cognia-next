@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils"
 import { getAllContributions } from "@/lib/plugin/contracts/capability-contributions"
 import { PluginRowActionsMenu } from "../plugin-row-actions-menu"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
+import { PluginActivationProgress } from "../plugin-activation-progress"
 import { PluginStatusPill } from "../plugin-status-badge"
 import { PluginVersionBadge } from "../_shared/plugin-version-badge"
 import { PluginAvatar } from "../plugin-avatar"
@@ -159,6 +160,7 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
             />
           )}
           <PluginStatusPill status={plugin.status} enabled={plugin.enabled} loading={isLoading} />
+          <PluginActivationProgress pluginId={plugin.id} pluginName={plugin.name} variant="row" />
         </div>
       </button>
       <PluginRowActionsMenu

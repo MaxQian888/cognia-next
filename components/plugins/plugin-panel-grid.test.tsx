@@ -15,10 +15,12 @@ jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => mockRows,
 }))
 
-const setPluginEnabledMock = jest.fn(async (_id: string, _enabled: boolean) => undefined)
+const togglePluginEnabledMock = jest.fn(async (_id: string, _enabled: boolean) => ({ ok: true }))
+jest.mock("@/lib/plugin/core/toggle-plugin-enabled", () => ({
+  togglePluginEnabled: (id: string, enabled: boolean) => togglePluginEnabledMock(id, enabled),
+}))
 jest.mock("@/lib/db/plugins", () => ({
   listPlugins: jest.fn(async () => mockRows),
-  setPluginEnabled: (id: string, enabled: boolean) => setPluginEnabledMock(id, enabled),
 }))
 
 import { PluginPanelGrid } from "./plugin-panel-grid"
@@ -26,7 +28,7 @@ import { usePluginsStore, DEFAULT_PLUGIN_FILTERS } from "@/stores/plugins"
 
 beforeEach(() => {
   mockRows.length = 0
-  setPluginEnabledMock.mockClear()
+  togglePluginEnabledMock.mockClear()
   usePluginsStore.setState({
     filters: DEFAULT_PLUGIN_FILTERS,
     selection: new Set(),

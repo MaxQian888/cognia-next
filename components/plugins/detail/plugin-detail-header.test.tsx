@@ -10,9 +10,9 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-const setPluginEnabledMock = jest.fn(async (_id: string, _enabled: boolean) => undefined)
-jest.mock("@/lib/db/plugins", () => ({
-  setPluginEnabled: (id: string, enabled: boolean) => setPluginEnabledMock(id, enabled),
+const togglePluginEnabledMock = jest.fn(async (_id: string, _enabled: boolean) => ({ ok: true }))
+jest.mock("@/lib/plugin/core/toggle-plugin-enabled", () => ({
+  togglePluginEnabled: (id: string, enabled: boolean) => togglePluginEnabledMock(id, enabled),
 }))
 
 let mockDiagnostics: ReadonlyArray<{
@@ -52,7 +52,7 @@ function makePlugin(overrides: Partial<PluginRow> = {}): PluginRow {
 }
 
 beforeEach(() => {
-  setPluginEnabledMock.mockClear()
+  togglePluginEnabledMock.mockClear()
   mockDiagnostics = []
   usePluginsStore.setState({
     deleteTarget: null,
@@ -71,10 +71,13 @@ describe("PluginDetailHeader", () => {
     expect(screen.getByText("marketplace")).toBeInTheDocument()
   })
 
-  it("flipping the enable toggle calls setPluginEnabled with the inverse", () => {
+  it("flipping the enable toggle routes through the plugin manager, not a bare Dexie write", () => {
+    // The toggle used to call `setPluginEnabled` directly, which flipped the
+    // stored flag without ever running activate() — the plugin read as enabled
+    // while its runtime had never started.
     render(<PluginDetailHeader plugin={makePlugin({ enabled: true })} />)
     fireEvent.click(screen.getByTestId("plugin-detail-enable-toggle"))
-    expect(setPluginEnabledMock).toHaveBeenCalledWith("alpha", false)
+    expect(togglePluginEnabledMock).toHaveBeenCalledWith("alpha", false)
   })
 
   it("Configure button only renders when the manifest declares a configSchema", () => {

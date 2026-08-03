@@ -118,6 +118,13 @@ import { withTimeout } from "@cognia/primitives"
 import { loggers } from "@/lib/plugin/core/logger"
 import { createPluginVerificationSnapshot } from "@/lib/plugin/core/verification"
 import { getPluginSignatureVerifier } from "@/lib/plugin/security/signature"
+import {
+  advancePluginActivationProgress,
+  beginPluginActivationProgress,
+  cancelPluginActivationProgress,
+  completePluginActivationProgress,
+  failPluginActivationProgress,
+} from "@/stores/plugin-runtime/plugin-activation-progress-store"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { grantPluginPermission, revokePluginPermission } from "./transport"
 import { getPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
@@ -2238,12 +2245,31 @@ export class PluginManager {
     }
   }
 
-  async enablePlugin(pluginId: string, reason: string = "manual"): Promise<void> {
+  async enablePlugin(
+    pluginId: string,
+    reason: string = "manual",
+    options: { activationParentId?: string } = {}
+  ): Promise<void> {
     // Dedupe concurrent enables of the same plugin onto one in-flight promise.
     const inflight = this.enableInFlight.get(pluginId)
     if (inflight) return inflight
     // W6.4: the enable also serializes against disable/unload/uninstall.
-    const run = this.withLifecycleLock(pluginId, () => this.enablePluginInner(pluginId, reason))
+    //
+    // The progress failure is recorded HERE, in the outer catch, rather than in
+    // a `finally` on the inner try. `enablePluginInner`'s own catch runs the
+    // whole rollback — unregisterPluginContributions, setPluginError,
+    // PLUGIN_ENABLE_FAILED_EVENT — before rethrowing, so by the time we see the
+    // error every rollback side effect has already happened and the entry has
+    // stayed `running` at the failing phase for the UI to read. A `finally` on
+    // the inner try would fire BEFORE the rethrow and invert that ordering.
+    const run = this.withLifecycleLock(pluginId, async () => {
+      try {
+        return await this.enablePluginInner(pluginId, reason, options)
+      } catch (error) {
+        failPluginActivationProgress(pluginId, error)
+        throw error
+      }
+    })
     this.enableInFlight.set(pluginId, run)
     try {
       await run
@@ -2252,7 +2278,11 @@ export class PluginManager {
     }
   }
 
-  private async enablePluginInner(pluginId: string, reason: string): Promise<void> {
+  private async enablePluginInner(
+    pluginId: string,
+    reason: string,
+    options: { activationParentId?: string } = {}
+  ): Promise<void> {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 
@@ -2263,6 +2293,13 @@ export class PluginManager {
     if (plugin.status === "enabled") {
       return
     }
+
+    // Phase 1/7 — preflight. Placed after the already-enabled guard so a no-op
+    // enable never creates an entry (and never flashes a bar in the UI).
+    beginPluginActivationProgress(pluginId, {
+      reason,
+      parentPluginId: options.activationParentId,
+    })
 
     // Reject an incompatible runtime before dependency activation or Dexie
     // schema registration. `loadPlugin` repeats these guards at its direct-call
@@ -2290,6 +2327,11 @@ export class PluginManager {
     // missing / disabled / version-mismatched / cyclic required dependency
     // before doing any load work. Runs outside the try below so the typed
     // `PluginDependencyError` surfaces to callers instead of being wrapped.
+    // Phase 2/7 — dependencies. Covers the required-dep gate AND the recursion
+    // below; the parent stays parked here for the whole loop, which is exactly
+    // the required behaviour and falls out of the call graph rather than any
+    // bookkeeping.
+    advancePluginActivationProgress(pluginId, "dependencies")
     this.assertRequiredDependenciesSatisfied(pluginId)
 
     // Auto-enable required dependencies first so this plugin can rely on them
@@ -2299,11 +2341,20 @@ export class PluginManager {
     for (const depId of Object.keys(plugin.manifest.dependencies ?? {})) {
       const dep = store.plugins[depId]
       if (dep && dep.status !== "enabled") {
-        await this.enablePlugin(depId, "dependency")
+        // Each dependency gets its OWN progress entry keyed by depId, running
+        // 0/7 → 7/7 independently while this plugin sits at `dependencies`.
+        await this.enablePlugin(depId, "dependency", { activationParentId: pluginId })
       }
     }
 
     try {
+      // Phase 3/7 — schema. Deliberately unconditional: it covers the error
+      // healing below AND `applyPluginTables`, and it must advance even when
+      // the manifest declares no `dexie` block. Moving this inside an
+      // `if (plugin.manifest.dexie)` is the one edit that breaks the
+      // "skipped optional work still advances" contract.
+      advancePluginActivationProgress(pluginId, "schema")
+
       // Recover an errored plugin in-session. Left in `error` status it
       // dead-ends every retry on the store's status guards ("cannot be enabled
       // from status: error" / "cannot be loaded from status: error"), so the
@@ -2347,6 +2398,10 @@ export class PluginManager {
       // Load next when not currently active in runtime. Re-read the live
       // status so the just-applied error recovery (or any concurrent enable) is
       // reflected here rather than the stale captured snapshot.
+      // Phase 4/7 — runtime. The long one: loadPlugin does signature
+      // verification, the resilient module load, and the 30 s activate()
+      // timeout. This is where the 10–45 s of a cold start actually goes.
+      advancePluginActivationProgress(pluginId, "runtime")
       const currentStatus = store.plugins[pluginId]?.status ?? plugin.status
       if (
         currentStatus === "installed" ||
@@ -2359,14 +2414,20 @@ export class PluginManager {
       // Enable the plugin
       await store.enablePlugin(pluginId, { viaManager: false })
 
+      // Phase 5/7 — contributions.
+      advancePluginActivationProgress(pluginId, "contributions")
       // Register plugin contributions
       await this.registerPluginContributions(pluginId)
 
+      // Phase 6/7 — hooks.
+      advancePluginActivationProgress(pluginId, "hooks")
       // Notify the plugin it is now enabled. A throw here propagates into the
       // catch below, which rolls back the contributions just registered — the
       // plugin reports enable failure rather than silently half-enabling.
       await this.hooksManager.dispatchOnEnable(pluginId)
 
+      // Phase 7/7 — commit.
+      advancePluginActivationProgress(pluginId, "commit")
       // Clear any stale resilience breakers from a prior lifecycle so the
       // freshly-enabled plugin starts with closed circuits.
       resetPluginBreakers(pluginId)
@@ -2385,6 +2446,8 @@ export class PluginManager {
         metadata: { reason },
       })
       loggers.manager.debug(`[plugin:${pluginId}] enabled (${reason})`)
+      // 7/7 — every phase entered and the transaction committed.
+      completePluginActivationProgress(pluginId)
     } catch (error) {
       // Rollback: if `registerPluginContributions` (or anything after it)
       // threw partway, registries may have entries we never cleaned up.
@@ -2454,6 +2517,10 @@ export class PluginManager {
   }
 
   private async disablePluginInner(pluginId: string, reason: string = "manual"): Promise<void> {
+    // A terminal op queued behind a failed or superseded enable leaves an
+    // entry `running` forever otherwise. `withLifecycleLock` serializes these
+    // against enable, so this never races a live advance.
+    cancelPluginActivationProgress(pluginId, "disable")
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 
@@ -2534,6 +2601,10 @@ export class PluginManager {
   }
 
   async unloadPlugin(pluginId: string): Promise<void> {
+    // A terminal op queued behind a failed or superseded enable leaves an
+    // entry `running` forever otherwise. `withLifecycleLock` serializes these
+    // against enable, so this never races a live advance.
+    cancelPluginActivationProgress(pluginId, "unload")
     return this.withLifecycleLock(pluginId, () => this.unloadPluginInner(pluginId))
   }
 
@@ -2620,6 +2691,10 @@ export class PluginManager {
   }
 
   async uninstallPlugin(pluginId: string, options?: { purgeData?: boolean }): Promise<void> {
+    // A terminal op queued behind a failed or superseded enable leaves an
+    // entry `running` forever otherwise. `withLifecycleLock` serializes these
+    // against enable, so this never races a live advance.
+    cancelPluginActivationProgress(pluginId, "uninstall")
     return this.withLifecycleLock(pluginId, () => this.uninstallPluginInner(pluginId, options))
   }
 

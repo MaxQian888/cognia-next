@@ -14,7 +14,8 @@ import { DownloadIcon, PowerIcon, Trash2Icon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { listPlugins, setPluginEnabled } from "@/lib/db/plugins"
+import { listPlugins } from "@/lib/db/plugins"
+import { togglePluginEnabled } from "@/lib/plugin/core/toggle-plugin-enabled"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { usePluginsStore } from "@/stores/plugins"
 
@@ -38,7 +39,13 @@ export function PluginBatchActionsBar() {
   const updatable = targets.filter(hasUpdate)
 
   const handleToggleAll = async () => {
-    await Promise.all(targets.map((r) => setPluginEnabled(r.id, !allEnabled)))
+    // Sequential rather than Promise.all: each toggle now runs a real
+    // activation, and `withLifecycleLock` would serialize them anyway — firing
+    // them all at once just queues N long operations behind one lock while the
+    // UI shows nothing about which is in flight.
+    for (const target of targets) {
+      await togglePluginEnabled(target.id, !allEnabled)
+    }
   }
 
   // Apply marketplace updates to every selected plugin that has one. Reuses

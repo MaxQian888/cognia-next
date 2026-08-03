@@ -13,6 +13,12 @@ function Progress({
   return (
     <ProgressPrimitive.Root
       data-slot="progress"
+      // `value` is forwarded, not just consumed by the transform below. The
+      // upstream shadcn snippet destructures it away, which leaves Radix with
+      // no value to publish and the bar with no `aria-valuenow` — visually
+      // determinate, accessibly indeterminate. Determinate regions
+      // (`LoadingRegion progress={...}`) depend on Radix emitting it.
+      value={value}
       className={cn("relative h-2 w-full overflow-hidden rounded-full bg-primary/20", className)}
       {...props}
     >

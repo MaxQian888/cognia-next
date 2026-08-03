@@ -161,3 +161,104 @@ describe("LoadingRegion", () => {
     expect(container.querySelector('[data-slot="loading-region"]')).not.toHaveAttribute("aria-busy")
   })
 })
+
+describe("determinate progress (Epic 3 / ADR-0096)", () => {
+  const advanceToIndicator = () => {
+    act(() => {
+      jest.advanceTimersByTime(LOADING_DELAY_MS + 10)
+    })
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers()
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  it("folds phase and count into the region's SINGLE status message", () => {
+    setup({
+      label: "Activating alpha",
+      progress: { processed: 3, total: 7, phaseLabel: "Starting" },
+    })
+    advanceToIndicator()
+
+    // Exactly one live region — the graphics never announce separately.
+    const statuses = screen.getAllByRole("status")
+    expect(statuses).toHaveLength(1)
+    expect(statuses[0]).toHaveTextContent("Activating alpha — Starting — 3/7")
+  })
+
+  it("renders the bar as a SIBLING of the status element, never inside it", () => {
+    // Radix gives Progress an implicit role="progressbar"; nested in a live
+    // region, every value change would be announced over the polite message.
+    setup({ progress: { processed: 2, total: 7 } })
+    advanceToIndicator()
+
+    const status = screen.getByRole("status")
+    const bar = screen.getByRole("progressbar")
+    expect(status.contains(bar)).toBe(false)
+    expect(bar).not.toHaveAttribute("aria-live")
+  })
+
+  it("reports the percentage on the bar", () => {
+    setup({ progress: { processed: 7, total: 7, phaseLabel: "Finishing" } })
+    advanceToIndicator()
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "100")
+  })
+
+  it("keeps aria-busy tied to `loading`, not to indicator visibility", () => {
+    const { container } = setup({ loading: false, progress: { processed: 1, total: 7 } })
+    expect(container.querySelector('[data-slot="loading-region"]')).not.toHaveAttribute("aria-busy")
+  })
+
+  it("falls back to indeterminate when the total is unknown", () => {
+    // A determinate 0% bar is a claim; a spinner is the truth.
+    setup({ progress: { processed: 0, total: 0 } })
+    advanceToIndicator()
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
+  })
+
+  it("replaces the elapsed-seconds detail rather than saying both", () => {
+    setup({ label: "Activating alpha", progress: { processed: 4, total: 7, phaseLabel: "Hooks" } })
+    advanceToIndicator()
+    act(() => {
+      jest.advanceTimersByTime(PROLONGED_AT_MS + 10)
+    })
+
+    const status = screen.getByRole("status")
+    expect(status).toHaveTextContent("Hooks — 4/7")
+    expect(status).not.toHaveTextContent("Still working")
+  })
+
+  it("lets offline win over the progress detail", () => {
+    mockNetwork.connected = false
+    try {
+      setup({ progress: { processed: 4, total: 7, phaseLabel: "Hooks" } })
+      advanceToIndicator()
+      act(() => {
+        jest.advanceTimersByTime(PROLONGED_AT_MS + 10)
+      })
+      expect(screen.getByRole("status")).toHaveTextContent("You're offline")
+    } finally {
+      mockNetwork.connected = true
+    }
+  })
+
+  it("shows no cancel button without onCancel, even past escalation", () => {
+    setup({ progress: { processed: 4, total: 7 } })
+    advanceToIndicator()
+    act(() => {
+      jest.advanceTimersByTime(ESCALATED_AT_MS + 10)
+    })
+    expect(screen.queryByText("Cancel")).not.toBeInTheDocument()
+  })
+
+  it("is unchanged when no progress is supplied", () => {
+    setup({ label: "Loading sessions" })
+    advanceToIndicator()
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("Loading sessions")
+  })
+})

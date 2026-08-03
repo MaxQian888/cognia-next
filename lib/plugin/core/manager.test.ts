@@ -1857,6 +1857,9 @@ describe("PluginManager", () => {
             manifest: {
               ...createManifest(pluginId),
               dexie: { tables: [{ name: "items", schema: "++id" }] },
+              runtimeCompatibility: {
+                browser: { availability: "supported" },
+              },
             },
             status: "installed",
             source: "builtin",
