@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 // Coverage for the backupHistory CRUD module — append, listing/filter, latest,
 // pruning, and clear/delete. Uses fake-indexeddb so we exercise the real Dexie
 // query path against an in-memory IDB.
 
-import "fake-indexeddb/auto"
 import {
   appendBackupHistory,
   clearBackupHistory,
@@ -12,16 +10,14 @@ import {
   listBackupHistory,
   __TESTING__,
 } from "./backup-history"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  // Touch getDb() and wait for the seed so we don't race in each test. We
-  // don't actually use the seeded characters/skills here.
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("appendBackupHistory", () => {
   it("inserts a row, fills schemaVersion, and returns it", async () => {

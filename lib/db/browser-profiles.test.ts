@@ -1,6 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-
 import {
   createBrowserProfile,
   deleteBrowserProfile,
@@ -12,17 +9,19 @@ import {
   selectBrowserProfile,
   touchBrowserProfile,
 } from "./browser-profiles"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import { SYNC_HANDLER_TABLES } from "@/lib/sync/companion-sync"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().browserProfiles.clear()
   await getDb().browserDomainGrants.clear()
 })
+afterAll(dbFixture.dispose)
 
 describe("browser profile metadata", () => {
   it("keeps profile and grant metadata out of companion sync", () => {

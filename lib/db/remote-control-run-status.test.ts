@@ -1,6 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   REMOTE_RUN_STATUS_MAX_ROWS,
   getRemoteRunStatus,
@@ -12,12 +11,13 @@ import {
 } from "./remote-control-run-status"
 import type { RemoteControlRunStatusRow } from "@/types/remote-control"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 describe("remote-control run status", () => {
   it("opens the v92 table and round-trips a row", async () => {
