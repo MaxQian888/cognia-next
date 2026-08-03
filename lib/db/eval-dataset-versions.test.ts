@@ -1,5 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import {
   snapshotVersion,
   getVersion,
@@ -17,18 +15,20 @@ import {
   listCases,
   deleteCase,
 } from "./eval-datasets"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import type { EvalCase } from "@/types/eval/eval"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().evalDatasets.clear()
   await getDb().evalCases.clear()
   await getDb().evalDatasetVersions.clear()
 })
+afterAll(dbFixture.dispose)
 
 function caseRow(over: Partial<EvalCase>): EvalCase {
   return {

@@ -1,5 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import {
   createDataset,
   getDataset,
@@ -18,13 +16,14 @@ import {
 import { saveRun, listRunsByDataset } from "./eval-runs"
 import { saveCaseResult, listCaseResults } from "./eval-run-cases"
 import { snapshotVersion, listVersions } from "./eval-dataset-versions"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().evalDatasets.clear()
   await getDb().evalCases.clear()
   await getDb().evalRuns.clear()
@@ -138,6 +137,7 @@ describe("dataset CRUD", () => {
     await expect(deleteDataset("")).resolves.toBeUndefined()
   })
 })
+afterAll(dbFixture.dispose)
 
 describe("case CRUD", () => {
   it("adds a case with a generated id, inheriting the dataset capability", async () => {
