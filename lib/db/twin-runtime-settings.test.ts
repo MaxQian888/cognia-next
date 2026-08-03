@@ -1,6 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-
 jest.mock("@/lib/tauri", () => ({
   ...jest.requireActual("@/lib/tauri"),
   isTauri: jest.fn(),
@@ -8,18 +5,20 @@ jest.mock("@/lib/tauri", () => ({
 
 import { isTauri } from "@/lib/tauri"
 import { getTwinRuntimeSettings, saveTwinRuntimeSettings } from "./twin-runtime-settings"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import { DEFAULT_TWIN_RUNTIME_SETTINGS } from "@/types/twin"
 
 const mockedIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
+  await dbFixture.restore()
   mockedIsTauri.mockReturnValue(false)
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
 })
+afterAll(dbFixture.dispose)
 
 describe("twin-runtime-settings CRUD", () => {
   it("returns defaults when no row exists", async () => {
