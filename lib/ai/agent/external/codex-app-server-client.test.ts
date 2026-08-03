@@ -2026,6 +2026,89 @@ describe("CodexAppServerAdapter", () => {
       )
     })
 
+    it("folds a thinking level the model does not publish onto its deepest supported tier", async () => {
+      // The composer's ladder reaches `max`; a Codex model typically stops at
+      // `high`. Sending `max` verbatim is at best ignored and at worst rejects
+      // the turn, so it folds DOWN — the direction every wire normalizer folds.
+      responders["model/list"] = () => ({
+        data: [
+          {
+            id: "gpt-5.2-codex",
+            isDefault: true,
+            defaultReasoningEffort: "medium",
+            // Deliberately not in ascending order: the server lists these in
+            // whatever order it likes, and a positional scan would pick `low`.
+            supportedReasoningEfforts: [
+              { reasoningEffort: "high" },
+              { reasoningEffort: "low" },
+              { reasoningEffort: "medium" },
+            ],
+          },
+        ],
+      })
+      const adapter = await connectedAdapter()
+      await adapter.listModels()
+      const session = await adapter.createSession()
+      await adapter.setConfigOption(session.id, "reasoningEffort", "max")
+
+      const it = iterator(adapter, session.id, userMessage("go"))
+      const first = it.next()
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      let r = await first
+      while (!r.done) r = await it.next()
+
+      const turn = lastWritten((m) => m.method === "turn/start")!
+      expect((turn.params as { effort?: string }).effort).toBe("high")
+    })
+
+    it("passes a supported thinking level through untouched", async () => {
+      responders["model/list"] = () => ({
+        data: [
+          {
+            id: "gpt-5.2-codex",
+            isDefault: true,
+            supportedReasoningEfforts: [
+              { reasoningEffort: "low" },
+              { reasoningEffort: "medium" },
+              { reasoningEffort: "high" },
+            ],
+          },
+        ],
+      })
+      const adapter = await connectedAdapter()
+      await adapter.listModels()
+      const session = await adapter.createSession()
+      await adapter.setConfigOption(session.id, "reasoningEffort", "low")
+
+      const it = iterator(adapter, session.id, userMessage("go"))
+      const first = it.next()
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      let r = await first
+      while (!r.done) r = await it.next()
+
+      expect(
+        (lastWritten((m) => m.method === "turn/start")!.params as { effort?: string }).effort
+      ).toBe("low")
+    })
+
+    it("leaves the level alone when the model catalog was never fetched", async () => {
+      // Guessing against an unknown ladder is worse than letting the server
+      // decide, so an unclamped value goes out as-is.
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      await adapter.setConfigOption(session.id, "reasoningEffort", "max")
+
+      const it = iterator(adapter, session.id, userMessage("go"))
+      const first = it.next()
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      let r = await first
+      while (!r.done) r = await it.next()
+
+      expect(
+        (lastWritten((m) => m.method === "turn/start")!.params as { effort?: string }).effort
+      ).toBe("max")
+    })
+
     it("resets the effort to the model default when the model changes", async () => {
       responders["model/list"] = () => ({
         data: [

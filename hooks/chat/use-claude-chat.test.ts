@@ -811,6 +811,7 @@ describe("useClaudeChat — actions", () => {
     await act(async () => {
       await result.current.send("refactor this module", {
         additionalDirectories: ["/shared"],
+        effort: "xhigh",
       })
     })
     expect(setDelegationRulesMock).toHaveBeenCalled()
@@ -818,6 +819,7 @@ describe("useClaudeChat — actions", () => {
       "refactor this module",
       expect.objectContaining({
         agentId: "ext-1",
+        reasoningEffort: "xhigh",
         context: { custom: { additionalDirectories: ["/shared"] } },
       })
     )

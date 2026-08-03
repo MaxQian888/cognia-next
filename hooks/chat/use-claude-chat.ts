@@ -1506,6 +1506,12 @@ export function useClaudeChat() {
           const result = await executeOnExternalAgent(externalSendText, {
             agentId: extAgentId,
             workingDirectory: sendOptions.cwd,
+            // The composer's thinking level, which before this reached only the
+            // built-in runtime — on an external agent the control was silently
+            // inert. `sendOptions.effort` already carries the resolved
+            // precedence chain (IM override > session > bot > app default), and
+            // the adapter folds it onto whatever ladder its model publishes.
+            ...(sendOptions.effort ? { reasoningEffort: sendOptions.effort } : {}),
             context: {
               custom: {
                 additionalDirectories: sendOptions.additionalDirectories ?? [],

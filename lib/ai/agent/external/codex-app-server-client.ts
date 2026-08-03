@@ -1178,7 +1178,14 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     if (cwd) params.cwd = cwd
     const model = session?.metadata?.selectedModel
     if (typeof model === "string") params.model = model
-    const effort = readString(session?.metadata?.reasoningEffort)
+    // The composer's thinking level can name a tier this model doesn't publish
+    // (the app ladder reaches `max`; Codex models typically stop at `high`), so
+    // fold it onto the nearest supported one rather than letting the server
+    // reject the turn.
+    const effort = this.clampEffortToSupported(
+      readString(session?.metadata?.reasoningEffort),
+      readString(session?.metadata?.selectedModel)
+    )
     if (effort) params.effort = effort
     const summary = readString(session?.metadata?.reasoningSummary)
     if (summary) params.summary = summary
@@ -2439,6 +2446,52 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       })),
       currentModelId: current ?? this.modelCache[0].id,
     }
+  }
+
+  /**
+   * Fold a requested effort onto what the model actually publishes.
+   *
+   * The composer's ladder is the APP's (`low`…`max`), while a Codex model
+   * advertises its own `supportedReasoningEfforts` — usually `low|medium|high`.
+   * Sending `max` there is at best ignored and at worst rejects the turn, so an
+   * unsupported value folds DOWN to the deepest supported one (the direction
+   * every wire normalizer in this repo folds), or up to the shallowest when the
+   * request sits below the whole list.
+   *
+   * Returns `undefined` for no request, and passes the value through untouched
+   * when the model catalog hasn't been fetched — guessing against an unknown
+   * ladder would be worse than letting the server decide.
+   */
+  private clampEffortToSupported(
+    requested: string | undefined,
+    selectedModel: string | undefined
+  ): string | undefined {
+    if (!requested) return undefined
+    const model =
+      this.modelCache.find((m) => m.id === selectedModel) ??
+      this.modelCache.find((m) => m.isDefault)
+    const supported = model?.supportedReasoningEfforts ?? []
+    if (supported.length === 0) return requested
+    const names = supported.map((e) => e.reasoningEffort)
+    if (names.includes(requested)) return requested
+    // Rank against the app's own ordering so "deepest supported at or below"
+    // is meaningful even when the two vocabularies only partly overlap.
+    const order = ["minimal", "low", "medium", "high", "xhigh", "max"]
+    const wanted = order.indexOf(requested)
+    if (wanted < 0) return names[names.length - 1]
+    // Pick by rank, not by report order — the server lists efforts in whatever
+    // order it likes, so scanning positionally could return a shallower tier
+    // than one further down the list.
+    let best: string | undefined
+    let bestRank = -1
+    for (const name of names) {
+      const rank = order.indexOf(name)
+      if (rank >= 0 && rank <= wanted && rank > bestRank) {
+        bestRank = rank
+        best = name
+      }
+    }
+    return best ?? names[0]
   }
 
   async setSessionModel(sessionId: string, modelId: string): Promise<void> {
