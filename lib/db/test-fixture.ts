@@ -41,22 +41,24 @@ async function clearTables(db: CogniaDB, tableNames: readonly string[]): Promise
 }
 
 async function captureDatabase(db: CogniaDB): Promise<TableSnapshot[]> {
-  const snapshots: TableSnapshot[] = []
-  for (const table of db.tables) {
-    const values = (await table.toArray()) as unknown[]
-    snapshots.push({ name: table.name, values })
-  }
-  return snapshots
+  return db.transaction("r", db.tables, () =>
+    Promise.all(
+      db.tables.map(async (table) => ({
+        name: table.name,
+        values: (await table.toArray()) as unknown[],
+      }))
+    )
+  )
 }
 
 async function restoreDatabase(db: CogniaDB, snapshots: readonly TableSnapshot[]): Promise<void> {
   await db.transaction("rw", db.tables, async () => {
-    for (const table of db.tables) await table.clear()
-    for (const snapshot of snapshots) {
-      if (snapshot.values.length === 0) continue
-      const table = db.table(snapshot.name)
-      await table.bulkPut(snapshot.values)
-    }
+    await Promise.all(db.tables.map((table) => table.clear()))
+    await Promise.all(
+      snapshots
+        .filter((snapshot) => snapshot.values.length > 0)
+        .map((snapshot) => db.table(snapshot.name).bulkPut(snapshot.values))
+    )
   })
 }
 
