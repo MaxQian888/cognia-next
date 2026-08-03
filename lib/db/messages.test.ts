@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 // Coverage for the messages CRUD layer — list/persist/clear/truncateAfter.
 // Persistence is diff-based so we exercise the upsert-vs-delete branches
 // directly, plus the metadata hoisting (senderId/senderKind) round-trip.
 
-import "fake-indexeddb/auto"
 import type { UIMessage } from "ai"
 import {
   clearMessages,
@@ -14,7 +12,8 @@ import {
   truncateAfter,
   updateMessageMetadata,
 } from "./messages"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
 jest.setTimeout(30_000)
 
@@ -28,15 +27,14 @@ async function putSession(id: string, projectId = "proj-A"): Promise<void> {
   } as never)
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().messages.clear()
-  // The first cold open builds the full Dexie schema (now v99) which can exceed
-  // the default 5s hook budget under fake-indexeddb — give it room.
-}, 30_000)
+})
+afterAll(dbFixture.dispose)
 
 function msg(
   id: string,

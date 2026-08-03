@@ -1,10 +1,8 @@
-/** @jest-environment jsdom */
 // Coverage for session creation, focused on the default-preset auto-apply
 // path added in v12 of the preset feature uplift. The non-preset behaviour
 // of `createSession` was tested implicitly through the broader app; we
 // exercise it directly here so the auto-apply branch can't regress.
 
-import "fake-indexeddb/auto"
 import { liveQuery } from "dexie"
 import type { ChatSession } from "@cognia/agent-config-types"
 import {
@@ -27,7 +25,8 @@ import {
 } from "./sessions"
 import { saveSettings } from "./settings"
 import { createPreset, setDefaultPreset } from "./prompt-presets"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import { createLoop, getLoop, listLoopsBySession } from "./loops"
 import { createGoal, listGoalsBySession } from "./goals"
 import { loggers } from "@cognia/logging"
@@ -54,16 +53,17 @@ jest.mock("@/lib/chat/search/indexer", () => ({
   markSessionRemoved: (sessionId: string) => markSessionRemovedMock(sessionId),
 }))
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
+  await dbFixture.restore()
   markSessionRemovedMock.mockClear()
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
   await getDb().promptPresets.clear()
   // Cold open builds the full Dexie schema (now v99); can exceed the default 5s
   // hook budget under fake-indexeddb on the first test.
-}, 30_000)
+})
+afterAll(dbFixture.dispose)
 
 /** Poll until `pred` is true (liveQuery emissions land on microtask timing). */
 async function waitUntil(pred: () => boolean, timeoutMs = 3000): Promise<void> {

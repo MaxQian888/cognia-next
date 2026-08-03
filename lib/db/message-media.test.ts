@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 // Coverage for the content-addressed chat-media store: reference parsing,
 // hash-keyed dedupe, batch reads, byte accounting and orphan collection. Uses
 // fake-indexeddb so the real Dexie query path runs in memory.
 
-import "fake-indexeddb/auto"
 import {
   MEDIA_REF_PREFIX,
   collectOrphanedMedia,
@@ -18,19 +16,19 @@ import {
   putMessageMedia,
   type MessageMediaRow,
 } from "./message-media"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
 // A cold open of the full schema chain crosses Jest's default 5s hook timeout
 // under coverage instrumentation. Mirrors the repo pattern for high-version
 // tables.
 jest.setTimeout(30_000)
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 function makeRow(over: Partial<MessageMediaRow> = {}): MessageMediaRow {
   return {

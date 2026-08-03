@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
 // Coverage for the session-usage CRUD + aggregator layer.
 
-import "fake-indexeddb/auto"
 import {
   deleteUsageForSession,
   listUsageForSession,
@@ -18,16 +16,18 @@ import {
   upsertSessionUsage,
   type SessionUsageRow,
 } from "./session-usage"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import type { SDKResultMessage } from "@cognia/agent-config-types"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().sessionUsage.clear()
 })
+afterAll(dbFixture.dispose)
 
 function row(
   id: string,

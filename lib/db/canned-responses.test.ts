@@ -1,6 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { getDb, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   createCanned,
   updateCanned,
@@ -10,11 +9,11 @@ import {
   seedBuiltinCanned,
 } from "./canned-responses"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("canned-responses", () => {
   it("creates, lists (sorted), and updates", async () => {
