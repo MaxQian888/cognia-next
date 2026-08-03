@@ -393,7 +393,10 @@ describe("reasoning effort integration", () => {
     expect(screen.getByTestId("model-picker-effort")).toHaveTextContent("high")
     fireEvent.click(screen.getByRole("button"))
     expect(screen.getByTestId("effort-selector-section")).toBeInTheDocument()
-    expect(screen.getByRole("radio", { name: "high" })).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByRole("slider", { name: "Thinking level" })).toHaveAttribute(
+      "aria-valuetext",
+      "high"
+    )
   })
 
   it("omits effort UI for a model that does not support effort", () => {

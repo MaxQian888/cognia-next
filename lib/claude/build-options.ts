@@ -85,6 +85,7 @@ import {
 } from "@/lib/ai/provider-consumption"
 import { isLocalProvider } from "@cognia/provider-core/providers/local-providers"
 import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
+import { isUltracodeLevel, resolveThinkingLevel } from "@/lib/ai/thinking-level"
 import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat-bridge"
 import { resolveCodexVaultCredential } from "@/lib/subscription/codex/chat-bridge"
 import {
@@ -2103,6 +2104,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
             )
         )
       }
+      // The capability-filtered manifest BEFORE semantic pruning. The ultracode
+      // tier below re-attaches workflow entries from it, so that tier's tool
+      // guarantee holds even when pruning would have dropped them for being a
+      // poor semantic match for this particular prompt.
+      const unprunedManifest = manifest
       // Semantic tool routing (opt-in, default OFF): when MORE plugin tools
       // than the activation threshold are exposed, keep only the top-K
       // semantic matches for the current prompt plus pinned tools. Only the
@@ -2180,6 +2186,39 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           WORKFLOW_AI_PLUGIN_ID,
         } = await import("@/lib/workflow/publish/runner-tool")
         if (!combined.some((entry) => entry.name === WORKFLOW_RUNNER_TOOL_NAME)) {
+          combined.push({
+            name: WORKFLOW_RUNNER_TOOL_NAME,
+            description: WORKFLOW_RUNNER_TOOL_DEFINITION.description,
+            jsonSchema: WORKFLOW_RUNNER_TOOL_DEFINITION.parametersSchema,
+            pluginId: WORKFLOW_AI_PLUGIN_ID,
+          })
+        }
+      }
+      // `ultracode` is the composite top thinking tier: `"xhigh"` effort (which
+      // the tier persists as `ChatSession.effort`, so the effort chain below
+      // needs no special case) PLUS the dynamic-workflow `wf_*` suite. The CLI
+      // expresses that second half through its `config.pluginTools` gate; this
+      // is the desktop/web equivalent.
+      //
+      // Two steps, both appended AFTER pruning so neither can be pruned away:
+      // re-attach the workflow plugin's own entries when it IS enabled, and
+      // fall back to the shared typed runner when it is not — the same seam,
+      // and the same `plugin-tool-ipc.ts` executor, as the graph-bodied-skills
+      // branch above. Choosing the tier is the opt-in; nothing here overrides a
+      // per-character `disablePluginTools` (we are already inside that guard).
+      if (isUltracodeLevel(resolveThinkingLevel(session))) {
+        const {
+          WORKFLOW_RUNNER_TOOL_NAME,
+          WORKFLOW_RUNNER_TOOL_DEFINITION,
+          WORKFLOW_AI_PLUGIN_ID,
+        } = await import("@/lib/workflow/publish/runner-tool")
+        const present = new Set(combined.map((entry) => entry.name))
+        for (const entry of unprunedManifest) {
+          if (entry.pluginId !== WORKFLOW_AI_PLUGIN_ID || present.has(entry.name)) continue
+          present.add(entry.name)
+          combined.push(entry)
+        }
+        if (!present.has(WORKFLOW_RUNNER_TOOL_NAME)) {
           combined.push({
             name: WORKFLOW_RUNNER_TOOL_NAME,
             description: WORKFLOW_RUNNER_TOOL_DEFINITION.description,

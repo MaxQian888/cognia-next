@@ -11,6 +11,7 @@ import { useTranslations } from "next-intl"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { useSettingsStore } from "@/stores/settings/settings-store"
+import { DEFAULT_EFFORT_SELECTOR_MODE } from "@/components/chat/composer/effort-selector-view"
 import type { AppSettings } from "@cognia/agent-config-types"
 
 type ComposerBehavior = NonNullable<AppSettings["composerBehavior"]>
@@ -53,6 +54,12 @@ export function ComposerBehaviorCard() {
   const autoScrollOnStream = cb.autoScrollOnStream !== false
   const inputHistoryRecall = cb.inputHistoryRecall !== false
   const persistDrafts = cb.persistDrafts !== false
+  // The one non-boolean member of this block: a two-way presentation choice for
+  // the composer's thinking-level control, surfaced as a switch because there
+  // are exactly two modes. `"slider"` is the default (see
+  // `components/chat/composer/effort-selector-view.ts`), so an absent value
+  // reads as on.
+  const effortSliderMode = (cb.effortSelectorMode ?? DEFAULT_EFFORT_SELECTOR_MODE) === "slider"
 
   function update(patch: Partial<ComposerBehavior>): void {
     void save({ composerBehavior: { ...cb, ...patch } })
@@ -111,6 +118,14 @@ export function ComposerBehaviorCard() {
         hint={t("persistDrafts.hint")}
         checked={persistDrafts}
         onChange={(next) => update({ persistDrafts: next })}
+      />
+
+      <ToggleRow
+        id="composer-effort-selector-mode"
+        label={t("effortSelectorMode.label")}
+        hint={t("effortSelectorMode.hint")}
+        checked={effortSliderMode}
+        onChange={(next) => update({ effortSelectorMode: next ? "slider" : "list" })}
       />
     </div>
   )

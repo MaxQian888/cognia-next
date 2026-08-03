@@ -3265,6 +3265,100 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
   })
 })
 
+describe("resolveSendOptions — the ultracode thinking tier", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sidecarBridge = require("@/lib/plugin/bridge/sidecar-tools-bridge")
+  const mBuildManifest = sidecarBridge.buildPluginToolsManifest as jest.Mock
+
+  const wfTool = (name: string) => ({
+    name,
+    description: `workflow tool ${name}`,
+    jsonSchema: {},
+    pluginId: "cognia-workflow-ai",
+  })
+  const unrelatedTool = {
+    name: "github_pr",
+    description: "open a PR",
+    jsonSchema: {},
+    pluginId: "cognia-github-delivery",
+  }
+
+  /** Tier as the composer persists it: the tier name plus the effort it maps to. */
+  const ultracodeSession = () =>
+    makeSession({ id: "s1", thinkingLevel: "ultracode", effort: "xhigh" })
+
+  beforeEach(() => {
+    mBuildManifest.mockReset().mockReturnValue([wfTool("wf_read_graph"), unrelatedTool])
+  })
+
+  it("still forwards xhigh effort — the tier maps down, it is not a new effort value", async () => {
+    const opts = await resolveSendOptions({
+      session: ultracodeSession(),
+      character: makeChar({ model: "claude-opus-4-8" }),
+    })
+    expect(opts.effort).toBe("xhigh")
+  })
+
+  it("exposes the workflow tool suite", async () => {
+    const opts = await resolveSendOptions({
+      session: ultracodeSession(),
+      character: makeChar(),
+    })
+    const names = (opts.pluginTools ?? []).map((t) => t.name)
+    expect(names).toContain("wf_read_graph")
+    expect(names).toContain("wf_run_workflow_typed")
+  })
+
+  it("adds the shared runner even when the workflow plugin contributes nothing", async () => {
+    // The plugin is disabled, so its own registration is absent; the tier's
+    // guarantee still holds through the `plugin-tool-ipc.ts` fallback executor.
+    mBuildManifest.mockReturnValue([unrelatedTool])
+    const opts = await resolveSendOptions({
+      session: ultracodeSession(),
+      character: makeChar(),
+    })
+    expect((opts.pluginTools ?? []).map((t) => t.name)).toContain("wf_run_workflow_typed")
+  })
+
+  it("never duplicates a workflow tool the manifest already carries", async () => {
+    mBuildManifest.mockReturnValue([wfTool("wf_run_workflow_typed"), wfTool("wf_read_graph")])
+    const opts = await resolveSendOptions({
+      session: ultracodeSession(),
+      character: makeChar(),
+    })
+    const runners = (opts.pluginTools ?? []).filter((t) => t.name === "wf_run_workflow_typed")
+    expect(runners).toHaveLength(1)
+  })
+
+  it("leaves the manifest alone on every other tier", async () => {
+    // `xhigh` persists the SAME effort as ultracode — only the tier differs, so
+    // this is the assertion that proves the coupling keys on the tier.
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", thinkingLevel: "xhigh", effort: "xhigh" }),
+      character: makeChar(),
+    })
+    expect((opts.pluginTools ?? []).map((t) => t.name)).not.toContain("wf_run_workflow_typed")
+  })
+
+  it("does not infer the tier from a legacy row that only carries xhigh effort", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", effort: "xhigh" }),
+      character: makeChar(),
+    })
+    expect((opts.pluginTools ?? []).map((t) => t.name)).not.toContain("wf_run_workflow_typed")
+  })
+
+  it("stays subject to the character's disablePluginTools opt-out", async () => {
+    // Picking the tier opts INTO tools; it does not override a character that
+    // has plugin tools switched off entirely.
+    const opts = await resolveSendOptions({
+      session: ultracodeSession(),
+      character: makeChar({ disablePluginTools: true }),
+    })
+    expect((opts.pluginTools ?? []).map((t) => t.name)).not.toContain("wf_run_workflow_typed")
+  })
+})
+
 describe("resolveSendOptions — first-class web tools supersede the plugin", () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const sidecarBridge = require("@/lib/plugin/bridge/sidecar-tools-bridge")

@@ -104,4 +104,31 @@ describe("ComposerBehaviorCard", () => {
     render(<ComposerBehaviorCard />)
     expect(screen.getByLabelText("autoScroll.label")).toBeChecked()
   })
+
+  describe("thinking-level presentation", () => {
+    it("shows the slider as the default when nothing is persisted", () => {
+      render(<ComposerBehaviorCard />)
+      expect(screen.getByLabelText("effortSelectorMode.label")).toBeChecked()
+    })
+
+    it("switches the composer control to the list presentation", async () => {
+      const user = userEvent.setup()
+      render(<ComposerBehaviorCard />)
+      await user.click(screen.getByLabelText("effortSelectorMode.label"))
+      expect(save).toHaveBeenCalledWith({ composerBehavior: { effortSelectorMode: "list" } })
+    })
+
+    it("reflects a persisted list preference and switches back", async () => {
+      mockSettings = { composerBehavior: { effortSelectorMode: "list", persistDrafts: false } }
+      const user = userEvent.setup()
+      render(<ComposerBehaviorCard />)
+      const toggle = screen.getByLabelText("effortSelectorMode.label")
+      expect(toggle).not.toBeChecked()
+
+      await user.click(toggle)
+      expect(save).toHaveBeenCalledWith({
+        composerBehavior: { effortSelectorMode: "slider", persistDrafts: false },
+      })
+    })
+  })
 })

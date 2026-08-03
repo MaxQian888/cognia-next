@@ -29,6 +29,7 @@ import { setSessionModel, closeSession } from "@/lib/claude/ipc"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { collectModelOptions, type ModelOption } from "@/lib/ai/model-options"
 import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
+import { resolveThinkingLevel } from "@/lib/ai/thinking-level"
 import { EffortSelector } from "./effort-selector"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -156,10 +157,13 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
   }, [options, activeModel, activeProvider, autoActive, t])
 
   // Only surfaced when the user has actually chosen a level AND the active
-  // model honours it — an "Auto" suffix on every chip would be noise.
+  // model honours it — an "Auto" suffix on every chip would be noise. Read the
+  // TIER rather than `session.effort`: `ultracode` persists as `"xhigh"` effort,
+  // so the raw field would label the chip with the wrong tier.
+  const effortTier = resolveThinkingLevel(session)
   const effortLabel =
-    session?.effort && modelSupportsEffort(activeProvider, activeModel)
-      ? tEffortLevels(`effort.${session.effort}`)
+    effortTier !== "off" && modelSupportsEffort(activeProvider, activeModel)
+      ? tEffortLevels(`effort.${effortTier}`)
       : null
 
   const handleSelect = (providerId: string, modelId: string) => {
@@ -368,10 +372,12 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
             )}
           </CommandList>
         </Command>
-        {/* Reasoning effort lives here rather than as its own toolbar chip. It
-            self-gates to nothing on models that ignore effort, so this row
-            simply does not appear for them. */}
-        <EffortSelector session={session} disabled={disabled} variant="section" />
+        {/* The thinking level lives here rather than as its own toolbar chip —
+            it qualifies a model and is meaningless on its own. It self-gates to
+            nothing on models that ignore effort, so this block simply does not
+            appear for them, and picks its own slider/list presentation from
+            `composerBehavior.effortSelectorMode`. */}
+        <EffortSelector session={session} disabled={disabled} />
       </PopoverContent>
     </Popover>
   )
