@@ -1,5 +1,5 @@
 import { deriveEffortSliderState, modelSupportsEffort, thinkingLevelToEffort } from "./thinking"
-import { EFFORT_SLIDER_LEVELS } from "./schema"
+import { EFFORT_SLIDER_LEVELS, type ThinkingLevel } from "./schema"
 
 describe("thinkingLevelToEffort", () => {
   it("maps each non-off level to the matching effort", () => {
@@ -37,6 +37,12 @@ describe("deriveEffortSliderState", () => {
       off: false,
       index: EFFORT_SLIDER_LEVELS.length - 1,
     })
+  })
+
+  it("parks an unrecognised level at the fast end rather than at index -1", () => {
+    // A `config.json` hand-edited to a tier this build no longer knows would
+    // otherwise seed the overlay's marker off the end of the track.
+    expect(deriveEffortSliderState("turbo" as ThinkingLevel)).toEqual({ off: false, index: 0 })
   })
 })
 

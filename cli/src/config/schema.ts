@@ -19,6 +19,8 @@
 import { z } from "zod"
 import { DEFAULT_BUILTIN_TOOLS, type BuiltinToolsConfig } from "@cognia/agent-config-types"
 
+import { EFFORT_SLIDER_LEVELS, THINKING_LEVELS, type ThinkingLevel } from "@/lib/ai/thinking-level"
+
 /** AI SDK protocol families the sidecar's dispatch table understands. Mirrors
  *  BUILTIN_PROTOCOL_NAMES in sidecar/dispatch/protocol-adapters/provider-protocol.mjs. */
 export const RESOLVER_PROTOCOLS = [
@@ -42,33 +44,14 @@ export const PERMISSION_MODES = [
 ] as const
 
 /**
- * Reasoning-effort tiers ("thinking levels"), ascending in depth. `"off"` means
- * "leave the model at its own default" (no `effort` forwarded). `"low"`→`"max"`
- * map 1:1 to `SendOptions["effort"]` / the SDK's `output_config.effort`.
- *
- * `"ultracode"` is the top composite tier: it maps to `"xhigh"` effort AND
- * auto-enables the in-tree dynamic-workflow plugin tools (`config.pluginTools`,
- * the `workflow-ai` `wf_*` suite) — see `thinking.ts` for the effort mapping and
- * the supported-model gate, and `App.tsx`/`EffortSlider.tsx` for the coupling.
+ * Reasoning-effort tiers ("thinking levels"), ascending in depth. Re-exported
+ * from the shared `@/lib/ai/thinking-level` so the CLI slider and the desktop
+ * composer selector can never disagree about the ladder — that module documents
+ * what `"off"` and the composite `"ultracode"` tier mean. `thinking.ts` owns the
+ * effort mapping + supported-model gate; `App.tsx`/`EffortSlider.tsx` own the
+ * `config.pluginTools` coupling.
  */
-export const THINKING_LEVELS = [
-  "off",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-  "ultracode",
-] as const
-export type ThinkingLevel = (typeof THINKING_LEVELS)[number]
-
-/**
- * The non-off thinking levels, in slider order (`low`→`ultracode`). The effort
- * slider overlay indexes into this; `"off"` is a separate checkbox, not a tick.
- */
-export const EFFORT_SLIDER_LEVELS = THINKING_LEVELS.filter(
-  (l): l is Exclude<ThinkingLevel, "off"> => l !== "off"
-)
+export { THINKING_LEVELS, EFFORT_SLIDER_LEVELS, type ThinkingLevel }
 
 /** Status-bar segment ids the footer knows how to render, in any order. */
 export const STATUS_SEGMENTS = [

@@ -2,7 +2,7 @@
 // pre-split `components/settings/presets/preset-editor.tsx` so each section
 // can import without pulling in the whole editor module.
 
-import type { SendOptions } from "@cognia/agent-config-types"
+import { SDK_EFFORT_LEVELS } from "@/lib/ai/thinking-level"
 
 export const COLOR_PALETTE = [
   "oklch(0.65 0.18 245)",
@@ -19,10 +19,10 @@ export const COLOR_PALETTE = [
   "oklch(0.65 0.15 220)",
 ] as const
 
-export const EFFORT_LEVELS: NonNullable<SendOptions["effort"]>[] = [
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-]
+/**
+ * Effort tiers a preset can store. Presets persist a raw `SendOptions.effort`,
+ * so they carry only the tiers that map 1:1 onto it — the composer's `"off"` and
+ * composite `"ultracode"` tiers have no representation here. Derived from
+ * `@/lib/ai/thinking-level` rather than re-listed, so the ladder has one owner.
+ */
+export const EFFORT_LEVELS = SDK_EFFORT_LEVELS
