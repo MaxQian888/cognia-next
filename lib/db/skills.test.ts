@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
 // Coverage for the skills CRUD layer + bulk-import + render helpers.
 
-import "fake-indexeddb/auto"
 import {
   activeEffectiveSkillIds,
   bulkImportSkills,
@@ -24,16 +22,18 @@ import {
   upsertSkillByCanonicalId,
 } from "./skills"
 import { createResource, listResourcesForSkill } from "./skill-resources"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().skills.clear()
   await getDb().skillResources.clear()
 })
+afterAll(dbFixture.dispose)
 
 describe("createSkill", () => {
   it("inserts a row with sensible defaults", async () => {

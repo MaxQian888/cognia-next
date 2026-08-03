@@ -1,6 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-
 // The cascade dynamically imports the project-knowledge deps resolver for its
 // best-effort remote vector-collection drop. Mock it so tests control whether a
 // (fake) vector store is present.
@@ -8,7 +5,8 @@ jest.mock("@/lib/project-knowledge/runtime/build-deps", () => ({
   tryBuildProjectKnowledgeDeps: jest.fn(async () => undefined),
 }))
 
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import { getSettings, saveSettings } from "./settings"
 import { tryBuildProjectKnowledgeDeps } from "@/lib/project-knowledge/runtime/build-deps"
 
@@ -23,14 +21,15 @@ import {
 } from "./project-scope"
 
 describe("project-scope helper", () => {
+  const dbFixture = createDbTestFixture()
+
+  beforeAll(dbFixture.initialize)
   beforeEach(async () => {
-    await getDb().delete()
-    __resetDbForTesting()
+    await dbFixture.restore()
     // Let the background built-in seed settle before exercising heavy
     // multi-table cascades, so seeding transactions don't race the test.
-    getDb()
-    await whenSeeded()
-  }, 30000)
+  })
+  afterAll(dbFixture.dispose)
 
   describe("resolveScopeProjectId", () => {
     it("returns an explicit id verbatim without touching settings", async () => {

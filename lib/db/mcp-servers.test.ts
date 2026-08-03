@@ -1,9 +1,6 @@
-/** @jest-environment jsdom */
 // Coverage for the MCP server CRUD module. Uses fake-indexeddb to hit the
 // Dexie store directly. We mock the lazy-imported sync module so we never
 // pull Tauri IPC into jsdom.
-
-import "fake-indexeddb/auto"
 
 // Mock the sync module so the CRUD tests don't touch the agents pipeline.
 // The mock is an ESM module (default + named export); register the named
@@ -29,15 +26,17 @@ import {
   MCP_TRANSPORTS,
   type McpImportDraft,
 } from "./mcp-servers"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
   scheduleSyncMock.mockClear()
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 async function flushDynamicImport() {
   // Allow the lazy `import("@/lib/claude/sync")` promise chain to settle.

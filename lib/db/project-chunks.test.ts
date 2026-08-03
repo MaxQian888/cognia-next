@@ -1,6 +1,4 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   bulkCreateProjectChunks,
   countProjectChunksByFile,
@@ -18,12 +16,13 @@ import {
   type ProjectChunkDraft,
 } from "./project-chunks"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-}, 30000)
+  await dbFixture.restore()
+})
+afterAll(dbFixture.dispose)
 
 function draft(overrides: Partial<ProjectChunkDraft> = {}): ProjectChunkDraft {
   return {

@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 /**
  * Coverage for `lib/db/wiki-sections.ts` — section CRUD + ordering.
  */
 
-import "fake-indexeddb/auto"
 import {
   bulkCreateWikiSections,
   createWikiSection,
@@ -15,14 +13,16 @@ import {
 } from "./wiki-sections"
 import type { WikiSectionDraft } from "./wiki-sections"
 import { SELF_CORPUS_ID } from "@/types/wiki"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 function makeDraft(overrides: Partial<WikiSectionDraft> = {}): WikiSectionDraft {
   return {

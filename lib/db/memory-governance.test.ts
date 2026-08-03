@@ -1,6 +1,4 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   appendMemoryAuditEvent,
   claimMemoryJob,
@@ -17,12 +15,11 @@ import {
   listMemoryJobs,
 } from "./memory-governance"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("memory evidence and audit", () => {
   it("persists source identities without raw source content", async () => {

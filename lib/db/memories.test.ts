@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import type { Memory } from "@/types/memory/memory"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   clearMemories,
   countActive,
@@ -35,12 +33,11 @@ function buildInput(overrides: Partial<MemoryCreateInput> = {}): MemoryCreateInp
   }
 }
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("memories CRUD", () => {
   it("createMemory stamps defaults and timestamps", async () => {

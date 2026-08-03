@@ -1,6 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   buildOcrCacheId,
   clearOcrCache,
@@ -41,12 +40,11 @@ function makeRow(overrides: Partial<OcrResultRow> = {}): OcrResultRow {
   }
 }
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("buildOcrCacheId", () => {
   it("lowercases and sorts languages", () => {

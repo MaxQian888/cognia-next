@@ -1,7 +1,6 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import type { Project } from "@/types"
-import { __resetDbForTesting, getDb, whenSeeded, backfillRootsForRow } from "./schema"
+import { backfillRootsForRow } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   getAllProjects,
   putProject,
@@ -10,12 +9,13 @@ import {
   persistActiveProjectId,
 } from "./projects"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 function makeProject(id: string, over: Partial<Project> = {}): Project {
   const now = new Date()
