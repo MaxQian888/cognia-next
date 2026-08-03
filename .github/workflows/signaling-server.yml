@@ -58,7 +58,7 @@ jobs:
             ${{ runner.os }}-signaling-
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.85.5
         with:
           tool: cargo-llvm-cov
 
@@ -127,7 +127,7 @@ jobs:
       # and serves build/worker/shim.mjs — verify that exact artifact builds so
       # a deploy can't be the first place the packaging breaks (ADR-0059 P0.3).
       - name: Install worker-build
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.85.5
         with:
           tool: worker-build
 

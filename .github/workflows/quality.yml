@@ -120,7 +120,7 @@ jobs:
       # reports as advisory-failed and the supply-chain scan never runs.
       - name: Install cargo-deny
         if: matrix.group == 'supply-chain'
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.85.5
         with:
           tool: cargo-deny
 
