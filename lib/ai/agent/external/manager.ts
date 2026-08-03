@@ -1696,6 +1696,12 @@ export class ExternalAgentManager {
       // Per-agent Codex defaults (sandbox mode / reasoning effort / summary)
       // ride to the adapter through metadata — same channel as selectedModel.
       codexOptions: instance.config.codexOptions,
+      // Per-execution thinking level. Rides the same metadata channel as
+      // `selectedModel`, and because the Codex client only applies
+      // `codexOptions.defaultReasoningEffort` when this is undefined, setting it
+      // here gives the composer's per-session choice precedence over the
+      // per-agent default — matching how model/provider layer everywhere else.
+      reasoningEffort: options?.reasoningEffort,
       // The requested model rides the same channel the interactive model picker
       // writes, which is the only one adapters read (e.g. the Codex app-server
       // client lifts it into `thread/start` params.model). Callers used to pass
@@ -1754,8 +1760,6 @@ export class ExternalAgentManager {
     // A cached session was created earlier, with an earlier `selectedModel`;
     // unlike createSession/resumeSession it never sees `sessionOptions`, so a
     // model requested now has to be applied to it explicitly (below).
-    const reusedFromCache = Boolean(session)
-
     if (!session && preferredSessionId) {
       const resumeSupport = this.getSessionExtensionSupport(adapter, instance)["session/resume"]
       const unsupportedByContract = resumeSupport.state === "unsupported"
@@ -1860,8 +1864,8 @@ export class ExternalAgentManager {
       }
     }
 
-    if (reusedFromCache && options?.model) {
-      await this.applyModelToReusedSession(adapter, session, options.model)
+    if (options?.model) {
+      await this.applyModelToSession(adapter, session, options.model)
     }
 
     instance.sessions.set(session.id, session)
@@ -1876,11 +1880,36 @@ export class ExternalAgentManager {
    * run on the session's current model. Both cases are logged rather than
    * thrown, matching how the rest of session resolution degrades.
    */
-  private async applyModelToReusedSession(
+  private async applyModelToSession(
     adapter: ProtocolAdapter,
     session: ExternalAgentSession,
     model: string
   ): Promise<void> {
+    const configOptions = adapter.getConfigOptions?.(session.id)
+    const modelOption = configOptions?.find(
+      (option): option is Extract<AcpConfigOption, { type: "select" }> =>
+        option.category === "model" && option.type === "select"
+    )
+    if (modelOption && adapter.setConfigOption) {
+      if (modelOption.currentValue === model) {
+        session.metadata = { ...(session.metadata ?? {}), selectedModel: model }
+        return
+      }
+      try {
+        await adapter.setConfigOption(session.id, modelOption.id, model)
+        session.metadata = { ...(session.metadata ?? {}), selectedModel: model }
+      } catch (error) {
+        // Best effort: the agent can reject an unknown or unavailable model, but
+        // the current session remains usable on its existing model.
+        externalAgentManagerLogger.warn("setConfigOption failed for model", {
+          sessionId: session.id,
+          model,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+      return
+    }
+
     const current = (session.metadata as Record<string, unknown> | undefined)?.selectedModel
     if (current === model) return
     if (!adapter.setSessionModel) return

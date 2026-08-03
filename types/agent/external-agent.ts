@@ -1976,6 +1976,22 @@ export interface ExternalAgentExecutionOptions {
    * Omit to inherit whatever the agent's own configuration selects.
    */
   model?: string
+  /**
+   * Reasoning effort ("thinking level") for this execution, as the app names it
+   * (`low`…`max`; the composite `ultracode` tier arrives already mapped to
+   * `xhigh`).
+   *
+   * Bridged to the adapter as `metadata.reasoningEffort`, which takes
+   * precedence over the per-agent `codexOptions.defaultReasoningEffort` — the
+   * same per-session-beats-per-agent layering `model` uses. Before this existed
+   * the composer's thinking level was silently a no-op on the external runtime:
+   * `ChatSession.effort` never reached the adapter at all.
+   *
+   * Best-effort: adapters with no reasoning concept ignore it, and one whose
+   * model advertises a narrower ladder folds it (see the Codex client's
+   * `supportedReasoningEfforts` clamp). Omit to inherit the agent's own default.
+   */
+  reasoningEffort?: string
   /** System prompt override */
   systemPrompt?: string
   /** Permission mode override */
