@@ -206,6 +206,10 @@ export const SETTINGS_SYNC = {
   realtimeVoice: { category: "desktop-only" },
   realtimeModel: { category: "desktop-only" },
   realtimeInstructions: { category: "desktop-only" },
+  // Live voice is desktop-first: the CN providers need the native relay, and
+  // token minting depends on the host keyring. A phone has neither, so syncing
+  // deployments to it would advertise sessions it cannot open.
+  liveVoice: { category: "desktop-only" },
   ttsEnabled: { category: "shared" },
   ttsRate: { category: "shared" },
   ttsPitch: { category: "shared" },
