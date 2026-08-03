@@ -3,40 +3,7 @@
  * This file is executed before each test file
  */
 
-import "@testing-library/jest-dom"
-import { configure as configureTestingLibrary } from "@testing-library/dom"
-import React from "react"
-
-// Full-suite runs spawn one Jest worker per core; under that CPU contention a
-// starved worker can blow through testing-library's default 1s `waitFor`
-// window on pure wall-clock (observed as roulette single-suite failures —
-// computer-use-toggle, goal settings-tab — that always pass in isolation).
-// 5s changes nothing for passing tests (they resolve as soon as the assertion
-// holds) and removes the starvation lottery.
-configureTestingLibrary({ asyncUtilTimeout: 5000 })
-
-// jsdom omits `window.matchMedia` — provide a default (non-matching) stub so
-// viewport hooks (`hooks/ui/use-mobile.ts:useIsMobile`, the shadcn sidebar,
-// the goal detail sheet's responsive Sheet/Drawer switch) render their
-// desktop branch in tests instead of throwing. Tests that need the mobile
-// branch override `useIsMobile` directly.
-if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) =>
-      ({
-        matches: false,
-        media: query,
-        onchange: null,
-        addListener: () => {},
-        removeListener: () => {},
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        dispatchEvent: () => false,
-      }) as unknown as MediaQueryList,
-  })
-}
+import type React from "react"
 
 // jsdom omits TextEncoder/TextDecoder — node:util has them. Required by
 // crypto helpers and fake-indexeddb's structured clone.
@@ -176,66 +143,25 @@ if (
   Object.assign(globalThis, { MessageChannel: TestMessageChannel, MessagePort: TestMessagePort })
 }
 
-// jsdom omits ResizeObserver / IntersectionObserver — Radix primitives use them
-// (Sheet, Slider, etc.). Provide a minimal polyfill so component tests can mount.
-class MockResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
-if (typeof globalThis.ResizeObserver === "undefined") {
-  ;(globalThis as unknown as { ResizeObserver: typeof MockResizeObserver }).ResizeObserver =
-    MockResizeObserver
-}
-if (
-  typeof window !== "undefined" &&
-  typeof (window as unknown as { ResizeObserver?: unknown }).ResizeObserver === "undefined"
-) {
-  ;(window as unknown as { ResizeObserver: typeof MockResizeObserver }).ResizeObserver =
-    MockResizeObserver
-}
-
-class MockIntersectionObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-  takeRecords() {
-    return [] as unknown[]
-  }
-  root = null
-  rootMargin = ""
-  thresholds: number[] = []
-}
-
-if (typeof globalThis.IntersectionObserver === "undefined") {
-  ;(
-    globalThis as unknown as { IntersectionObserver: typeof MockIntersectionObserver }
-  ).IntersectionObserver = MockIntersectionObserver
-}
-if (
-  typeof window !== "undefined" &&
-  typeof (window as unknown as { IntersectionObserver?: unknown }).IntersectionObserver ===
-    "undefined"
-) {
-  ;(
-    window as unknown as { IntersectionObserver: typeof MockIntersectionObserver }
-  ).IntersectionObserver = MockIntersectionObserver
-}
-
-// Radix primitives sometimes call hasPointerCapture / scrollIntoView, neither
-// of which jsdom implements. Stub them to satisfy callers.
-if (typeof Element !== "undefined") {
-  if (typeof Element.prototype.hasPointerCapture !== "function") {
-    Element.prototype.hasPointerCapture = function () {
-      return false
-    }
-  }
-  if (typeof Element.prototype.releasePointerCapture !== "function") {
-    Element.prototype.releasePointerCapture = function () {}
-  }
-  if (typeof Element.prototype.scrollIntoView !== "function") {
-    Element.prototype.scrollIntoView = function () {}
+// jsdom also omits `fetch`, and AI SDK 7 turned that from harmless into a
+// suite-killer: `@ai-sdk/provider-utils@5` runs
+// `Function.prototype.toString.call(globalThis.fetch)` at MODULE LOAD to detect
+// Node's built-in undici fetch (its SSRF-safe-fetch path). Against `undefined`
+// that throws `TypeError: Function.prototype.toString requires that 'this' be a
+// Function`, and because it happens during import it takes down the whole
+// suite — every jsdom test whose module graph reaches any provider package,
+// which is ~50 of them.
+//
+// The stand-in only has to BE a function. It deliberately rejects instead of
+// doing anything: suites that exercise fetch always install their own mock, and
+// a default that silently succeeded would let a missing mock reach the network.
+if (typeof (globalThis as { fetch?: unknown }).fetch !== "function") {
+  ;(globalThis as { fetch?: unknown }).fetch = function fetch() {
+    return Promise.reject(
+      new Error(
+        "jest.setup: global fetch is a stub — mock `fetch` in this suite before calling it."
+      )
+    )
   }
 }
 
@@ -286,32 +212,27 @@ if (typeof (globalThis as { structuredClone?: unknown }).structuredClone !== "fu
     ) => JSON.parse(JSON.stringify(value)) as unknown
   }
 }
-// Mirror onto window when running under jsdom so libraries that read
-// `window.structuredClone` see it.
-if (
-  typeof window !== "undefined" &&
-  typeof (window as { structuredClone?: unknown }).structuredClone !== "function"
-) {
-  ;(window as unknown as { structuredClone: typeof structuredClone }).structuredClone = (
-    globalThis as { structuredClone: typeof structuredClone }
-  ).structuredClone
-}
-
 type MockNextImageProps = React.ComponentPropsWithoutRef<"img"> & {
   priority?: boolean
   fill?: boolean
 }
 
 // Mock Next.js Image component
-jest.mock("next/image", () => ({
-  __esModule: true,
-  default: (props: MockNextImageProps) => {
-    const normalizedProps = { ...props }
-    delete normalizedProps.priority
-    delete normalizedProps.fill
-    return React.createElement("img", normalizedProps)
-  },
-}))
+jest.mock("next/image", () => {
+  // Keep React out of true Node suites unless their module graph actually
+  // imports next/image and asks Jest to instantiate this mock factory.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ReactRuntime = require("react") as typeof import("react")
+  return {
+    __esModule: true,
+    default: (props: MockNextImageProps) => {
+      const normalizedProps = { ...props }
+      delete normalizedProps.priority
+      delete normalizedProps.fill
+      return ReactRuntime.createElement("img", normalizedProps)
+    },
+  }
+})
 
 // Mock Next.js router
 jest.mock("next/navigation", () => ({
@@ -462,41 +383,12 @@ jest.mock("next-intl", () => {
   }
 })
 
-// Plugin per-call consent auto-responder. The PermissionGuard now registers
-// declared *dangerous* permissions at the "confirm" tier by default
-// (`confirmDangerousByDefault: true`), so a guarded dangerous-permission API
-// call routes through the consent broker + overlay before running. In tests
-// there is no overlay, so without this the broker would hang until its 30 s
-// timeout and every dangerous-permission forwarding test would fail.
-//
-// Default mode is "allow" (auto-grant once, no session persist). Tests that
-// exercise the consent flow itself set `globalThis.__PLUGIN_CONSENT_AUTO` to
-// "deny" (auto-reject) or "off" (ignore — let the test's own listener/overlay
-// respond) in their setup.
-if (typeof window !== "undefined") {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const consent = require("@/lib/plugin/security/consent-broker") as {
-      getPluginConsentBroker: () => {
-        respond: (id: string, r: { allow: boolean; persist: boolean }) => boolean
-      }
-      PLUGIN_CONSENT_REQUEST_EVENT: string
-    }
-    const flags = globalThis as { __PLUGIN_CONSENT_AUTO?: "allow" | "deny" | "off" }
-    flags.__PLUGIN_CONSENT_AUTO ??= "allow"
-    window.addEventListener(consent.PLUGIN_CONSENT_REQUEST_EVENT, (event: Event) => {
-      const mode = flags.__PLUGIN_CONSENT_AUTO
-      if (mode === "off") return
-      const detail = (event as CustomEvent<{ requestId: string }>).detail
-      if (!detail?.requestId) return
-      consent.getPluginConsentBroker().respond(detail.requestId, {
-        allow: mode !== "deny",
-        persist: false,
-      })
-    })
-  } catch {
-    // consent-broker not resolvable in this environment — skip.
-  }
+// A test file can belong to the Node project and still opt into jsdom through
+// its docblock. Dispatch after the environment-neutral polyfills and mocks are
+// installed, while setup is still synchronous and before the test module loads.
+if (typeof document !== "undefined" && document.defaultView !== null) {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require("./jest.setup.dom")
 }
 
 // Suppress console errors in tests (optional)

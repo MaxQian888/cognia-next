@@ -306,8 +306,26 @@ const projectCommon: Config = {
   // only form that survives pnpm's two-layer
   // `.pnpm/<scope>+<pkg>@<ver>/node_modules/<scope>/<pkg>` layout. Add new
   // ESM packages to the negative-lookahead alternation as they surface.
+  //
+  // AI SDK 7 is ESM-only (`"type": "module"`, no CJS dist), so every suite whose
+  // module graph reaches `ai` needs it transpiled. `ai` is entered anchored —
+  // `\.pnpm/ai@` and `/node_modules/ai/` — and NEVER as a bare `ai`, which as a
+  // substring alternative would match half the store (`chai`, `ramda`, any path
+  // containing the letters). `@ai-sdk\+` is the pnpm virtual-store dir form
+  // (`.pnpm/@ai-sdk+openai@…`), `@ai-sdk/` the symlinked form — same pairing as
+  // the `@octokit` entries above.
+  //
+  // This list and `transpilePackages` in `next.config.ts` BOTH have to name a
+  // package; neither alone is enough. next/jest prepends two patterns built
+  // from `transpilePackages`, and this pattern is evaluated at every
+  // `/node_modules/` boundary in the path — including the inner one of pnpm's
+  // `.pnpm/<pkg>@<ver>/node_modules/<scope>/<pkg>` layout, where the remainder
+  // is just `<scope>/<pkg>/…` and the `.pnpm` marker is already behind us. A
+  // package missing here is therefore still ignored even when next/jest would
+  // have transformed it (that is how `@workflow/serde`, a transitive ESM-only
+  // dep of `@ai-sdk/provider-utils@5`, slipped through).
   transformIgnorePatterns: [
-    "/node_modules/(?!.*(?:@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common|@tokenlens\\+|@tokenlens/|use-stick-to-bottom|tokenlens|shiki|@shikijs|@streamdown|streamdown|hast-util-|mdast-util-|micromark|unist-util-|vfile|react-markdown|remark-gfm|remark-math|rehype-raw|rehype-sanitize|remark-parse|remark-rehype|rehype-stringify|unified|bail|is-plain-obj|trough|zwitch|ccount|character-entities|comma-separated-tokens|decode-named-character-reference|devlop|extend|html-void-elements|longest-streak|property-information|space-separated-tokens|stringify-entities|web-namespaces|@octokit\\+|@octokit/|universal-user-agent|before-after-hook|deprecation|once|wrappy|btoa-lite|fast-content-type-parse|toad-cache|bottleneck|@types\\+|@types/|@modelcontextprotocol\\+|@modelcontextprotocol/|@xyflow\\+|@xyflow/|chart\\.js|cheerio))",
+    "/node_modules/(?!.*(?:\\.pnpm/ai@|/node_modules/ai/|\\bai/dist/|@ai-sdk\\+|@ai-sdk/|@standard-schema\\+|@standard-schema/|@workflow\\+|@workflow/|@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common|@tokenlens\\+|@tokenlens/|use-stick-to-bottom|tokenlens|shiki|@shikijs|@streamdown|streamdown|hast-util-|mdast-util-|micromark|unist-util-|vfile|react-markdown|remark-gfm|remark-math|rehype-raw|rehype-sanitize|remark-parse|remark-rehype|rehype-stringify|unified|bail|is-plain-obj|trough|zwitch|ccount|character-entities|comma-separated-tokens|decode-named-character-reference|devlop|extend|html-void-elements|longest-streak|property-information|space-separated-tokens|stringify-entities|web-namespaces|@octokit\\+|@octokit/|universal-user-agent|before-after-hook|deprecation|once|wrappy|btoa-lite|fast-content-type-parse|toad-cache|bottleneck|@types\\+|@types/|@modelcontextprotocol\\+|@modelcontextprotocol/|@xyflow\\+|@xyflow/|chart\\.js|cheerio))",
     "\\.pnp\\.[^\\\\]+$",
   ],
 }

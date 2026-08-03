@@ -162,6 +162,47 @@ const NODE_ONLY_MODULES = [
 // (see vercel/next.js#56477). Production export behavior is unchanged.
 const nextConfig: NextConfig = {
   output: isProd ? "export" : undefined,
+  // AI SDK 7 is ESM-only (`"type": "module"`, no CJS dist). Listing the packages
+  // here is what lets `next/jest` transform them under Jest's CommonJS runtime:
+  // next/jest PREPENDS its own `transformIgnorePatterns` built from this list,
+  // and its `.pnpm` rule excludes every virtual-store path that isn't named
+  // here — so a hand-written entry in `jest.config.ts` can never win (patterns
+  // are OR'd, and next/jest's rule matches first). `ai` really does reach the
+  // browser bundle via the standalone/BYOK chat engine, so transpiling it is
+  // correct for the static export too, not a test-only concession.
+  transpilePackages: [
+    "ai",
+    "@ai-sdk/alibaba",
+    "@ai-sdk/amazon-bedrock",
+    "@ai-sdk/anthropic",
+    "@ai-sdk/azure",
+    "@ai-sdk/bytedance",
+    "@ai-sdk/cohere",
+    "@ai-sdk/deepinfra",
+    // Not a direct dependency — pulled in transitively, and ESM-only like the
+    // rest. Every installed `@ai-sdk/*` is listed here on purpose: next/jest
+    // matches exact package names, so one missing entry fails the whole suite.
+    "@ai-sdk/deepseek",
+    "@ai-sdk/fal",
+    "@ai-sdk/fireworks",
+    "@ai-sdk/gateway",
+    "@ai-sdk/google",
+    "@ai-sdk/mcp",
+    "@ai-sdk/mistral",
+    "@ai-sdk/openai",
+    "@ai-sdk/openai-compatible",
+    "@ai-sdk/provider",
+    "@ai-sdk/provider-utils",
+    "@ai-sdk/react",
+    "@ai-sdk/replicate",
+    "@ai-sdk/togetherai",
+    "@ai-sdk/xai",
+    // ESM-only transitive deps of `@ai-sdk/provider-utils@5`. next/jest builds
+    // its allowlist from exact package names, so a transitive dep the SDK pulls
+    // in has to be named too or the CJS runtime trips on its `export` keyword.
+    "@standard-schema/spec",
+    "@workflow/serde",
+  ],
   // Tauri and local browser tooling may address the same dev server through
   // the IPv4 loopback alias while Next starts it as `localhost`. Allow only
   // that additional loopback host so HMR and generated font resources remain
