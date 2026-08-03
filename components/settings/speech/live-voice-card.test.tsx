@@ -4,20 +4,20 @@
 import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 
+import type {
+  LiveVoiceDeployment,
+  LiveVoiceProviderId,
+  LiveVoiceRegion,
+  LiveVoiceSettings,
+} from "@cognia/agent-config-types"
+
 const saveMock = jest.fn()
+let currentLiveVoice: Partial<LiveVoiceSettings> | undefined
 
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (
     selector: (state: { settings: Record<string, unknown>; save: jest.Mock }) => unknown
-  ) =>
-    selector({
-      settings: {
-        realtimeModel: "gpt-realtime-2.1",
-        realtimeVoice: "marin",
-        realtimeInstructions: "",
-      },
-      save: saveMock,
-    }),
+  ) => selector({ settings: { liveVoice: currentLiveVoice }, save: saveMock }),
 }))
 
 jest.mock("next-intl", () => ({
@@ -32,19 +32,180 @@ jest.mock("./api-key-input", () => ({
 
 import { LiveVoiceCard } from "./live-voice-card"
 
-describe("LiveVoiceCard", () => {
-  beforeEach(() => jest.clearAllMocks())
+/** The last `liveVoice` block handed to the settings store. */
+function savedLiveVoice(): LiveVoiceSettings {
+  return saveMock.mock.calls.at(-1)?.[0]?.liveVoice
+}
 
-  it("uses the OpenAI key and exposes current model and voice settings", () => {
+function enabledDeployment(
+  provider: LiveVoiceProviderId = "openai",
+  region: LiveVoiceRegion = "global"
+): LiveVoiceDeployment {
+  return { id: `${provider}-${region}`, provider, region, enabled: true }
+}
+
+beforeEach(() => {
+  jest.clearAllMocks()
+  currentLiveVoice = undefined
+})
+
+describe("LiveVoiceCard — top-level controls", () => {
+  it("renders defaults for an install that has never configured live voice", () => {
     render(<LiveVoiceCard />)
-    expect(screen.getByTestId("api-key-provider")).toHaveTextContent("openai")
-    expect(screen.getByText("GPT Realtime 2.1")).toBeInTheDocument()
-    expect(screen.getByText("Marin")).toBeInTheDocument()
+
+    expect(screen.getByLabelText("enabled")).not.toBeChecked()
+    // Fallback defaults on, so a misbehaving primary does not end the session.
+    expect(screen.getByLabelText("fallback")).toBeChecked()
   })
 
-  it("persists custom live instructions", () => {
+  it("writes a complete block when the master switch is flipped", () => {
     render(<LiveVoiceCard />)
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Be brief" } })
-    expect(saveMock).toHaveBeenLastCalledWith({ realtimeInstructions: "Be brief" })
+
+    fireEvent.click(screen.getByLabelText("enabled"))
+
+    // A partial write would strip the defaults the resolver depends on.
+    expect(savedLiveVoice()).toMatchObject({
+      enabled: true,
+      region: "global",
+      maxCandidates: 3,
+      connectTimeoutMs: 10_000,
+      historyTurnLimit: 12,
+      historyCharacterLimit: 16_000,
+    })
+  })
+
+  it("persists the instructions used as the session persona", () => {
+    render(<LiveVoiceCard />)
+
+    fireEvent.change(screen.getByLabelText("instructions"), { target: { value: "be brief" } })
+
+    expect(savedLiveVoice().instructions).toBe("be brief")
+  })
+
+  it("toggles cross-provider fallback", () => {
+    currentLiveVoice = { enabled: true, fallbackEnabled: true }
+    render(<LiveVoiceCard />)
+
+    fireEvent.click(screen.getByLabelText("fallback"))
+
+    expect(savedLiveVoice().fallbackEnabled).toBe(false)
+  })
+})
+
+describe("LiveVoiceCard — providers", () => {
+  it("offers the providers that ship an adapter for the global region", () => {
+    render(<LiveVoiceCard />)
+
+    expect(screen.getByLabelText("providers.openai")).toBeInTheDocument()
+    expect(screen.getByLabelText("providers.google")).toBeInTheDocument()
+    expect(screen.getByLabelText("providers.xai")).toBeInTheDocument()
+  })
+
+  it("says so plainly when the region has no usable provider yet", () => {
+    // CN providers are all relay-backed and land with the Phase 2 relay; an
+    // empty list with no explanation reads as a broken screen.
+    currentLiveVoice = { enabled: true, region: "cn" }
+    render(<LiveVoiceCard />)
+
+    expect(screen.getByText("noProviders")).toBeInTheDocument()
+    expect(screen.queryByLabelText("providers.openai")).not.toBeInTheDocument()
+  })
+
+  it("creates a deployment with a region-derived id when a provider is switched on", () => {
+    render(<LiveVoiceCard />)
+
+    fireEvent.click(screen.getByLabelText("providers.google"))
+
+    expect(savedLiveVoice().deployments).toEqual([
+      { id: "google-global", provider: "google", region: "global", enabled: true },
+    ])
+  })
+
+  it("keeps a provider's settings when it is switched off and on again", () => {
+    currentLiveVoice = {
+      enabled: true,
+      deployments: [{ ...enabledDeployment(), model: "gpt-realtime-custom" }],
+    }
+    render(<LiveVoiceCard />)
+
+    fireEvent.click(screen.getByLabelText("providers.openai"))
+
+    // Disabling must not orphan the row — the derived id makes it recoverable.
+    expect(savedLiveVoice().deployments).toEqual([
+      {
+        id: "openai-global",
+        provider: "openai",
+        region: "global",
+        enabled: false,
+        model: "gpt-realtime-custom",
+      },
+    ])
+  })
+
+  it("leaves other providers untouched when one is toggled", () => {
+    currentLiveVoice = {
+      enabled: true,
+      deployments: [enabledDeployment(), enabledDeployment("xai")],
+    }
+    render(<LiveVoiceCard />)
+
+    fireEvent.click(screen.getByLabelText("providers.xai"))
+
+    expect(savedLiveVoice().deployments).toHaveLength(2)
+    expect(savedLiveVoice().deployments[0]).toEqual(enabledDeployment())
+  })
+
+  it("shows model, voice and key fields only for an enabled provider", () => {
+    currentLiveVoice = { enabled: true, deployments: [enabledDeployment()] }
+    render(<LiveVoiceCard />)
+
+    expect(screen.getByLabelText("model")).toBeInTheDocument()
+    expect(screen.getByTestId("api-key-provider")).toHaveTextContent("openai")
+    // Google is off, so it contributes no second set of fields.
+    expect(screen.getAllByLabelText("model")).toHaveLength(1)
+  })
+
+  it("suggests the provider's default model rather than pre-filling it", () => {
+    // An empty value means "use the default"; pre-filling would freeze today's
+    // model id into the user's settings forever.
+    currentLiveVoice = { enabled: true, deployments: [enabledDeployment()] }
+    render(<LiveVoiceCard />)
+
+    const model = screen.getByLabelText("model")
+    expect(model).toHaveValue("")
+    expect(model).toHaveAttribute("placeholder", "gpt-realtime-2.1")
+  })
+
+  it("records a model override against the right deployment", () => {
+    currentLiveVoice = { enabled: true, deployments: [enabledDeployment()] }
+    render(<LiveVoiceCard />)
+
+    fireEvent.change(screen.getByLabelText("model"), { target: { value: "gpt-realtime-next" } })
+
+    expect(savedLiveVoice().deployments[0].model).toBe("gpt-realtime-next")
+  })
+
+  it("records a voice override", () => {
+    currentLiveVoice = { enabled: true, deployments: [enabledDeployment()] }
+    render(<LiveVoiceCard />)
+
+    fireEvent.change(screen.getByLabelText("voice"), { target: { value: "cedar" } })
+
+    expect(savedLiveVoice().deployments[0].voice).toBe("cedar")
+  })
+})
+
+describe("LiveVoiceCard — primary provider", () => {
+  it("cannot be chosen before a provider is enabled", () => {
+    render(<LiveVoiceCard />)
+
+    expect(screen.getByLabelText("preferred")).toBeDisabled()
+  })
+
+  it("becomes selectable once a provider is on", () => {
+    currentLiveVoice = { enabled: true, deployments: [enabledDeployment()] }
+    render(<LiveVoiceCard />)
+
+    expect(screen.getByLabelText("preferred")).not.toBeDisabled()
   })
 })

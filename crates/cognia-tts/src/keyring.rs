@@ -25,6 +25,7 @@ const KNOWN_PROVIDERS: &[&str] = &[
     "deepgram",
     "xiaomi",
     "mistral",
+    "xai",
 ];
 
 fn validate_provider(provider: &str) -> Result<(), String> {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { AudioWaveformIcon, MicIcon, MicOffIcon, PhoneOffIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -14,12 +14,18 @@ import {
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useLiveVoiceState } from "@/hooks/voice/use-live-voice"
+import { createLiveVoiceController, type LiveVoiceController } from "@/lib/voice/live/controller"
 import {
-  createInitialLiveVoiceState,
-  RealtimeVoiceSession,
-  screenLiveVoiceText,
-  type LiveVoiceState,
-} from "@/lib/voice/realtime-session"
+  LiveVoiceUnavailableError,
+  resolveLiveVoiceSession,
+  type LiveVoiceUnavailableReason,
+} from "@/lib/voice/live/session"
+import { buildLiveVoiceRuntimeBindings } from "@/lib/voice/live/runtime-bindings"
+import { persistLiveVoiceTurns, type LiveVoiceTurnProvenance } from "@/lib/voice/live/persist-turns"
+import { screenLiveVoiceText } from "@/lib/voice/realtime-session"
+import { DEFAULT_LIVE_VOICE_SETTINGS } from "@cognia/agent-config-types"
+import { useChatStore } from "@/stores/chat/chat-store"
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
 
@@ -28,57 +34,185 @@ interface LiveVoiceDialogProps {
   onUserTranscript?: (text: string) => void
 }
 
+/**
+ * Which message explains a failed start.
+ *
+ * Kept as a translation-key suffix rather than a sentence so the four
+ * "nothing to dial" situations stay distinguishable — "no provider configured"
+ * and "your key was rejected" need very different next actions from the user.
+ */
+type StartFailure = LiveVoiceUnavailableReason | "mintFailed"
+
+const UNAVAILABLE_MESSAGE_KEYS: Record<StartFailure, string> = {
+  disabled: "errors.disabled",
+  "no-deployments": "errors.noDeployments",
+  "none-eligible": "errors.noneEligible",
+  mintFailed: "errors.mintFailed",
+}
+
 export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogProps) {
   const t = useTranslations("chat.composer.voice.live")
   const settings = useSettingsStore((store) => store.settings)
+  const providerKeys = useSettingsStore((store) => store.providerKeys)
+  const sessionId = useChatStore((store) => store.activeSessionId)
   const [open, setOpen] = useState(false)
-  const [state, setState] = useState<LiveVoiceState>(createInitialLiveVoiceState)
-  const sessionRef = useRef<RealtimeVoiceSession | null>(null)
+  const [controller, setController] = useState<LiveVoiceController | null>(null)
+  const [startFailure, setStartFailure] = useState<StartFailure | null>(null)
+  const controllerRef = useRef<LiveVoiceController | null>(null)
   const deliveredTurns = useRef(new Set<string>())
+  /** Provenance + wall clock captured at start, so teardown can persist turns. */
+  const sessionMetaRef = useRef<{
+    sessionId: string
+    startedAt: number
+    provenance: LiveVoiceTurnProvenance
+  } | null>(null)
 
-  const receiveState = useCallback(
-    (next: LiveVoiceState) => {
-      setState(next)
-      for (const turn of next.turns) {
-        if (turn.role !== "user" || deliveredTurns.current.has(turn.id)) continue
-        deliveredTurns.current.add(turn.id)
-        const safeText = screenLiveVoiceText(turn.text)
-        if (safeText) onUserTranscript?.(safeText)
-      }
-    },
-    [onUserTranscript]
+  const state = useLiveVoiceState(controller)
+
+  // Read out before the callback closes over them: depending on
+  // `settings?.liveVoice` inside the callback makes the React Compiler infer
+  // the whole `settings` object as the dependency, which it then refuses to
+  // memoize because that is broader than the declared list.
+  const liveVoiceSettings = settings?.liveVoice
+  const microphoneId = settings?.selectedMicId
+  const agentPermissions = settings?.agentPermissions
+  const alwaysAllowTools = settings?.alwaysAllowTools
+
+  // Only the providers with a shipped adapter can consume a BYOK key; the
+  // relay-backed ones read their credentials in the host.
+  const apiKeys = useMemo(
+    () => ({
+      openai: providerKeys?.openai,
+      google: providerKeys?.google,
+      xai: providerKeys?.xai,
+    }),
+    [providerKeys?.openai, providerKeys?.google, providerKeys?.xai]
   )
 
+  // Deliver each finalised user turn to the composer exactly once. Screened
+  // again here because the transcript is model output, not the instructions
+  // that were gated at mint time.
+  useEffect(() => {
+    for (const turn of state.turns) {
+      if (turn.role !== "user" || deliveredTurns.current.has(turn.id)) continue
+      deliveredTurns.current.add(turn.id)
+      const safeText = screenLiveVoiceText(turn.text)
+      if (safeText) onUserTranscript?.(safeText)
+    }
+  }, [state.turns, onUserTranscript])
+
   const endSession = useCallback(() => {
-    sessionRef.current?.stop()
-    sessionRef.current = null
+    const active = controllerRef.current
+    const meta = sessionMetaRef.current
+    controllerRef.current = null
+    sessionMetaRef.current = null
+
+    // Read the transcript before stopping — `stop()` resets the state, so the
+    // turns are gone by the time the promise settles.
+    const turns = active?.getSnapshot().turns ?? []
+    void active?.stop()
+
+    if (meta && turns.length > 0) {
+      void persistLiveVoiceTurns({
+        sessionId: meta.sessionId,
+        turns,
+        provenance: meta.provenance,
+        startedAt: meta.startedAt,
+      }).catch(() => {
+        // The conversation still happened; failing to archive it must not take
+        // the composer down with it.
+      })
+    }
+
+    setController(null)
     deliveredTurns.current.clear()
+    setStartFailure(null)
     setOpen(false)
-    setState(createInitialLiveVoiceState())
   }, [])
 
-  useEffect(() => () => sessionRef.current?.stop(), [])
+  useEffect(() => () => void controllerRef.current?.stop(), [])
 
   const startSession = useCallback(async () => {
-    if (disabled || sessionRef.current) return
+    if (disabled || controllerRef.current) return
     setOpen(true)
-    const session = new RealtimeVoiceSession(receiveState)
-    sessionRef.current = session
+    setStartFailure(null)
+
+    let next: LiveVoiceController | null = null
     try {
-      await session.start({
-        model: settings?.realtimeModel ?? "gpt-realtime-2.1",
-        voice: settings?.realtimeVoice ?? "marin",
-        instructions: settings?.realtimeInstructions ?? "",
-        microphoneId: settings?.selectedMicId,
+      const resolved = await resolveLiveVoiceSession({
+        settings: liveVoiceSettings,
+        instructions: liveVoiceSettings?.instructions,
+        apiKeys,
       })
-    } catch {
-      toast.error(t("errors.startFailed"))
+
+      // Tools, permissions and the conversation seed, resolved once. A failure
+      // in here degrades the session rather than blocking it.
+      const bindings = await buildLiveVoiceRuntimeBindings({
+        sessionId: sessionId ?? undefined,
+        capabilities: resolved.session.capabilities,
+        policy: {
+          toolRules: agentPermissions?.toolRules,
+          alwaysAllowTools,
+        },
+        limits: {
+          turnLimit:
+            liveVoiceSettings?.historyTurnLimit ?? DEFAULT_LIVE_VOICE_SETTINGS.historyTurnLimit,
+          characterLimit:
+            liveVoiceSettings?.historyCharacterLimit ??
+            DEFAULT_LIVE_VOICE_SETTINGS.historyCharacterLimit,
+        },
+      })
+
+      next = createLiveVoiceController({
+        session: resolved.session,
+        adapter: resolved.adapter,
+        instructions: resolved.instructions,
+        voice: resolved.voice,
+        deviceId: microphoneId,
+        tools: bindings.tools,
+        toolExecution: bindings.toolExecution,
+        contextTranscript: bindings.contextTranscript,
+      })
+      controllerRef.current = next
+      if (sessionId) {
+        sessionMetaRef.current = {
+          sessionId,
+          startedAt: Date.now(),
+          provenance: {
+            provider: resolved.session.provider,
+            modelOrResource: resolved.session.modelOrResource,
+            region: resolved.session.region,
+          },
+        }
+      }
+      setController(next)
+      await next.start()
+    } catch (error) {
+      // Drop a half-built controller: leaving it in the ref would make the next
+      // click a no-op with the dialog stuck on an error.
+      if (controllerRef.current === next) {
+        controllerRef.current = null
+        void next?.stop()
+        setController(null)
+      }
+      const failure: StartFailure =
+        error instanceof LiveVoiceUnavailableError ? error.reason : "mintFailed"
+      setStartFailure(failure)
+      toast.error(t(UNAVAILABLE_MESSAGE_KEYS[failure]))
     }
-  }, [disabled, receiveState, settings, t])
+  }, [
+    disabled,
+    liveVoiceSettings,
+    microphoneId,
+    apiKeys,
+    sessionId,
+    agentPermissions,
+    alwaysAllowTools,
+    t,
+  ])
 
   const toggleMute = useCallback(() => {
-    const muted = !state.muted
-    sessionRef.current?.setMuted(muted)
+    controllerRef.current?.setMuted(!state.muted)
   }, [state.muted])
 
   const onOpenChange = useCallback(
@@ -88,6 +222,8 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
     },
     [endSession]
   )
+
+  const phase = startFailure ? "error" : state.phase
 
   return (
     <>
@@ -123,21 +259,23 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
               <div
                 className={cn(
                   "relative flex size-24 items-center justify-center rounded-full bg-primary/10 text-primary",
-                  state.phase === "speaking" && "animate-pulse bg-destructive/10 text-destructive",
-                  state.phase === "responding" && "bg-emerald-500/10 text-emerald-600"
+                  phase === "speaking" && "animate-pulse bg-destructive/10 text-destructive",
+                  phase === "responding" && "bg-emerald-500/10 text-emerald-600"
                 )}
               >
                 <AudioWaveformIcon className="size-11" />
-                {(state.phase === "speaking" || state.phase === "responding") && (
+                {(phase === "speaking" || phase === "responding") && (
                   <span className="absolute inset-0 animate-ping rounded-full border border-current opacity-30" />
                 )}
               </div>
               <p aria-live="polite" className="text-sm font-medium">
-                {t(`phases.${state.phase}`)}
+                {t(`phases.${phase}`)}
               </p>
-              {state.error && (
+              {(startFailure || state.error) && (
                 <p role="alert" className="text-center text-xs text-destructive">
-                  {t("errors.sessionFailed")}
+                  {startFailure
+                    ? t(UNAVAILABLE_MESSAGE_KEYS[startFailure])
+                    : t("errors.sessionFailed")}
                 </p>
               )}
             </div>
@@ -170,6 +308,7 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
             <div className="flex items-center justify-center gap-4 border-t p-4">
               <Button
                 aria-label={state.muted ? t("unmute") : t("mute")}
+                disabled={!controller}
                 onClick={toggleMute}
                 size="icon"
                 type="button"

@@ -2,6 +2,7 @@ import type { AppSettings, BuiltinToolsConfig } from "@cognia/agent-config-types
 import {
   DEFAULT_BIOMETRIC_GUARD,
   DEFAULT_BUILTIN_TOOLS,
+  DEFAULT_LIVE_VOICE_SETTINGS,
   DEFAULT_UPDATE_SETTINGS,
   DEFAULT_USER_PROFILE,
 } from "@cognia/agent-config-types"
@@ -62,6 +63,8 @@ export const DEFAULTS: AppSettings = {
   limitsQueryEnabledAccounts: [],
   lastUpdateCheckAt: undefined,
   updates: { ...DEFAULT_UPDATE_SETTINGS },
+  // Multi-provider live voice — off until the user configures a deployment.
+  liveVoice: { ...DEFAULT_LIVE_VOICE_SETTINGS },
   browserCookieImportEnabled: false,
   remoteBrowserEnabled: false,
   cliBridge: { autoSync: false },
@@ -252,6 +255,13 @@ export async function getSettings(): Promise<AppSettings> {
     webTools: { enabled: row.webTools?.enabled ?? true },
     cliBridge: { autoSync: row.cliBridge?.autoSync ?? false },
     updates: { ...DEFAULT_UPDATE_SETTINGS, ...(row.updates ?? {}) },
+    liveVoice: {
+      ...DEFAULT_LIVE_VOICE_SETTINGS,
+      ...(row.liveVoice ?? {}),
+      // Deployments are a replace-not-merge list: spreading defaults under a
+      // user's array would resurrect entries they deleted.
+      deployments: row.liveVoice?.deployments ?? DEFAULT_LIVE_VOICE_SETTINGS.deployments,
+    },
     biometricRequiredFor: {
       ...DEFAULT_BIOMETRIC_GUARD,
       ...(row.biometricRequiredFor ?? {}),

@@ -217,7 +217,18 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
                 metadata: stripHoistedMeta(meta),
                 createdAt,
               })
-              if (!existingIds.has(id) && message.role === "user") {
+              // `triggerWorkflows: false` opts a message out of the
+              // `trigger.chat.message` fan-out. Live-voice turns set it: the
+              // user spoke to the assistant directly and never went through the
+              // send path, so firing chat-message workflows would surprise
+              // them. The flag must be present on FIRST persist —
+              // `updateMessageMetadata` cannot retract a dispatch that already
+              // happened.
+              if (
+                !existingIds.has(id) &&
+                message.role === "user" &&
+                meta?.triggerWorkflows !== false
+              ) {
                 newUserMessageIds.push(id)
               }
             }

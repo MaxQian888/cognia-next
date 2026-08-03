@@ -151,6 +151,50 @@ describe("getSettings", () => {
     expect(s.ocrSettings?.defaultFormat).toBe("markdown")
   })
 
+  it("ships live voice off with no deployments on a fresh install", async () => {
+    const s = await getSettings()
+    expect(s.liveVoice?.enabled).toBe(false)
+    expect(s.liveVoice?.region).toBe("global")
+    expect(s.liveVoice?.deployments).toEqual([])
+  })
+
+  it("merges live-voice defaults under a row saved before a field existed", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      liveVoice: {
+        enabled: true,
+        region: "cn",
+        deployments: [{ id: "d1", provider: "qwen", region: "cn", enabled: true }],
+      },
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+    const s = await getSettings()
+
+    // Persisted fields win.
+    expect(s.liveVoice?.enabled).toBe(true)
+    expect(s.liveVoice?.region).toBe("cn")
+    // Missing nested fields filled from defaults.
+    expect(s.liveVoice?.maxCandidates).toBe(3)
+    expect(s.liveVoice?.connectTimeoutMs).toBe(10_000)
+    expect(s.liveVoice?.historyTurnLimit).toBe(12)
+    expect(s.liveVoice?.historyCharacterLimit).toBe(16_000)
+  })
+
+  it("keeps a user's deployment list exactly as saved", async () => {
+    // An emptied list must stay empty: a defaults-spread would resurrect
+    // deployments the user deliberately removed.
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      liveVoice: { enabled: true, deployments: [] },
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+    const s = await getSettings()
+
+    expect(s.liveVoice?.deployments).toEqual([])
+  })
+
   it("defaults onboardingDismissedAt to undefined for fresh installs", async () => {
     const s = await getSettings()
     expect(s.onboardingDismissedAt).toBeUndefined()
