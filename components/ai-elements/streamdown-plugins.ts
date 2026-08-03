@@ -2,6 +2,7 @@ import { cjk } from "@streamdown/cjk"
 import { createCodePlugin } from "@streamdown/code"
 import { math } from "@streamdown/math"
 import { mermaid } from "@streamdown/mermaid"
+import type { PluginConfig } from "streamdown"
 import { CHAT_CODE_THEME } from "@/lib/chat/code-theme"
 
 /**
@@ -18,9 +19,13 @@ import { CHAT_CODE_THEME } from "@/lib/chat/code-theme"
  * glue; the theme contract it depends on is guarded by
  * `lib/chat/code-theme.test.ts`.
  */
+const code = createCodePlugin({
+  themes: [CHAT_CODE_THEME.light, CHAT_CODE_THEME.dark],
+}) as NonNullable<PluginConfig["code"]>
+
 export const streamdownPlugins = {
   cjk,
-  code: createCodePlugin({ themes: [CHAT_CODE_THEME.light, CHAT_CODE_THEME.dark] }),
+  code,
   math,
   mermaid,
-}
+} satisfies PluginConfig
