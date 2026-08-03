@@ -150,7 +150,7 @@ jobs:
 
       - id: meta
         if: steps.ctx.outputs.present == 'true'
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ needs.vars.outputs.owner }}/${{ matrix.name }}
           tags: |
@@ -211,7 +211,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server
           flavor: |
