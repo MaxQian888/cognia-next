@@ -19,12 +19,12 @@
 /**
  * The option key the partition result is emitted under.
  *
- * `ai@6`: `streamText` only accepts `system`.
- * `ai@7`: `instructions` is canonical and `system` is a deprecated alias.
- *
- * Flip this (and the emitted key below) in the v7 bump.
+ * `ai@7` renamed `system` to `instructions`; `system` survives only as a
+ * deprecated alias and will be dropped in the next major. Exported so the tests
+ * can pin it — a silent revert here would send system content back into a key
+ * the SDK no longer treats as canonical.
  */
-export const EMITTED_INSTRUCTIONS_KEY = "system"
+export const EMITTED_INSTRUCTIONS_KEY = "instructions"
 
 /**
  * @typedef {{ role: string, content: any, providerOptions?: any }} AnyMessage
@@ -73,7 +73,7 @@ function toSystemMessages(instructions) {
  *
  * @param {ReadonlyArray<AnyMessage>} messages
  * @param {string|SystemMessage|ReadonlyArray<SystemMessage>} [leadingInstructions]
- * @returns {{ system?: SystemMessage[], messages: AnyMessage[], allowSystemInMessages?: true }}
+ * @returns {{ instructions?: SystemMessage[], messages: AnyMessage[], allowSystemInMessages?: true }}
  */
 export function partitionPrompt(messages, leadingInstructions) {
   const list = Array.isArray(messages) ? messages : []
@@ -82,14 +82,14 @@ export function partitionPrompt(messages, leadingInstructions) {
     firstNonSystem += 1
   }
 
-  const system = [
+  const instructions = [
     ...toSystemMessages(leadingInstructions),
     ...toSystemMessages(list.slice(0, firstNonSystem)),
   ]
   const rest = list.slice(firstNonSystem)
 
   return {
-    ...(system.length > 0 ? { system } : {}),
+    ...(instructions.length > 0 ? { [EMITTED_INSTRUCTIONS_KEY]: instructions } : {}),
     messages: rest,
     ...(rest.some(isSystemMessage) ? { allowSystemInMessages: true } : {}),
   }

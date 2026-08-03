@@ -24,6 +24,7 @@ import type {
 import { createPluginSystemLogger } from "../core/logger"
 import { createApiGuardedAPI } from "./api-permission-gate"
 import { assertNoLeakingPii } from "./plugin-pii-gate"
+import { refreshAllPackWarnings } from "@/lib/plugin/registries/character-pack-registry"
 import {
   registerProviderDefinition,
   unregisterProvider,
@@ -244,6 +245,11 @@ export function createAIProviderAPI(pluginId: string): PluginAIProviderAPI {
           },
           "plugin"
         )
+        // A Character Pack may declare `requires.providers`; the provider
+        // catalog has no change notification of its own, so push a refresh from
+        // the single host-side mutator rather than adding a subscription to
+        // @cognia/provider-types for one consumer.
+        refreshAllPackWarnings()
       } catch {
         // Non-critical: plugin still works even if settings UI integration fails
       }
@@ -251,6 +257,7 @@ export function createAIProviderAPI(pluginId: string): PluginAIProviderAPI {
       return () => {
         customProviders.delete(providerId)
         unregisterProvider(providerId)
+        refreshAllPackWarnings()
         if (protocolRegistered) {
           unregisterProtocolAdapter(providerId)
           unregisterCodeAdapterExecutor(providerId)
@@ -455,5 +462,6 @@ export function clearCustomAIProvidersByPlugin(pluginId: string): number {
     unregisterCodeAdapterExecutor(providerId)
     removed += 1
   }
+  if (removed > 0) refreshAllPackWarnings()
   return removed
 }

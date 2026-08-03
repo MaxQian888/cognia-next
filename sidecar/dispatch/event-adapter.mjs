@@ -865,6 +865,17 @@ export function createEventAdapter(ctx) {
           // an error string — adapter doesn't translate them.
           return out
         }
+        case "reasoning-file": {
+          // AI SDK 7 split files referenced inside a model's reasoning trace out
+          // of `file` into their own part type. DELIBERATELY DROPPED: raw
+          // chain-of-thought artifacts are never rendered or persisted (same
+          // policy the `reasoning` parts follow — see the gpt-oss raw-analysis
+          // handling). Models normally re-emit anything they actually intend as
+          // output as a regular `file` part, so this loses nothing user-visible.
+          // Handled explicitly rather than falling through to `default` so the
+          // drop is a decision, not an oversight.
+          return out
+        }
         default:
           return out
       }

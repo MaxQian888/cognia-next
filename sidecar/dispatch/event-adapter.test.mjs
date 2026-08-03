@@ -423,6 +423,35 @@ test("v6 file part emits a generated file as its own one-shot assistant message"
   ])
 })
 
+test("v7 reasoning-file part is dropped: no message, nothing persisted", () => {
+  // AI SDK 7 split files referenced inside a model's reasoning trace out of
+  // `file` into `reasoning-file`. Raw chain-of-thought artifacts must never
+  // reach the transcript, so this part is dropped on purpose — asserted here so
+  // a future "handle every part type" pass can't quietly start emitting them.
+  const adapter = createEventAdapter(baseCtx())
+  // Warm up past the one-shot system/init message so `out` reflects only what
+  // this part contributes.
+  adapter.handle({ type: "start" })
+  const out = adapter.handle({
+    type: "reasoning-file",
+    file: { base64: "U0VDUkVU", mediaType: "image/png" },
+    filename: "scratchpad.png",
+  })
+  assert.deepEqual(out, [], "reasoning-file produces no SDK messages")
+  assert.deepEqual(adapter.sealAssistant(), [], "and leaves no assistant content behind")
+
+  // A genuine output file on the same turn still comes through.
+  const after = adapter.handle({
+    type: "file",
+    file: { base64: "QUJD", mediaType: "image/png" },
+    filename: "chart.png",
+  })
+  assert.ok(
+    after.find((m) => m.type === "assistant"),
+    "a real file part is unaffected by the reasoning-file drop"
+  )
+})
+
 test("v6 url file part projects a hosted file onto the assistant snapshot", () => {
   const adapter = createEventAdapter(baseCtx())
   const out = adapter.handle({
@@ -786,6 +815,37 @@ test("handled finish event uses AI SDK totalUsage when present", () => {
   assert.equal(result.usage.input_tokens, 8)
   assert.equal(result.usage.output_tokens, 3)
   assert.equal(result.usage.reasoning_tokens, 1)
+})
+
+test("v7 finish part (totalUsage + token-detail objects only) bills all steps", () => {
+  // AI SDK 7's `TextStreamFinishPart` is `{ type, finishReason, rawFinishReason,
+  // totalUsage }` — there is no `usage` field any more, and the deprecated
+  // top-level `cachedInputTokens` / `reasoningTokens` mirrors are gone. So the
+  // `event.usage ?? event.totalUsage` fallback is now load-bearing, and
+  // `totalUsage` is the sum across every step of the agentic loop rather than
+  // the final step alone. Multi-step turns are billed higher than on v6 —
+  // deliberately, since the earlier figure under-reported real consumption.
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", textDelta: "ok" })
+  adapter.handle({
+    type: "finish",
+    finishReason: "stop",
+    rawFinishReason: "end_turn",
+    totalUsage: {
+      inputTokens: 120,
+      outputTokens: 45,
+      totalTokens: 165,
+      inputTokenDetails: { noCacheTokens: 40, cacheReadTokens: 60, cacheWriteTokens: 20 },
+      outputTokenDetails: { textTokens: 30, reasoningTokens: 15 },
+    },
+  })
+  const out = adapter.finish()
+  const result = out.find((m) => m.type === "result")
+  assert.equal(result.usage.input_tokens, 120)
+  assert.equal(result.usage.output_tokens, 45)
+  assert.equal(result.usage.cache_read_input_tokens, 60)
+  assert.equal(result.usage.cache_creation_input_tokens, 20)
+  assert.equal(result.usage.reasoning_tokens, 15)
 })
 
 test("finish() surfaces contextInputTokens as context_input_tokens (window prompt)", () => {

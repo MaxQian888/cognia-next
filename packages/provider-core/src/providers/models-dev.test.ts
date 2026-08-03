@@ -58,12 +58,45 @@ describe("deriveAdapterFromNpm", () => {
 })
 
 describe("computeModelVariants", () => {
-  it("emits reasoning tiers for reasoning models", () => {
-    expect(computeModelVariants(sonnet)).toEqual(["low", "medium", "high"])
-  })
   it("emits nothing for non-reasoning models", () => {
     expect(computeModelVariants({ ...sonnet, reasoning: false })).toEqual([])
     expect(computeModelVariants({ id: "x" })).toEqual([])
+  })
+
+  it("falls back to the conservative three when the provider is unknown", () => {
+    expect(computeModelVariants(sonnet)).toEqual(["low", "medium", "high"])
+  })
+
+  it("resolves the real ladder from the provider's wire surface", () => {
+    // Anthropic's effort-GA families reach low…max…
+    expect(computeModelVariants({ id: "claude-opus-4-6", reasoning: true }, "anthropic")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ])
+    // …OpenAI-native has `minimal` and rejects `max`…
+    expect(computeModelVariants({ id: "gpt-5", reasoning: true }, "openai")).toEqual([
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ])
+    // …and a gateway keeps only the three it can distinguish.
+    expect(computeModelVariants({ id: "deepseek-reasoner", reasoning: true }, "deepseek")).toEqual([
+      "low",
+      "medium",
+      "high",
+    ])
+  })
+
+  it("emits no tiers for a reasoning model whose provider rejects the effort param", () => {
+    // models.dev marks Sonnet 4.5 `reasoning: true` — it DOES think — but it
+    // 400s on `output_config.effort`. Badging it with tiers it cannot honour is
+    // exactly what the flat placeholder used to do.
+    expect(computeModelVariants(sonnet, "anthropic")).toEqual([])
   })
 })
 
@@ -117,7 +150,9 @@ describe("mapModelsDevModel", () => {
       releaseDate: "2025-09-29",
       knowledge: "2025-07-31",
       adapter: "anthropic",
-      variants: ["low", "medium", "high"],
+      // Sonnet 4.5 reasons but rejects `output_config.effort`, so it carries no
+      // effort tiers — see the `computeModelVariants` cases above.
+      variants: undefined,
       supportsAttachment: true,
       supportsTemperature: true,
       openWeights: false,

@@ -58,6 +58,35 @@ export function toMcpTransport(
 }
 
 /**
+ * `@ai-sdk/mcp` v2 flipped `MCPTransportConfig.redirect` from `"follow"` to
+ * `"error"`: an HTTP/SSE MCP server that answers with a 3xx is now rejected
+ * instead of followed, so a compromised or misconfigured server can't bounce the
+ * request (with its `Authorization` header) to an unintended host. We keep that
+ * default — restoring `"follow"` would hand back the SSRF surface.
+ *
+ * The raw failure is an opaque fetch error, so recognize it and say what
+ * actually happened; otherwise a working-before-the-upgrade server just reports
+ * "failed to connect".
+ *
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+export function isRedirectRefusal(err) {
+  for (let current = err, depth = 0; current && depth < 5; current = current.cause, depth++) {
+    const message = typeof current === "string" ? current : current?.message
+    if (typeof message === "string" && /redirect/i.test(message)) return true
+  }
+  return false
+}
+
+/** Human-readable connect failure, with the redirect case called out. */
+function describeConnectError(err) {
+  const base = err?.message ?? String(err)
+  if (!isRedirectRefusal(err)) return base
+  return `${base} — the server answered with an HTTP redirect, which AI SDK 7 refuses by default to prevent the request (and its Authorization header) being forwarded to another host. Point the config at the server's final URL.`
+}
+
+/**
  * Decide whether a namespaced MCP tool (`mcp__<server>__<tool>`) is exposed,
  * given the allow/deny lists. Deny wins. An empty allow list means "no
  * restriction". A whole-server allow (`mcp__<server>`) admits all of its tools.
@@ -248,9 +277,13 @@ export async function buildAiSdkMcpTools({
       } catch (err) {
         thisCapture?.end()
         thisCapture?.stream.destroy()
-        if (attempt === attempts - 1) {
-          log?.("warn", `mcp "${server}" failed to connect: ${err?.message ?? err}`)
-          diag(server, "warn", `failed to connect: ${err?.message ?? err}`)
+        // A refused redirect is deterministic — the server will answer 3xx every
+        // time — so burning the remaining attempts (with backoff) only delays
+        // the turn. Fail fast with the actionable message.
+        if (attempt === attempts - 1 || isRedirectRefusal(err)) {
+          const detail = describeConnectError(err)
+          log?.("warn", `mcp "${server}" failed to connect: ${detail}`)
+          diag(server, "warn", `failed to connect: ${detail}`)
           return null
         }
         diag(

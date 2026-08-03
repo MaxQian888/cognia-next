@@ -444,7 +444,7 @@ describe("AI Provider API", () => {
 
       expect(mockStreamText).toHaveBeenCalledWith(
         expect.objectContaining({
-          system: [{ role: "system", content: "You are terse." }],
+          instructions: [{ role: "system", content: "You are terse." }],
           messages: [{ role: "user", content: "Hello" }],
         })
       )

@@ -70,7 +70,7 @@ jest.mock("@ai-sdk/amazon-bedrock", () => ({
 }))
 
 jest.mock("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: jest.fn(() => ({
+  createGoogle: jest.fn(() => ({
     embedding: jest.fn(() => mockEmbeddingModel),
     embeddingModel: jest.fn(() => mockEmbeddingModel),
   })),

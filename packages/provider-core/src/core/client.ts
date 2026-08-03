@@ -8,7 +8,7 @@
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createOpenAI } from "@ai-sdk/openai"
 import { createAzure } from "@ai-sdk/azure"
-import { createGoogleGenerativeAI } from "@ai-sdk/google"
+import { createGoogle } from "@ai-sdk/google"
 import { createMistral } from "@ai-sdk/mistral"
 import { createCohere } from "@ai-sdk/cohere"
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
@@ -76,7 +76,7 @@ export function getProviderModel(opts: ProviderModelOptions): LanguageModel {
     }
     case "google":
     case "gemini":
-      return createGoogleGenerativeAI({ apiKey, baseURL })(opts.model) as LanguageModel
+      return createGoogle({ apiKey, baseURL })(opts.model) as LanguageModel
     case "mistral":
       return createMistral({ apiKey, baseURL })(opts.model) as LanguageModel
     case "cohere":

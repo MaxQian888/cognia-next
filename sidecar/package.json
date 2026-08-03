@@ -13,25 +13,26 @@
     "test": "node --test telemetry.test.mjs agent-host.test.mjs claude-host.test.mjs cognia-tool-bridge.test.mjs dispatch/*.test.mjs dispatch/optical/*.test.mjs a2ui-tools/*.test.mjs builtin-tools/*.test.mjs builtin-tools/shared/*.test.mjs builtin-tools/core/*.test.mjs builtin-tools/file-ops/*.test.mjs builtin-tools/process/*.test.mjs builtin-tools/git/*.test.mjs builtin-tools/code/*.test.mjs builtin-tools/code/languages/*.test.mjs builtin-tools/ast-grep/*.test.mjs builtin-tools/clonedeps/*.test.mjs builtin-tools/webclone/*.test.mjs lsp/*.test.mjs mcp-oauth-helper.test.mjs"
   },
   "dependencies": {
-    "@cognia/redact": "file:../packages/redact",
-    "@ai-sdk/amazon-bedrock": "4.0.123",
-    "@ai-sdk/anthropic": "3.0.85",
-    "@ai-sdk/azure": "3.0.79",
-    "@ai-sdk/cohere": "3.0.39",
-    "@ai-sdk/google": "3.0.83",
-    "@ai-sdk/mcp": "1.0.52",
-    "@ai-sdk/mistral": "3.0.40",
-    "@ai-sdk/openai": "3.0.73",
+    "@ai-sdk/amazon-bedrock": "5.0.40",
+    "@ai-sdk/anthropic": "4.0.27",
+    "@ai-sdk/azure": "4.0.28",
+    "@ai-sdk/cohere": "4.0.18",
+    "@ai-sdk/google": "4.0.31",
+    "@ai-sdk/mcp": "2.0.22",
+    "@ai-sdk/mistral": "4.0.20",
+    "@ai-sdk/openai": "4.0.27",
+    "@ai-sdk/otel": "1.0.48",
     "@anthropic-ai/claude-agent-sdk": "0.3.220",
     "@anthropic-ai/sdk": "0.115.0",
     "@aws-sdk/client-bedrock": "^3.1092.0",
     "@aws-sdk/credential-providers": "^3.1092.0",
+    "@cognia/redact": "link:../packages/redact",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@opencode-ai/client": "https://raw.githubusercontent.com/anomalyco/opencode/95636bd3caa7935eba3ae91ec92a81560c8520e1/packages/app/vendor/opencode-ai-client-1.17.13-v2.tgz",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.208.0",
     "@opentelemetry/sdk-node": "^0.208.0",
-    "ai": "6.0.208",
+    "ai": "7.0.48",
     "diff": "^7.0.0",
     "fast-glob": "^3.3.3",
     "pdfjs-dist": "^5.7.284",
@@ -44,11 +45,5 @@
     "node-pty": "^1.0.0",
     "tree-sitter-wasms": "^0.1.12",
     "web-tree-sitter": "^0.25.10"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "node-pty",
-      "better-sqlite3"
-    ]
   }
 }

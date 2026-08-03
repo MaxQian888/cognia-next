@@ -246,7 +246,7 @@ test("start merges the Codex responses fields with reasoning into one openai blo
   let captured = null
   const fakeStreamText = (args) => {
     captured = args
-    return { fullStream: (async function* () {})(), usage: Promise.resolve({}) }
+    return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   await makeAiSdkAdapter("openai").start({
     model: "gpt-5.6-sol",
@@ -270,7 +270,7 @@ test("start passes model/messages/params through to streamText verbatim", async 
   let captured = null
   const fakeStreamText = (args) => {
     captured = args
-    return { fullStream: (async function* () {})(), usage: Promise.resolve({}) }
+    return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   const adapter = makeAiSdkAdapter("openai")
   assert.equal(adapter.id, "ai-sdk:openai")
@@ -296,7 +296,7 @@ test("start hoists leading system messages out of messages, cacheControl intact"
   let captured = null
   const fakeStreamText = (args) => {
     captured = args
-    return { fullStream: (async function* () {})(), usage: Promise.resolve({}) }
+    return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   await makeAiSdkAdapter("anthropic").start({
     model: "claude-x",
@@ -310,7 +310,7 @@ test("start hoists leading system messages out of messages, cacheControl intact"
     streamTextFn: fakeStreamText,
   })
 
-  assert.deepEqual(captured.system, [
+  assert.deepEqual(captured.instructions, [
     { role: "system", content: "base", providerOptions: cacheControl },
     { role: "system", content: "append", providerOptions: cacheControl },
     { role: "system", content: "per-turn tail" },
@@ -323,7 +323,7 @@ test("start opts a mid-history system message back in instead of reordering it",
   let captured = null
   const fakeStreamText = (args) => {
     captured = args
-    return { fullStream: (async function* () {})(), usage: Promise.resolve({}) }
+    return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   await makeAiSdkAdapter("openai").start({
     model: "gpt-x",
@@ -336,7 +336,7 @@ test("start opts a mid-history system message back in instead of reordering it",
     streamTextFn: fakeStreamText,
   })
 
-  assert.deepEqual(captured.system, [{ role: "system", content: "base" }])
+  assert.deepEqual(captured.instructions, [{ role: "system", content: "base" }])
   assert.deepEqual(captured.messages, [
     { role: "user", content: "hi" },
     { role: "system", content: "mid" },
@@ -348,7 +348,7 @@ test("start wires tools + the maxSteps stop condition when tools exist", async (
   let captured = null
   const fakeStreamText = (args) => {
     captured = args
-    return { fullStream: (async function* () {})(), usage: Promise.resolve({}) }
+    return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   const tools = { my_tool: { execute: async () => "ok" } }
   await makeAiSdkAdapter("openai").start({
@@ -370,7 +370,7 @@ test("start forwards prepareStep so callers can change active tools between step
   let captured = null
   const fakeStreamText = (args) => {
     captured = args
-    return { fullStream: (async function* () {})(), usage: Promise.resolve({}) }
+    return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   const prepareStep = () => ({ activeTools: ["read"] })
 
@@ -528,7 +528,7 @@ test("start threads abortSignal into streamText", async () => {
   let captured = null
   const fakeStreamText = (args) => {
     captured = args
-    return { fullStream: (async function* () {})(), usage: Promise.resolve({}) }
+    return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   const ac = new AbortController()
   await makeAiSdkAdapter("openai").start({
@@ -549,7 +549,7 @@ test("start threads reasoning providerOptions, deep-merged with modelParams.prov
   let captured = null
   const fakeStreamText = (args) => {
     captured = args
-    return { fullStream: (async function* () {})(), usage: Promise.resolve({}) }
+    return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   await makeAiSdkAdapter("anthropic").start({
     model: "claude-x",
@@ -570,7 +570,7 @@ test("empty tools object behaves like no tools (historical hasTools check)", asy
   let captured = null
   const fakeStreamText = (args) => {
     captured = args
-    return { fullStream: (async function* () {})(), usage: Promise.resolve({}) }
+    return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   await makeAiSdkAdapter("openai").start({
     model: "gpt-x",

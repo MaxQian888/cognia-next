@@ -7,7 +7,7 @@
 // Reuse map:
 //  - provider+model: `resolveStandaloneProvider` + `createFeatureProviderModel`
 //  - streaming transport: `getStreamingFetch` + `browserDirectHeaders`
-//  - AI SDK fullStream → SDKMessage: `createSdkEventMapper` (port of the sidecar
+//  - AI SDK stream → SDKMessage: `createSdkEventMapper` (port of the sidecar
 //    event-adapter)
 //  - system prompt: `composeSystem` (shared with the agent executor)
 //
@@ -15,7 +15,7 @@
 // emits assistant snapshots as they stream, a trailing `result` envelope with
 // usage, then a single `session_ended` so the existing settle/seal logic runs.
 
-import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai"
+import { convertToModelMessages, isStepCount, streamText, type UIMessage } from "ai"
 
 import { composeSystem } from "@/lib/ai/agent/agent-executor"
 import { partitionPrompt } from "@/lib/ai/prompt-partition"
@@ -114,6 +114,15 @@ export async function runStandaloneTurn(params: StandaloneTurnParams): Promise<v
       // payload rather than the pre-split pair so the PII check covers exactly
       // what is handed to the provider.
       const partitioned = partitionPrompt(modelMessages, system)
+      const derivedSystemPayload = {
+        instructions: partitioned.instructions,
+        embeddedSystemMessages: partitioned.messages.filter((message) => message.role === "system"),
+      }
+      if (!hasNoLeakingPiiDeep(derivedSystemPayload)) {
+        throw new Error(
+          "The standalone request was blocked because derived context contains private data."
+        )
+      }
       if (fallbackAttempt && !hasNoLeakingPiiDeep(partitioned)) {
         throw new Error(
           "Provider fallback was blocked because the full conversation contains private data."
@@ -140,11 +149,11 @@ export async function runStandaloneTurn(params: StandaloneTurnParams): Promise<v
           ...partitioned,
           abortSignal: signal,
           ...(resolvedTools
-            ? { tools: resolvedTools.tools, stopWhen: stepCountIs(STANDALONE_MAX_STEPS) }
+            ? { tools: resolvedTools.tools, stopWhen: isStepCount(STANDALONE_MAX_STEPS) }
             : {}),
         })
 
-        for await (const part of result.fullStream) {
+        for await (const part of result.stream) {
           if (signal.aborted) break
           throwStreamPartError(part)
           if (commitsRoutingAttempt(part)) controller?.commit()

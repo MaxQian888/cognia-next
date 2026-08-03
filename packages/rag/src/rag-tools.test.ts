@@ -310,7 +310,7 @@ describe("rag-tools", () => {
       const tool = createSimpleRetrievalTool(mockFindRelevant)
       const result = await tool.execute!(
         { question: "test question" },
-        { toolCallId: "test", messages: [] }
+        { toolCallId: "test", messages: [], context: {} }
       )
 
       expect(mockFindRelevant).toHaveBeenCalledWith("test question")
@@ -325,7 +325,7 @@ describe("rag-tools", () => {
       const tool = createSimpleRetrievalTool(mockFindRelevant)
       const result = await tool.execute!(
         { question: "unknown" },
-        { toolCallId: "test", messages: [] }
+        { toolCallId: "test", messages: [], context: {} }
       )
 
       expect(result).toBe("No relevant information found.")
@@ -335,7 +335,10 @@ describe("rag-tools", () => {
       const mockFindRelevant = jest.fn().mockRejectedValue(new Error("Search failed"))
 
       const tool = createSimpleRetrievalTool(mockFindRelevant)
-      const result = await tool.execute!({ question: "test" }, { toolCallId: "test", messages: [] })
+      const result = await tool.execute!(
+        { question: "test" },
+        { toolCallId: "test", messages: [], context: {} }
+      )
 
       expect(result).toBe("Error searching knowledge base.")
     })
@@ -358,7 +361,7 @@ describe("rag-tools", () => {
         const tools = createKnowledgeBaseManagementTools(mockPipeline, "my-kb")
         const result = await tools.getKnowledgeBaseStats.execute!(
           {},
-          { toolCallId: "test", messages: [] }
+          { toolCallId: "test", messages: [], context: {} }
         )
 
         expect(result).toContain("my-kb")
@@ -374,7 +377,7 @@ describe("rag-tools", () => {
         const tools = createKnowledgeBaseManagementTools(mockPipeline, "my-kb")
         const result = await tools.getKnowledgeBaseStats.execute!(
           {},
-          { toolCallId: "test", messages: [] }
+          { toolCallId: "test", messages: [], context: {} }
         )
 
         expect(result).toBe("Error getting knowledge base stats.")
@@ -386,7 +389,7 @@ describe("rag-tools", () => {
         const tools = createKnowledgeBaseManagementTools(mockPipeline, "my-kb")
         const result = await tools.clearKnowledgeBase.execute!(
           { confirm: true },
-          { toolCallId: "test", messages: [] }
+          { toolCallId: "test", messages: [], context: {} }
         )
 
         expect(mockPipeline.clearCollection).toHaveBeenCalledWith("my-kb")
@@ -397,7 +400,7 @@ describe("rag-tools", () => {
         const tools = createKnowledgeBaseManagementTools(mockPipeline, "my-kb")
         const result = await tools.clearKnowledgeBase.execute!(
           { confirm: false },
-          { toolCallId: "test", messages: [] }
+          { toolCallId: "test", messages: [], context: {} }
         )
 
         expect(mockPipeline.clearCollection).not.toHaveBeenCalled()
@@ -412,7 +415,7 @@ describe("rag-tools", () => {
         const tools = createKnowledgeBaseManagementTools(mockPipeline, "my-kb")
         const result = await tools.clearKnowledgeBase.execute!(
           { confirm: true },
-          { toolCallId: "test", messages: [] }
+          { toolCallId: "test", messages: [], context: {} }
         )
 
         expect(result).toBe("Error clearing knowledge base.")

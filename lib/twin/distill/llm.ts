@@ -207,8 +207,8 @@ async function buildLanguageModel(config: LlmConfig): Promise<LanguageModel> {
       return selectOpenAiFamilyModel(client, config, "azure")
     }
     case "google": {
-      const { createGoogleGenerativeAI } = await import("@ai-sdk/google")
-      const client = createGoogleGenerativeAI(buildProviderSettings(config))
+      const { createGoogle } = await import("@ai-sdk/google")
+      const client = createGoogle(buildProviderSettings(config))
       return client(config.model)
     }
     case "mistral": {

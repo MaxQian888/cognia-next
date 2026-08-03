@@ -1,0 +1,8 @@
+# The sidecar is installed with --ignore-workspace, so pnpm does not inherit
+# the repository root's build policy. Keep every dependency script decision
+# explicit here: pnpm 11 fails installs when an encountered build is undecided.
+allowBuilds:
+  "@ast-grep/cli": false
+  better-sqlite3: true
+  node-pty: true
+  protobufjs: false

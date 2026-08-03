@@ -15,7 +15,7 @@ import { createOpenAI } from "@ai-sdk/openai"
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
 import type { BedrockConnectionSettings } from "@cognia/provider-types"
 import type { EmbeddingModelV3 } from "@ai-sdk/provider"
-import { createGoogleGenerativeAI } from "@ai-sdk/google"
+import { createGoogle } from "@ai-sdk/google"
 import { createCohere } from "@ai-sdk/cohere"
 import { createMistral } from "@ai-sdk/mistral"
 import type { ProviderName } from "@cognia/provider-types"
@@ -228,7 +228,7 @@ function getEmbeddingModel(config: EmbeddingConfig) {
       return openai.embedding(modelId)
     }
     case "google": {
-      const google = createGoogleGenerativeAI({ apiKey, baseURL })
+      const google = createGoogle({ apiKey, baseURL })
       const modelId = model || defaultEmbeddingModels.google || "text-embedding-004"
       return google.embeddingModel(modelId)
     }

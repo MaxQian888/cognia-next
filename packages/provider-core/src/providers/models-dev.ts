@@ -37,6 +37,7 @@ import type {
 import { CATALOG_SCHEMA_VERSION } from "@cognia/provider-types/model-catalog"
 import type { ModelPricing, ProviderModelDiscoveryEntry } from "@cognia/provider-types/provider"
 import { builtInProvidersWithModelsDevEntry, resolveModelsDevProviderId } from "./models-dev-id-map"
+import { reasoningTiersFor } from "./reasoning-tiers"
 import { proxyFetch } from "./runtime-adapters"
 
 export const MODELS_DEV_API_URL = "https://models.dev/api.json"
@@ -141,7 +142,12 @@ export interface ModelsDevCatalogModel extends ProviderModelDiscoveryEntry {
   adapter?: BuiltInProviderAdapterId
   /** Resolved API endpoint template, if the model/provider declares one. */
   apiUrl?: string
-  /** Reasoning effort tiers (display badges; future routing input). */
+  /**
+   * Reasoning effort tiers this model actually offers, resolved from its
+   * provider's wire surface by {@link computeModelVariants} — Anthropic's GA
+   * families report `low…max`, an OpenAI-native model `minimal…xhigh`, a
+   * generic gateway `low/medium/high`. Empty/absent for a non-reasoning model.
+   */
   variants?: string[]
   /** Expanded experimental modes. */
   modes?: ModelsDevMode[]
@@ -172,7 +178,16 @@ export type NormalizedModelsDevCatalog = Record<string, NormalizedModelsDevProvi
 // Mapping helpers
 // =============================================================================
 
-/** Reasoning effort tiers surfaced for any reasoning-capable model. */
+/**
+ * Fallback reasoning tiers for a reasoning-capable model whose provider we
+ * can't place. The conservative three every OpenAI-compatible gateway accepts.
+ *
+ * This used to be what EVERY reasoning model got, which made
+ * `ModelsDevCatalogModel.variants` a placeholder rather than data: an Anthropic
+ * Opus 4.6 (low…max) and a gateway model (low/medium/high) reported the same
+ * three tiers. {@link computeModelVariants} now resolves the real ladder from
+ * the provider's wire surface.
+ */
 export const REASONING_VARIANT_TIERS = ["low", "medium", "high"] as const
 
 /**
@@ -206,10 +221,16 @@ function mapCost(cost: ModelsDevCost | undefined): ModelPricing | undefined {
   }
 }
 
-/** Reasoning tiers for a model — empty unless the model is reasoning-capable. */
-export function computeModelVariants(model: ModelsDevModel): string[] {
+/**
+ * Reasoning tiers for a model — empty unless the model is reasoning-capable AND
+ * its provider exposes a depth control. `providerId` is the models.dev provider
+ * id; without it we can't place the wire surface and fall back to the
+ * conservative {@link REASONING_VARIANT_TIERS}.
+ */
+export function computeModelVariants(model: ModelsDevModel, providerId?: string): string[] {
   if (!model.reasoning) return []
-  return [...REASONING_VARIANT_TIERS]
+  if (!providerId) return [...REASONING_VARIANT_TIERS]
+  return [...reasoningTiersFor({ providerId, modelId: model.id, reasoning: true })]
 }
 
 function camelCase(key: string): string {
@@ -260,7 +281,7 @@ export function mapModelsDevModel(
 ): ModelsDevCatalogModel {
   const npm = model.provider?.npm ?? provider.npm
   const apiUrl = model.provider?.api ?? provider.api
-  const variants = computeModelVariants(model)
+  const variants = computeModelVariants(model, provider.id)
   const modes = expandModelModes(model)
   const isEmbedding =
     /embed/i.test(model.id) || /embed/i.test(model.family ?? "") || outputHas(model, "embedding")

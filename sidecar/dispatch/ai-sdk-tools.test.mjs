@@ -102,7 +102,7 @@ test("plugin tool image results pass through as content blocks the model can see
   assert.equal(modelOutput.type, "content")
   assert.deepEqual(modelOutput.value, [
     { type: "text", text: "shot.png (12 bytes)" },
-    { type: "image-data", mediaType: "image/png", data: "AAAA" },
+    { type: "file", mediaType: "image/png", data: { type: "data", data: "AAAA" } },
   ])
 })
 
@@ -130,7 +130,7 @@ test("plugin tool audio-only results pass through as file content the model can 
   assert.deepEqual(await execPromise, callToolResult)
   assert.deepEqual(tools.record_audio.toModelOutput({ output: callToolResult }), {
     type: "content",
-    value: [{ type: "file-data", mediaType: "audio/wav", data: "UklGRg==" }],
+    value: [{ type: "file", mediaType: "audio/wav", data: { type: "data", data: "UklGRg==" } }],
   })
 })
 
@@ -174,7 +174,12 @@ test("plugin tool resource-only results pass through with embedded text and blob
     type: "content",
     value: [
       { type: "text", text: "resource text" },
-      { type: "file-data", mediaType: "audio/wav", data: "UklGRg==", filename: "clip.wav" },
+      {
+        type: "file",
+        mediaType: "audio/wav",
+        data: { type: "data", data: "UklGRg==" },
+        filename: "clip.wav",
+      },
     ],
   })
 })
@@ -1105,7 +1110,7 @@ test("builtinToModelOutput maps a plain string result to a text output", () => {
   assert.deepEqual(builtinToModelOutput({ output: "hello" }), { type: "text", value: "hello" })
 })
 
-test("builtinToModelOutput maps an MCP image block to an image-data content part", () => {
+test("builtinToModelOutput maps an MCP image block to a canonical file content part", () => {
   const { builtinToModelOutput } = __testing__
   const out = builtinToModelOutput({
     output: {
@@ -1118,17 +1123,20 @@ test("builtinToModelOutput maps an MCP image block to an image-data content part
   assert.equal(out.type, "content")
   assert.deepEqual(out.value, [
     { type: "text", text: "screenshot.png (12 bytes)" },
-    // NOT the deprecated `media` part — the supported `image-data` shape.
-    { type: "image-data", mediaType: "image/png", data: "QUJD" },
+    // AI SDK 7 canonical shape: one `file` part with a tagged data union.
+    // The `media` and `image-data` variants are both gone.
+    { type: "file", mediaType: "image/png", data: { type: "data", data: "QUJD" } },
   ])
 })
 
-test("builtinToModelOutput routes non-image media to a file-data part", () => {
+test("builtinToModelOutput routes non-image media to a canonical file part", () => {
   const { builtinToModelOutput } = __testing__
   const out = builtinToModelOutput({
     output: { content: [{ type: "image", data: "QQ==", mimeType: "audio/wav" }] },
   })
-  assert.deepEqual(out.value, [{ type: "file-data", mediaType: "audio/wav", data: "QQ==" }])
+  assert.deepEqual(out.value, [
+    { type: "file", mediaType: "audio/wav", data: { type: "data", data: "QQ==" } },
+  ])
 })
 
 test("hasImageBlock detects an MCP image block and ignores text-only results", () => {

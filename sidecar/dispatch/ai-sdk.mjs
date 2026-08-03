@@ -140,17 +140,22 @@ function toAiSdkUserContent(blocks) {
     const isUrlSource = src && typeof src === "object" && src.type === "url"
 
     if (block.type === "image") {
-      // Already AI SDK shape — leave as-is.
-      if ("image" in block && !src) return block
+      // AI SDK 7 deprecated the dedicated `image` part: images are just files
+      // with an image media type. `mediaType` accepts either a full IANA type
+      // ("image/png") or the bare top-level segment ("image"), which is the
+      // right answer when the source never told us the subtype.
+      if ("image" in block && !src) {
+        return { type: "file", mediaType: block.mediaType ?? "image", data: block.image }
+      }
       if (isBase64Source) {
         return {
-          type: "image",
-          image: `data:${src.media_type ?? ""};base64,${src.data ?? ""}`,
-          ...(src.media_type ? { mediaType: src.media_type } : {}),
+          type: "file",
+          mediaType: src.media_type ?? "image",
+          data: `data:${src.media_type ?? ""};base64,${src.data ?? ""}`,
         }
       }
       if (isUrlSource && typeof src.url === "string") {
-        return { type: "image", image: src.url }
+        return { type: "file", mediaType: src.media_type ?? "image", data: src.url }
       }
       return block
     }
@@ -688,10 +693,11 @@ export function dispatchAiSdk({
     } else if (Array.isArray(content)) {
       // Multimodal content blocks arrive in the Anthropic agent-SDK shape
       // (`{ type:'image', source:{ type:'base64', media_type, data } }`) because
-      // the composer targets the native Anthropic path. AI SDK v6 expects
-      // `{ type:'image', image }` / `{ type:'file', data, mediaType }`, so the
-      // blocks MUST be converted here — otherwise streamText drops every image
-      // and non-Anthropic providers (OpenAI/Gemini/Mistral/…) see text only.
+      // the composer targets the native Anthropic path. AI SDK 7 wants a single
+      // canonical `{ type:'file', mediaType, data }` part (images are just files
+      // with an image media type), so the blocks MUST be converted here —
+      // otherwise streamText drops every image and non-Anthropic providers
+      // (OpenAI/Gemini/Mistral/…) see text only.
       conversation.push({ role: "user", content: toAiSdkUserContent(content) })
     }
   }

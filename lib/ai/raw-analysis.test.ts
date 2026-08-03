@@ -1,8 +1,8 @@
-import type { LanguageModelV3 } from "@ai-sdk/provider"
+import type { LanguageModelV4 } from "@ai-sdk/provider"
 
 import { protectRawAnalysis, RAW_ANALYSIS_SOURCE } from "./raw-analysis"
 
-function fixtureModel(parts: Array<Record<string, unknown>>): LanguageModelV3 {
+function fixtureModel(parts: Array<Record<string, unknown>>): LanguageModelV4 {
   return {
     specificationVersion: "v3",
     provider: "fixture",
@@ -22,7 +22,7 @@ function fixtureModel(parts: Array<Record<string, unknown>>): LanguageModelV3 {
         },
       }),
     }),
-  } as unknown as LanguageModelV3
+  } as unknown as LanguageModelV4
 }
 
 describe("protectRawAnalysis", () => {

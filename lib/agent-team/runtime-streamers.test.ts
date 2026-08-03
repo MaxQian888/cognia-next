@@ -138,7 +138,7 @@ describe("createCompositeStreamer (Claude path)", () => {
     )
 
     const call = mockedStreamText.mock.calls[0][0]
-    expect(call.system).toEqual([{ role: "system", content: "Be a teammate." }])
+    expect(call.instructions).toEqual([{ role: "system", content: "Be a teammate." }])
     expect(call.messages).toEqual([{ role: "user", content: "hi" }])
     expect(call).not.toHaveProperty("allowSystemInMessages")
   })

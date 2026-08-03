@@ -2186,6 +2186,30 @@ export function getAllProviders(): Record<string, ProviderConfig> {
   return { ...PROVIDERS, ...getDynamicProviders() }
 }
 
+/**
+ * Every known provider id, built-in and dynamic.
+ *
+ * Cheaper than `Object.keys(getAllProviders())`, which allocates a merged copy
+ * of every `ProviderConfig` just to read its keys. Used by Character Pack
+ * `requires.providers` validation, which runs on every registry change.
+ */
+export function listAllProviderIds(): string[] {
+  const ids = new Set<string>(Object.keys(PROVIDERS))
+  for (const id of Object.keys(getDynamicProviders())) ids.add(id)
+  return [...ids]
+}
+
+/**
+ * True when `providerId` names a provider in the catalog.
+ *
+ * Catalog membership, not user configuration: a pack requiring `anthropic` is
+ * satisfied whether or not the user has added an account, because the pack's
+ * dependency is on the provider existing, not on it being signed in.
+ */
+export function hasProvider(providerId: string): boolean {
+  return providerId in PROVIDERS || providerId in getDynamicProviders()
+}
+
 // ============================================================================
 // Provider Context Types (from provider-context.tsx)
 // ============================================================================

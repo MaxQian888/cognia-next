@@ -34,7 +34,11 @@ export interface ProviderTextBenchmarkInput {
 interface StreamUsage {
   inputTokens?: number
   outputTokens?: number
-  reasoningTokens?: number
+  /**
+   * AI SDK 7 removed the deprecated top-level `reasoningTokens` mirror from
+   * `LanguageModelUsage`; the details object is the only source now.
+   */
+  outputTokenDetails?: { reasoningTokens?: number }
 }
 
 interface StreamResult {
@@ -124,7 +128,7 @@ export async function runProviderTextBenchmark(
   const outputTokens = actualOutputTokens ?? estimateTokens(output)
   const actualInputTokens = finiteTokenCount(usage.inputTokens)
   const inputTokens = actualInputTokens ?? estimateTokens(PROVIDER_DIAGNOSTIC_TEXT_PROMPT)
-  const reasoningTokens = finiteTokenCount(usage.reasoningTokens)
+  const reasoningTokens = finiteTokenCount(usage.outputTokenDetails?.reasoningTokens)
   const generationDurationMs =
     firstTextAt === undefined ? undefined : Math.max(0, completedAt - firstTextAt)
   const estimatedCostUsd = input.price

@@ -32,7 +32,7 @@ jest.mock("@ai-sdk/openai", () => ({
 }))
 jest.mock("@ai-sdk/google", () => ({
   __esModule: true,
-  createGoogleGenerativeAI: makeFactoryMock("google"),
+  createGoogle: makeFactoryMock("google"),
 }))
 jest.mock("@ai-sdk/mistral", () => ({
   __esModule: true,
@@ -54,7 +54,7 @@ jest.mock("@ai-sdk/amazon-bedrock", () => ({
 import { getProviderModel, isGenuineOpenAiEndpoint } from "./client"
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createOpenAI } from "@ai-sdk/openai"
-import { createGoogleGenerativeAI } from "@ai-sdk/google"
+import { createGoogle } from "@ai-sdk/google"
 import { createMistral } from "@ai-sdk/mistral"
 import { createCohere } from "@ai-sdk/cohere"
 import { createAzure } from "@ai-sdk/azure"
@@ -64,7 +64,7 @@ type ResolvedModel = { provider: string; modelId?: string; factoryOpts?: Record<
 
 const mockAnthropic = createAnthropic as unknown as jest.Mock
 const mockOpenAI = createOpenAI as unknown as jest.Mock
-const mockGoogle = createGoogleGenerativeAI as unknown as jest.Mock
+const mockGoogle = createGoogle as unknown as jest.Mock
 const mockMistral = createMistral as unknown as jest.Mock
 const mockCohere = createCohere as unknown as jest.Mock
 const mockAzure = createAzure as unknown as jest.Mock
