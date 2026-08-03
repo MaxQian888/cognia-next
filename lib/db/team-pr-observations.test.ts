@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 // Coverage for the teamPrObservations CRUD module — record/get round-trip,
 // team-scoped newest-first listing, nudge-signature update, and per-run clear.
 // Uses fake-indexeddb so the real Dexie query path runs in memory.
 
-import "fake-indexeddb/auto"
 import {
   clearTeamPrObservationsForRun,
   getTeamPrObservation,
@@ -13,19 +11,21 @@ import {
   updateTeamPrNudgeSignature,
   type TeamPrObservationRow,
 } from "./team-pr-observations"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import { unfetchedObservation } from "@/lib/github/pr-observe/types"
 
 // High-version schema; a cold open can cross Jest's default hook timeout under
 // coverage instrumentation. Mirror the repo pattern for high-version tables.
 jest.setTimeout(30_000)
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 function makeRow(over: Partial<TeamPrObservationRow> = {}): TeamPrObservationRow {
   const runId = over.runId ?? "run-1"

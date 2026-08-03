@@ -1,7 +1,6 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
 import type { GoalTemplate } from "@/types/goal"
+import { createDbTestFixture } from "./test-fixture"
 import {
   deleteGoalTemplate,
   getGoalTemplate,
@@ -10,14 +9,15 @@ import {
   upsertGoalTemplate,
 } from "./goal-templates"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   // Isolate from the seeded built-ins so ordering assertions are deterministic.
   await getDb().goalTemplates.clear()
 })
+afterAll(dbFixture.dispose)
 
 function tpl(over: Partial<GoalTemplate> = {}): GoalTemplate {
   const now = Date.now()

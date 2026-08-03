@@ -1,8 +1,5 @@
-/** @jest-environment jsdom */
-
-import "fake-indexeddb/auto"
 import type { CanvasCommentRow } from "./canvas-types"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   addContextComment,
   addContextCommentReaction,
@@ -19,12 +16,11 @@ import {
 } from "./context-comments"
 import { isContextCommentAnchorStale } from "@/types/context-comment"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("context-comments", () => {
   it("supports every anchor kind and reports revision drift", async () => {

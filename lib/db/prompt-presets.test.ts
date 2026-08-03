@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 // Coverage for the prompt-presets CRUD layer + built-in seeder. Uses
 // fake-indexeddb so the real Dexie indexes / transactions / upgrade hook
 // run against an in-memory IDB.
 
-import "fake-indexeddb/auto"
 import {
   clearDefaultPreset,
   createPreset,
@@ -23,18 +21,20 @@ import {
   updatePreset,
 } from "./prompt-presets"
 import { BUILT_IN_PRESET_IDS, buildBuiltInPresets } from "./preset-built-ins"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   // Wipe so each test starts from a clean slate (the seeder still runs
   // automatically; we explicitly clear here for tests that don't want
   // built-ins around).
   await getDb().promptPresets.clear()
 })
+afterAll(dbFixture.dispose)
 
 describe("createPreset", () => {
   it("inserts a row with sensible defaults", async () => {
