@@ -2,14 +2,20 @@ import os from "node:os"
 
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
 import type {
+  AcpConfigOption,
   AcpPermissionMode,
   AcpPermissionRequest,
   AcpPermissionResponse,
+  AcpSessionModelState,
   ExternalAgentConfig,
   ExternalAgentExecutionOptions,
   ExternalAgentResult,
 } from "@/types/agent/external-agent"
-import { getExternalAgentManager, type ExternalAgentManager } from "@/lib/ai/agent/external/manager"
+import {
+  getExternalAgentManager,
+  type AgentCapabilityResult,
+  type ExternalAgentManager,
+} from "@/lib/ai/agent/external/manager"
 import {
   createAgentFromPreset,
   getPresetConfig,
@@ -23,6 +29,7 @@ import {
 
 import type { McpServer } from "@cognia/agent-config-types"
 import type { AcpMcpServerConfig } from "@/types/agent/external-agent"
+import type { SessionCreateOptions } from "@/lib/ai/agent/external/protocol-adapter"
 
 import { resolveHome } from "../config/load"
 import { loadMcpServers } from "../mcp/load-mcp-config"
@@ -34,7 +41,7 @@ import type { TuiAction } from "../tui/state/types"
 import { createIdleWatchdog } from "./idle-watchdog"
 import { isResumableLink, readExternalLink, writeExternalLink } from "./external-session-link"
 import { mintSessionId } from "./run"
-import type { AgentSession, SendTurnOptions } from "./session-runner"
+import type { AgentModelOption, AgentSession, SendTurnOptions } from "./session-runner"
 import { appendTranscript, type TranscriptFs } from "./transcript"
 import {
   createCliContextAssembler,
@@ -137,8 +144,61 @@ export interface ExternalAgentSessionManager {
    * have to discard the thread. Throws when the adapter has no model selection;
    * the caller treats that as "applies on the next turn" rather than an error. */
   setSessionModel(agentId: string, sessionId: string, modelId: string): Promise<void>
+  /** Read the modern ACP config options for a live session, when supported. */
+  getConfigOptions?: (
+    agentId: string,
+    sessionId: string
+  ) => AgentCapabilityResult<AcpConfigOption[]>
+  /** Change a modern ACP config option for a live session, when supported. */
+  setConfigOption?: (
+    agentId: string,
+    sessionId: string,
+    configId: string,
+    value: string | boolean
+  ) => Promise<AcpConfigOption[]>
+  /** Read the legacy ACP model state for older adapters. */
+  getSessionModels?: (
+    agentId: string,
+    sessionId: string
+  ) => AgentCapabilityResult<AcpSessionModelState>
+  /** Create a short-lived ACP session for pre-turn config discovery. */
+  createSession?: (agentId: string, options?: SessionCreateOptions) => Promise<{ id: string }>
+  /** Close a short-lived ACP discovery session. */
+  closeSession?: (agentId: string, sessionId: string) => Promise<void>
   cancel(agentId: string, sessionId: string): Promise<void>
   removeAgent(agentId: string): Promise<void>
+}
+
+/** Convert an ACP select option in the semantic `model` category to TUI rows. */
+export function acpModelOptions(configOptions: AcpConfigOption[] | undefined): AgentModelOption[] {
+  const modelOption = configOptions?.find(
+    (option): option is Extract<AcpConfigOption, { type: "select" }> =>
+      option.category === "model" && option.type === "select"
+  )
+  if (!modelOption) return []
+  return modelOption.options
+    .flatMap((entry) => ("group" in entry ? entry.options : [entry]))
+    .filter((entry) => entry.value.length > 0)
+    .map((entry) => ({ id: entry.value, ...(entry.name ? { name: entry.name } : {}) }))
+}
+
+function readLiveModelOptions(
+  manager: ExternalAgentSessionManager,
+  agentId: string,
+  sessionId: string
+): AgentModelOption[] {
+  const configResult = manager.getConfigOptions?.(agentId, sessionId)
+  if (configResult?.status === "ok") {
+    const options = acpModelOptions(configResult.data)
+    if (options.length > 0) return options
+  }
+
+  const legacyResult = manager.getSessionModels?.(agentId, sessionId)
+  if (legacyResult?.status !== "ok") return []
+  return legacyResult.data.availableModels.map((model) => ({
+    id: model.modelId,
+    ...(model.name ? { name: model.name } : {}),
+  }))
 }
 
 export interface ExternalAgentSessionParams {
@@ -818,6 +878,36 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         await manager.setSessionMode(agentId, externalSessionId, permissionMode)
       }
     },
+    async listModels() {
+      if (closed) return []
+      if (!initialized) await ensureAgent()
+      if (externalSessionId) return readLiveModelOptions(manager, agentId, externalSessionId)
+      if (!manager.createSession || !manager.closeSession) return []
+
+      // ACP config options are session-scoped. Before the first turn, create a
+      // disposable discovery session so `/model` can still populate the picker;
+      // the real conversation session is created later with the selected model.
+      const resolved = await assembler.resolveSession()
+      const probe = await manager.createSession(agentId, {
+        cwd: resolved.cwd,
+        mcpServers: toAcpMcpServers(resolved.mcpServers),
+        additionalDirectories: resolved.additionalDirectories,
+        systemPrompt: resolved.sendOptions.systemPrompt,
+        instructionEnvelope: {
+          hash: resolved.contextVersion,
+          developerInstructions: resolved.sendOptions.systemPrompt ?? "",
+          sourceFlags: {
+            hasSkills: resolved.activeSkillIds.length > 0,
+            hasAdditionalRoots: resolved.additionalDirectories.length > 0,
+          },
+        },
+      })
+      try {
+        return readLiveModelOptions(manager, agentId, probe.id)
+      } finally {
+        await manager.closeSession(agentId, probe.id).catch(() => undefined)
+      }
+    },
     /**
      * Apply a `/model` pick to the live session so the thread survives it.
      *
@@ -829,6 +919,26 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
      */
     async setModel(model) {
       if (!initialized || !externalSessionId) return false
+
+      const configResult = manager.getConfigOptions?.(agentId, externalSessionId)
+      const modelOption =
+        configResult?.status === "ok"
+          ? configResult.data.find(
+              (option): option is Extract<AcpConfigOption, { type: "select" }> =>
+                option.category === "model" && option.type === "select"
+            )
+          : undefined
+      if (modelOption && manager.setConfigOption) {
+        try {
+          await manager.setConfigOption(agentId, externalSessionId, modelOption.id, model)
+          return true
+        } catch {
+          // A model rejected by the active ACP agent must not fall through to a
+          // legacy method and cause a second, incompatible mutation.
+          return false
+        }
+      }
+
       try {
         await manager.setSessionModel(agentId, externalSessionId, model)
         return true

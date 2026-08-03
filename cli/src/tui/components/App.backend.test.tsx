@@ -51,6 +51,21 @@ const ok = (): BackendConnectResult => ({
   },
 })
 
+const okAcp = (): BackendConnectResult => ({
+  ok: true,
+  connection: {
+    backend: "claude-code",
+    presetId: "claude-code",
+    agentId: "cli-backend-s1",
+    command: "claude-agent-acp",
+    capabilities: externalCapabilities({
+      backend: "claude-code",
+      presetId: "claude-code",
+      protocol: "acp",
+    }),
+  },
+})
+
 const failed = (): BackendConnectResult => ({
   ok: false,
   failure: {
@@ -219,6 +234,37 @@ describe("App — external backend startup", () => {
 
     expect(container.textContent).not.toContain("stale-codex-model")
     expect(container.textContent).not.toContain("Switch model")
+  })
+
+  it("uses the live ACP session model options instead of model/list", async () => {
+    const listModels = jest.fn(async () => [{ id: "claude-opus-4-1", name: "Claude Opus 4.1" }])
+    const createExternalSession = jest.fn(() => ({
+      sessionId: "acp-session",
+      send: jest.fn(async () => ({
+        text: "hello",
+        messageId: "m",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })),
+      listModels,
+      close: jest.fn(async () => undefined),
+    })) as React.ComponentProps<typeof App>["createExternalSession"]
+    const { container } = renderApp(fakeConnect(okAcp), {
+      config: { ...config, agentBackend: "claude-code" },
+      trusted: true,
+      createExternalSession,
+      listExternalModels: jest.fn(async () => {
+        throw new Error("the ACP path must not call model/list")
+      }),
+    })
+    await settle()
+
+    type("/model")
+    submit()
+    await settle()
+
+    expect(listModels).toHaveBeenCalledTimes(1)
+    expect(container.textContent).toContain("Claude Opus 4.1")
   })
 
   it("reports external model-list failures instead of leaking a rejection", async () => {

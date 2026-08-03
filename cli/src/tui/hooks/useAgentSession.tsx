@@ -11,7 +11,11 @@ import { transport } from "@/lib/tauri"
 import { compactSession } from "@/lib/claude/ipc"
 import { WORKFLOW_COPILOT_ALLOWED_TOOLS } from "@/lib/claude/agents/workflow-copilot-prompt"
 
-import { createAgentSession, type AgentSession } from "../../agent/session-runner"
+import {
+  createAgentSession,
+  type AgentModelOption,
+  type AgentSession,
+} from "../../agent/session-runner"
 import { runManualCompact } from "../../agent/manual-compact"
 import { readToolApprovals } from "../../agent/tool-approvals"
 import { resolveHome } from "../../config/load"
@@ -61,6 +65,8 @@ export interface AgentSessionApi {
   clear(newSessionId: string): Promise<void>
   resume(sessionId: string, cells: Cell[]): Promise<void>
   switchModel(model: string): Promise<void>
+  /** List models advertised by the live external session; empty for built-in or pre-session. */
+  listModels(): Promise<AgentModelOption[]>
   switchMode(mode: PermissionMode): Promise<void>
   switchThinking(level: ThinkingLevel, pluginTools?: boolean): Promise<void>
   switchProvider(provider: string, model?: string): Promise<void>
@@ -623,6 +629,11 @@ export function useAgentSession({
     [dispatch, dropSession]
   )
 
+  const listModels = useCallback(async (): Promise<AgentModelOption[]> => {
+    const session = ensureSession()
+    return (await session.listModels?.()) ?? []
+  }, [ensureSession])
+
   const changeCwd = useCallback(
     async (dir: string) => {
       dispatch({ type: "SET_CWD", cwd: dir })
@@ -807,6 +818,7 @@ export function useAgentSession({
     clear,
     resume,
     switchModel,
+    listModels,
     switchMode,
     switchThinking,
     switchProvider,

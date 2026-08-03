@@ -941,8 +941,8 @@ export function App({
   const openModelPicker = useCallback(() => {
     // While an external agent hosts, the built-in provider's catalog is the
     // wrong list — those are not models that agent can run, and picking one used
-    // to send the id straight into its session. Ask the agent instead, and say
-    // so plainly when it cannot enumerate its own models.
+    // to send the id straight into its session. Native Codex has a global
+    // `model/list`; ACP exposes model options only from the live session.
     const caps = state.backendCapabilities
     if (caps && !caps.builtin) {
       if (!supportsFeature(caps, "modelPicker")) {
@@ -954,8 +954,11 @@ export function App({
         dispatch({ type: "NOTICE", message: "The agent is not connected yet." })
         return
       }
+      const isAcp = caps.protocol === "acp"
       const list = listExternalModels ?? defaultBackendModelHost().listExternalModels
-      const unavailableMessage = `${caps.backend} did not report any models.`
+      const unavailableMessage = isAcp
+        ? `${caps.backend} did not expose model options for the active ACP session. Send a message first, then retry.`
+        : `${caps.backend} did not report any models.`
       const requestId = ++externalModelRequestRef.current
       const isCurrentRequest = () => {
         return (
@@ -963,7 +966,8 @@ export function App({
           connectionRef.current?.agentId === agentId
         )
       }
-      void list(agentId).then(
+      const modelsPromise = isAcp ? agent.listModels() : list(agentId)
+      void modelsPromise.then(
         (models) => {
           if (!isCurrentRequest()) return
           if (models.length === 0) {
@@ -1006,6 +1010,7 @@ export function App({
     dispatch,
     syncAndRefreshModelOverlay,
     listExternalModels,
+    agent,
   ])
 
   // When a plan-mode turn proposes a plan (the reducer captured it as

@@ -2,6 +2,7 @@
  * @jest-environment node
  */
 import type {
+  AcpConfigOption,
   AcpPermissionRequest,
   ExternalAgentConfig,
   ExternalAgentExecutionOptions,
@@ -77,6 +78,9 @@ function fakeManager(result?: Partial<ExternalAgentResult>) {
     }),
     setSessionMode: jest.fn(async () => undefined),
     setSessionModel: jest.fn(async () => undefined),
+    getConfigOptions: jest.fn(() => ({ status: "unsupported" as const })),
+    setConfigOption: jest.fn(async () => [] as AcpConfigOption[]),
+    getSessionModels: jest.fn(() => ({ status: "unsupported" as const })),
     cancel: jest.fn(async () => undefined),
     removeAgent: jest.fn(async () => undefined),
   }
@@ -406,6 +410,72 @@ describe("createExternalAgentSession", () => {
         "acp-session-1",
         "gpt-5.6-sol"
       )
+    })
+
+    it("uses ACP model config options for listing and live switching", async () => {
+      const { manager } = fakeManager()
+      ;(manager.getConfigOptions as jest.Mock).mockReturnValue({
+        status: "ok",
+        data: [
+          {
+            id: "model",
+            name: "Model",
+            category: "model",
+            type: "select",
+            currentValue: "claude-sonnet-4-5",
+            options: [
+              { value: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
+              { value: "claude-opus-4-1", name: "Claude Opus 4.1" },
+            ],
+          },
+        ],
+      })
+      const session = newSession(manager)
+      await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+      await expect(session.listModels?.()).resolves.toEqual([
+        { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
+        { id: "claude-opus-4-1", name: "Claude Opus 4.1" },
+      ])
+      await expect(session.setModel?.("claude-opus-4-1")).resolves.toBe(true)
+      expect(manager.setConfigOption).toHaveBeenCalledWith(
+        "cli-external-cli-session",
+        "acp-session-1",
+        "model",
+        "claude-opus-4-1"
+      )
+      expect(manager.setSessionModel).not.toHaveBeenCalled()
+    })
+
+    it("discovers ACP models before the first turn through a disposable session", async () => {
+      const { manager } = fakeManager()
+      const createSession = jest.fn(async () => ({ id: "acp-model-probe" }))
+      const closeSession = jest.fn(async () => undefined)
+      manager.createSession = createSession
+      manager.closeSession = closeSession
+      ;(manager.getConfigOptions as jest.Mock).mockReturnValue({
+        status: "ok",
+        data: [
+          {
+            id: "model",
+            name: "Model",
+            category: "model",
+            type: "select",
+            currentValue: "claude-sonnet-4-5",
+            options: [{ value: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" }],
+          },
+        ],
+      })
+      const session = newSession(manager)
+
+      await expect(session.listModels?.()).resolves.toEqual([
+        { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
+      ])
+      expect(createSession).toHaveBeenCalledWith(
+        "cli-external-cli-session",
+        expect.objectContaining({ cwd: "/work" })
+      )
+      expect(closeSession).toHaveBeenCalledWith("cli-external-cli-session", "acp-model-probe")
     })
 
     it("reports no live switch before the first turn (nothing to switch yet)", async () => {

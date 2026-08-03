@@ -143,6 +143,12 @@ export interface AgentSessionParams {
   now?: () => number
 }
 
+/** A model option exposed by the external agent that is currently hosting a session. */
+export interface AgentModelOption {
+  id: string
+  name?: string
+}
+
 export interface SendTurnOptions {
   gate: PermissionResponder
   onEvent?: (event: CaptureStreamEvent) => void
@@ -195,6 +201,8 @@ export interface AgentSession {
    * resolved SendOptions and recreates the session instead.
    */
   setModel?(model: string): Promise<boolean>
+  /** Return model options advertised by the live external session. */
+  listModels?(): Promise<AgentModelOption[]>
   close(): Promise<void>
 }
 
