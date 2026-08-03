@@ -1924,6 +1924,35 @@ export function useClaudeChat() {
           return
         }
       }
+      // Realtime voice tool approvals — same in-renderer contract as the
+      // built-in-skill branch above: there is no sidecar-side waiter, so these
+      // ids must never reach `approveTool`. "Always allow" writes an explicit
+      // `toolRules` entry rather than falling through to `alwaysAllowTools`,
+      // because `deriveAllowRuleFromApproval` returns null for plugin tools and
+      // that bare list is only consulted by the sidecar — the voice session
+      // would have kept asking forever.
+      {
+        const { isRealtimeToolApprovalRequestId, grantRealtimeToolAlwaysAllow } =
+          await import("@/lib/voice/live/approval")
+        if (isRealtimeToolApprovalRequestId(approval.requestId)) {
+          if (decision === "allow_always") {
+            const settingsState = useSettingsStore.getState()
+            const ap = settingsState.settings?.agentPermissions ?? {}
+            const nextRules = grantRealtimeToolAlwaysAllow(
+              approval.sessionId,
+              approval.toolName,
+              ap.toolRules
+            )
+            await settingsState.save({ agentPermissions: { ...ap, toolRules: nextRules } })
+          }
+          const { resolveApproval } = await import("@/lib/connectors/hitl/approval-registry")
+          resolveApproval(approval.sessionId, approval.requestId, {
+            decision: decision === "deny" ? "deny" : "allow",
+          })
+          store.getState().clearApproval(approval.requestId, approval.sessionId)
+          return
+        }
+      }
       // Persist the always-allow choice. Prefer a TARGET-SCOPED rule
       // (`Bash(git *)`, `Read(/path/x)`) so the grant is precise and future
       // matching calls auto-resolve via the sidecar ruleset — falling back to a

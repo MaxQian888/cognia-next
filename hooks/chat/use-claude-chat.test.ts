@@ -1144,6 +1144,35 @@ describe("useClaudeChat — actions", () => {
     expect(chatState.clearApproval).toHaveBeenCalledWith("builtin-skill:im.create_chat:x", "sess-1")
   })
 
+  it("respondToApproval resolves realtime approvals locally and persists always-allow rules", async () => {
+    const { awaitApproval } = await import("@/lib/connectors/hitl/approval-registry")
+    const requestId = "realtime-tool:call-1"
+    const pending = awaitApproval("sess-1", requestId, { ttlMs: 0 })
+    settingsState.save.mockClear()
+    settingsState.toggleAlwaysAllow.mockClear()
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.respondToApproval(
+        {
+          sessionId: "sess-1",
+          requestId,
+          toolName: "search_notes",
+        } as never,
+        "allow_always"
+      )
+    })
+
+    await expect(pending).resolves.toEqual({ decision: "allow" })
+    expect(settingsState.save).toHaveBeenCalledWith({
+      agentPermissions: { toolRules: { search_notes: { "*": "allow" } } },
+    })
+    expect(settingsState.toggleAlwaysAllow).not.toHaveBeenCalled()
+    expect(approveToolMock).not.toHaveBeenCalled()
+    expect(chatState.clearApproval).toHaveBeenCalledWith(requestId, "sess-1")
+  })
+
   it("respondToApproval (allow_always) toggles the always-allow list", async () => {
     const { result } = renderHook(() => useClaudeChat())
     await flush()
