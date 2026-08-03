@@ -434,7 +434,7 @@ it("selects a remote element by snapshot ref and sends it through the shared com
     expect(sendComment).toHaveBeenCalledWith(
       expect.objectContaining({ selector: "#buy" }),
       "Make this clearer",
-      { sessionId: "chat-1", pageUrl: "https://example.com/current" }
+      { sessionId: "chat-1" }
     )
   )
 })

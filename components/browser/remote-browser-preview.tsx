@@ -404,7 +404,6 @@ export function RemoteBrowserPreview({
     try {
       const sent = await sendComment(selection, comment.trim(), {
         sessionId: chatSessionId,
-        pageUrl: selection.pageUrl ?? activePage?.url,
       })
       if (sent) {
         setSelection(null)
