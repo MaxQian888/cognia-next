@@ -292,6 +292,12 @@ const projectCommon: Config = {
   // `typeof window !== "undefined"` guard, so it serves both projects.
   setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
 
+  // Multi-project full-suite runs keep several Jest workers CPU-bound at once.
+  // Database setup and other integration-style tests that finish in under ten
+  // seconds alone can cross Jest's five-second default while a worker is
+  // starved. Keep a finite ceiling, but budget for loaded CI and local runs.
+  testTimeout: 30_000,
+
   testPathIgnorePatterns: baseTestPathIgnorePatterns,
 
   // Several ported npm packages are ESM-only (no CJS dist), so Jest's default
