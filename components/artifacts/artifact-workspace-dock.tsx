@@ -42,40 +42,13 @@ import { ArtifactDock } from "./artifact-dock"
 import { WorkspaceRevealOpener } from "./workspace-mode/workspace-reveal-opener"
 
 /**
- * Apply a dock size change under a short flex-grow transition, then strip the
- * transition again so manual divider dragging stays immediate.
- *
- * The panel's content is pinned to the width it will occupy when the animation
- * settles, so the shrinking shell *wipes* it instead of reflowing it. Without
- * that pin the dock squashed for the whole transition — the activity rail is `shrink-0` while
- * the panel body is not, so the body alone got crushed on the way out and
- * stretched on the way in.
- *
- * Uses inline styles (not Tailwind classes) so the duration can consume the
- * user's `--motion-duration-scale` preference — a runtime `classList.add` of an
- * arbitrary Tailwind class would never be JIT-compiled into the CSS. The
- * cleanup delay is scaled by the same multiplier so a slower (1.5×) preference
- * isn't cut short; reduce-motion collapses it via the global CSS guard.
- *
- * **Skipped entirely while a Pro IDE pane is pinned inside this dock.** That
- * pane is a native child webview floating above the DOM: CSS neither clips nor
- * tweens it, and its bounds are re-pushed over IPC once per frame. Animating
- * around it costs a full VS Code relayout every frame — and, worse, the frozen
- * content width below would hold the reserved rect at full size for the whole
- * transition, so a collapse left a full-width VS Code hanging over the chat before
- * snapping away. `app/globals.css` states this policy for the shell transitions
- * it can reach; inline styles are out of the stylesheet's reach, so the same
- * policy is enforced here instead.
- */
-/**
  * Duration and curve both come from the shared motion tokens, so the dock
  * moves on the same clock as the terminal dock, the mobile sheets and every
- * other surface built from them. They used to be a local `200ms ease-in-out`,
- * which was a third curve competing with `MOBILE_EASE` and `MotionCollapse`.
+ * other surface built from them.
  *
- * The divider below carries the same pair as a literal Tailwind class — an
- * arbitrary value cannot be interpolated from a constant and still be
- * JIT-compiled. `artifact-workspace-dock.test.tsx` pins the two together.
+ * The View Transition CSS and divider below carry the same pair as literals —
+ * an arbitrary value cannot be interpolated from a constant and still be
+ * compiled into CSS. `artifact-workspace-dock.test.tsx` pins all three together.
  */
 export const DOCK_RESIZE_DURATION_MS = MOBILE_DURATION.normal * 1000
 export const DOCK_RESIZE_EASE = `cubic-bezier(${MOBILE_EASE.join(",")})`
@@ -83,56 +56,82 @@ export const DOCK_RESIZE_EASE = `cubic-bezier(${MOBILE_EASE.join(",")})`
 const DOCK_RESIZE_CLEANUP_SLACK_MS = 40
 
 /**
- * The user's motion-speed preference, as published by `motion-applier`.
- * jsdom reports no custom properties, so this falls back to 1× in tests.
+ * Commit the final panel layout once and let the browser animate old/new
+ * snapshots on the compositor. A live flex-grow tween makes the conversation
+ * and dock reflow every frame; that is the page shake this boundary must avoid.
+ *
+ * View Transitions are progressive enhancement. Unsupported engines resize in
+ * one stable frame, and a native Pro IDE child webview always takes that path
+ * because a DOM snapshot cannot capture or clip it.
  */
-function motionDurationScale(element: HTMLElement): number {
-  return Number(getComputedStyle(element).getPropertyValue("--motion-duration-scale")) || 1
-}
-
-function animateDockResize(
-  panel: HTMLDivElement,
-  content: HTMLDivElement | null,
-  /** Target width as a percent of the group, or null when collapsing. */
-  targetPercent: number | null,
-  apply: () => void
-): () => void {
-  if (isProIdePanePinnedWithin(panel)) {
+function animateDockResize(panel: HTMLDivElement, apply: () => void): () => void {
+  const startViewTransition = document.startViewTransition?.bind(document)
+  if (isProIdePanePinnedWithin(panel) || !startViewTransition) {
     apply()
     return () => {}
   }
 
-  // Freeze whichever geometry is wider. Expanding lays the body out at its
-  // destination from the first frame; shrinking keeps the current wide layout
-  // and lets the shell wipe it. Pinning every preset to its destination treated
-  // wide → narrow like an expansion, so responsive content reflowed before the
-  // outer panel moved and produced a visible two-step bump.
-  const currentWidth = content?.offsetWidth ?? 0
-  const targetWidth =
-    targetPercent === null ? 0 : ((panel.parentElement?.offsetWidth ?? 0) * targetPercent) / 100
-  const frozenWidth = Math.max(currentWidth, targetWidth)
-
-  const reset = () => {
-    panel.style.transitionProperty = ""
-    panel.style.transitionDuration = ""
-    panel.style.transitionTimingFunction = ""
-    if (content) content.style.width = ""
+  const group = panel.parentElement
+  const siblings = group ? Array.from(group.children) : []
+  const chat = siblings.find(
+    (element): element is HTMLElement =>
+      element instanceof HTMLElement && element !== panel && element.hasAttribute("data-panel")
+  )
+  const divider = siblings.find(
+    (element): element is HTMLElement =>
+      element instanceof HTMLElement && element.hasAttribute("data-separator")
+  )
+  if (!chat || !divider) {
+    apply()
+    return () => {}
   }
 
-  if (content && frozenWidth > 0) content.style.width = `${frozenWidth}px`
-  panel.style.transitionProperty = "flex-grow"
-  panel.style.transitionDuration = `calc(${DOCK_RESIZE_DURATION_MS}ms * var(--motion-duration-scale, 1))`
-  panel.style.transitionTimingFunction = DOCK_RESIZE_EASE
-  // Commit the transition style before react-resizable-panels updates flex-grow.
-  void panel.offsetWidth
-  apply()
+  const root = document.documentElement
+  const previousNames = {
+    root: root.style.viewTransitionName,
+    chat: chat.style.viewTransitionName,
+    divider: divider.style.viewTransitionName,
+    panel: panel.style.viewTransitionName,
+  }
+  root.style.viewTransitionName = "none"
+  chat.style.viewTransitionName = "cognia-dock-chat"
+  divider.style.viewTransitionName = "cognia-dock-divider"
+  panel.style.viewTransitionName = "cognia-dock-panel"
 
-  const timer = window.setTimeout(
-    reset,
-    DOCK_RESIZE_DURATION_MS * motionDurationScale(panel) + DOCK_RESIZE_CLEANUP_SLACK_MS
-  )
+  const reset = () => {
+    root.style.viewTransitionName = previousNames.root
+    chat.style.viewTransitionName = previousNames.chat
+    divider.style.viewTransitionName = previousNames.divider
+    panel.style.viewTransitionName = previousNames.panel
+  }
+
+  let applied = false
+  const applyOnce = () => {
+    if (applied) return
+    applied = true
+    apply()
+  }
+  let transition: ViewTransition
+  try {
+    transition = startViewTransition(applyOnce)
+  } catch {
+    reset()
+    applyOnce()
+    return () => {}
+  }
+
+  let active = true
+  void transition.finished
+    .catch(() => undefined)
+    .finally(() => {
+      if (!active) return
+      active = false
+      reset()
+    })
   return () => {
-    window.clearTimeout(timer)
+    if (!active) return
+    active = false
+    transition.skipTransition()
     reset()
   }
 }
@@ -196,9 +195,9 @@ function useDockAttentionSignal(): void {
  * invisible zero-width dock could lock every other surface out of the webview
  * and leave them retrying on a backoff.
  *
- * The delay is not cosmetic. `animateDockResize` freezes the content's width so
- * the shrinking shell wipes it rather than reflowing it; unmounting on the same
- * frame would leave that animation wiping an empty box.
+ * The delay is not cosmetic. `animateDockResize` captures the open and collapsed
+ * layouts as compositor snapshots; unmounting on the same frame would capture
+ * an empty panel instead of letting the old body move cleanly into the rail.
  *
  * **With a persistent rail this never retracts** — callers pass `false`. The
  * workbench stays mounted so its activity rail can keep drawing, and it drops
@@ -221,7 +220,10 @@ function useDockContentMounted(
     const element = panelElementRef.current
     const timer = window.setTimeout(
       () => setRetracted(true),
-      DOCK_RESIZE_DURATION_MS * (element ? motionDurationScale(element) : 1) +
+      DOCK_RESIZE_DURATION_MS *
+        (element
+          ? Number(getComputedStyle(element).getPropertyValue("--motion-duration-scale")) || 1
+          : 1) +
         DOCK_RESIZE_CLEANUP_SLACK_MS
     )
     return () => window.clearTimeout(timer)
@@ -286,7 +288,6 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const railPersistent = useWorkbenchRailPersistent()
   const dockPanelRef = useRef<PanelImperativeHandle | null>(null)
   const dockPanelElementRef = useRef<HTMLDivElement | null>(null)
-  const dockContentElementRef = useRef<HTMLDivElement | null>(null)
   const previousDockCollapsedRef = useRef(dockCollapsed)
   const previousDockSizeRequestRef = useRef(dockSizeRequest)
   /**
@@ -297,13 +298,12 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
    * `setDockSize`, and the value it reports is a pixel measurement converted to
    * a percent — so it practically never matches the requested number exactly.
    * With `dockSize` in the dependency arrays that echo landed *mid-animation*
-   * and re-ran both effects: React fired their cleanup, which clears the timer
-   * and calls `reset()`, stripping the transition and the frozen content width
-   * one frame after they were applied. The re-run then bailed on the unchanged
-   * request token, so nothing put them back. The dock snapped to its new width
-   * with no transition while its contents were laid out at the *destination*
-   * width for a single frame inside the old box — a reflow flash that showed up
-   * as a scrollbar blinking in and out of the panel body on every panel switch.
+   * and re-ran both effects: React fired their cleanup, skipped the active view
+   * transition and removed its temporary capture names. The re-run then bailed
+   * on the unchanged request token, so nothing restarted the motion. The dock
+   * snapped to its new width while responsive content changed geometry in the
+   * live page — a reflow flash that showed up as a scrollbar blinking in and out
+   * of the panel body on every panel switch.
    *
    * A layout effect, so the ref is current before the passive effects below run
    * in the same commit.
@@ -314,14 +314,13 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   }, [dockSize])
   /**
    * Whether the panel *body* is still on screen. Retracts one animation after a
-   * collapse, so the shrinking shell wipes real content instead of an empty box.
+   * collapse, so the old snapshot contains real content instead of an empty box.
    *
    * Two consumers now read this one delay: whether `<ArtifactDock />` mounts at
    * all (only when the rail is not persistent — otherwise the rail has to keep
    * drawing), and `railOnly`, which is what actually drops the body. Deriving
-   * `railOnly` from the raw `dockCollapsed` instead would flip it on the first
-   * frame of the collapse and leave a lone 48px rail sitting inside a
-   * frozen-width box for the whole 280ms.
+   * `railOnly` from the raw `dockCollapsed` instead would flip it before the
+   * transition captured the outgoing panel and make the body blink away.
    */
   const dockBodyMounted = useDockContentMounted(dockCollapsed, dockPanelElementRef)
   const dockContentMounted = railPersistent || dockBodyMounted
@@ -391,15 +390,10 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
     if (!panel || !element) return
 
     const target = dockSizeRef.current
-    return animateDockResize(
-      element,
-      dockContentElementRef.current,
-      dockCollapsed ? null : target,
-      () => {
-        if (dockCollapsed) panel.collapse()
-        else panel.resize(`${target}%`)
-      }
-    )
+    return animateDockResize(element, () => {
+      if (dockCollapsed) panel.collapse()
+      else panel.resize(`${target}%`)
+    })
   }, [dockCollapsed])
 
   // A width preset (the workbench narrow/wide buttons) asked for a specific
@@ -415,9 +409,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
     if (!panel || !element || dockCollapsed) return
 
     const target = dockSizeRef.current
-    return animateDockResize(element, dockContentElementRef.current, target, () =>
-      panel.resize(`${target}%`)
-    )
+    return animateDockResize(element, () => panel.resize(`${target}%`))
   }, [dockCollapsed, dockSizeRequest])
 
   // Auto-expanding on a fresh artifact lives in `useDockAttentionSignal` on the
@@ -549,11 +541,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
           collapsible
           collapsedSize={collapsedSize}
         >
-          <div
-            ref={dockContentElementRef}
-            data-testid="artifact-dock-wrapper"
-            className="h-full min-w-0 overflow-hidden"
-          >
+          <div data-testid="artifact-dock-wrapper" className="h-full min-w-0 overflow-hidden">
             {dockContentMounted ? <ArtifactDock railOnly={!dockBodyMounted} /> : null}
           </div>
         </ResizablePanel>

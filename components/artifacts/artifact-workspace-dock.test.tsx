@@ -134,6 +134,7 @@ jest.mock("@/components/ui/resizable", () => {
       return (
         <div
           ref={elementRef}
+          data-panel=""
           data-testid={`resizable-panel-${id}`}
           data-size={size}
           data-min={minSize}
@@ -158,6 +159,7 @@ jest.mock("@/components/ui/resizable", () => {
       onPointerUp?: () => void
     }) => (
       <div
+        data-separator=""
         data-testid="resizable-handle"
         className={className}
         onDoubleClick={onDoubleClick}
@@ -256,9 +258,9 @@ describe("ArtifactWorkspaceDock", () => {
 
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
 
-      // Still showing its body through the collapse animation: `animateDockResize`
-      // pins the content's width so the shrinking shell wipes it, and dropping
-      // it on the same frame would leave that animation wiping a blank box.
+      // Still showing its body through the collapse animation: the old view
+      // snapshot needs real content, and dropping it on the same frame would
+      // capture a blank box moving into the activity rail.
       expect(screen.getByTestId("dock")).not.toHaveAttribute("data-rail-only")
 
       act(() => jest.advanceTimersByTime(400))
@@ -593,7 +595,59 @@ describe("ArtifactWorkspaceDock", () => {
     expect(state.dockSizeRequest).toBe(before + 1)
   })
 
-  it("animates collapse/expand via a motion-speed-scaled inline transition", async () => {
+  it("uses one snapshot transition for a preset instead of reflowing the live page", async () => {
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    let finishTransition: (() => void) | undefined
+    const skipTransition = jest.fn()
+    const startViewTransition = jest.fn((update: () => void) => {
+      update()
+      return {
+        ready: Promise.resolve(),
+        updateCallbackDone: Promise.resolve(),
+        finished: new Promise<void>((resolve) => {
+          finishTransition = resolve
+        }),
+        skipTransition,
+      }
+    })
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: startViewTransition,
+    })
+
+    try {
+      render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+      const dockPanel = screen.getByTestId("resizable-panel-artifact-dock")
+      const chatPanel = screen.getByTestId("resizable-panel-artifact-chat")
+      const divider = screen.getByTestId("resizable-handle")
+
+      act(() => useArtifactDockLayoutStore.getState().requestDockSize(50))
+
+      expect(startViewTransition).toHaveBeenCalledTimes(1)
+      expect(dockPanel).toHaveAttribute("data-size", "50%")
+      expect(dockPanel.style.transitionProperty).toBe("")
+      expect(dockPanel.style.viewTransitionName).toBe("cognia-dock-panel")
+      expect(chatPanel.style.viewTransitionName).toBe("cognia-dock-chat")
+      expect(divider.style.viewTransitionName).toBe("cognia-dock-divider")
+      expect(document.documentElement.style.viewTransitionName).toBe("none")
+
+      finishTransition?.()
+      await waitFor(() => expect(dockPanel.style.viewTransitionName).toBe(""))
+      expect(chatPanel.style.viewTransitionName).toBe("")
+      expect(divider.style.viewTransitionName).toBe("")
+      expect(document.documentElement.style.viewTransitionName).toBe("")
+      expect(skipTransition).not.toHaveBeenCalled()
+    } finally {
+      Reflect.deleteProperty(document, "startViewTransition")
+      document.documentElement.style.viewTransitionName = ""
+    }
+  })
+
+  it("falls back to an immediate stable resize when snapshot transitions are unavailable", () => {
     render(
       <ArtifactWorkspaceDock>
         <div data-testid="chat" />
@@ -607,69 +661,135 @@ describe("ArtifactWorkspaceDock", () => {
     act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
     const dockPanel = screen.getByTestId("resizable-panel-artifact-dock")
     expect(dockPanel).toHaveAttribute("data-size", "34%")
-    // Inline styles (not Tailwind classes) so the duration can consume the
-    // user's --motion-duration-scale preference.
-    expect(dockPanel.style.transitionProperty).toBe("flex-grow")
-    expect(dockPanel.style.transitionTimingFunction).toBe(DOCK_RESIZE_EASE)
-    expect(dockPanel.getAttribute("style") ?? "").toContain("--motion-duration-scale")
-
-    // Transition is removed after the (scaled) animation so manual dragging stays immediate.
-    await waitFor(() => expect(dockPanel.style.transitionProperty).toBe(""))
+    // Replaying a live flex transition would reflow the chat on every frame.
+    // An engine without View Transitions takes the correct final layout once.
+    expect(dockPanel.style.transitionProperty).toBe("")
+    expect(screen.getByTestId("artifact-dock-wrapper").style.width).toBe("")
 
     act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
     expect(dockPanel).toHaveAttribute("data-size", "48px")
-    expect(dockPanel.style.transitionProperty).toBe("flex-grow")
+    expect(dockPanel.style.transitionProperty).toBe("")
   })
 
-  it("pins the dock body's width so collapsing wipes it instead of squashing it", async () => {
-    // jsdom reports every offsetWidth as 0, so the pin is unreachable without
-    // stubbing the two measurements it derives from.
-    let bodyWidth = 48
-    const offsetWidth = jest
-      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
-      .mockImplementation(function (this: HTMLElement) {
-        return this.dataset.testid === "artifact-dock-wrapper" ? bodyWidth : 400
+  it("falls back cleanly when the resizable group cannot provide snapshot surfaces", () => {
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    const startViewTransition = jest.fn()
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: startViewTransition,
+    })
+    try {
+      const { unmount } = render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+      screen.getByTestId("resizable-handle").removeAttribute("data-separator")
+
+      act(() => useArtifactDockLayoutStore.getState().requestDockSize(50))
+
+      expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute(
+        "data-size",
+        "50%"
+      )
+      expect(startViewTransition).not.toHaveBeenCalled()
+      unmount()
+    } finally {
+      Reflect.deleteProperty(document, "startViewTransition")
+    }
+  })
+
+  it("lands the requested layout if snapshot capture throws", () => {
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    const startViewTransition = jest.fn(() => {
+      throw new Error("snapshot unavailable")
+    })
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: startViewTransition,
+    })
+    try {
+      const { unmount } = render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+
+      act(() => useArtifactDockLayoutStore.getState().requestDockSize(50))
+
+      const dockPanel = screen.getByTestId("resizable-panel-artifact-dock")
+      expect(dockPanel).toHaveAttribute("data-size", "50%")
+      expect(dockPanel.style.viewTransitionName).toBe("")
+      expect(document.documentElement.style.viewTransitionName).toBe("")
+      unmount()
+    } finally {
+      Reflect.deleteProperty(document, "startViewTransition")
+      document.documentElement.style.viewTransitionName = ""
+    }
+  })
+
+  it("uses the same snapshot path for collapse and expand", async () => {
+    const transitions: Array<{ finish: () => void }> = []
+    const startViewTransition = jest.fn((update: () => void) => {
+      update()
+      let finish = () => {}
+      const finished = new Promise<void>((resolve) => {
+        finish = resolve
       })
+      transitions.push({ finish })
+      return {
+        ready: Promise.resolve(),
+        updateCallbackDone: Promise.resolve(),
+        finished,
+        skipTransition: jest.fn(),
+      }
+    })
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: startViewTransition,
+    })
     try {
       render(
         <ArtifactWorkspaceDock>
           <div data-testid="chat" />
         </ArtifactWorkspaceDock>
       )
-      const body = screen.getByTestId("artifact-dock-wrapper")
+      const panel = screen.getByTestId("resizable-panel-artifact-dock")
 
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+      expect(panel).toHaveAttribute("data-size", "34%")
+      expect(startViewTransition).toHaveBeenCalledTimes(1)
+      transitions[0]?.finish()
+      await waitFor(() => expect(panel.style.viewTransitionName).toBe(""))
 
-      // Expanding: the body is laid out at the width it is heading for (34% of
-      // the 400px group) from the first frame, so the widening panel reveals
-      // finished content rather than stretching a squeezed column.
-      expect(body.style.width).toBe("136px")
-      await waitFor(() => expect(body.style.width).toBe(""))
-
-      bodyWidth = 400
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
-
-      // Collapsing: hold what is on screen. The activity rail is shrink-0 while
-      // the panel body is not, so an unpinned body gets crushed alone.
-      expect(body.style.width).toBe("400px")
-      await waitFor(() => expect(body.style.width).toBe(""))
+      expect(panel).toHaveAttribute("data-size", "48px")
+      expect(startViewTransition).toHaveBeenCalledTimes(2)
+      expect(screen.getByTestId("artifact-dock-wrapper").style.width).toBe("")
     } finally {
-      offsetWidth.mockRestore()
+      Reflect.deleteProperty(document, "startViewTransition")
+      document.documentElement.style.viewTransitionName = ""
     }
   })
 
-  it("keeps wide content geometry while a width preset shrinks the dock", () => {
+  it("keeps responsive content untouched while a width preset shrinks the dock", () => {
     act(() => {
       useArtifactDockLayoutStore.getState().setDockCollapsed(false)
       useArtifactDockLayoutStore.getState().setDockSize(50)
     })
-    const offsetWidth = jest
-      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
-      .mockImplementation(function (this: HTMLElement) {
-        if (this.dataset.testid === "resizable-panel-artifact-dock") return 500
-        if (this.dataset.testid === "artifact-dock-wrapper") return 500
-        return 1000
-      })
+    const startViewTransition = jest.fn((update: () => void) => {
+      update()
+      return {
+        ready: Promise.resolve(),
+        updateCallbackDone: Promise.resolve(),
+        finished: new Promise<void>(() => {}),
+        skipTransition: jest.fn(),
+      }
+    })
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: startViewTransition,
+    })
     try {
       render(
         <ArtifactWorkspaceDock>
@@ -680,23 +800,34 @@ describe("ArtifactWorkspaceDock", () => {
 
       act(() => useArtifactDockLayoutStore.getState().requestDockSize(34))
 
-      // The shell starts at 500px and animates down to 340px. Reflowing the
-      // body to 340px before the shell has moved makes responsive controls jump
-      // first, producing the visible wide-to-narrow layout bump. Hold the
-      // current geometry and let the shrinking shell wipe it instead.
-      expect(body.style.width).toBe("500px")
+      // The browser owns old/new snapshots; the live body is never forced to a
+      // guessed pixel width that can disagree with the panel's final flex math.
+      expect(startViewTransition).toHaveBeenCalledTimes(1)
+      expect(body.style.width).toBe("")
     } finally {
-      offsetWidth.mockRestore()
+      Reflect.deleteProperty(document, "startViewTransition")
+      document.documentElement.style.viewTransitionName = ""
     }
   })
 
-  it("skips the transition and the width pin while a Pro IDE pane is pinned inside", async () => {
+  it("skips the snapshot transition while a Pro IDE pane is pinned inside", async () => {
     // The embedded code-server pane is a native child webview floating above the
-    // DOM. CSS cannot clip it, so the frozen content width below would hold its
-    // reserved rect at full size for the whole 200ms — a collapse left a
-    // full-width VS Code hanging over the chat before snapping away. And every
-    // frame of the transition costs an IPC bounds push plus a VS Code relayout.
-    const offsetWidth = jest.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(400)
+    // DOM. A browser snapshot cannot capture it, and moving the reserved region
+    // underneath would leave a full-width VS Code view hanging over the chat
+    // before snapping away.
+    const startViewTransition = jest.fn((update: () => void) => {
+      update()
+      return {
+        ready: Promise.resolve(),
+        updateCallbackDone: Promise.resolve(),
+        finished: Promise.resolve(),
+        skipTransition: jest.fn(),
+      }
+    })
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: startViewTransition,
+    })
     try {
       render(
         <ArtifactWorkspaceDock>
@@ -709,8 +840,8 @@ describe("ArtifactWorkspaceDock", () => {
       // Nothing holds the pane yet, so the region alone must not disarm the
       // animation — otherwise the guard would silently kill it for everyone.
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
-      expect(dockPanel.style.transitionProperty).toBe("flex-grow")
-      await waitFor(() => expect(body.style.width).toBe(""))
+      expect(startViewTransition).toHaveBeenCalledTimes(1)
+      await waitFor(() => expect(dockPanel.style.viewTransitionName).toBe(""))
 
       await act(async () => {
         await claimCodeServerPane("session:s1", "http://127.0.0.1:1/", RECT, jest.fn())
@@ -720,15 +851,18 @@ describe("ArtifactWorkspaceDock", () => {
 
       // The size change still lands — it just lands in one frame.
       expect(dockPanel).toHaveAttribute("data-size", "48px")
+      expect(startViewTransition).toHaveBeenCalledTimes(1)
       expect(dockPanel.style.transitionProperty).toBe("")
       expect(body.style.width).toBe("")
 
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
       expect(dockPanel).toHaveAttribute("data-size", "34%")
+      expect(startViewTransition).toHaveBeenCalledTimes(1)
       expect(dockPanel.style.transitionProperty).toBe("")
       expect(body.style.width).toBe("")
     } finally {
-      offsetWidth.mockRestore()
+      Reflect.deleteProperty(document, "startViewTransition")
+      document.documentElement.style.viewTransitionName = ""
     }
   })
 
@@ -820,12 +954,20 @@ describe("ArtifactWorkspaceDock", () => {
     expect(screen.getByTestId("resizable-panel-artifact-chat")).toHaveAttribute("data-min", "35%")
   })
 
-  it("keeps the resize animation alive when the layout echoes a settled width back", () => {
-    const offsetWidth = jest
-      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
-      .mockImplementation(function (this: HTMLElement) {
-        return this.dataset.testid === "artifact-dock-wrapper" ? 340 : 1000
-      })
+  it("keeps one snapshot transition alive when layout echoes the settled width back", () => {
+    const startViewTransition = jest.fn((update: () => void) => {
+      update()
+      return {
+        ready: Promise.resolve(),
+        updateCallbackDone: Promise.resolve(),
+        finished: new Promise<void>(() => {}),
+        skipTransition: jest.fn(),
+      }
+    })
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: startViewTransition,
+    })
     try {
       render(
         <ArtifactWorkspaceDock>
@@ -836,25 +978,26 @@ describe("ArtifactWorkspaceDock", () => {
       const panel = screen.getByTestId("resizable-panel-artifact-dock")
       const body = screen.getByTestId("artifact-dock-wrapper")
 
+      const requestsBefore = startViewTransition.mock.calls.length
       act(() => useArtifactDockLayoutStore.getState().requestDockSize(50))
-      expect(body.style.width).toBe("500px")
+      expect(startViewTransition).toHaveBeenCalledTimes(requestsBefore + 1)
+      expect(panel.style.viewTransitionName).toBe("cognia-dock-panel")
 
       // `onLayoutChanged` reports a pixel measurement converted back to a
       // percent, so it practically never equals the number that was requested.
       // That echo used to be a dependency of the animation effect: React ran
-      // its cleanup mid-flight, stripping the transition and the frozen width
-      // one frame after they were applied, and the re-run bailed on the
-      // unchanged request token instead of putting them back. The dock snapped
-      // while its contents were briefly laid out at the destination width
-      // inside the old box — a reflow flash that blinked a scrollbar in and out
-      // of the panel body on every switch.
+      // its cleanup mid-flight and the re-run bailed on the unchanged request
+      // token instead of restarting the motion. Keep the one capture active so
+      // responsive contents never flash into the live page between snapshots.
       act(() => screen.getByTestId("resize-dock").click())
 
       expect(useArtifactDockLayoutStore.getState().dockSize).toBe(42)
-      expect(body.style.width).toBe("500px")
-      expect(panel.style.transitionProperty).toBe("flex-grow")
+      expect(body.style.width).toBe("")
+      expect(panel.style.viewTransitionName).toBe("cognia-dock-panel")
+      expect(startViewTransition).toHaveBeenCalledTimes(requestsBefore + 1)
     } finally {
-      offsetWidth.mockRestore()
+      Reflect.deleteProperty(document, "startViewTransition")
+      document.documentElement.style.viewTransitionName = ""
     }
   })
 
@@ -966,15 +1109,23 @@ describe("dock motion tokens", () => {
     expect(DOCK_RESIZE_EASE).toBe(`cubic-bezier(${MOBILE_EASE.join(",")})`)
   })
 
-  it("keeps the divider's literal class in step with them", () => {
-    // The divider fades and narrows as one movement with the panel, but its
-    // transition is a Tailwind arbitrary value, which cannot be interpolated
-    // from a constant and still be JIT-compiled. Assert the literals agree so
-    // the two cannot drift into a visible mismatch.
+  it("keeps the snapshot CSS and divider's literal class in step with them", () => {
+    // The snapshot groups and divider move as one gesture, but their CSS
+    // literals cannot interpolate TypeScript constants. Assert they agree so
+    // the boundary never outruns either panel capture.
     const source = readFileSync(join(__dirname, "artifact-workspace-dock.tsx"), "utf8")
+    const globalStyles = readFileSync(join(__dirname, "../../app/globals.css"), "utf8")
     expect(source).toContain(
       `duration-[calc(${DOCK_RESIZE_DURATION_MS}ms*var(--motion-duration-scale,1))]`
     )
     expect(source).toContain(`ease-[${DOCK_RESIZE_EASE}]`)
+    expect(globalStyles).toContain(
+      `animation-duration: calc(${DOCK_RESIZE_DURATION_MS}ms * var(--motion-duration-scale, 1))`
+    )
+    expect(globalStyles.replaceAll(/\s/g, "")).toContain(
+      `animation-timing-function:${DOCK_RESIZE_EASE}`
+    )
+    expect(globalStyles).toContain("object-position: left center")
+    expect(globalStyles).toContain("object-position: right center")
   })
 })
