@@ -1,10 +1,8 @@
-/** @jest-environment jsdom */
 /**
  * Coverage for `lib/db/mcp-audit-log.ts` — append/list/count/clear plus the
  * 5000-row cap (overflow behavior in `pruneOldest`).
  */
 
-import "fake-indexeddb/auto"
 import {
   __TESTING__,
   appendMcpAuditLog,
@@ -13,14 +11,14 @@ import {
   listMcpAuditLog,
 } from "./mcp-audit-log"
 import type { McpAuditDraft } from "./mcp-audit-log"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 function draft(overrides: Partial<McpAuditDraft> = {}): McpAuditDraft {
   return {
