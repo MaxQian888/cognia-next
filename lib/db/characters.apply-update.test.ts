@@ -1,4 +1,3 @@
-/** @jest-environment jsdom */
 /**
  * Apply Update + clone-hides-overlay dedupe tests (ADR-0030 v49).
  *
@@ -10,7 +9,6 @@
  *   - applyPackUpdateForPack batches over every clone of a given pack
  */
 
-import "fake-indexeddb/auto"
 import {
   applyPackUpdate,
   applyPackUpdateForPack,
@@ -18,7 +16,8 @@ import {
   listCharacters,
   previewPackUpdate,
 } from "./characters"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   __resetCharacterPacksForTesting,
   buildOverlayCharacterId,
@@ -58,14 +57,15 @@ function makePack(
   }
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().characters.clear()
   __resetCharacterPacksForTesting()
 })
+afterAll(dbFixture.dispose)
 
 describe("duplicateCharacter on overlay source", () => {
   it("captures pristineSnapshot of overlay's pack-managed fields", async () => {

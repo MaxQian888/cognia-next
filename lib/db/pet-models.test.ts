@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
 // Coverage for the pet Live2D model storage CRUD layer (v73).
 
-import "fake-indexeddb/auto"
 import {
   listPetModels,
   getPetModel,
@@ -12,15 +10,17 @@ import {
   updatePetModelCustomization,
 } from "./pet-models"
 import type { PetModelRow } from "./pet-models"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await Promise.all([getDb().petModels.clear(), getDb().petModelFiles.clear()])
 })
+afterAll(dbFixture.dispose)
 
 type Meta = Omit<PetModelRow, "id" | "createdAt"> & { id?: string }
 

@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 // CRUD coverage for the characters table — list/get/create/update/delete
 // plus the duplicate path and idempotent built-in seeder. ADR-0030 added
 // overlay-aware paths exercised below.
 
-import "fake-indexeddb/auto"
 import {
   createCharacter,
   deleteCharacter,
@@ -16,7 +14,8 @@ import {
   seedBuiltInCharacters,
   updateCharacter,
 } from "./characters"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   __resetCharacterPacksForTesting,
   registerCharacterPack,
@@ -58,14 +57,15 @@ function makeOverlayPack(
   }
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().characters.clear()
   __resetCharacterPacksForTesting()
 })
+afterAll(dbFixture.dispose)
 
 describe("createCharacter", () => {
   it("inserts a row with sensible defaults", async () => {
