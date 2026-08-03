@@ -1,24 +1,16 @@
-/** @jest-environment jsdom */
-
-import "fake-indexeddb/auto"
 import {
   appendBehaviorEvent,
   clearBehaviorEvents,
   exportBehaviorEvents,
   listBehaviorEvents,
 } from "./behavior-events"
-import { __resetDbForTesting, getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
-beforeEach(async () => {
-  const db = getDb()
-  await db.delete()
-  __resetDbForTesting()
-})
+const dbFixture = createDbTestFixture()
 
-afterAll(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-})
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 it("appends, lists newest first, exports, and clears behavior events", async () => {
   await appendBehaviorEvent({

@@ -1,13 +1,9 @@
-/**
- * @jest-environment jsdom
- */
-import "fake-indexeddb/auto"
-
 jest.mock("@/lib/db/seed", () => ({
   seedBuiltIns: jest.fn().mockResolvedValue(undefined),
 }))
 
-import { __resetDbForTesting, getDb, whenSeeded, type BackgroundTaskJournalRow } from "./schema"
+import { getDb, type BackgroundTaskJournalRow } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   clearSettledBackgroundTasks,
   createDexieBackgroundTaskJournal,
@@ -31,13 +27,14 @@ function row(overrides: Partial<BackgroundTaskJournalRow> = {}): BackgroundTaskJ
   }
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().backgroundTasks.clear()
 })
+afterAll(dbFixture.dispose)
 
 describe("background task journal table", () => {
   it("is registered in the latest Dexie schema", async () => {

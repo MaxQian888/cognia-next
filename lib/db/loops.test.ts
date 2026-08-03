@@ -1,5 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import type { LoopCreateInput } from "./loops"
 import {
   __TESTING__,
@@ -15,7 +13,8 @@ import {
   listLoopsBySession,
   updateLoop,
 } from "./loops"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
 function buildLoop(overrides: Partial<LoopCreateInput> = {}): LoopCreateInput {
   return {
@@ -45,12 +44,11 @@ function buildLoop(overrides: Partial<LoopCreateInput> = {}): LoopCreateInput {
   }
 }
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("loop CRUD", () => {
   it("creates and reads back a loop with timestamps", async () => {
