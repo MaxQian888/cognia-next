@@ -1,6 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { getDb, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   createLabel,
   updateLabel,
@@ -10,11 +9,11 @@ import {
 } from "./conversation-labels"
 import { upsertByConversationKey } from "./conversation-overrides"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("conversation-labels", () => {
   it("creates, lists (sorted), and updates labels", async () => {

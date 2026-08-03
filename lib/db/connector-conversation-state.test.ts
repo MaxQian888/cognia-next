@@ -1,7 +1,4 @@
-/** @jest-environment jsdom */
-
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   activateConnectorConversation,
   closeConnectorConversation,
@@ -32,17 +29,13 @@ const TARGET: ConversationDeliveryTarget = {
   refreshedAt: 1_000,
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
+
 describe("connector conversation state", () => {
-  beforeEach(async () => {
-    await getDb().delete()
-    __resetDbForTesting()
-  })
-
-  afterEach(async () => {
-    await getDb().delete()
-    __resetDbForTesting()
-  })
-
   it("persists activation, refreshes the latest target, and closes explicitly", async () => {
     await activateConnectorConversation(TARGET, {
       activatedBy: "ou-1",

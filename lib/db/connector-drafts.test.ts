@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 /**
  * Tests for lib/db/connector-drafts.ts — outbound draft approval queue.
  */
 
-import "fake-indexeddb/auto"
 import {
   createDraft,
   listPendingForConversation,
@@ -11,15 +9,15 @@ import {
   rejectDraft,
   sweepExpired,
 } from "./connector-drafts"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import type { MessageSegment } from "@/types/connectors/segment"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 const segments: MessageSegment[] = [{ type: "text", text: "Hello!" }]
 

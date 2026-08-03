@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
-
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   bindConnectorInboundJobExecutionRun,
   claimConnectorInboundJob,
@@ -41,17 +39,13 @@ function event(messageId: string, timestamp: number): NormalizedInboundEvent {
   }
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
+
 describe("connector inbound jobs", () => {
-  beforeEach(async () => {
-    await getDb().delete()
-    __resetDbForTesting()
-  })
-
-  afterEach(async () => {
-    await getDb().delete()
-    __resetDbForTesting()
-  })
-
   it("deduplicates, claims in FIFO order, and completes durably", async () => {
     const first = await enqueueConnectorInboundJob(event("om-1", 10), "queue", { now: 100 })
     const duplicate = await enqueueConnectorInboundJob(event("om-1", 10), "queue", { now: 200 })
@@ -101,10 +95,11 @@ describe("connector inbound jobs", () => {
   it("converges when another delivery wins the unique insert race", async () => {
     const db = getDb()
     const actualAdd = db.connectorInboundJobs.add.bind(db.connectorInboundJobs)
-    jest.spyOn(db.connectorInboundJobs, "add").mockImplementationOnce(async (row) => {
-      await actualAdd(row)
-      throw new Error("ConstraintError")
-    })
+    jest.spyOn(db.connectorInboundJobs, "add").mockImplementationOnce((row) =>
+      actualAdd(row).then(() => {
+        throw new Error("ConstraintError")
+      })
+    )
 
     const result = await ensureConnectorInboundJob(event("om-race", 10), "queue", { now: 100 })
 

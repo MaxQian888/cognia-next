@@ -1,4 +1,3 @@
-/** @jest-environment jsdom */
 /**
  * Tests for lib/db/inbox-telemetry.ts — capped breadcrumb log (cap 3000).
  *
@@ -7,17 +6,16 @@
  * rotates faster than the operator-visible audit log.
  */
 
-import "fake-indexeddb/auto"
 import { append, listRecent, __TESTING__ } from "./inbox-telemetry"
 import type { InboxTelemetryEventRow, InboxTelemetryKind } from "./inbox-telemetry-types"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 function makeEntry(
   overrides: Partial<InboxTelemetryEventRow> = {}

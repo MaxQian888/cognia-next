@@ -1,17 +1,15 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { getDb, __resetDbForTesting } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   appendAssignmentEvent,
   listAssignmentEvents,
   MAX_ASSIGNMENT_EVENTS_PER_CONVERSATION,
 } from "./conversation-assignment-events"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("conversation-assignment-events", () => {
   it("appends and lists events oldest → newest", async () => {

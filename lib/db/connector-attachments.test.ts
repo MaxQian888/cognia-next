@@ -1,19 +1,17 @@
-/** @jest-environment jsdom */
 /**
  * Tests for lib/db/connector-attachments.ts — cached platform attachment CRUD.
  */
 
-import "fake-indexeddb/auto"
 import { upsertAttachment, findByRemoteRef, cleanupExpired } from "./connector-attachments"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import type { ConnectorAttachmentRow } from "./connector-types"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 function makeRow(overrides: Partial<ConnectorAttachmentRow> = {}): ConnectorAttachmentRow {
   return {
