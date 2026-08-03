@@ -22,7 +22,24 @@ import {
   newResourceWorkbenchSessionId,
   promoteEmbeddedSessionPatch,
   surfaceBindingKey,
+  type ResourceSessionRepository,
 } from "@/lib/context-workbench/resource-session"
+
+/** Shared Dexie repository for ensuring and migrating resource sidechats. */
+export function createResourceSessionRepository(): ResourceSessionRepository {
+  const db = getDb()
+  return {
+    get: (id) => db.sessions.get(id),
+    findByBinding: (target) =>
+      db.sessions.where("surfaceBindingKey").equals(surfaceBindingKey(target)).first(),
+    put: (row) => db.sessions.put(row).then(() => undefined),
+    update: (id, patch) => db.sessions.update(id, patch),
+    resolveProjectId: async (target) =>
+      target.kind === "session"
+        ? ((await db.sessions.get(target.sessionId))?.projectId ?? (await resolveScopeProjectId()))
+        : resolveScopeProjectId(),
+  }
+}
 
 /**
  * Every aside bound to `binding`, oldest first.

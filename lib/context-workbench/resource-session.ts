@@ -1,7 +1,7 @@
 import type { ChatSession, SessionSurfaceBinding } from "@cognia/agent-config-types"
 import type { ContextResource } from "@/types/context-workbench"
 
-interface ResourceSessionRepository {
+export interface ResourceSessionRepository {
   get: (id: string) => Promise<ChatSession | undefined>
   findByBinding?: (binding: SessionSurfaceBinding) => Promise<ChatSession | undefined>
   put: (session: ChatSession) => Promise<void>
