@@ -1,7 +1,3 @@
-/** @jest-environment jsdom */
-
-import "fake-indexeddb/auto"
-
 import { createTwinChunk } from "./twin-chunks"
 import {
   createTwinSource,
@@ -9,14 +5,16 @@ import {
   getTwinSource,
   listTwinSourcesByTwin,
 } from "./twin-sources"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 describe("twin source persistence", () => {
   it("creates, lists, and cascade-deletes a source with its chunks", async () => {
@@ -62,7 +60,7 @@ describe("twin source persistence", () => {
       id: "source_empty",
       twinId: "twin_a",
       kind: "document",
-      format: "text",
+      format: "markdown",
       source: "/empty.txt",
       title: "Empty",
       bytes: 0,
