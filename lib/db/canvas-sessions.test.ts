@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 /**
  * Tests for lib/db/canvas-sessions.ts (schema v11+ canvasSessions table).
  */
 
-import "fake-indexeddb/auto"
 import {
   bulkImport,
   closeSession,
@@ -16,14 +14,13 @@ import {
   __TESTING__,
 } from "./canvas-sessions"
 import type { CollaborativeSession, Participant } from "@/types/canvas/collaboration"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 function makeParticipant(overrides: Partial<Participant> = {}): Participant {
   return {

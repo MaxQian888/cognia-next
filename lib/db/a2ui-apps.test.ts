@@ -1,6 +1,3 @@
-/** @jest-environment jsdom */
-
-import "fake-indexeddb/auto"
 import {
   bulkUpsertApps,
   deleteAllUserApps,
@@ -11,7 +8,8 @@ import {
   touchApp,
   upsertApp,
 } from "./a2ui-apps"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import type { A2UIAppRow } from "./a2ui-types"
 
 function createRow(id: string, overrides: Partial<A2UIAppRow> = {}): A2UIAppRow {
@@ -31,13 +29,14 @@ function createRow(id: string, overrides: Partial<A2UIAppRow> = {}): A2UIAppRow 
   }
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().a2uiApps.clear()
 })
+afterAll(dbFixture.dispose)
 
 describe("A2UI app persistence", () => {
   it("upserts, lists newest first, and deletes user apps", async () => {

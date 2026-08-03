@@ -1,8 +1,6 @@
-/** @jest-environment jsdom */
 // CRUD coverage for the workflows table — list/get/create/update/replace/
 // delete plus duplicate, seed, and the regenerateNodeIds helper.
 
-import "fake-indexeddb/auto"
 import {
   __resetRunCountCacheForTesting,
   addTagToWorkflows,
@@ -33,7 +31,8 @@ import {
   seedBuiltInWorkflows,
   updateWorkflow,
 } from "./workflows"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import { DEFAULT_WORKFLOW_SETTINGS, type VisualWorkflow } from "@/types/workflow/visual"
 import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
@@ -50,11 +49,11 @@ const triggerProjectionMocks = jest.requireMock("@/lib/workflow/runtime/webhook-
 const syncWorkflowTriggersMock = triggerProjectionMocks.syncWorkflowTriggers
 const unsyncWorkflowTriggersMock = triggerProjectionMocks.unsyncWorkflowTriggers
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().workflows.clear()
   await getDb().workflowFolders.clear()
   await getDb().workflowRuns.clear()
@@ -62,6 +61,7 @@ beforeEach(async () => {
   syncWorkflowTriggersMock.mockReset().mockResolvedValue(undefined)
   unsyncWorkflowTriggersMock.mockClear()
 })
+afterAll(dbFixture.dispose)
 
 function manualNode(id: string, x = 0): VisualWorkflow["nodes"][number] {
   return {

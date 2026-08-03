@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 /**
  * Tests for lib/db/canvas-comments.ts (schema v11+ canvasComments table).
  */
 
-import "fake-indexeddb/auto"
 import {
   addComment,
   bulkImport,
@@ -22,14 +20,14 @@ import {
   __TESTING__,
 } from "./canvas-comments"
 import type { CanvasComment, LineRange } from "@/types/canvas/collaboration"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 const RANGE: LineRange = { startLine: 1, startColumn: 1, endLine: 1, endColumn: 10 }
 
