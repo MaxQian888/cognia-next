@@ -1,0 +1,99 @@
+{
+  "actions": {
+    "add": "Add action",
+    "builtIn": "Built-in",
+    "description": "What the panel offers, in order. Each action can carry its own input fields.",
+    "edit": "Edit",
+    "hide": "Hide",
+    "moveDown": "Move down",
+    "moveUp": "Move up",
+    "remove": "Remove",
+    "reset": "Reset",
+    "show": "Show",
+    "title": "Panel actions"
+  },
+  "behavior": {
+    "description": "A popover under the tray icon for delegating a task or firing a quick action.",
+    "leftClick": "Clicking the tray icon",
+    "leftClickHint": "Right-click always opens the tray menu.",
+    "leftClickOptions": {
+      "none": "Does nothing",
+      "panel": "Opens the quick panel",
+      "toggle-window": "Shows or hides the main window"
+    },
+    "preview": "Preview",
+    "previewAction": "Open the panel",
+    "previewHint": "Opens the panel where the tray icon last was.",
+    "title": "Tray quick panel"
+  },
+  "desktopOnly": "The tray quick panel is only available in the desktop build.",
+  "editor": {
+    "cancel": "Cancel",
+    "chord": "Shortcut",
+    "commandId": "Command id",
+    "description": "Choose when the action is offered, what it does, and which inputs it collects.",
+    "effect": "Does",
+    "effects": {
+      "command": "Run a registered command",
+      "delegate": "Delegate a task",
+      "native": "Run a tray action",
+      "navigate": "Open a page",
+      "slash": "Run a slash command"
+    },
+    "fields": "Input fields",
+    "fieldsHint": "Collected before the action runs; reference them as '{{fieldId}}'.",
+    "focusMainWindow": "Bring the main window forward",
+    "icon": "Icon",
+    "iconPlaceholder": "Lucide icon name, e.g. rocket",
+    "issues": {
+      "duplicateFieldId": "Duplicate field id: {id}",
+      "emptyEffect": "Fill in what this action should do.",
+      "emptySelect": "Dropdown \"{id}\" needs at least one option.",
+      "illegalTrigger": "Only \"open a page\" and \"run a command\" may run when the panel opens.",
+      "invalidFieldId": "Field id \"{id}\" may only use letters, digits, - and _.",
+      "missingChord": "Enter a shortcut, e.g. mod+1.",
+      "missingLabel": "Give the action a label.",
+      "unknownPlaceholder": "No field matches: {ids}"
+    },
+    "label": "Label",
+    "nativeAction": "Tray action",
+    "path": "Path",
+    "prompt": "Prompt",
+    "promptHint": "Reference an input field with '{{fieldId}}'.",
+    "promptPlaceholder": "Review '{{path}}' and summarise the risks",
+    "save": "Save",
+    "slash": "Slash command",
+    "target": "Destination",
+    "targetHint": "newSession, activeSession, or '{{fieldId}}' to let an input decide.",
+    "title": "Edit action",
+    "trigger": "Trigger",
+    "triggers": {
+      "hotkey": "Keyboard shortcut",
+      "manual": "On click",
+      "open": "When the panel opens",
+      "submit": "Primary (Enter)"
+    },
+    "when": "Condition",
+    "whenHint": "Optional. The action is hidden unless the expression is true.",
+    "whenPlaceholder": "e.g. automation.running"
+  },
+  "fieldEditor": {
+    "add": "Add field",
+    "empty": "No input fields — the action runs straight away.",
+    "id": "Id",
+    "kind": "Type",
+    "kinds": {
+      "number": "Number",
+      "select": "Dropdown",
+      "switch": "Switch",
+      "text": "Text",
+      "textarea": "Long text"
+    },
+    "label": "Label",
+    "options": "Options",
+    "optionsPlaceholder": "value=Label, one per line",
+    "remove": "Remove field",
+    "required": "Required",
+    "submitOnEnter": "Enter submits"
+  }
+}

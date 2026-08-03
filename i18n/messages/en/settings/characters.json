@@ -267,9 +267,28 @@
   "searchPlaceholder": "Search characters…",
   "skillsCount": "{count, plural, =1 {# skill} other {# skills}}",
   "title": "Characters",
+  "trust": {
+    "rejectedToast": "Pack “{id}” was rejected: its signature did not verify ({reason}).",
+    "skippedSignature": "{count, plural, =1 {1 signed pack failed verification and was not loaded} other {# signed packs failed verification and were not loaded}}",
+    "unsigned": "Unsigned",
+    "unsignedTooltip": "This pack carries no publisher signature. It was imported as-is.",
+    "verified": "Verified",
+    "verifiedTooltip": "Signature verified — {fingerprint}"
+  },
   "updatedToast": "Updated {name}.",
   "validation": {
     "nameRequired": "Name is required.",
     "systemPromptRequired": "System prompt cannot be empty."
+  },
+  "warning": {
+    "characterScope": "{message} (character: {localId})",
+    "missingA2uiCatalog": "Missing A2UI catalog: {id}",
+    "missingConnector": "Missing connector: {id}",
+    "missingMcpPreset": "Missing MCP server preset: {id}",
+    "missingNativeTool": "Missing native tool: {id}",
+    "missingPluginSkill": "Missing plugin skill: {id}",
+    "missingProvider": "Missing provider: {id}",
+    "missingSkill": "Missing skill: {id}",
+    "missingThemePack": "Missing theme pack: {id}"
   }
 }

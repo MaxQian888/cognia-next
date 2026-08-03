@@ -12,6 +12,32 @@
   "empty": "未找到会话。",
   "emptyHint": "磁盘上没有找到内容。可尝试手动选择会话文件。",
   "errorTitle": "导入失败",
+  "fidelityReport": {
+    "fidelity": {
+      "contextual": "上下文重放",
+      "native-exact": "原生（精确）",
+      "structured": "结构化",
+      "summary-only": "仅摘要",
+      "unsupported": "不支持"
+    },
+    "fidelityHint": {
+      "contextual": "以转录重放为种子创建新会话继续。",
+      "native-exact": "运行时可将该会话作为其自身会话精确恢复。",
+      "structured": "文本与工具历史可携带；运行时私有状态不可携带。",
+      "summary-only": "仅携带会话摘要。",
+      "unsupported": "该来源不支持此方向的转换。"
+    },
+    "lossCount": "{count} 项未能携带",
+    "lossKinds": {
+      "approximated": "已近似",
+      "dropped": "已丢弃",
+      "summarized": "已摘要"
+    },
+    "noLosses": "转换无损。",
+    "rebuilt": "重建",
+    "rebuiltHint": "该记录由可信工件重建，带有溯源标记，不冒充原始转录。",
+    "title": "转换保真度"
+  },
   "importSelected": "导入选中的 {count} 项",
   "importing": "正在导入…",
   "liveSync": "实时同步",
@@ -36,31 +62,5 @@
   "title": "导入 Agent 会话",
   "unrecognized": "这些文件未被识别为受支持的 Agent 会话。",
   "webHint": "自动扫描和实时同步仅支持桌面端。在 iOS 和网页端，请手动选择导出的会话文件。",
-  "writingProgress": "正在写入 {done}/{total}…",
-  "fidelityReport": {
-    "title": "转换保真度",
-    "rebuilt": "重建",
-    "rebuiltHint": "该记录由可信工件重建，带有溯源标记，不冒充原始转录。",
-    "noLosses": "转换无损。",
-    "lossCount": "{count} 项未能携带",
-    "lossKinds": {
-      "dropped": "已丢弃",
-      "approximated": "已近似",
-      "summarized": "已摘要"
-    },
-    "fidelity": {
-      "native-exact": "原生（精确）",
-      "structured": "结构化",
-      "contextual": "上下文重放",
-      "summary-only": "仅摘要",
-      "unsupported": "不支持"
-    },
-    "fidelityHint": {
-      "native-exact": "运行时可将该会话作为其自身会话精确恢复。",
-      "structured": "文本与工具历史可携带；运行时私有状态不可携带。",
-      "contextual": "以转录重放为种子创建新会话继续。",
-      "summary-only": "仅携带会话摘要。",
-      "unsupported": "该来源不支持此方向的转换。"
-    }
-  }
+  "writingProgress": "正在写入 {done}/{total}…"
 }

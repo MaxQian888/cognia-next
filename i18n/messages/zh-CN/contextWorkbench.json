@@ -81,8 +81,6 @@
     "you": "你"
   },
   "customize": {
-    "persistentRail": "常驻图标栏",
-    "persistentRailHint": "收起工作台后，活动图标会留在右侧的窄列里，可以拖拽重新展开。关闭后整个右栏会完全收起。",
     "dragHint": "拖拽以排序",
     "hidden": "已隐藏",
     "hiddenEmpty": "暂无隐藏项。",
@@ -90,6 +88,8 @@
     "hint": "隐藏某个活动只会移除它的图标按钮——面板仍可通过命令面板和快捷键到达。",
     "onRail": "在活动栏上",
     "onRailEmpty": "活动栏上暂无活动。",
+    "persistentRail": "常驻图标栏",
+    "persistentRailHint": "收起工作台后，活动图标会留在右侧的窄列里，可以拖拽重新展开。关闭后整个右栏会完全收起。",
     "restoreDefaults": "恢复默认",
     "showItem": "显示"
   },

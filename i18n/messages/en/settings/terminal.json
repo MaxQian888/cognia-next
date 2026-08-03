@@ -205,10 +205,6 @@
     "helper": "Show a lightbulb on a failed command offering a fix — git push --set-upstream, “did you mean”, create-PR link, freeing a busy port, pwsh command-not-found, and more.",
     "label": "Quick fixes"
   },
-  "rescaleOverlappingGlyphs": {
-    "helper": "Rescale wide glyphs that would otherwise overlap adjacent terminal cells.",
-    "label": "Rescale overlapping glyphs"
-  },
   "renderer": {
     "auto": "Auto",
     "canvas": "Canvas",
@@ -216,6 +212,10 @@
     "helper": "Auto picks GPU-accelerated WebGL, falling back to Canvas then DOM. Switch to Canvas or DOM if the terminal renders blank or garbled.",
     "label": "Renderer",
     "webgl": "WebGL"
+  },
+  "rescaleOverlappingGlyphs": {
+    "helper": "Rescale wide glyphs that would otherwise overlap adjacent terminal cells.",
+    "label": "Rescale overlapping glyphs"
   },
   "runInDockTimeout": {
     "helper": "How long the chat 'Run in dock' affordance and the agent's terminal_dock_write tool wait for a command_end OSC 633 event before timing out. Per-call overrides win; this is the floor. Range 5–600, default 60.",
@@ -233,10 +233,6 @@
     "helper": "Number of lines kept in xterm's history buffer. Range 1000–100000.",
     "label": "Scrollback lines"
   },
-  "smoothScrolling": {
-    "helper": "Animate wheel and touchpad scrolling instead of jumping between terminal rows.",
-    "label": "Smooth scrolling"
-  },
   "shell": {
     "auto": "Auto-detect (recommended)",
     "bash": "bash",
@@ -252,6 +248,10 @@
   "shellIntegration": {
     "helper": "Injects OSC 633 prompt markers (bash / zsh / pwsh) so the dock can show command status and cwd badges. Disable for shells that mis-parse the sequences.",
     "label": "Enable shell integration"
+  },
+  "smoothScrolling": {
+    "helper": "Animate wheel and touchpad scrolling instead of jumping between terminal rows.",
+    "label": "Smooth scrolling"
   },
   "ssh": {
     "add": "Add SSH host",

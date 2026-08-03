@@ -214,8 +214,8 @@
     "exitReason": "退出原因",
     "foregroundDormancy": "交互式目标仅在 App 打开时推进；关闭后会暂停，直到你重新打开该会话。定时与无头目标则会自行继续。",
     "lastJudgeReason": "最近判定理由",
-    "reasonQuoted": "“{reason}”",
     "objective": "目标",
+    "reasonQuoted": "“{reason}”",
     "statusBadge": "状态：{status}",
     "tokenBudgetAria": "已用 token 预算",
     "tokens": "Tokens",
@@ -308,8 +308,8 @@
     "builtin": "内置（不可删除）",
     "customise": "想自定义该智能体的提示？打开 设置 → 角色 并复制 Goal Tracker。",
     "loading": "加载中…",
-    "openCharacters": "打开角色设置",
     "missing": "Goal Tracker 角色缺失——重新播种内置项以恢复。",
+    "openCharacters": "打开角色设置",
     "permissionMode": "权限模式：{mode}",
     "systemPrompt": "系统提示"
   }

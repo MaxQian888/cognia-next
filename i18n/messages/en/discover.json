@@ -5,6 +5,7 @@
     "filterChip": "Filter: {value}",
     "sortChip": "Sort: {value}"
   },
+  "badgePlugin": "plugin",
   "builtInBadge": "Built-in",
   "card": {
     "twinDraftFallbackName": "{kind} draft",
@@ -205,6 +206,9 @@
     "shareOriginal": "Share anyway",
     "shareRedacted": "Remove and continue"
   },
+  "shellDesktop": "desktop",
+  "shellMobile": "mobile",
+  "shellWeb": "web",
   "skillMarketplace": {
     "browse": "Browse skills",
     "title": "Skill marketplace"
@@ -233,9 +237,5 @@
     "compact": "Compact",
     "grid": "Grid",
     "list": "List"
-  },
-  "badgePlugin": "plugin",
-  "shellDesktop": "desktop",
-  "shellMobile": "mobile",
-  "shellWeb": "web"
+  }
 }

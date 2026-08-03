@@ -29,6 +29,57 @@
   "badgeLive": "运行中",
   "badgeWeb": "web",
   "description": "把本应用的知识与运行时能力开放给外部 MCP 客户端。",
+  "inbound": {
+    "accept": "接受",
+    "acceptConfirmDesc": {
+      "lesson": "它将成为一条长期记忆。接受后不可在此撤销。",
+      "note": "它将归档为一条知识笔记。接受后不可在此撤销。",
+      "skill": "它将成为一个技能，并以「已禁用」创建——在你亲自启用之前不会运行。接受后不可在此撤销。"
+    },
+    "acceptConfirmTitle": "接受这条提交？",
+    "cancel": "取消",
+    "description": "来自 Cognia 之外的经验、技能草稿与笔记。在你接受之前，这里的内容不会改变任何东西。",
+    "detailAria": "展开 {title} 的详情",
+    "editAria": "编辑 {title} 的提交内容",
+    "empty": "没有待审核的内容。",
+    "filter": {
+      "accepted": "已接受",
+      "all": "全部",
+      "pending": "待审核",
+      "rejected": "已拒绝"
+    },
+    "filterAria": "按审核状态筛选",
+    "kind": {
+      "lesson": "经验",
+      "note": "笔记",
+      "skill": "技能草稿"
+    },
+    "materializeFailed": "尝试 {attempts} 次后仍无法应用：{error}",
+    "origin": {
+      "crawler": "抓取任务",
+      "ide-scanner": "IDE 扫描",
+      "mcp": "MCP 客户端"
+    },
+    "pendingCount": "{count} 条待审核",
+    "producedId": "已创建：{id}",
+    "reject": "拒绝",
+    "rejectConfirmDesc": "草稿会留存备查，但永远不会被应用。拒绝后不可在此撤销。",
+    "rejectConfirmTitle": "拒绝这条提交？",
+    "rejectionReason": "原因：{reason}",
+    "retry": "重试",
+    "retryAria": "重新处理 {title}",
+    "retryFailed": "重试失败。",
+    "status": {
+      "accepted": "已接受",
+      "pending": "待审核",
+      "rejected": "已拒绝"
+    },
+    "title": "入站审核",
+    "toastAccepted": "已接受，稍后应用。",
+    "toastRejected": "已拒绝。",
+    "toastRetried": "已应用。",
+    "untrustedLabel": "由 Cognia 之外提交——请视为不可信内容"
+  },
   "loading": "加载中…",
   "nav": {
     "badgeScopesAria": "已授予 {total} 项权限范围中的 {granted} 项",
@@ -41,6 +92,10 @@
       "audit": {
         "description": "桥接处理过的每一次调用",
         "label": "审计日志"
+      },
+      "inbound": {
+        "description": "审批外部智能体的贡献",
+        "label": "入站审核"
       },
       "scopes": {
         "description": "外部客户端可以调用的能力",
@@ -105,11 +160,11 @@
   "server": {
     "bearerTokenLabel": "Bearer Token（仅 HTTP）",
     "copyTokenAria": "复制 Token",
+    "defaultClientName": "Cognia 控制端",
     "hide": "隐藏",
     "httpPort": "HTTP 端口",
     "httpPortDiverged": "监听器仍在端口 {bound} 上。重启外部桥接以切换端口。",
     "httpPortHelp": "HTTP 传输监听的端口，下方的接入片段会使用该值。",
-    "defaultClientName": "Cognia 控制端",
     "noActiveClientError": "没有可用的 External Bridge 客户端。",
     "regenerateWarning": "⚠ 重新生成将立即作废旧 Token。",
     "rotateConfirmAction": "轮换 Token",

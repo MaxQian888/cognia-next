@@ -162,16 +162,16 @@
       "0": "呼呼…",
       "1": "好舒服…"
     },
-    "streakDay": {
-      "0": "在一起第 {days} 天啦！金币滚滚来！",
-      "1": "连续 {days} 天——我们势头正旺！"
-    },
     "snarky": {
       "error": ["这代码谁写的？…哦。", "反正不是我的锅。"],
       "fed": ["总算想起我了。", "勉强能吃。"],
       "petted": ["就允许你摸这一下。", "哼，还行。"],
       "played": ["我让着你的。", "再来。显然你还没玩够。"],
       "success": ["大部分是我干的。", "意料之中。"]
+    },
+    "streakDay": {
+      "0": "在一起第 {days} 天啦！金币滚滚来！",
+      "1": "连续 {days} 天——我们势头正旺！"
     },
     "success": ["搞定！", "完成啦。", "耶！"],
     "talked": ["我在听呢！", "再多说点？", "嘿嘿，好哦！"],
@@ -234,30 +234,6 @@
       "shop": "商店"
     },
     "title": "你的宠物"
-  },
-  "journal": {
-    "dayTotals": "{count} 条 · +{xp} XP",
-    "empty": "日记还是空的——照顾你的宠物，它的每一天都会记录在这里。",
-    "kinds": {
-      "cleaned": "洗得干干净净",
-      "fed": "吃了一顿饭",
-      "goalComplete": "庆祝目标完成",
-      "goalProgress": "为目标进展欢呼",
-      "inboundMessage": "注意到新消息",
-      "petted": "被摸了摸头",
-      "played": "一起玩耍",
-      "review": "查看了一些结果",
-      "scheduledRun": "围观定时任务",
-      "scheduledRunStarting": "看到任务启动",
-      "slept": "睡了个午觉",
-      "success": "庆祝一次成功",
-      "talked": "聊了聊天",
-      "teamRun": "围观智能体团队干活",
-      "treated": "收到小奖励",
-      "workflowRun": "围观工作流运行"
-    },
-    "loading": "正在翻开日记…",
-    "xp": "+{xp} XP"
   },
   "customize": {
     "appearance": {
@@ -349,6 +325,30 @@
   },
   "inventory": {
     "title": "道具"
+  },
+  "journal": {
+    "dayTotals": "{count} 条 · +{xp} XP",
+    "empty": "日记还是空的——照顾你的宠物，它的每一天都会记录在这里。",
+    "kinds": {
+      "cleaned": "洗得干干净净",
+      "fed": "吃了一顿饭",
+      "goalComplete": "庆祝目标完成",
+      "goalProgress": "为目标进展欢呼",
+      "inboundMessage": "注意到新消息",
+      "petted": "被摸了摸头",
+      "played": "一起玩耍",
+      "review": "查看了一些结果",
+      "scheduledRun": "围观定时任务",
+      "scheduledRunStarting": "看到任务启动",
+      "slept": "睡了个午觉",
+      "success": "庆祝一次成功",
+      "talked": "聊了聊天",
+      "teamRun": "围观智能体团队干活",
+      "treated": "收到小奖励",
+      "workflowRun": "围观工作流运行"
+    },
+    "loading": "正在翻开日记…",
+    "xp": "+{xp} XP"
   },
   "live2d": {
     "loadFailed": "无法加载 Live2D 模型，已改为显示 SVG 宠物。"

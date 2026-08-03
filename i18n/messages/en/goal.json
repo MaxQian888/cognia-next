@@ -214,8 +214,8 @@
     "exitReason": "Exit reason",
     "foregroundDormancy": "Interactive goals advance only while the app is open; closing it pauses progress until you reopen this chat. Scheduled and headless goals continue on their own.",
     "lastJudgeReason": "Last judge reason",
-    "reasonQuoted": "“{reason}”",
     "objective": "Objective",
+    "reasonQuoted": "“{reason}”",
     "statusBadge": "Status: {status}",
     "tokenBudgetAria": "Token budget used",
     "tokens": "Tokens",
@@ -308,8 +308,8 @@
     "builtin": "Built-in (cannot be deleted)",
     "customise": "Want to customise this agent's prompt? Open Settings → Characters and duplicate the Goal Tracker.",
     "loading": "Loading…",
-    "openCharacters": "Open Characters settings",
     "missing": "The Goal Tracker character is missing — reseed built-ins to restore it.",
+    "openCharacters": "Open Characters settings",
     "permissionMode": "Permission mode: {mode}",
     "systemPrompt": "System prompt"
   }

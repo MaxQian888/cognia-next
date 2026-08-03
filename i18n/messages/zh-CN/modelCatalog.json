@@ -30,8 +30,8 @@
     "speech": "语音"
   },
   "modalityLabel": "模态",
-  "offline": "当前离线：正在显示已缓存的最后一个有效版本。",
   "offerings": "提供方 Offering",
+  "offline": "当前离线：正在显示已缓存的最后一个有效版本。",
   "recoveryDescription": "系统会自动恢复内置目录；现有提供商设置不会被修改。",
   "recoveryTitle": "模型目录正在恢复",
   "replacement": "建议替代模型",

@@ -16,259 +16,533 @@
   },
   "templates": {
     "calculator": {
-      "name": "计算器",
       "description": "用于基本算术运算的计算器",
+      "name": "计算器",
       "tags": ["数学", "计算器", "工具"]
     },
     "contact-form": {
-      "name": "联系表单",
-      "description": "带校验功能的专业联系表单",
-      "tags": ["联系", "表单", "邮件", "支持"],
       "components": {
-        "title": { "text": "✉️ 联系我们" },
-        "subtitle": { "text": "期待收到你的消息！" },
-        "first-name": { "label": "名字", "placeholder": "小明" },
-        "last-name": { "label": "姓氏", "placeholder": "王" },
-        "email-input": { "label": "电子邮箱", "placeholder": "xiaoming@example.com" },
+        "email-input": {
+          "label": "电子邮箱",
+          "placeholder": "xiaoming@example.com"
+        },
+        "first-name": {
+          "label": "名字",
+          "placeholder": "小明"
+        },
+        "last-name": {
+          "label": "姓氏",
+          "placeholder": "王"
+        },
+        "message-input": {
+          "label": "留言",
+          "placeholder": "请告诉我们可以如何帮助你……"
+        },
+        "privacy-notice": {
+          "text": "我们尊重你的隐私。"
+        },
         "subject-select": {
           "label": "主题",
-          "placeholder": "选择一个主题……",
           "options": [
-            { "value": "general", "label": "一般咨询" },
-            { "value": "support", "label": "技术支持" },
-            { "value": "sales", "label": "销售咨询" },
-            { "value": "feedback", "label": "意见反馈" },
-            { "value": "other", "label": "其他" }
-          ]
+            {
+              "label": "一般咨询",
+              "value": "general"
+            },
+            {
+              "label": "技术支持",
+              "value": "support"
+            },
+            {
+              "label": "销售咨询",
+              "value": "sales"
+            },
+            {
+              "label": "意见反馈",
+              "value": "feedback"
+            },
+            {
+              "label": "其他",
+              "value": "other"
+            }
+          ],
+          "placeholder": "选择一个主题……"
         },
-        "message-input": { "label": "留言", "placeholder": "请告诉我们可以如何帮助你……" },
-        "privacy-notice": { "text": "我们尊重你的隐私。" },
-        "submit-btn": { "text": "发送消息" }
-      }
+        "submit-btn": {
+          "text": "发送消息"
+        },
+        "subtitle": {
+          "text": "期待收到你的消息！"
+        },
+        "title": {
+          "text": "✉️ 联系我们"
+        }
+      },
+      "description": "带校验功能的专业联系表单",
+      "name": "联系表单",
+      "tags": ["联系", "表单", "邮件", "支持"]
     },
     "data-dashboard": {
-      "name": "数据仪表盘",
-      "description": "展示图表与统计数据的仪表盘",
-      "tags": ["仪表盘", "分析", "图表", "数据"],
       "components": {
-        "title": { "text": "📊 数据分析仪表盘" },
-        "refresh-btn": { "text": "刷新" },
-        "stat-users": { "title": "用户总数" },
-        "stat-revenue": { "title": "收入" },
-        "stat-growth": { "title": "增长率" },
-        "chart-section": { "title": "月度趋势" },
-        "table-section": { "title": "最近动态" },
         "activity-table": {
           "columns": [
-            { "key": "date", "header": "日期", "type": "date" },
-            { "key": "event", "header": "事件" },
-            { "key": "user", "header": "用户" },
-            { "key": "value", "header": "数值", "type": "number", "align": "right" }
+            {
+              "header": "日期",
+              "key": "date",
+              "type": "date"
+            },
+            {
+              "header": "事件",
+              "key": "event"
+            },
+            {
+              "header": "用户",
+              "key": "user"
+            },
+            {
+              "align": "right",
+              "header": "数值",
+              "key": "value",
+              "type": "number"
+            }
           ]
+        },
+        "chart-section": {
+          "title": "月度趋势"
+        },
+        "refresh-btn": {
+          "text": "刷新"
+        },
+        "stat-growth": {
+          "title": "增长率"
+        },
+        "stat-revenue": {
+          "title": "收入"
+        },
+        "stat-users": {
+          "title": "用户总数"
+        },
+        "table-section": {
+          "title": "最近动态"
+        },
+        "title": {
+          "text": "📊 数据分析仪表盘"
         }
       },
       "dataModel": {
-        "chartData": [
-          { "month": "1 月", "users": 1200, "revenue": 5000 },
-          { "month": "2 月", "users": 1400, "revenue": 6200 },
-          { "month": "3 月", "users": 1800, "revenue": 7800 },
-          { "month": "4 月", "users": 2100, "revenue": 8500 },
-          { "month": "5 月", "users": 2500, "revenue": 9200 },
-          { "month": "6 月", "users": 2800, "revenue": 10500 }
-        ],
         "activityData": [
-          { "id": 1, "date": "2024-01-15", "event": "新用户注册", "user": "张明", "value": 1 },
-          { "id": 2, "date": "2024-01-15", "event": "购买", "user": "李娜", "value": 99 },
-          { "id": 3, "date": "2024-01-14", "event": "升级", "user": "王博", "value": 49 }
+          {
+            "date": "2024-01-15",
+            "event": "新用户注册",
+            "id": 1,
+            "user": "张明",
+            "value": 1
+          },
+          {
+            "date": "2024-01-15",
+            "event": "购买",
+            "id": 2,
+            "user": "李娜",
+            "value": 99
+          },
+          {
+            "date": "2024-01-14",
+            "event": "升级",
+            "id": 3,
+            "user": "王博",
+            "value": 49
+          }
+        ],
+        "chartData": [
+          {
+            "month": "1 月",
+            "revenue": 5000,
+            "users": 1200
+          },
+          {
+            "month": "2 月",
+            "revenue": 6200,
+            "users": 1400
+          },
+          {
+            "month": "3 月",
+            "revenue": 7800,
+            "users": 1800
+          },
+          {
+            "month": "4 月",
+            "revenue": 8500,
+            "users": 2100
+          },
+          {
+            "month": "5 月",
+            "revenue": 9200,
+            "users": 2500
+          },
+          {
+            "month": "6 月",
+            "revenue": 10500,
+            "users": 2800
+          }
         ]
-      }
+      },
+      "description": "展示图表与统计数据的仪表盘",
+      "name": "数据仪表盘",
+      "tags": ["仪表盘", "分析", "图表", "数据"]
     },
     "expense-tracker": {
-      "name": "支出追踪器",
-      "description": "记录每日支出与预算",
-      "tags": ["支出", "资金", "预算", "财务", "追踪"],
       "components": {
-        "header": { "text": "💰 支出追踪器" },
-        "total-label": { "text": "累计支出" },
-        "today-label": { "text": "今日" },
-        "desc-input": { "placeholder": "支出说明……", "label": "事项" },
-        "amount-input": { "label": "金额" },
+        "add-btn": {
+          "text": "添加支出"
+        },
+        "amount-input": {
+          "label": "金额"
+        },
         "category-row": {
           "label": "分类",
           "options": [
-            { "value": "food", "label": "🍔 餐饮" },
-            { "value": "transport", "label": "🚗 交通" },
-            { "value": "shopping", "label": "🛍️ 购物" },
-            { "value": "entertainment", "label": "🎬 娱乐" },
-            { "value": "other", "label": "📦 其他" }
+            {
+              "label": "🍔 餐饮",
+              "value": "food"
+            },
+            {
+              "label": "🚗 交通",
+              "value": "transport"
+            },
+            {
+              "label": "🛍️ 购物",
+              "value": "shopping"
+            },
+            {
+              "label": "🎬 娱乐",
+              "value": "entertainment"
+            },
+            {
+              "label": "📦 其他",
+              "value": "other"
+            }
           ]
         },
-        "add-btn": { "text": "添加支出" },
-        "expenses-list": { "emptyText": "暂无支出记录" }
-      }
+        "desc-input": {
+          "label": "事项",
+          "placeholder": "支出说明……"
+        },
+        "expenses-list": {
+          "emptyText": "暂无支出记录"
+        },
+        "header": {
+          "text": "💰 支出追踪器"
+        },
+        "today-label": {
+          "text": "今日"
+        },
+        "total-label": {
+          "text": "累计支出"
+        }
+      },
+      "description": "记录每日支出与预算",
+      "name": "支出追踪器",
+      "tags": ["支出", "资金", "预算", "财务", "追踪"]
     },
     "habit-tracker": {
-      "name": "习惯追踪器",
-      "description": "追踪每日习惯并保持连续记录",
-      "tags": ["习惯", "追踪", "每日", "目标", "效率"],
       "components": {
-        "header": { "text": "🎯 习惯追踪器" },
-        "habit-input": { "placeholder": "新习惯……" },
-        "add-btn": { "text": "添加" },
-        "habits-list": { "emptyText": "还没有习惯，请在上方添加！" }
+        "add-btn": {
+          "text": "添加"
+        },
+        "habit-input": {
+          "placeholder": "新习惯……"
+        },
+        "habits-list": {
+          "emptyText": "还没有习惯，请在上方添加！"
+        },
+        "header": {
+          "text": "🎯 习惯追踪器"
+        }
       },
       "dataModel": {
         "stats": {
           "streakText": "连续 0 天",
           "todayText": "今日已完成 0 项"
         }
-      }
+      },
+      "description": "追踪每日习惯并保持连续记录",
+      "name": "习惯追踪器",
+      "tags": ["习惯", "追踪", "每日", "目标", "效率"]
     },
     "notes": {
-      "name": "快捷笔记",
-      "description": "支持搜索的简易笔记应用",
-      "tags": ["笔记", "写作", "效率"],
       "components": {
-        "header": { "text": "📝 快捷笔记" },
-        "search-row": { "placeholder": "🔍 搜索笔记……" },
-        "note-title-input": { "placeholder": "笔记标题", "label": "标题" },
-        "note-content-input": { "placeholder": "在这里写下笔记……" },
-        "save-btn": { "text": "保存笔记" }
+        "header": {
+          "text": "📝 快捷笔记"
+        },
+        "note-content-input": {
+          "placeholder": "在这里写下笔记……"
+        },
+        "note-title-input": {
+          "label": "标题",
+          "placeholder": "笔记标题"
+        },
+        "save-btn": {
+          "text": "保存笔记"
+        },
+        "search-row": {
+          "placeholder": "🔍 搜索笔记……"
+        }
       },
-      "dataModel": { "notesCountText": "共 0 条笔记" }
+      "dataModel": {
+        "notesCountText": "共 0 条笔记"
+      },
+      "description": "支持搜索的简易笔记应用",
+      "name": "快捷笔记",
+      "tags": ["笔记", "写作", "效率"]
     },
     "profile-card": {
-      "name": "个人资料卡",
-      "description": "展示用户个人资料",
-      "tags": ["个人资料", "用户", "卡片", "社交"],
       "components": {
-        "avatar": { "alt": "头像" },
-        "followers-label": { "text": "粉丝" },
-        "following-label": { "text": "关注" },
-        "posts-label": { "text": "帖子" },
-        "follow-btn": { "text": "关注" },
-        "message-btn": { "text": "发消息" }
+        "avatar": {
+          "alt": "头像"
+        },
+        "follow-btn": {
+          "text": "关注"
+        },
+        "followers-label": {
+          "text": "粉丝"
+        },
+        "following-label": {
+          "text": "关注"
+        },
+        "message-btn": {
+          "text": "发消息"
+        },
+        "posts-label": {
+          "text": "帖子"
+        }
       },
       "dataModel": {
         "profile": {
-          "name": "张明",
-          "title": "软件开发工程师",
           "bio": "用代码打造优秀产品。",
-          "location": "中国上海"
+          "location": "中国上海",
+          "name": "张明",
+          "title": "软件开发工程师"
         }
-      }
+      },
+      "description": "展示用户个人资料",
+      "name": "个人资料卡",
+      "tags": ["个人资料", "用户", "卡片", "社交"]
     },
     "shopping-list": {
-      "name": "购物清单",
-      "description": "简单的杂货与购物清单管理工具",
-      "tags": ["购物", "杂货", "清单", "效率"],
       "components": {
-        "title": { "text": "🛒 购物清单" },
-        "clear-btn": { "text": "全部清空" },
-        "item-input": { "placeholder": "商品名称……" },
-        "qty-input": { "placeholder": "数量" },
-        "add-btn": { "text": "添加" },
-        "items-list": { "emptyText": "购物清单为空" }
-      },
-      "dataModel": { "totalText": "共 0 件商品" }
-    },
-    "survey-form": {
-      "name": "调查表单",
-      "description": "可自定义的调查或反馈收集表单",
-      "tags": ["调查", "反馈", "表单", "问卷"],
-      "components": {
-        "title": { "text": "📋 快速调查" },
-        "description": { "text": "请回答几个问题，帮助我们持续改进" },
-        "name-field": { "label": "姓名", "placeholder": "请输入姓名" },
-        "email-field": { "label": "电子邮箱", "placeholder": "your@email.com" },
-        "rating-label": { "text": "你会如何评价这次体验？" },
-        "feedback-field": { "label": "补充反馈", "placeholder": "请详细说说你的体验……" },
-        "clear-btn": { "text": "清空" },
-        "submit-btn": { "text": "提交" }
-      },
-      "dataModel": { "form": { "ratingText": "5/10 - 一般" } }
-    },
-    "timer": {
-      "name": "计时器",
-      "description": "倒计时与秒表应用",
-      "tags": ["计时器", "秒表", "倒计时", "时间"],
-      "components": {
-        "header": { "text": "⏱️ 计时器" },
-        "start-btn": { "text": "开始" },
-        "pause-btn": { "text": "暂停" },
-        "reset-btn": { "text": "重置" },
-        "preset-1": { "text": "1 分钟" },
-        "preset-5": { "text": "5 分钟" },
-        "preset-10": { "text": "10 分钟" },
-        "preset-25": { "text": "25 分钟" }
-      }
-    },
-    "todo-list": {
-      "name": "待办清单",
-      "description": "支持添加、完成和删除任务的简易任务管理应用",
-      "tags": ["任务", "效率", "清单"],
-      "components": {
-        "header": { "text": "📝 我的任务" },
-        "task-input": { "placeholder": "输入新任务……" },
-        "add-btn": { "text": "添加" },
-        "task-list": { "emptyText": "还没有任务，请在上方添加！" }
+        "add-btn": {
+          "text": "添加"
+        },
+        "clear-btn": {
+          "text": "全部清空"
+        },
+        "item-input": {
+          "placeholder": "商品名称……"
+        },
+        "items-list": {
+          "emptyText": "购物清单为空"
+        },
+        "qty-input": {
+          "placeholder": "数量"
+        },
+        "title": {
+          "text": "🛒 购物清单"
+        }
       },
       "dataModel": {
-        "stats": { "completedText": "已完成 0 项", "pendingText": "待完成 0 项" }
-      }
+        "totalText": "共 0 件商品"
+      },
+      "description": "简单的杂货与购物清单管理工具",
+      "name": "购物清单",
+      "tags": ["购物", "杂货", "清单", "效率"]
+    },
+    "survey-form": {
+      "components": {
+        "clear-btn": {
+          "text": "清空"
+        },
+        "description": {
+          "text": "请回答几个问题，帮助我们持续改进"
+        },
+        "email-field": {
+          "label": "电子邮箱",
+          "placeholder": "your@email.com"
+        },
+        "feedback-field": {
+          "label": "补充反馈",
+          "placeholder": "请详细说说你的体验……"
+        },
+        "name-field": {
+          "label": "姓名",
+          "placeholder": "请输入姓名"
+        },
+        "rating-label": {
+          "text": "你会如何评价这次体验？"
+        },
+        "submit-btn": {
+          "text": "提交"
+        },
+        "title": {
+          "text": "📋 快速调查"
+        }
+      },
+      "dataModel": {
+        "form": {
+          "ratingText": "5/10 - 一般"
+        }
+      },
+      "description": "可自定义的调查或反馈收集表单",
+      "name": "调查表单",
+      "tags": ["调查", "反馈", "表单", "问卷"]
+    },
+    "timer": {
+      "components": {
+        "header": {
+          "text": "⏱️ 计时器"
+        },
+        "pause-btn": {
+          "text": "暂停"
+        },
+        "preset-1": {
+          "text": "1 分钟"
+        },
+        "preset-10": {
+          "text": "10 分钟"
+        },
+        "preset-25": {
+          "text": "25 分钟"
+        },
+        "preset-5": {
+          "text": "5 分钟"
+        },
+        "reset-btn": {
+          "text": "重置"
+        },
+        "start-btn": {
+          "text": "开始"
+        }
+      },
+      "description": "倒计时与秒表应用",
+      "name": "计时器",
+      "tags": ["计时器", "秒表", "倒计时", "时间"]
+    },
+    "todo-list": {
+      "components": {
+        "add-btn": {
+          "text": "添加"
+        },
+        "header": {
+          "text": "📝 我的任务"
+        },
+        "task-input": {
+          "placeholder": "输入新任务……"
+        },
+        "task-list": {
+          "emptyText": "还没有任务，请在上方添加！"
+        }
+      },
+      "dataModel": {
+        "stats": {
+          "completedText": "已完成 0 项",
+          "pendingText": "待完成 0 项"
+        }
+      },
+      "description": "支持添加、完成和删除任务的简易任务管理应用",
+      "name": "待办清单",
+      "tags": ["任务", "效率", "清单"]
     },
     "unit-converter": {
-      "name": "单位换算器",
-      "description": "在不同计量单位之间进行换算",
-      "tags": ["换算", "单位", "工具", "计量"],
       "components": {
-        "header": { "text": "🔄 单位换算器" },
-        "type-select": {
-          "label": "类型",
-          "options": [
-            { "value": "length", "label": "长度" },
-            { "value": "weight", "label": "重量" },
-            { "value": "temperature", "label": "温度" }
-          ]
+        "convert-btn": {
+          "text": "换算"
         },
-        "input-row": { "label": "数值" },
         "from-unit": {
           "label": "从",
           "options": [
-            { "value": "m", "label": "米" },
-            { "value": "cm", "label": "厘米" },
-            { "value": "ft", "label": "英尺" }
+            {
+              "label": "米",
+              "value": "m"
+            },
+            {
+              "label": "厘米",
+              "value": "cm"
+            },
+            {
+              "label": "英尺",
+              "value": "ft"
+            }
           ]
+        },
+        "header": {
+          "text": "🔄 单位换算器"
+        },
+        "input-row": {
+          "label": "数值"
+        },
+        "result-label": {
+          "text": "结果"
         },
         "to-unit": {
           "label": "到",
           "options": [
-            { "value": "m", "label": "米" },
-            { "value": "cm", "label": "厘米" },
-            { "value": "ft", "label": "英尺" }
+            {
+              "label": "米",
+              "value": "m"
+            },
+            {
+              "label": "厘米",
+              "value": "cm"
+            },
+            {
+              "label": "英尺",
+              "value": "ft"
+            }
           ]
         },
-        "convert-btn": { "text": "换算" },
-        "result-label": { "text": "结果" }
-      }
+        "type-select": {
+          "label": "类型",
+          "options": [
+            {
+              "label": "长度",
+              "value": "length"
+            },
+            {
+              "label": "重量",
+              "value": "weight"
+            },
+            {
+              "label": "温度",
+              "value": "temperature"
+            }
+          ]
+        }
+      },
+      "description": "在不同计量单位之间进行换算",
+      "name": "单位换算器",
+      "tags": ["换算", "单位", "工具", "计量"]
     },
     "weather": {
-      "name": "天气组件",
-      "description": "展示当前天气信息",
-      "tags": ["天气", "组件", "工具"],
       "components": {
-        "humidity-label": { "text": "💧 湿度" },
-        "wind-label": { "text": "💨 风速" },
-        "uv-label": { "text": "☀️ 紫外线" }
+        "humidity-label": {
+          "text": "💧 湿度"
+        },
+        "uv-label": {
+          "text": "☀️ 紫外线"
+        },
+        "wind-label": {
+          "text": "💨 风速"
+        }
       },
       "dataModel": {
         "weather": {
-          "location": "美国加利福尼亚州旧金山",
           "condition": "局部多云",
-          "wind": "每小时 12 英里",
-          "uv": "中等"
+          "location": "美国加利福尼亚州旧金山",
+          "uv": "中等",
+          "wind": "每小时 12 英里"
         }
-      }
+      },
+      "description": "展示当前天气信息",
+      "name": "天气组件",
+      "tags": ["天气", "组件", "工具"]
     }
   }
 }

@@ -418,14 +418,14 @@
   "searchTeams": "搜索团队...",
   "settings": {
     "accordion": {
+      "execution": "执行",
       "governance": "治理",
       "memory": "共享内存",
       "overview": "概览",
       "plugins": "插件与能力",
       "prFeedback": "PR 反馈",
       "ultracode": "Ultracode",
-      "worktrees": "工作树隔离",
-      "execution": "执行"
+      "worktrees": "工作树隔离"
     },
     "autoShutdown": "完成后自动关闭",
     "awaitingExternalPickup": "等待外部认领",
@@ -457,6 +457,12 @@
     "description": "描述",
     "dispatchDecisionLabel": "调度决策",
     "enableMessaging": "智能体间消息",
+    "execution": {
+      "description": "团队级执行默认值（ADR-0090）：继承模式成员解析到的绑定，以及团队间委派深度上限。",
+      "maxDelegationDepth": "团队委派最大深度",
+      "maxDelegationDepthHint": "仅计团队间委派（默认 2）。达到上限的团队再委派会被拒绝。与原生 subagent 嵌套深度相互独立。",
+      "title": "执行"
+    },
     "executionMode": "执行模式",
     "executionModeOption": {
       "autonomous": "自主",
@@ -702,12 +708,6 @@
         }
       },
       "title": "工作树隔离"
-    },
-    "execution": {
-      "title": "执行",
-      "description": "团队级执行默认值（ADR-0090）：继承模式成员解析到的绑定，以及团队间委派深度上限。",
-      "maxDelegationDepth": "团队委派最大深度",
-      "maxDelegationDepthHint": "仅计团队间委派（默认 2）。达到上限的团队再委派会被拒绝。与原生 subagent 嵌套深度相互独立。"
     }
   },
   "stats": {
@@ -797,6 +797,33 @@
   "teamUpdated": "团队已更新。",
   "teammateConfig": {
     "description": "编辑该队友的身份、提示词、工具与插件能力。",
+    "executionBinding": {
+      "candidateIds": "候选部署",
+      "candidateIdsHint": "协调者只能在这些部署 id 中选择（当前默认选第一个候选）。",
+      "candidateIdsPlaceholder": "dep-a, dep-b",
+      "credentialProfileRef": "凭证档案",
+      "credentialProfileRefPlaceholder": "凭证档案引用",
+      "credentialRefHint": "指向凭证存储的引用——绝不是原始密钥。",
+      "deploymentRef": "部署档案",
+      "deploymentRefPlaceholder": "部署 id（如 dep-vendor-a）",
+      "description": "该成员的运行时、部署与凭证如何绑定。仅引用——端点与密钥保存在 Provider Profile 中。",
+      "flagOffHint": "在统一执行 resolver 开关（agentExecutionResolverV2）开启前不生效——关闭时派发忽略此绑定。",
+      "modeInherit": "继承团队默认",
+      "modePinned": "固定绑定",
+      "modePool": "候选池",
+      "modelRole": "模型角色",
+      "modelRoleFast": "快速",
+      "modelRoleInherit": "继承",
+      "modelRolePowerful": "强力",
+      "modelRolePrimary": "主力",
+      "previewNative": "原生委派",
+      "previewOrchestrated": "编排委派（{reasons}）",
+      "runtimeAiSdk": "AI SDK",
+      "runtimeAuto": "自动",
+      "runtimeClaudeSdk": "Claude Agent SDK",
+      "runtimePolicy": "运行时",
+      "title": "执行绑定"
+    },
     "rosterSection": {
       "description": "存在于队员行而非预设配置上的字段。",
       "provider": "服务商",
@@ -810,34 +837,7 @@
       "twinNone": "无"
     },
     "save": "保存",
-    "title": "配置 {name}",
-    "executionBinding": {
-      "title": "执行绑定",
-      "description": "该成员的运行时、部署与凭证如何绑定。仅引用——端点与密钥保存在 Provider Profile 中。",
-      "modeInherit": "继承团队默认",
-      "modePinned": "固定绑定",
-      "modePool": "候选池",
-      "runtimePolicy": "运行时",
-      "runtimeAuto": "自动",
-      "modelRole": "模型角色",
-      "modelRoleInherit": "继承",
-      "modelRolePrimary": "主力",
-      "modelRoleFast": "快速",
-      "modelRolePowerful": "强力",
-      "deploymentRef": "部署档案",
-      "deploymentRefPlaceholder": "部署 id（如 dep-vendor-a）",
-      "credentialProfileRef": "凭证档案",
-      "credentialProfileRefPlaceholder": "凭证档案引用",
-      "credentialRefHint": "指向凭证存储的引用——绝不是原始密钥。",
-      "candidateIds": "候选部署",
-      "candidateIdsPlaceholder": "dep-a, dep-b",
-      "candidateIdsHint": "协调者只能在这些部署 id 中选择（当前默认选第一个候选）。",
-      "previewNative": "原生委派",
-      "previewOrchestrated": "编排委派（{reasons}）",
-      "flagOffHint": "在统一执行 resolver 开关（agentExecutionResolverV2）开启前不生效——关闭时派发忽略此绑定。",
-      "runtimeClaudeSdk": "Claude Agent SDK",
-      "runtimeAiSdk": "AI SDK"
-    }
+    "title": "配置 {name}"
   },
   "teammatesCount": "{count} 名队员",
   "templates": {

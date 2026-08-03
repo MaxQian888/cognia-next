@@ -1,8 +1,8 @@
 {
   "add": {
-    "cancel": "Cancel",
     "agentIdLabel": "Agent ID",
     "branchLabel": "Branch (optional)",
+    "cancel": "Cancel",
     "characterIdLabel": "Character ID",
     "description": "Manually save a durable fact with explicit provenance and an optional narrow scope.",
     "importanceLabel": "Importance",
@@ -64,8 +64,8 @@
     "fields": {
       "accessCount": "Recalled",
       "archivedAt": "Archived",
-      "created": "Created",
       "contamination": "Context trust",
+      "created": "Created",
       "evidence": "Evidence",
       "importance": "Importance",
       "indexed": "Indexed",
@@ -80,9 +80,9 @@
     "next": "Next memory",
     "no": "No",
     "previous": "Previous memory",
+    "recordCount": "{count, plural, one {# record} other {# records}}",
     "replacedBy": "Replaced by",
     "replacedByGone": "The replacement was deleted.",
-    "recordCount": "{count, plural, one {# record} other {# records}}",
     "save": "Save",
     "source": "Source",
     "tagsLabel": "Tags",
@@ -96,6 +96,18 @@
     "not_found": "This memory no longer exists",
     "pii_blocked": "Blocked: the text contains personal information",
     "temporary": "Memory is in temporary mode"
+  },
+  "governance": {
+    "clean": "Clean",
+    "conflict": "Conflict",
+    "external-context": "External context",
+    "legacy": "Legacy / no evidence",
+    "markConflict": "Mark conflict",
+    "markVerified": "Mark verified",
+    "supported": "Evidence-backed",
+    "unknown": "Unknown",
+    "unreviewed": "Unreviewed",
+    "verified": "Verified"
   },
   "panel": {
     "accessedRelative": "used {time}",
@@ -152,18 +164,6 @@
     "inbound": "Inbound",
     "system": "System",
     "user": "Auto (chat)"
-  },
-  "governance": {
-    "clean": "Clean",
-    "conflict": "Conflict",
-    "external-context": "External context",
-    "legacy": "Legacy / no evidence",
-    "markConflict": "Mark conflict",
-    "markVerified": "Mark verified",
-    "supported": "Evidence-backed",
-    "unknown": "Unknown",
-    "unreviewed": "Unreviewed",
-    "verified": "Verified"
   },
   "scopes": {
     "agent": "Agent",

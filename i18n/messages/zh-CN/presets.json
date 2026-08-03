@@ -134,9 +134,9 @@
       },
       "tools": {
         "description": "工具白名单、有序的技能栈与 MCP 服务器子集。",
-        "title": "工具",
         "noneDefined": "（尚未定义）",
-        "reorderLabel": "重新排序："
+        "reorderLabel": "重新排序：",
+        "title": "工具"
       }
     },
     "setDefault": "设为默认",
@@ -162,6 +162,7 @@
     "hasSkills": "含技能",
     "recent": "最近使用"
   },
+  "moreActions": "更多操作",
   "pickWorkingDir": "选择工作目录",
   "readOnlyDeleteTooltip": "内置预设无法删除",
   "readOnlyTooltip": "内置预设——请先复制再编辑",
@@ -193,6 +194,5 @@
   "validation": {
     "contentRequired": "系统提示词不能为空。",
     "nameRequired": "预设名称不能为空。"
-  },
-  "moreActions": "更多操作"
+  }
 }

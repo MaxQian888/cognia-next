@@ -134,9 +134,9 @@
       },
       "tools": {
         "description": "Tool whitelists, ordered skill stack, and MCP server subset.",
-        "title": "Tools",
         "noneDefined": "(none defined yet)",
-        "reorderLabel": "Reorder:"
+        "reorderLabel": "Reorder:",
+        "title": "Tools"
       }
     },
     "setDefault": "Set as default",
@@ -162,6 +162,7 @@
     "hasSkills": "Has Skills",
     "recent": "Recently used"
   },
+  "moreActions": "More actions",
   "pickWorkingDir": "Select working directory",
   "readOnlyDeleteTooltip": "Built-in presets can't be deleted",
   "readOnlyTooltip": "Built-in preset — duplicate to edit",
@@ -193,6 +194,5 @@
   "validation": {
     "contentRequired": "System prompt cannot be empty.",
     "nameRequired": "Preset name is required."
-  },
-  "moreActions": "More actions"
+  }
 }

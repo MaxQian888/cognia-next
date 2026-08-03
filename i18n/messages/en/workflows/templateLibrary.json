@@ -1,0 +1,13 @@
+{
+  "create": "Create workflow",
+  "creating": "Creating…",
+  "emptyDescription": "Published workflow templates will appear here.",
+  "emptyTitle": "No workflow templates yet",
+  "noDescription": "No description",
+  "trust": {
+    "built-in": "Built in",
+    "signed-unknown": "Signed, unknown publisher",
+    "unsigned": "Unsigned",
+    "verified-publisher": "Verified publisher"
+  }
+}

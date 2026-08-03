@@ -255,13 +255,13 @@
     "edit": "Edit {name}",
     "enableSwitch": "Enable {name} in cognia",
     "failed": "failed",
+    "logs": "View {name} logs",
+    "logsTooltip": "View logs",
     "test": "Test {name}",
     "testDesktopOnly": "Desktop only",
     "testTooltip": "Test connection (10s timeout)",
     "toolsOne": "{count} tool",
-    "toolsOther": "{count} tools",
-    "logs": "View {name} logs",
-    "logsTooltip": "View logs"
+    "toolsOther": "{count} tools"
   },
   "tabs": {
     "agents": "Agent Sync",

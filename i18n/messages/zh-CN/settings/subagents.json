@@ -216,9 +216,9 @@
     "title": "模板",
     "toolsHint": "「继承」让该子代理拥有父级的工具；「自定义清单」精确授予所列工具；「全部禁用」则一个都不给。",
     "toolsLabel": "工具权限",
+    "variableIndex": "变量 {index}",
     "varsUndeclared": "使用了但未声明：{names}",
-    "varsUnused": "已声明但从未使用：{names}",
-    "variableIndex": "变量 {index}"
+    "varsUnused": "已声明但从未使用：{names}"
   },
   "title": "子代理",
   "toolCatalog": {

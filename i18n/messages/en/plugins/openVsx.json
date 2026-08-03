@@ -1,7 +1,7 @@
 {
+  "installNotice": "VS Code extensions are real programs. This one runs with the same access to your files, network, and processes as any other program you install — cognia checks the download's checksum, not what the code does.",
   "integrityChecked": "Integrity checked",
   "integrityCheckedTooltip": "The download matched Open VSX's SHA-256 checksum, which confirms the file was not corrupted in transit. This is not a signature: it does not verify the publisher, and it cannot detect a compromised registry — the same server supplies both the file and the checksum.",
-  "installNotice": "VS Code extensions are real programs. This one runs with the same access to your files, network, and processes as any other program you install — cognia checks the download's checksum, not what the code does.",
   "publisherVerified": "Publisher verified by Open VSX",
   "publisherVerifiedTooltip": "Open VSX states that this publisher controls the \"{namespace}\" namespace. That is Open VSX's claim about ownership, not cognia's, and not a claim that the extension is safe.",
   "searchPlaceholder": "Search Open VSX extensions…",

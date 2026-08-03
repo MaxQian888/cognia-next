@@ -174,6 +174,7 @@
       "trigger": "Attach"
     },
     "attachments": {
+      "analyzing": "Analyzing image…",
       "countLimit": "Only {max} attachments allowed.",
       "extracting": "Reading…",
       "fallbackFile": "file",
@@ -189,6 +190,7 @@
       "oversizeConfirm": "Send anyway",
       "oversizeTitle": "Large attachment",
       "preparing": "Preparing attachments…",
+      "preparingImages": "{count, plural, =1 {Preparing 1 image…} other {Preparing # images…}}",
       "preview": {
         "empty": "Nothing was extracted from this file.",
         "fileTab": "File",
@@ -199,8 +201,8 @@
         "ocrDetail": "View per-page result",
         "ocrRun": "Run OCR",
         "ocrRunning": "Running OCR…",
-        "ocrToggle": "Also send OCR text",
         "ocrToInput": "Add text to message",
+        "ocrToggle": "Also send OCR text",
         "redactedNote": "Highlighted spans were redacted before sending.",
         "tokens": "{tokens} tokens"
       },
@@ -223,7 +225,17 @@
       "permissionDenied": "Camera or photo access is required to attach a photo.",
       "unsupported": "Photo capture isn't available on this device."
     },
+    "commandHint": {
+      "needsArgs": "Add the required arguments"
+    },
+    "commandQueue": {
+      "ariaLabel": "Queued commands",
+      "failedTooltip": "/{name} failed",
+      "label": "{count, plural, one {# command} other {# commands}}",
+      "removeAria": "Remove /{name}"
+    },
     "commands": {
+      "batchFailed": "{count, plural, one {Command {names} failed} other {Commands {names} failed}}",
       "failed": "Command failed",
       "unavailable": "/{name} is not available yet."
     },
@@ -246,7 +258,20 @@
     },
     "effort": {
       "aria": "Thinking level",
-      "auto": "Auto"
+      "auto": "Auto",
+      "desc": {
+        "high": "Deep reasoning for complex tasks.",
+        "low": "Light reasoning for straightforward tasks.",
+        "max": "Maximum reasoning for the hardest tasks.",
+        "medium": "Balanced reasoning for everyday tasks.",
+        "off": "Use the model's default reasoning behavior.",
+        "ultracode": "Maximum-but-one reasoning plus the dynamic workflow tools.",
+        "xhigh": "Extra-deep reasoning for demanding tasks."
+      },
+      "faster": "Faster",
+      "hint": "Choose how much reasoning the model should use for this conversation.",
+      "hintAria": "About thinking levels",
+      "smarter": "Smarter"
     },
     "enhance": {
       "modes": {
@@ -289,7 +314,27 @@
     "ghostAcceptHint": "Tab",
     "ghostDismiss": "Dismiss suggestion",
     "helperHints": {
+      "chainingNote": "Put commands on separate lines to run them in order.",
+      "cheatsheetDescription": "Keyboard shortcuts and prefixes available in the message composer.",
+      "cheatsheetLabel": "Keyboard help",
+      "cheatsheetTitle": "Composer shortcuts",
       "dropImages": "Drop / paste files, folders or links",
+      "keys": {
+        "complete": "Complete the current command or mention",
+        "dismiss": "Dismiss suggestions",
+        "history": "Recall input history",
+        "newline": "Insert a new line",
+        "permissionMode": "Change permission mode",
+        "send": "Send the message"
+      },
+      "keysTitle": "Keyboard",
+      "prefixes": {
+        "memory": "Write to memory",
+        "mention": "Mention a file, agent, skill, or workflow",
+        "shell": "Run a shell command",
+        "slash": "Run a slash command"
+      },
+      "prefixesTitle": "Prefixes",
       "send": "⏎ Send · ⇧⏎ New line",
       "tryPrefix": "Try"
     },
@@ -300,12 +345,32 @@
     },
     "memory": {
       "appended": "Appended to {path}",
+      "desktopOnly": "File-backed memory is available in the desktop app.",
       "emptyPreview": "(start typing the memory line)",
       "failed": "Memory write failed",
       "needsLine": "Type the memory line after #.",
       "panelTitle": "Append to memory",
       "pickScope": "Pick Project or User memory in the popover to save.",
       "projectLabel": "Project memory",
+      "scope": {
+        "global": "global memory",
+        "workspace": "workspace memory"
+      },
+      "storedInMemory": "Stored in {scope}",
+      "storeError": {
+        "disabled": "Long-term memory is disabled.",
+        "empty": "Type a fact to remember.",
+        "failed": "The memory could not be stored.",
+        "pii": "Sensitive information cannot be stored in memory.",
+        "temporary": "Memory is unavailable in temporary mode.",
+        "unavailable": "The memory store is unavailable."
+      },
+      "targetLabel": {
+        "file:project": "Project memory file",
+        "file:user": "User memory file",
+        "store:global": "Global memory",
+        "store:workspace": "Workspace memory"
+      },
       "userLabel": "User memory"
     },
     "modelPicker": {
@@ -484,12 +549,17 @@
       },
       "grantMicAccess": "Allow microphone access",
       "languageLabel": "Language",
+      "listening": "Listening…",
       "live": {
         "description": "Talk naturally, interrupt at any time, and keep the conversation moving hands-free.",
         "end": "End live voice",
         "errors": {
+          "disabled": "Live voice is turned off. Enable it in Settings → Speech.",
+          "mintFailed": "Could not start a session with any live voice provider. Check your API key and network, then try again.",
+          "noDeployments": "No live voice provider is set up yet. Add one in Settings → Speech.",
+          "noneEligible": "None of your live voice providers is available in this region on this device.",
           "sessionFailed": "The live voice connection was interrupted. End the session and try again.",
-          "startFailed": "Could not start live voice. Check your OpenAI key and microphone access."
+          "startFailed": "Could not start live voice. Check your provider key and microphone access."
         },
         "mute": "Mute microphone",
         "phases": {
@@ -505,7 +575,6 @@
         "title": "Live voice",
         "unmute": "Unmute microphone"
       },
-      "listening": "Listening…",
       "micPermissionDenied": "Microphone access is blocked — enable it in your system or browser settings.",
       "microphoneLabel": "Microphone",
       "noMicFound": "No microphone found.",
@@ -583,6 +652,39 @@
       "continue": "Continue",
       "tryPrompt": "Try a prompt"
     },
+    "stats": {
+      "customize": "Customize stats",
+      "customizeTitle": "Show on the welcome page",
+      "dayCount": "{count}d",
+      "empty": "No usage recorded in this window yet.",
+      "heatmap": "Calendar heatmap",
+      "models": {
+        "empty": "No model usage in this window.",
+        "turns": "{count} turns"
+      },
+      "none": "—",
+      "range": {
+        "days": "{days}d",
+        "label": "Time range"
+      },
+      "tiles": {
+        "activeDays": "Active days",
+        "cost": "Total cost",
+        "currentStreak": "Current streak",
+        "longestStreak": "Longest streak",
+        "peakHour": "Peak hour",
+        "sessions": "Sessions",
+        "tokens": "Total tokens",
+        "topModel": "Top model",
+        "turns": "Turns"
+      },
+      "title": "Your activity",
+      "view": {
+        "label": "Dashboard view",
+        "models": "Models",
+        "overview": "Overview"
+      }
+    },
     "style": {
       "minimal": "Minimal",
       "rich": "Rich",
@@ -605,6 +707,11 @@
     },
     "ariaSettings": "Session settings",
     "bareMode": "Bare mode",
+    "branchAria": "Branch conversation",
+    "branchEmpty": "Nothing to branch yet — this conversation has no messages.",
+    "branchError": "Couldn't branch this conversation.",
+    "branchSuccess": "Branched. The new conversation is now active.",
+    "branchTooltip": "Branch conversation — copies this thread into a new one you can take elsewhere",
     "briefMode": "Brief output",
     "cancel": "Cancel",
     "compactAria": "Compact",
@@ -629,30 +736,16 @@
       "simplified": "Simplified",
       "standard": "Standard"
     },
-    "branchAria": "Branch conversation",
-    "branchEmpty": "Nothing to branch yet — this conversation has no messages.",
-    "branchError": "Couldn't branch this conversation.",
-    "branchSuccess": "Branched. The new conversation is now active.",
-    "branchTooltip": "Branch conversation — copies this thread into a new one you can take elsewhere",
     "forkAria": "Fork session",
     "forkSuccess": "Session forked. The new branch is now active.",
     "forkTooltip": "Fork conversation — branches a new session from this one's history",
     "forkUnsupported": "This agent doesn't support session forking.",
-    "providerUndoAria": "Provider Undo",
-    "providerUndoConfirm": "Continue with Provider Undo",
-    "providerUndoFailure": "Provider undo failed: {error}",
-    "providerUndoProgress": "Undoing…",
-    "providerUndoSuccess": "Provider undo completed",
-    "providerUndoTooltip": "Run the provider's advertised /undo command",
-    "providerUndoWarningDescription": "The provider may revert conversation state and file changes. This is provider-native undo, not a compaction restore. This warning is remembered for this external-agent configuration.",
-    "providerUndoWarningTitle": "Provider Undo may change files",
     "groups": {
       "default": "Default",
       "favorites": "Favorites",
       "other": "Other"
     },
     "hideArtifacts": "Hide artifacts panel",
-    "openBrowser": "Open browser panel",
     "hideConversations": "Hide conversation list",
     "insights": "Session insights",
     "memoryInherit": "Inherit app setting",
@@ -661,6 +754,7 @@
     "memoryOn": "On",
     "memoryUse": "Use memories in this chat",
     "noApiKey": "No API key",
+    "openBrowser": "Open browser panel",
     "permissionModeAppDefault": "Use app default",
     "permissionModeLabel": "Permission mode",
     "pickDirAria": "Pick directory",
@@ -690,6 +784,14 @@
       "searchAriaLabel": "Search presets",
       "searchPlaceholder": "Search presets…"
     },
+    "providerUndoAria": "Provider Undo",
+    "providerUndoConfirm": "Continue with Provider Undo",
+    "providerUndoFailure": "Provider undo failed: {error}",
+    "providerUndoProgress": "Undoing…",
+    "providerUndoSuccess": "Provider undo completed",
+    "providerUndoTooltip": "Run the provider's advertised /undo command",
+    "providerUndoWarningDescription": "The provider may revert conversation state and file changes. This is provider-native undo, not a compaction restore. This warning is remembered for this external-agent configuration.",
+    "providerUndoWarningTitle": "Provider Undo may change files",
     "save": "Save",
     "sheet": {
       "sections": {
@@ -832,6 +934,16 @@
     },
     "read": {
       "title": "Read"
+    },
+    "spawnTask": {
+      "aside": "aside",
+      "caveats": "Caveats",
+      "codeLocations": "Code locations",
+      "inherit": "inherits context",
+      "open": "Open task",
+      "situation": "Situation",
+      "solution": "Proposed solution",
+      "start": "Start task"
     },
     "webFetch": {
       "empty": "No content returned"

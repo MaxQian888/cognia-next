@@ -1,200 +1,202 @@
 {
-  "title": "Sites",
-  "subtitle": "Build, preview, and publish from Cognia",
-  "empty": "Create or select a Site to begin.",
-  "sidebarEmpty": "No Sites yet. Create one to get started.",
-  "desktopOnly": {
-    "title": "Sites requires Cognia Desktop",
-    "description": "Builds, provider credentials, and previews stay on the selected local desktop host."
-  },
-  "create": {
-    "title": "New Site",
-    "description": "Publish a project's build output to Cloudflare Workers.",
-    "project": "Project",
-    "name": "Site name",
-    "subpath": "Source subpath (optional)",
-    "accountId": "Cloudflare account ID",
-    "workerName": "Worker name"
-  },
-  "steps": {
-    "connect": {
-      "title": "Connect Cloudflare",
-      "description": "Verify and store the API token for this Site."
+  "access": {
+    "description": "Authoring permissions stay in Cognia. Visitor policy is reconciled with Cloudflare Access.",
+    "hostname": "Protected hostname",
+    "mode": "Visitor access mode",
+    "modes": {
+      "domains": "Email domains",
+      "identities": "Specific identities",
+      "organization": "Organization",
+      "private": "Private (deny all)",
+      "public": "Public"
     },
-    "environment": {
-      "title": "Environment",
-      "description": "Save the variables and secrets the build needs."
-    },
-    "build": {
-      "title": "Build",
-      "description": "Provision bindings and build an immutable version."
-    },
-    "preview": {
-      "title": "Preview",
-      "description": "Run the build locally before publishing."
-    },
-    "publish": {
-      "title": "Publish",
-      "description": "Upload a version and deploy it to production."
-    }
+    "title": "Visitor access",
+    "values": "One email, domain, or organization ID per line"
   },
-  "stepState": {
-    "idle": "Not started",
-    "running": "In progress",
-    "done": "Done",
-    "failed": "Needs attention"
-  },
-  "wrangler": {
-    "detecting": "Detecting the Wrangler CLI…",
-    "ready": "Wrangler ready ({version}).",
-    "notFound": "Wrangler CLI was not found on this host.",
-    "installHint": "Install it with npm i -g wrangler, then re-detect."
-  },
-  "publish": {
-    "noVersions": "Build a version first to upload and deploy."
+  "actions": {
+    "addDomain": "Add domain",
+    "build": "Build saved version",
+    "cancel": "Cancel",
+    "confirmDeleteMetadata": "Delete metadata",
+    "confirmPurge": "Purge managed resources",
+    "create": "Create Site",
+    "creating": "Creating…",
+    "deleteMetadata": "Delete Site metadata",
+    "deploy": "Deploy",
+    "loadAnalytics": "Load last 24 hours of analytics",
+    "loadLogs": "Load last 24 hours of logs",
+    "newSite": "New Site",
+    "preview": "Start preview",
+    "provision": "Provision bindings",
+    "purge": "Purge managed resources",
+    "reconcile": "Reconcile provider state",
+    "redetectWrangler": "Re-detect Wrangler",
+    "remove": "Remove",
+    "restore": "Restore",
+    "rollback": "Redeploy / Roll back",
+    "saveAccess": "Apply access policy",
+    "saveAuthoring": "Save authoring access",
+    "saveEnvironment": "Save environment revision",
+    "saveToken": "Verify and save token",
+    "stopPreview": "Stop preview",
+    "takeDown": "Take down",
+    "upload": "Upload version"
   },
   "advanced": {
     "title": "Advanced configuration"
   },
-  "actions": {
-    "newSite": "New Site",
-    "creating": "Creating…",
-    "create": "Create Site",
-    "redetectWrangler": "Re-detect Wrangler",
-    "saveEnvironment": "Save environment revision",
-    "provision": "Provision bindings",
-    "build": "Build saved version",
-    "preview": "Start preview",
-    "stopPreview": "Stop preview",
-    "upload": "Upload version",
-    "deploy": "Deploy",
-    "rollback": "Redeploy / Roll back",
-    "saveAccess": "Apply access policy",
-    "addDomain": "Add domain",
-    "remove": "Remove",
-    "loadLogs": "Load last 24 hours of logs",
-    "loadAnalytics": "Load last 24 hours of analytics",
-    "saveToken": "Verify and save token",
-    "saveAuthoring": "Save authoring access",
-    "reconcile": "Reconcile provider state",
-    "takeDown": "Take down",
-    "restore": "Restore",
-    "purge": "Purge managed resources",
-    "deleteMetadata": "Delete Site metadata",
-    "cancel": "Cancel",
-    "confirmPurge": "Purge managed resources",
-    "confirmDeleteMetadata": "Delete metadata"
-  },
-  "confirm": {
-    "purge": {
-      "title": "Purge managed provider resources?",
-      "description": "This permanently deletes eligible Cognia-managed resources. Adopted and shared provider resources remain intact and will be reported as preserved."
-    },
-    "deleteMetadata": {
-      "title": "Delete Cognia Site metadata?",
-      "description": "This removes the deleted Site, versions, operation history, and preserved-resource report from Cognia. Provider resources are not changed."
-    }
-  },
-  "environment": {
-    "title": "Environment",
-    "description": "Plain values are versioned. Secret values go only to this host's OS keyring.",
-    "variables": "Variables",
-    "secrets": "Secrets",
-    "variablesPlaceholder": "API_ORIGIN=https://api.example.com",
-    "secretsPlaceholder": "API_TOKEN=secret-value"
+  "authoring": {
+    "accountsPlaceholder": "One Cognia account ID per line",
+    "deployers": "Deployer account IDs",
+    "editors": "Editor account IDs"
   },
   "build": {
-    "title": "Confined build and local preview",
     "description": "Cognia reads .cognia/hosting.json and runs its argv commands inside the OS sandbox.",
-    "runtime": "Runtime snapshot",
+    "networkHosts": "Approved install hosts",
     "packageManager": "Package manager snapshot",
-    "networkHosts": "Approved install hosts"
+    "runtime": "Runtime snapshot",
+    "title": "Confined build and local preview"
   },
-  "versions": {
-    "version": "Version {sequence}"
-  },
-  "operations": {
-    "title": "Operation journal",
-    "description": "Durable lifecycle events used for crash recovery and provider reconciliation.",
-    "empty": "No lifecycle operations yet.",
-    "eventCount": "{count, plural, one {# event} other {# events}}"
-  },
-  "operationType": {
-    "build": "Build",
-    "provision": "Provision",
-    "upload": "Upload",
-    "deploy": "Deploy",
-    "access": "Access",
-    "environment": "Environment",
-    "domain": "Domain",
-    "takedown": "Take down",
-    "restore": "Restore",
-    "reconcile": "Reconcile",
-    "purge": "Purge"
-  },
-  "operationStatus": {
-    "queued": "Queued",
-    "running": "Running",
-    "waiting-reconcile": "Waiting for reconciliation",
-    "succeeded": "Succeeded",
-    "failed": "Failed",
-    "cancelled": "Cancelled"
-  },
-  "access": {
-    "title": "Visitor access",
-    "description": "Authoring permissions stay in Cognia. Visitor policy is reconciled with Cloudflare Access.",
-    "mode": "Visitor access mode",
-    "hostname": "Protected hostname",
-    "values": "One email, domain, or organization ID per line",
-    "modes": {
-      "private": "Private (deny all)",
-      "identities": "Specific identities",
-      "domains": "Email domains",
-      "organization": "Organization",
-      "public": "Public"
+  "confirm": {
+    "deleteMetadata": {
+      "description": "This removes the deleted Site, versions, operation history, and preserved-resource report from Cognia. Provider resources are not changed.",
+      "title": "Delete Cognia Site metadata?"
+    },
+    "purge": {
+      "description": "This permanently deletes eligible Cognia-managed resources. Adopted and shared provider resources remain intact and will be reported as preserved.",
+      "title": "Purge managed provider resources?"
     }
   },
+  "create": {
+    "accountId": "Cloudflare account ID",
+    "description": "Publish a project's build output to Cloudflare Workers.",
+    "name": "Site name",
+    "project": "Project",
+    "subpath": "Source subpath (optional)",
+    "title": "New Site",
+    "workerName": "Worker name"
+  },
+  "deploymentStatus": {
+    "active": "Active",
+    "deploying": "Deploying",
+    "failed": "Failed",
+    "pending": "Pending",
+    "superseded": "Superseded",
+    "taken-down": "Taken down"
+  },
+  "desktopOnly": {
+    "description": "Builds, provider credentials, and previews stay on the selected local desktop host.",
+    "title": "Sites requires Cognia Desktop"
+  },
   "domains": {
-    "title": "Custom domains",
     "description": "Attach and reconcile Cloudflare Worker custom domains.",
-    "hostname": "docs.example.com"
+    "hostname": "docs.example.com",
+    "title": "Custom domains"
   },
-  "observability": {
-    "title": "Provider observability",
-    "description": "Query Cloudflare Worker logs and request analytics without copying them into another runtime.",
-    "empty": "No query has run yet."
+  "empty": "Create or select a Site to begin.",
+  "environment": {
+    "description": "Plain values are versioned. Secret values go only to this host's OS keyring.",
+    "secrets": "Secrets",
+    "secretsPlaceholder": "API_TOKEN=secret-value",
+    "title": "Environment",
+    "variables": "Variables",
+    "variablesPlaceholder": "API_ORIGIN=https://api.example.com"
   },
-  "provider": {
-    "title": "Cloudflare provider",
-    "description": "The API token is verified before it is stored in the local OS keyring.",
-    "token": "Cloudflare API token",
-    "account": "Account",
-    "worker": "Worker"
-  },
-  "authoring": {
-    "editors": "Editor account IDs",
-    "deployers": "Deployer account IDs",
-    "accountsPlaceholder": "One Cognia account ID per line"
-  },
-  "feedback": { "success": "Site state updated" },
   "errors": {
-    "projectRoot": "The selected project has no workspace root.",
+    "artifactRequired": "The saved version artifact is unavailable.",
     "environmentRequired": "Save an environment revision first.",
-    "wranglerRequired": "Choose an approved absolute Wrangler binary path.",
-    "artifactRequired": "The saved version artifact is unavailable."
+    "projectRoot": "The selected project has no workspace root.",
+    "wranglerRequired": "Choose an approved absolute Wrangler binary path."
+  },
+  "feedback": {
+    "success": "Site state updated"
   },
   "lifecycle": {
     "active": "Active",
-    "taken-down": "Taken down",
+    "deleted": "Deleted",
     "deleting": "Deleting",
-    "deleted": "Deleted"
-  },
-  "deploymentStatus": {
-    "pending": "Pending",
-    "deploying": "Deploying",
-    "active": "Active",
-    "failed": "Failed",
-    "superseded": "Superseded",
     "taken-down": "Taken down"
+  },
+  "observability": {
+    "description": "Query Cloudflare Worker logs and request analytics without copying them into another runtime.",
+    "empty": "No query has run yet.",
+    "title": "Provider observability"
+  },
+  "operationStatus": {
+    "cancelled": "Cancelled",
+    "failed": "Failed",
+    "queued": "Queued",
+    "running": "Running",
+    "succeeded": "Succeeded",
+    "waiting-reconcile": "Waiting for reconciliation"
+  },
+  "operationType": {
+    "access": "Access",
+    "build": "Build",
+    "deploy": "Deploy",
+    "domain": "Domain",
+    "environment": "Environment",
+    "provision": "Provision",
+    "purge": "Purge",
+    "reconcile": "Reconcile",
+    "restore": "Restore",
+    "takedown": "Take down",
+    "upload": "Upload"
+  },
+  "operations": {
+    "description": "Durable lifecycle events used for crash recovery and provider reconciliation.",
+    "empty": "No lifecycle operations yet.",
+    "eventCount": "{count, plural, one {# event} other {# events}}",
+    "title": "Operation journal"
+  },
+  "provider": {
+    "account": "Account",
+    "description": "The API token is verified before it is stored in the local OS keyring.",
+    "title": "Cloudflare provider",
+    "token": "Cloudflare API token",
+    "worker": "Worker"
+  },
+  "publish": {
+    "noVersions": "Build a version first to upload and deploy."
+  },
+  "sidebarEmpty": "No Sites yet. Create one to get started.",
+  "stepState": {
+    "done": "Done",
+    "failed": "Needs attention",
+    "idle": "Not started",
+    "running": "In progress"
+  },
+  "steps": {
+    "build": {
+      "description": "Provision bindings and build an immutable version.",
+      "title": "Build"
+    },
+    "connect": {
+      "description": "Verify and store the API token for this Site.",
+      "title": "Connect Cloudflare"
+    },
+    "environment": {
+      "description": "Save the variables and secrets the build needs.",
+      "title": "Environment"
+    },
+    "preview": {
+      "description": "Run the build locally before publishing.",
+      "title": "Preview"
+    },
+    "publish": {
+      "description": "Upload a version and deploy it to production.",
+      "title": "Publish"
+    }
+  },
+  "subtitle": "Build, preview, and publish from Cognia",
+  "title": "Sites",
+  "versions": {
+    "version": "Version {sequence}"
+  },
+  "wrangler": {
+    "detecting": "Detecting the Wrangler CLI…",
+    "installHint": "Install it with npm i -g wrangler, then re-detect.",
+    "notFound": "Wrangler CLI was not found on this host.",
+    "ready": "Wrangler ready ({version})."
   }
 }

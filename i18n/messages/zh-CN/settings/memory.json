@@ -19,7 +19,6 @@
     "heading": "允许云端向量化",
     "label": "允许云端向量化"
   },
-  "description": "助手跨会话记住关于你的内容。",
   "danger": {
     "backupFirst": "先备份",
     "clear": "清除记忆",
@@ -52,15 +51,29 @@
     },
     "title": "危险区域"
   },
+  "description": "助手跨会话记住关于你的内容。",
   "enabled": {
     "description": "召回关于你的耐久事实，并注入到后续对话中。",
     "heading": "启用长期记忆",
     "label": "启用长期记忆"
   },
+  "externalContext": {
+    "description": "使用网页搜索、MCP、屏幕上下文或连接器的轮次不自动学习；本地代码工具仍可学习。",
+    "heading": "阻止外部上下文学习",
+    "label": "阻止外部上下文学习"
+  },
+  "halfLife": {
+    "label": "新近度半衰期（天）"
+  },
   "hybrid": {
     "description": "召回时结合语义（向量）与关键词检索。",
     "heading": "混合检索",
     "label": "混合检索"
+  },
+  "learnFromChats": {
+    "description": "在后台从符合条件的对话学习耐久事实；可与召回开关分别按对话覆盖。",
+    "heading": "从对话学习",
+    "label": "从对话学习"
   },
   "learning": {
     "autoExtract": {
@@ -89,26 +102,10 @@
       }
     }
   },
-  "useMemory": {
-    "description": "允许符合条件的对话召回已保存记忆；每个对话可单独覆盖。",
-    "heading": "使用记忆",
-    "label": "使用记忆"
-  },
-  "learnFromChats": {
-    "description": "在后台从符合条件的对话学习耐久事实；可与召回开关分别按对话覆盖。",
-    "heading": "从对话学习",
-    "label": "从对话学习"
-  },
-  "externalContext": {
-    "description": "使用网页搜索、MCP、屏幕上下文或连接器的轮次不自动学习；本地代码工具仍可学习。",
-    "heading": "阻止外部上下文学习",
-    "label": "阻止外部上下文学习"
-  },
-  "tokenBudget": { "label": "召回 Token 预算" },
-  "relevanceFloor": { "label": "最低召回相关度" },
-  "halfLife": { "label": "新近度半衰期（天）" },
-  "maxIdle": { "label": "未使用后遗忘天数（0 为永不）" },
   "manage": "管理记忆",
+  "maxIdle": {
+    "label": "未使用后遗忘天数（0 为永不）"
+  },
   "nav": {
     "items": {
       "learning": {
@@ -132,6 +129,7 @@
         "label": "检索"
       }
     },
+    "mobileTrigger": "分区",
     "title": "记忆设置"
   },
   "overview": {
@@ -176,6 +174,9 @@
     "description": "召回记忆时用同义词扩展加宽关键词检索。",
     "heading": "查询扩展",
     "label": "查询扩展"
+  },
+  "relevanceFloor": {
+    "label": "最低召回相关度"
   },
   "retrieval": {
     "gates": {
@@ -230,8 +231,8 @@
     "character": "按人格",
     "description": "新记忆的存储位置。相同稳定键下，更窄的作用域覆盖更宽的记忆。",
     "global": "全局（所有人格）",
-    "workspace": "当前工作区",
-    "heading": "默认作用域"
+    "heading": "默认作用域",
+    "workspace": "当前工作区"
   },
   "temporary": {
     "description": "暂停记忆——本次会话既不读取也不写入。",
@@ -239,7 +240,15 @@
     "label": "临时模式"
   },
   "title": "记忆",
+  "tokenBudget": {
+    "label": "召回 Token 预算"
+  },
   "topK": {
     "label": "每轮注入的记忆数"
+  },
+  "useMemory": {
+    "description": "允许符合条件的对话召回已保存记忆；每个对话可单独覆盖。",
+    "heading": "使用记忆",
+    "label": "使用记忆"
   }
 }

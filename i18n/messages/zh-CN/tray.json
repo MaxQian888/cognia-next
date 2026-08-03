@@ -55,6 +55,7 @@
     "streaming": "回复中…"
   },
   "toggleWindow": "显示 / 隐藏窗口",
+  "trayPanelToggle": "快捷面板",
   "usage": {
     "auto": "自动（用量最高）",
     "empty": "暂无额度数据",

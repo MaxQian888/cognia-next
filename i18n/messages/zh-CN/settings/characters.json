@@ -267,9 +267,28 @@
   "searchPlaceholder": "搜索角色…",
   "skillsCount": "{count} 项技能",
   "title": "角色",
+  "trust": {
+    "rejectedToast": "角色包「{id}」已被拒绝：签名验证未通过（{reason}）。",
+    "skippedSignature": "{count} 个已签名角色包验证失败，未加载",
+    "unsigned": "未签名",
+    "unsignedTooltip": "此角色包未携带发布者签名，按原样导入。",
+    "verified": "已验证",
+    "verifiedTooltip": "签名已验证 —— {fingerprint}"
+  },
   "updatedToast": "已更新 {name}。",
   "validation": {
     "nameRequired": "请填写名称。",
     "systemPromptRequired": "系统提示词不能为空。"
+  },
+  "warning": {
+    "characterScope": "{message}（角色：{localId}）",
+    "missingA2uiCatalog": "缺少 A2UI 目录：{id}",
+    "missingConnector": "缺少连接器：{id}",
+    "missingMcpPreset": "缺少 MCP 服务器预设：{id}",
+    "missingNativeTool": "缺少原生工具：{id}",
+    "missingPluginSkill": "缺少插件技能：{id}",
+    "missingProvider": "缺少模型供应商：{id}",
+    "missingSkill": "缺少技能：{id}",
+    "missingThemePack": "缺少主题包：{id}"
   }
 }

@@ -50,11 +50,11 @@
     "planMaxAutoRefinements": "最大自动优化次数",
     "planMaxAutoRefinementsHint": "步骤失败后自动修复重规划的上限（0–10）。",
     "planRequireApproval": "计划需要审批",
+    "planRequireApprovalHint": "实施前显示审批卡片。关闭后，捕获的计划将以自动接受编辑模式直接继续。",
     "planStyleCards": "卡片",
     "planStyleCompact": "紧凑",
     "planStyleDefault": "默认",
     "planStyleTimeline": "时间线",
-    "planRequireApprovalHint": "实施前显示审批卡片。关闭后，捕获的计划将以自动接受编辑模式直接继续。",
     "planTitle": "计划模式",
     "routingDesc": "某次发送失败时，自动尝试别名回退链中的下一项。关闭后会保留原始错误，便于排查。",
     "routingTitle": "路由回退",
@@ -69,6 +69,10 @@
     "workingDirTitle": "默认工作目录"
   },
   "description": "配置进程内 Claude SDK 侧载的默认行为——这些值会用于所有新会话，除非角色或会话级别覆盖。",
+  "nav": {
+    "mobileTrigger": "分区",
+    "title": "智能体运行时设置"
+  },
   "permissions": {
     "addBtn": "添加",
     "addToolPlaceholder": "工具名（例如 mcp__cognia-tools__file_hash）",
@@ -148,6 +152,7 @@
         "name": "网页克隆"
       }
     },
+    "categoriesTitle": "工具类别",
     "desktopOnlyHint": "内置工具分类运行在桌面侧载中，请切换到桌面端启用。",
     "infoLabel": "查看 {name} 包含的工具",
     "infoListTitle": "{count} 个工具",
@@ -215,6 +220,37 @@
     "resume": "切换到此会话",
     "resumedToast": "已切换到 `{title}`。",
     "save": "保存",
+    "sdk": {
+      "cancel": "取消",
+      "count": "{count} 个原生会话",
+      "delete": "删除 SDK 会话",
+      "deleteConfirm": "永久删除",
+      "deleteDescription": "将删除原生 SDK 对话记录及其所有子智能体对话记录，此操作无法撤销。",
+      "deleteTitle": "删除原生 SDK 会话？",
+      "deleted": "SDK 会话已删除。",
+      "description": "由 Claude Agent SDK 保存的会话，包括尚未关联到 Cognia 对话的记录。",
+      "disabled": "请先在侧载诊断中启用 Claude Agent SDK 完整支持，再管理原生会话。",
+      "empty": "未找到原生 SDK 会话。",
+      "errors": {
+        "deleteFailed": "无法删除 SDK 会话。",
+        "forkFailed": "无法分支 SDK 会话。",
+        "importFailed": "无法导入 SDK 会话。",
+        "loadFailed": "无法加载 SDK 会话。",
+        "renameFailed": "无法重命名 SDK 会话。"
+      },
+      "fork": "Fork SDK 会话",
+      "forked": "SDK 会话已分支。",
+      "importStore": "导入 SessionStore",
+      "imported": "SDK 会话已导入 SessionStore。",
+      "refresh": "刷新 SDK 会话",
+      "rename": "重命名 SDK 会话",
+      "renameDescription": "修改原生 SDK 会话标题，不改变对话记录。",
+      "renameTitle": "重命名原生 SDK 会话",
+      "renamed": "SDK 会话已重命名。",
+      "save": "保存",
+      "title": "原生 SDK 会话",
+      "titleLabel": "会话标题"
+    },
     "title": "会话列表",
     "untitled": "（未命名）"
   },
@@ -236,6 +272,28 @@
     "countsTitle": "关联面板",
     "description": "进程内 Claude SDK 侧载的只读视图。",
     "desktopOnlyHint": "重启功能仅在桌面端版本中提供。",
+    "parity": {
+      "capabilities": "已配置的能力覆盖",
+      "checkpoint": {
+        "description": "允许对 SDK 用户消息检查点进行预演并经确认后恢复文件。",
+        "label": "文件检查点"
+      },
+      "description": "渐进启用完整 Claude Agent SDK 能力，并独立控制有状态的高风险功能。",
+      "disabledHint": "请先启用主开关，再开启有状态能力。",
+      "master": {
+        "description": "使用版本化的选项、控制、事件、Hooks 与会话 API 契约。",
+        "label": "Claude Agent SDK 完整支持"
+      },
+      "prewarm": {
+        "description": "保留相互隔离的预热 SDK 进程，以处理下一次兼容请求。",
+        "label": "预热池"
+      },
+      "sessionStore": {
+        "description": "将原生 SDK 会话记录镜像到加密且租户隔离的主机存储。",
+        "label": "会话存储"
+      },
+      "title": "Claude Agent SDK 高级功能"
+    },
     "restartBtn": "重启侧载",
     "restartedToast": "已请求重启侧载。",
     "running": "运行中",

@@ -11,8 +11,6 @@
   "coreFilesDesc": "面向非 Anthropic 模型的完整编码 Agent 工具集：搜索、读取、补丁、Shell、可等待的后台命令，以及带依赖关系的结构化会话任务。只读工具自由运行；文件系统和 Shell 变更需逐次审批。",
   "dependencyResearch": "依赖源码",
   "dependencyResearchDesc": "将依赖的源码仓库克隆到被忽略的 .cognia/clonedeps/ 工作区（clone_dep_source / list_cloned_deps），让 Agent 直接阅读库的内部实现。仅 HTTPS、幂等、不运行任何构建脚本。仅桌面端。",
-  "webclone": "网页快照",
-  "webcloneDesc": "对在线网页做快照（web_clone / web_clone_convert）——下载其 HTML 以及全部 CSS/JS/图片/字体资源，打包成自包含单文件或目录 bundle，可选做组件提取与 Vue/React/Angular/Svelte/jQuery 代码生成。除非显式放行，私有/回环地址会被拦截。仅桌面端。",
   "description": "分类切换 sidecar 内的 cognia-tools MCP 服务器。每个分类向 Agent 暴露一组不同的工具。",
   "desktopRequired": "仅桌面端",
   "desktopRequiredDesc": "这些工具运行在本地 sidecar 进程内，Web 构建中不可用。",
@@ -42,6 +40,8 @@
   "skillToolTitle": "Skill 工具",
   "slashToolDesc": "暴露 SlashCommand 工具，让 Agent 运行已注册的斜杠命令。内置 UI 命令会返回在聊天框运行的提示。",
   "slashToolTitle": "SlashCommand 工具",
+  "spawnTaskToolDesc": "允许 Agent 将明确范围的后续工作暂存到命名侧聊中，供你检查并启动。",
+  "spawnTaskToolTitle": "派生任务",
   "teamCollabToolDesc": "让队友在团队运行期间协作——给同伴发消息、共享黑板、发起或参与共识投票、委派子任务。仅对 Agent 团队会话生效。",
   "teamCollabToolTitle": "团队协作工具",
   "terminalRepl": "交互式 REPL",
@@ -53,8 +53,6 @@
     "astGrepSearch": "按 AST 结构搜索代码（元变量 $VAR / $$$），覆盖 25 种语言。只读，比纯文本 grep 更精确。",
     "checkProgramAllowed": "测试某程序是否会被 start_process 接受。",
     "cloneDepSource": "将依赖的 HTTPS 源码仓库克隆到 .cognia/clonedeps/（幂等），以便阅读其内部实现。",
-    "webClone": "对在线网页做快照——下载其 HTML 以及全部 CSS/JS/图片/字体资源，打包成自包含单文件或目录 bundle，可选做组件提取与框架代码生成。产物写入工作区。",
-    "webCloneConvert": "对已有的本地快照（目录 bundle 或单 HTML 文件）做组件提取 + 框架代码生成，无需重新抓取。生成 Vue/React/Angular/Svelte/jQuery 组件。",
     "contentSearch": "在文件内容中按子串或正则查找，返回行号。",
     "coreApplyPatch": "原子地对一个或多个文件应用统一 diff（创建 / 修改 / 删除）。",
     "coreBash": "执行任意 shell 命令（需审批；超长输出保留尾部）。",
@@ -122,8 +120,13 @@
     "terminalReplSpawn": "打开持久化交互式 PTY（例如 python / sql REPL），返回 sessionId 供后续写入 / 读取。",
     "terminalReplWrite": "向 REPL 会话 stdin 写入字节。非阻塞 —— 配合 terminal_repl_read 使用。",
     "terminateProcess": "终止 PID（默认仅允许本会话启动的 PID）。",
-    "topMemoryProcesses": "按常驻内存排序取前 N 个进程。"
+    "topMemoryProcesses": "按常驻内存排序取前 N 个进程。",
+    "webClone": "对在线网页做快照——下载其 HTML 以及全部 CSS/JS/图片/字体资源，打包成自包含单文件或目录 bundle，可选做组件提取与框架代码生成。产物写入工作区。",
+    "webCloneConvert": "对已有的本地快照（目录 bundle 或单 HTML 文件）做组件提取 + 框架代码生成，无需重新抓取。生成 Vue/React/Angular/Svelte/jQuery 组件。"
   },
+  "vectorToolDesc": "让 Agent 在当前项目的向量记忆中存取文档。集合按关联项目隔离；未关联项目的会话无法使用这些工具。",
+  "vectorToolDesktopOnly": "需要桌面端——向量记忆运行在本机原生向量库上。",
+  "vectorToolTitle": "向量记忆工具",
   "webAllowPrivateDesc": "允许 web_fetch 访问 localhost 及内网主机（10.x、192.168.x、169.254.x 云元数据）。默认关闭以阻断 SSRF——仅在可信的本地开发时开启。",
   "webAllowPrivateTitle": "允许私有 / 本地地址",
   "webAlwaysDistillDesc": "即使没有问题，也先用工具模型处理每个抓取的网页再交给智能体——智能体不会读到原始网页文本，从而收窄提示注入面。需已配置模型；每次抓取成本略增。",
@@ -132,7 +135,6 @@
   "webCardTitle": "网络",
   "webNativeAnthropicDesc": "在 Anthropic 链路下，改用 Claude 内置的 WebSearch / WebFetch（服务端抽取 + 引用），而非多 provider 工具。其他 provider 仍用多 provider 工具。",
   "webNativeAnthropicTitle": "使用 Anthropic 原生网络工具",
-  "vectorToolDesc": "让 Agent 在当前项目的向量记忆中存取文档。集合按关联项目隔离；未关联项目的会话无法使用这些工具。",
-  "vectorToolDesktopOnly": "需要桌面端——向量记忆运行在本机原生向量库上。",
-  "vectorToolTitle": "向量记忆工具"
+  "webclone": "网页快照",
+  "webcloneDesc": "对在线网页做快照（web_clone / web_clone_convert）——下载其 HTML 以及全部 CSS/JS/图片/字体资源，打包成自包含单文件或目录 bundle，可选做组件提取与 Vue/React/Angular/Svelte/jQuery 代码生成。除非显式放行，私有/回环地址会被拦截。仅桌面端。"
 }

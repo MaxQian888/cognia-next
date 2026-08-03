@@ -30,7 +30,6 @@
     "disconnect": "断开",
     "emptyBody": "配对一台远程 Cognia 服务器,即可从这里驱动它的终端、文件与 git。在「添加主机」标签页添加一台。",
     "emptyTitle": "还没有远程主机",
-    "neverConnected": "从未连接",
     "featureCategory": {
       "host": "远程主机执行",
       "proxy": "控制端代理",
@@ -40,6 +39,7 @@
     "featureManifestUnknown": "缺少 operation 级功能契约——主机返回契约前保持写操作禁用",
     "featurePermissionNote": "已声明的 operation 仍需通过对应命令权限；管理写入需要 remote-control，高风险写入还需要 Owner admin lease。",
     "featureVersion": "{feature} v{version}",
+    "neverConnected": "从未连接",
     "none": "无",
     "remove": "移除",
     "removeA11y": "移除 {label}",

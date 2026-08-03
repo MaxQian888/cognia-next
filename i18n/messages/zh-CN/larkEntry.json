@@ -20,11 +20,11 @@
   "openWorkbench": "打开工作台",
   "resolving": "正在校验链接…",
   "shortcut": {
-    "title": "导入消息",
-    "preparing": "正在准备导入…",
-    "importing": "正在导入所选消息…",
+    "creating": "正在为该会话创建任务……",
     "done": "导入完成，正在打开会话…",
-    "creating": "正在为该会话创建任务……"
+    "importing": "正在导入所选消息…",
+    "preparing": "正在准备导入…",
+    "title": "导入消息"
   },
   "title": "Cognia 入口"
 }

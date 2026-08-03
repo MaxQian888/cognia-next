@@ -83,8 +83,8 @@
   "delete": {
     "body": "\"{name}\" will be removed. Characters using it will silently drop the reference on next save.",
     "bundles": {
-      "label": "Also delete {count} recording(s) of this skill",
-      "hint": "The capture and its screenshots are removed from this device. This cannot be undone."
+      "hint": "The capture and its screenshots are removed from this device. This cannot be undone.",
+      "label": "Also delete {count} recording(s) of this skill"
     },
     "cancel": "Cancel",
     "confirm": "Remove",
@@ -125,6 +125,7 @@
     "scanCodex": "Scan ~/.agents/skills/",
     "scanCustom": "Scan a directory…",
     "scanHome": "Scan ~/.claude/skills/",
+    "scanOpencode": "Scan OpenCode skills",
     "scanning": "Scanning {label}…",
     "title": "Find skills"
   },
@@ -386,6 +387,8 @@
       "toolbarButton": "Record a skill"
     },
     "generate": {
+      "blockedByVariables": "{count, plural, one {# variable still needs confirming} other {# variables still need confirming}} before a skill can be generated.",
+      "blockedByVariablesHint": "Open the review step and confirm or exclude each one.",
       "failed": "The skill could not be generated.",
       "manualFallback": "Write it from the timeline instead",
       "manualFallbackHint": "Produces a complete skill from the steps you reviewed, with no model involved.",
@@ -411,9 +414,7 @@
         "title": "Tools this skill may use",
         "unknown": "The model suggested {count} tools that do not exist. They were left out."
       },
-      "truncated": "{count} further steps were left out for length.",
-      "blockedByVariables": "{count, plural, one {# variable still needs confirming} other {# variables still need confirming}} before a skill can be generated.",
-      "blockedByVariablesHint": "Open the review step and confirm or exclude each one."
+      "truncated": "{count} further steps were left out for length."
     },
     "generateFailed": "Couldn't generate a skill from this recording.",
     "generating": "Generating skill…",
@@ -480,6 +481,7 @@
     },
     "redacted": "Sensitive text was redacted before sending to the model.",
     "review": {
+      "blockedByVariables": "{count, plural, one {# unconfirmed variable} other {# unconfirmed variables}}",
       "blockers": {
         "noIncludedSteps": "Include at least one step.",
         "sensitiveVariableHasValue": "\"{name}\" is marked secret but still holds a value.",
@@ -533,8 +535,7 @@
       "verify": "Check afterwards",
       "verifyPlaceholder": "How would you know this step worked?",
       "viewDetail": "Details",
-      "viewTimeline": "Timeline",
-      "blockedByVariables": "{count, plural, one {# unconfirmed variable} other {# unconfirmed variables}}"
+      "viewTimeline": "Timeline"
     },
     "save": {
       "assetsPromoted": "{count} screenshots attached",
@@ -573,14 +574,14 @@
       "scopeWindow": "A single window",
       "start": "Start recording",
       "storage": "{used} of {limit} used by recordings",
-      "targetRequired": "Pick a target to record.",
-      "targetRefresh": "Refresh",
-      "targetLoading": "Looking for open windows…",
-      "targetFailed": "Couldn't list open windows. Refresh to try again.",
+      "targetApplication": "Application to record",
       "targetEmpty": "No open windows to record.",
+      "targetFailed": "Couldn't list open windows. Refresh to try again.",
+      "targetLoading": "Looking for open windows…",
       "targetMinimized": "Minimized",
-      "targetWindow": "Window to record",
-      "targetApplication": "Application to record"
+      "targetRefresh": "Refresh",
+      "targetRequired": "Pick a target to record.",
+      "targetWindow": "Window to record"
     },
     "srStatus": "Recorder stage {stage}, step {current} of {total}.",
     "stages": {
@@ -641,12 +642,12 @@
       "regenerate": "Regenerate",
       "saveAsNew": "Save as another skill",
       "status": {
-        "recording": "Recording",
         "captured": "Captured",
+        "discarded": "Discarded",
         "drafting": "Draft",
-        "saved": "Saved",
         "interrupted": "Interrupted",
-        "discarded": "Discarded"
+        "recording": "Recording",
+        "saved": "Saved"
       },
       "stepCount": "{count} steps",
       "stepCounts": "{included} of {total} steps kept",

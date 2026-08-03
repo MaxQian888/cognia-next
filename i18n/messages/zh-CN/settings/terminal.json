@@ -205,10 +205,6 @@
     "helper": "命令失败时在该命令处显示灯泡，提供修复建议：git push --set-upstream、“是否想输入”、创建 PR 链接、释放被占端口、pwsh 未找到命令等。",
     "label": "快速修复"
   },
-  "rescaleOverlappingGlyphs": {
-    "helper": "缩放可能覆盖相邻终端单元格的宽字形。",
-    "label": "缩放重叠字形"
-  },
   "renderer": {
     "auto": "自动",
     "canvas": "Canvas",
@@ -216,6 +212,10 @@
     "helper": "自动优先 GPU 加速的 WebGL，失败时回退到 Canvas 再到 DOM。若终端渲染为空白或花屏，可切换到 Canvas 或 DOM。",
     "label": "渲染器",
     "webgl": "WebGL"
+  },
+  "rescaleOverlappingGlyphs": {
+    "helper": "缩放可能覆盖相邻终端单元格的宽字形。",
+    "label": "缩放重叠字形"
   },
   "runInDockTimeout": {
     "helper": "聊天中的「Run in dock」与智能体 terminal_dock_write 等候 command_end OSC 633 事件的时间上限。每次调用可单独覆盖，此处是默认值。范围 5–600，默认 60。",
@@ -233,10 +233,6 @@
     "helper": "xterm 历史缓冲区保留的行数。范围 1000–100000。",
     "label": "回滚行数"
   },
-  "smoothScrolling": {
-    "helper": "为滚轮和触控板滚动添加动画，避免在终端行之间跳动。",
-    "label": "平滑滚动"
-  },
   "shell": {
     "auto": "自动检测（推荐）",
     "bash": "bash",
@@ -252,6 +248,10 @@
   "shellIntegration": {
     "helper": "向 bash / zsh / pwsh 注入 OSC 633 提示符标记，让面板能展示命令状态和 cwd 徽章。若 shell 会解析错误，请关闭。",
     "label": "启用 shell 集成"
+  },
+  "smoothScrolling": {
+    "helper": "为滚轮和触控板滚动添加动画，避免在终端行之间跳动。",
+    "label": "平滑滚动"
   },
   "ssh": {
     "add": "添加 SSH 主机",

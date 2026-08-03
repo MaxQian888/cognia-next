@@ -1,11 +1,11 @@
 {
   "avgResponse": "平均耗时",
   "description": "各 Provider 的调用次数与响应时间。",
+  "errCount": "{count} 个错误",
   "errors": "错误",
   "mostUsed": "最常用",
   "noData": "暂无数据。",
   "reset": "重置",
   "title": "使用统计",
-  "totalSearches": "总搜索数",
-  "errCount": "{count} 个错误"
+  "totalSearches": "总搜索数"
 }

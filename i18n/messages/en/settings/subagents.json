@@ -216,9 +216,9 @@
     "title": "Templates",
     "toolsHint": "Inherit gives this sub-agent the parent's tools. A custom list grants exactly those. Disable all leaves it with none.",
     "toolsLabel": "Tool access",
+    "variableIndex": "Variable {index}",
     "varsUndeclared": "Used but not declared: {names}",
-    "varsUnused": "Declared but never used: {names}",
-    "variableIndex": "Variable {index}"
+    "varsUnused": "Declared but never used: {names}"
   },
   "title": "Sub-agents",
   "toolCatalog": {

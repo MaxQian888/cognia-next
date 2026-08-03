@@ -1569,6 +1569,76 @@
       "switchPasswordPlaceholder": "密码"
     }
   },
+  "agentMigration": {
+    "artifacts": {
+      "names": {
+        "commands": "命令",
+        "mcp": "MCP 服务器",
+        "memory": "记忆",
+        "sessions": "会话",
+        "settings": "设置",
+        "skills": "技能",
+        "subagents": "子智能体"
+      },
+      "title": "选择要导入的内容"
+    },
+    "back": "返回",
+    "cancel": "取消",
+    "cardBody": "将设置、历史记录、技能、智能体、MCP 服务器、命令和记忆迁移到 Cognia。",
+    "cardTitle": "编程智能体迁移",
+    "close": "关闭",
+    "continue": "继续",
+    "description": "从已安装的编程智能体导入受支持的数据。写入前可逐项预览。",
+    "errors": {
+      "artifactFailed": "此项内容无法导入。",
+      "importFailed": "无法完成迁移。",
+      "previewFailed": "无法生成迁移预览。",
+      "scanFailed": "无法检测已安装的编程智能体。"
+    },
+    "import": "导入",
+    "preview": {
+      "action": "预览",
+      "items": "{count} 项"
+    },
+    "progress": {
+      "artifact": "正在导入{artifact}…",
+      "starting": "正在开始导入…"
+    },
+    "result": {
+      "aborted": "迁移已停止",
+      "complete": "迁移完成",
+      "description": "查看从所选编程智能体导入到 Cognia 的内容。",
+      "imported": "已导入 {count} 项",
+      "title": "迁移结果"
+    },
+    "retry": "重试",
+    "status": {
+      "empty": "无内容",
+      "error": "错误",
+      "ready": "可导入",
+      "shared": "已共享",
+      "unsupported": "不支持"
+    },
+    "step": "第 {current} 步，共 {total} 步",
+    "strategy": {
+      "duplicate": "两者都保留",
+      "label": "冲突处理",
+      "overwrite": "替换现有内容",
+      "skip": "保留现有内容"
+    },
+    "title": "从编程智能体导入",
+    "vendor": {
+      "installed": "已安装",
+      "notInstalled": "未找到",
+      "scanning": "正在查找已安装的智能体…",
+      "title": "选择来源"
+    },
+    "vendors": {
+      "claude-code": "Claude Code",
+      "codex": "Codex",
+      "opencode": "OpenCode"
+    }
+  },
   "agentMode": {
     "a2uiTemplatePreviewTitle": "A2UI 模板预览",
     "agentTeams": "代理团队",
@@ -4279,6 +4349,7 @@
         "trigger": "添加附件"
       },
       "attachments": {
+        "analyzing": "正在解析图片…",
         "countLimit": "最多只能附加 {max} 个附件。",
         "extracting": "读取中…",
         "fallbackFile": "文件",
@@ -4294,6 +4365,7 @@
         "oversizeConfirm": "仍然发送",
         "oversizeTitle": "附件较大",
         "preparing": "正在处理附件…",
+        "preparingImages": "正在处理 {count} 张图片…",
         "preview": {
           "empty": "未能从此文件中提取到内容。",
           "fileTab": "文件",
@@ -4319,9 +4391,7 @@
         "reorderAria": "拖动排序 {filename}",
         "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。",
         "tokenBadge": "{tokens} tok",
-        "unsupported": "有 {count} 个文件不受支持。",
-        "analyzing": "正在解析图片…",
-        "preparingImages": "正在处理 {count} 张图片…"
+        "unsupported": "有 {count} 个文件不受支持。"
       },
       "camera": {
         "captureAria": "拍照或添加照片",
@@ -4330,7 +4400,17 @@
         "permissionDenied": "需要相机或照片访问权限才能添加照片。",
         "unsupported": "此设备不支持拍照。"
       },
+      "commandHint": {
+        "needsArgs": "请补充必填参数"
+      },
+      "commandQueue": {
+        "ariaLabel": "待执行命令",
+        "failedTooltip": "/{name} 执行失败",
+        "label": "{count} 个命令",
+        "removeAria": "移除 /{name}"
+      },
       "commands": {
+        "batchFailed": "命令 {names} 执行失败",
         "failed": "命令执行失败",
         "unavailable": "/{name} 暂不可用。"
       },
@@ -4353,7 +4433,20 @@
       },
       "effort": {
         "aria": "思考等级",
-        "auto": "默认"
+        "auto": "默认",
+        "desc": {
+          "high": "深入推理，适合复杂任务。",
+          "low": "轻量推理，适合直接任务。",
+          "max": "最大推理深度，适合最困难的任务。",
+          "medium": "均衡推理，适合日常任务。",
+          "off": "使用模型的默认推理行为。",
+          "ultracode": "次高推理深度，并启用动态工作流工具。",
+          "xhigh": "超深度推理，适合高难度任务。"
+        },
+        "faster": "更快",
+        "hint": "选择模型在本会话中使用的推理强度。",
+        "hintAria": "关于思考等级",
+        "smarter": "更智能"
       },
       "enhance": {
         "modes": {
@@ -4396,7 +4489,27 @@
       "ghostAcceptHint": "Tab",
       "ghostDismiss": "忽略建议",
       "helperHints": {
+        "chainingNote": "将命令分行输入，即可按顺序执行。",
+        "cheatsheetDescription": "消息输入框可用的键盘快捷键与前缀。",
+        "cheatsheetLabel": "键盘帮助",
+        "cheatsheetTitle": "输入框快捷键",
         "dropImages": "拖拽 / 粘贴文件、文件夹或链接",
+        "keys": {
+          "complete": "补全当前命令或提及",
+          "dismiss": "关闭建议",
+          "history": "调取输入历史",
+          "newline": "插入新行",
+          "permissionMode": "切换权限模式",
+          "send": "发送消息"
+        },
+        "keysTitle": "键盘",
+        "prefixes": {
+          "memory": "写入记忆",
+          "mention": "提及文件、智能体、技能或工作流",
+          "shell": "运行 Shell 命令",
+          "slash": "运行斜杠命令"
+        },
+        "prefixesTitle": "前缀",
         "send": "⏎ 发送 · ⇧⏎ 换行",
         "tryPrefix": "试试"
       },
@@ -4407,12 +4520,32 @@
       },
       "memory": {
         "appended": "已写入 {path}",
+        "desktopOnly": "文件记忆仅在桌面应用中可用。",
         "emptyPreview": "（开始输入 memory 内容）",
         "failed": "写入 memory 失败",
         "needsLine": "请在 # 后输入要写入 memory 的内容。",
         "panelTitle": "追加到 memory",
         "pickScope": "请在弹层中选择「项目 memory」或「用户 memory」以保存。",
         "projectLabel": "项目 memory",
+        "scope": {
+          "global": "全局记忆",
+          "workspace": "工作区记忆"
+        },
+        "storeError": {
+          "disabled": "长期记忆已关闭。",
+          "empty": "请输入要记住的内容。",
+          "failed": "无法存储这条记忆。",
+          "pii": "敏感信息不能存入记忆。",
+          "temporary": "临时模式下无法使用记忆。",
+          "unavailable": "记忆存储当前不可用。"
+        },
+        "storedInMemory": "已存入{scope}",
+        "targetLabel": {
+          "file:project": "项目记忆文件",
+          "file:user": "用户记忆文件",
+          "store:global": "全局记忆",
+          "store:workspace": "工作区记忆"
+        },
         "userLabel": "用户 memory"
       },
       "modelPicker": {
@@ -4596,8 +4729,12 @@
           "description": "自然连续对话，随时插话打断，免手动保持交流。",
           "end": "结束实时语音",
           "errors": {
+            "disabled": "实时语音已关闭。请在「设置 → 语音」中开启。",
+            "mintFailed": "无法与任何实时语音服务商建立会话。请检查 API 密钥与网络后重试。",
+            "noDeployments": "尚未配置实时语音服务商。请在「设置 → 语音」中添加。",
+            "noneEligible": "当前地区和设备下，没有可用的实时语音服务商。",
             "sessionFailed": "实时语音连接已中断，请结束会话后重试。",
-            "startFailed": "无法启动实时语音，请检查 OpenAI 密钥和麦克风权限。"
+            "startFailed": "无法启动实时语音。请检查服务商密钥与麦克风权限。"
           },
           "mute": "麦克风静音",
           "phases": {
@@ -4690,46 +4827,46 @@
         "continue": "最近",
         "tryPrompt": "试试这些"
       },
+      "stats": {
+        "customize": "自定义统计项",
+        "customizeTitle": "在欢迎页显示",
+        "dayCount": "{count} 天",
+        "empty": "该时间范围内还没有使用记录。",
+        "heatmap": "日历热力图",
+        "models": {
+          "empty": "该时间范围内没有模型用量。",
+          "turns": "{count} 轮"
+        },
+        "none": "—",
+        "range": {
+          "days": "{days} 天",
+          "label": "时间范围"
+        },
+        "tiles": {
+          "activeDays": "活跃天数",
+          "cost": "总花费",
+          "currentStreak": "当前连续",
+          "longestStreak": "最长连续",
+          "peakHour": "高峰时段",
+          "sessions": "会话数",
+          "tokens": "总 Token",
+          "topModel": "常用模型",
+          "turns": "对话轮次"
+        },
+        "title": "使用概览",
+        "view": {
+          "label": "面板视图",
+          "models": "模型",
+          "overview": "总览"
+        }
+      },
       "style": {
         "minimal": "精简",
         "rich": "丰富",
         "toggleLabel": "切换欢迎页布局"
       },
       "subtitle": "随便问、直接进入某个能力，或接着上次继续。",
-      "title": "今天想完成点什么？",
-      "stats": {
-        "title": "使用概览",
-        "empty": "该时间范围内还没有使用记录。",
-        "none": "—",
-        "dayCount": "{count} 天",
-        "customize": "自定义统计项",
-        "customizeTitle": "在欢迎页显示",
-        "heatmap": "日历热力图",
-        "view": {
-          "label": "面板视图",
-          "overview": "总览",
-          "models": "模型"
-        },
-        "range": {
-          "label": "时间范围",
-          "days": "{days} 天"
-        },
-        "tiles": {
-          "sessions": "会话数",
-          "turns": "对话轮次",
-          "tokens": "总 Token",
-          "cost": "总花费",
-          "activeDays": "活跃天数",
-          "currentStreak": "当前连续",
-          "longestStreak": "最长连续",
-          "peakHour": "高峰时段",
-          "topModel": "常用模型"
-        },
-        "models": {
-          "empty": "该时间范围内没有模型用量。",
-          "turns": "{count} 轮"
-        }
-      }
+      "title": "今天想完成点什么？"
     },
     "filePreview": {
       "extractedChars": "已提取 {count} 字符",
@@ -4972,6 +5109,16 @@
       },
       "read": {
         "title": "读取"
+      },
+      "spawnTask": {
+        "aside": "独立侧聊",
+        "caveats": "注意事项",
+        "codeLocations": "代码位置",
+        "inherit": "继承上下文",
+        "open": "打开任务",
+        "situation": "现状",
+        "solution": "建议方案",
+        "start": "开始任务"
       },
       "webFetch": {
         "empty": "无返回内容"
@@ -5919,6 +6066,20 @@
     "deleteConfirmDesc": "此操作无法撤消，自定义模式将被永久删除。",
     "deleteSelected": "删除所选",
     "deletedModes": "已删除 {count} 个模式",
+    "detail": {
+      "modelOverride": "模型覆盖",
+      "noSystemPrompt": "此模式不添加系统提示词。",
+      "none": "无",
+      "outputFormat": "输出格式",
+      "permissionMode": "权限模式",
+      "systemPrompt": "系统提示词",
+      "tags": "标签",
+      "tools": "工具",
+      "updated": "更新时间",
+      "usage": "使用情况"
+    },
+    "detailEmptyDescription": "从列表中选择一个模式，查看它会改变什么。",
+    "detailEmptyTitle": "未选择模式",
     "duplicate": "复制",
     "editMode": "编辑 {name}",
     "exportedModes": "已导出 {count} 个模式",
@@ -5927,6 +6088,7 @@
     "importedMode": "已导入模式 \"{name}\"",
     "importedModes": "已导入 {count} 个模式",
     "invalidFileFormat": "文件格式无效",
+    "mobileTrigger": "模式",
     "modeDeleted": "已删除模式",
     "modeDuplicated": "已复制模式",
     "modeExported": "已导出模式",
@@ -5937,6 +6099,7 @@
     "resultsCount": "显示 {shown} / {total}",
     "searchModes": "搜索模式…",
     "selectAll": "全选",
+    "selectMode": "选择 {name}",
     "selected": "已选择 {count} 项",
     "sortByCreated": "按创建时间排序",
     "sortByLabel": "排序",
@@ -5944,23 +6107,7 @@
     "sortByName": "按名称排序",
     "sortByUpdated": "按更新时间排序",
     "tools": "{count} 个工具",
-    "usedTimes": "使用 {count} 次",
-    "mobileTrigger": "模式",
-    "selectMode": "选择 {name}",
-    "detailEmptyTitle": "未选择模式",
-    "detailEmptyDescription": "从列表中选择一个模式，查看它会改变什么。",
-    "detail": {
-      "tools": "工具",
-      "tags": "标签",
-      "none": "无",
-      "outputFormat": "输出格式",
-      "permissionMode": "权限模式",
-      "modelOverride": "模型覆盖",
-      "usage": "使用情况",
-      "updated": "更新时间",
-      "systemPrompt": "系统提示词",
-      "noSystemPrompt": "此模式不添加系统提示词。"
-    }
+    "usedTimes": "使用 {count} 次"
   },
   "desktop": {
     "barCustomize": {
@@ -11907,6 +12054,8 @@
       "clearAfterSendHelp": "成功发送后清空输入框（文字与附件）。",
       "composerSection": "输入框",
       "composerSectionHelp": "本机消息输入框的行为。",
+      "effortSelectorMode": "思考等级滑杆",
+      "effortSelectorModeHelp": "选择模型思考等级时使用滑杆，而不是列表。",
       "inputHistory": "调取输入历史",
       "inputHistoryHelp": "在空输入框按 ↑ / ↓ 调取之前发送过的消息。",
       "persistDrafts": "保留草稿",
@@ -15088,6 +15237,22 @@
     "triggerText": "计划任务（{count}）"
   },
   "plugins": {
+    "activation": {
+      "cancelled": "启用在「{phase}」阶段被取消",
+      "countLabel": "第 {processed} 步，共 {total} 步",
+      "failed": "启用在「{phase}」阶段失败",
+      "label": "正在启用 {name}",
+      "phase": {
+        "commit": "正在完成启用",
+        "contributions": "正在注册贡献点",
+        "dependencies": "正在启用依赖项",
+        "hooks": "正在执行启用钩子",
+        "preflight": "正在检查兼容性",
+        "runtime": "正在启动插件运行时",
+        "schema": "正在准备数据存储"
+      },
+      "progressAria": "正在启用 {name}——{phase}，第 {processed} 步，共 {total} 步"
+    },
     "activeFilters": {
       "ariaLabel": "已激活的筛选条件",
       "chip": {
@@ -18297,46 +18462,46 @@
     }
   },
   "safeMode": {
-    "title": "Cognia 已进入诊断模式",
-    "description": "应用连续两次启动失败，因此插件、连接器和后台任务将暂停，直到各子系统通过健康检查。",
-    "buildFooter": "构建 {buildId}",
-    "suspect": {
-      "title": "疑似原因",
-      "subsystem": "{subsystem} 子系统未通过健康检查。",
-      "unknownSubsystem": "未能定位到具体子系统。"
-    },
-    "checkpoints": {
-      "title": "子系统健康检查",
-      "description": "每项检查均为只读。某项失败会中断其后的检查，因为它们依赖于它。",
-      "running": "正在执行健康检查",
-      "empty": "尚未执行任何健康检查。"
-    },
-    "status": {
-      "pending": "尚未检查",
-      "passed": "已通过",
-      "failed": "未通过",
-      "skipped": "已跳过",
-      "disabled": "保持关闭"
-    },
-    "subsystem": {
-      "database": "本地数据库",
-      "plugins": "插件",
-      "sidecar": "Agent Sidecar",
-      "connectors": "平台连接器",
-      "workflow": "工作流",
-      "external-agent": "外部 Agent"
-    },
     "actions": {
-      "retry": "重试",
-      "keepDisabled": "保持关闭"
+      "keepDisabled": "保持关闭",
+      "retry": "重试"
     },
     "available": {
-      "title": "诊断模式下仍可使用",
+      "about": "关于与重置",
+      "backup": "备份与导出",
       "description": "本地数据仍可读取，你可以在重试前导出诊断报告或备份。",
       "logs": "打开日志与崩溃报告",
-      "backup": "备份与导出",
-      "about": "关于与重置"
-    }
+      "title": "诊断模式下仍可使用"
+    },
+    "buildFooter": "构建 {buildId}",
+    "checkpoints": {
+      "description": "每项检查均为只读。某项失败会中断其后的检查，因为它们依赖于它。",
+      "empty": "尚未执行任何健康检查。",
+      "running": "正在执行健康检查",
+      "title": "子系统健康检查"
+    },
+    "description": "应用连续两次启动失败，因此插件、连接器和后台任务将暂停，直到各子系统通过健康检查。",
+    "status": {
+      "disabled": "保持关闭",
+      "failed": "未通过",
+      "passed": "已通过",
+      "pending": "尚未检查",
+      "skipped": "已跳过"
+    },
+    "subsystem": {
+      "connectors": "平台连接器",
+      "database": "本地数据库",
+      "external-agent": "外部 Agent",
+      "plugins": "插件",
+      "sidecar": "Agent Sidecar",
+      "workflow": "工作流"
+    },
+    "suspect": {
+      "subsystem": "{subsystem} 子系统未通过健康检查。",
+      "title": "疑似原因",
+      "unknownSubsystem": "未能定位到具体子系统。"
+    },
+    "title": "Cognia 已进入诊断模式"
   },
   "scheduler": {
     "action": "操作",
@@ -18473,6 +18638,7 @@
     "cloneSuccess": "任务克隆成功",
     "cloneTask": "克隆任务",
     "close": "关闭",
+    "code": "代码：",
     "command": "命令",
     "commandArgs": "命令参数",
     "config": "配置",
@@ -18793,6 +18959,10 @@
       "successOnly": "仅成功时"
     },
     "notifyOnStart": "开始时通知",
+    "occurrenceList": {
+      "moreTimes": "另有 {count} 次",
+      "rowAria": "{name}，未来 {count} 次执行"
+    },
     "onBootDelaySeconds": "开机延迟（秒）",
     "onEventId": "事件 ID",
     "onEventSource": "事件来源",
@@ -19122,6 +19292,7 @@
         "unavailableOnWeb": "仅桌面版支持系统级调度器集成。"
       }
     },
+    "showLess": "显示更少",
     "showMore": "显示更多",
     "slashCommand": {
       "description": "创建定时任务或提醒"
@@ -19133,6 +19304,7 @@
       "nextRun": "下次运行"
     },
     "sourceConversationMissing": "来源 IM 会话已不再绑定聊天会话。",
+    "stackTrace": "堆栈跟踪",
     "startedAt": "开始时间",
     "statistics": "统计",
     "stats": {
@@ -19314,10 +19486,7 @@
     "workflowScriptReadOnlyTitle": "工作流托管任务",
     "workflowTriggerNotFound": "未找到该工作流触发器。",
     "workingDir": "工作目录",
-    "yes": "是",
-    "showLess": "显示更少",
-    "stackTrace": "堆栈跟踪",
-    "code": "代码："
+    "yes": "是"
   },
   "searchCache": {
     "allProviders": "全部 Provider",
@@ -20123,11 +20292,11 @@
         "engine": "网页引擎",
         "hideAdvanced": "隐藏运行时详情",
         "react": "React",
+        "runtime": "运行时",
         "showAdvanced": "显示运行时详情",
         "tauri": "Tauri",
         "title": "版本与构建",
-        "version": "版本",
-        "runtime": "运行时"
+        "version": "版本"
       },
       "versionLine": "版本",
       "versionUnknown": "—",
@@ -20160,6 +20329,8 @@
       "localAccountsTitle": "本地账户",
       "lockNow": "立即锁定",
       "lockedNow": "账户已锁定",
+      "manageDescription": "更改套餐、账单信息，或退出登录。",
+      "manageTitle": "管理账户",
       "notSignedIn": "未登录",
       "pair": "配对设备",
       "securityAutoLockOff": "未开启自动锁定",
@@ -20167,7 +20338,9 @@
       "securityManage": "管理",
       "securityTitle": "安全与自动锁定",
       "sessionActionFailed": "操作失败，请重试。",
+      "sessionDescription": "当前登录状态及其保持活跃的时长。",
       "sessionRefreshed": "会话已刷新",
+      "sessionTitle": "会话",
       "signedOut": "已登出",
       "subscriptionManage": "管理",
       "subscriptionTitle": "订阅",
@@ -20176,11 +20349,7 @@
       "title": "账户",
       "usageFiveHour": "5 小时用量",
       "usageReset": "剩余 {remaining}",
-      "usageSevenDay": "7 天用量",
-      "sessionTitle": "会话",
-      "sessionDescription": "当前登录状态及其保持活跃的时长。",
-      "manageTitle": "管理账户",
-      "manageDescription": "更改套餐、账单信息，或退出登录。"
+      "usageSevenDay": "7 天用量"
     },
     "actions": {
       "cancel": "取消",
@@ -20277,6 +20446,10 @@
         "workingDirTitle": "默认工作目录"
       },
       "description": "配置进程内 Claude SDK 侧载的默认行为——这些值会用于所有新会话，除非角色或会话级别覆盖。",
+      "nav": {
+        "mobileTrigger": "分区",
+        "title": "智能体运行时设置"
+      },
       "permissions": {
         "addBtn": "添加",
         "addToolPlaceholder": "工具名（例如 mcp__cognia-tools__file_hash）",
@@ -20356,6 +20529,7 @@
             "name": "网页克隆"
           }
         },
+        "categoriesTitle": "工具类别",
         "desktopOnlyHint": "内置工具分类运行在桌面侧载中，请切换到桌面端启用。",
         "infoLabel": "查看 {name} 包含的工具",
         "infoListTitle": "{count} 个工具",
@@ -20385,8 +20559,7 @@
           "verdictDeny": "拒绝",
           "verdictLabel": "裁决",
           "wildcardTool": "所有工具（*）"
-        },
-        "categoriesTitle": "工具类别"
+        }
       },
       "sessions": {
         "ago": {
@@ -20424,6 +20597,37 @@
         "resume": "切换到此会话",
         "resumedToast": "已切换到 `{title}`。",
         "save": "保存",
+        "sdk": {
+          "cancel": "取消",
+          "count": "{count} 个原生会话",
+          "delete": "删除 SDK 会话",
+          "deleteConfirm": "永久删除",
+          "deleteDescription": "将删除原生 SDK 对话记录及其所有子智能体对话记录，此操作无法撤销。",
+          "deleteTitle": "删除原生 SDK 会话？",
+          "deleted": "SDK 会话已删除。",
+          "description": "由 Claude Agent SDK 保存的会话，包括尚未关联到 Cognia 对话的记录。",
+          "disabled": "请先在侧载诊断中启用 Claude Agent SDK 完整支持，再管理原生会话。",
+          "empty": "未找到原生 SDK 会话。",
+          "errors": {
+            "deleteFailed": "无法删除 SDK 会话。",
+            "forkFailed": "无法分支 SDK 会话。",
+            "importFailed": "无法导入 SDK 会话。",
+            "loadFailed": "无法加载 SDK 会话。",
+            "renameFailed": "无法重命名 SDK 会话。"
+          },
+          "fork": "Fork SDK 会话",
+          "forked": "SDK 会话已分支。",
+          "importStore": "导入 SessionStore",
+          "imported": "SDK 会话已导入 SessionStore。",
+          "refresh": "刷新 SDK 会话",
+          "rename": "重命名 SDK 会话",
+          "renameDescription": "修改原生 SDK 会话标题，不改变对话记录。",
+          "renameTitle": "重命名原生 SDK 会话",
+          "renamed": "SDK 会话已重命名。",
+          "save": "保存",
+          "title": "原生 SDK 会话",
+          "titleLabel": "会话标题"
+        },
         "title": "会话列表",
         "untitled": "（未命名）"
       },
@@ -20445,6 +20649,28 @@
         "countsTitle": "关联面板",
         "description": "进程内 Claude SDK 侧载的只读视图。",
         "desktopOnlyHint": "重启功能仅在桌面端版本中提供。",
+        "parity": {
+          "capabilities": "已配置的能力覆盖",
+          "checkpoint": {
+            "description": "允许对 SDK 用户消息检查点进行预演并经确认后恢复文件。",
+            "label": "文件检查点"
+          },
+          "description": "渐进启用完整 Claude Agent SDK 能力，并独立控制有状态的高风险功能。",
+          "disabledHint": "请先启用主开关，再开启有状态能力。",
+          "master": {
+            "description": "使用版本化的选项、控制、事件、Hooks 与会话 API 契约。",
+            "label": "Claude Agent SDK 完整支持"
+          },
+          "prewarm": {
+            "description": "保留相互隔离的预热 SDK 进程，以处理下一次兼容请求。",
+            "label": "预热池"
+          },
+          "sessionStore": {
+            "description": "将原生 SDK 会话记录镜像到加密且租户隔离的主机存储。",
+            "label": "会话存储"
+          },
+          "title": "Claude Agent SDK 高级功能"
+        },
         "restartBtn": "重启侧载",
         "restartedToast": "已请求重启侧载。",
         "running": "运行中",
@@ -20478,10 +20704,6 @@
         "toolsLabel": "始终加载的工具",
         "toolsPlaceholder": "工具名称，例如 read_file",
         "unknownHint": "未在当前工具目录中找到——在匹配的服务器或工具存在之前，此固定项不会生效。"
-      },
-      "nav": {
-        "title": "智能体运行时设置",
-        "mobileTrigger": "分区"
       }
     },
     "agentTeams": {
@@ -21745,10 +21967,29 @@
       "searchPlaceholder": "搜索角色…",
       "skillsCount": "{count} 项技能",
       "title": "角色",
+      "trust": {
+        "rejectedToast": "角色包「{id}」已被拒绝：签名验证未通过（{reason}）。",
+        "skippedSignature": "{count} 个已签名角色包验证失败，未加载",
+        "unsigned": "未签名",
+        "unsignedTooltip": "此角色包未携带发布者签名，按原样导入。",
+        "verified": "已验证",
+        "verifiedTooltip": "签名已验证 —— {fingerprint}"
+      },
       "updatedToast": "已更新 {name}。",
       "validation": {
         "nameRequired": "请填写名称。",
         "systemPromptRequired": "系统提示词不能为空。"
+      },
+      "warning": {
+        "characterScope": "{message}（角色：{localId}）",
+        "missingA2uiCatalog": "缺少 A2UI 目录：{id}",
+        "missingConnector": "缺少连接器：{id}",
+        "missingMcpPreset": "缺少 MCP 服务器预设：{id}",
+        "missingNativeTool": "缺少原生工具：{id}",
+        "missingPluginSkill": "缺少插件技能：{id}",
+        "missingProvider": "缺少模型供应商：{id}",
+        "missingSkill": "缺少技能：{id}",
+        "missingThemePack": "缺少主题包：{id}"
       }
     },
     "cliBridge": {
@@ -23435,6 +23676,10 @@
           "label": "使用紧凑输入区布局"
         },
         "description": "控制消息输入框的输入、发送与草稿行为。",
+        "effortSelectorMode": {
+          "hint": "将思考等级显示为连续滑杆，而不是列表。",
+          "label": "使用滑杆选择思考等级"
+        },
         "inputHistory": {
           "hint": "在空输入框中按上/下方向键调出历史消息。",
           "label": "调出输入历史"
@@ -24378,6 +24623,57 @@
       "badgeLive": "运行中",
       "badgeWeb": "web",
       "description": "把本应用的知识与运行时能力开放给外部 MCP 客户端。",
+      "inbound": {
+        "accept": "接受",
+        "acceptConfirmDesc": {
+          "lesson": "它将成为一条长期记忆。接受后不可在此撤销。",
+          "note": "它将归档为一条知识笔记。接受后不可在此撤销。",
+          "skill": "它将成为一个技能，并以「已禁用」创建——在你亲自启用之前不会运行。接受后不可在此撤销。"
+        },
+        "acceptConfirmTitle": "接受这条提交？",
+        "cancel": "取消",
+        "description": "来自 Cognia 之外的经验、技能草稿与笔记。在你接受之前，这里的内容不会改变任何东西。",
+        "detailAria": "展开 {title} 的详情",
+        "editAria": "编辑 {title} 的提交内容",
+        "empty": "没有待审核的内容。",
+        "filter": {
+          "accepted": "已接受",
+          "all": "全部",
+          "pending": "待审核",
+          "rejected": "已拒绝"
+        },
+        "filterAria": "按审核状态筛选",
+        "kind": {
+          "lesson": "经验",
+          "note": "笔记",
+          "skill": "技能草稿"
+        },
+        "materializeFailed": "尝试 {attempts} 次后仍无法应用：{error}",
+        "origin": {
+          "crawler": "抓取任务",
+          "ide-scanner": "IDE 扫描",
+          "mcp": "MCP 客户端"
+        },
+        "pendingCount": "{count} 条待审核",
+        "producedId": "已创建：{id}",
+        "reject": "拒绝",
+        "rejectConfirmDesc": "草稿会留存备查，但永远不会被应用。拒绝后不可在此撤销。",
+        "rejectConfirmTitle": "拒绝这条提交？",
+        "rejectionReason": "原因：{reason}",
+        "retry": "重试",
+        "retryAria": "重新处理 {title}",
+        "retryFailed": "重试失败。",
+        "status": {
+          "accepted": "已接受",
+          "pending": "待审核",
+          "rejected": "已拒绝"
+        },
+        "title": "入站审核",
+        "toastAccepted": "已接受，稍后应用。",
+        "toastRejected": "已拒绝。",
+        "toastRetried": "已应用。",
+        "untrustedLabel": "由 Cognia 之外提交——请视为不可信内容"
+      },
       "loading": "加载中…",
       "nav": {
         "badgeScopesAria": "已授予 {total} 项权限范围中的 {granted} 项",
@@ -24390,6 +24686,10 @@
           "audit": {
             "description": "桥接处理过的每一次调用",
             "label": "审计日志"
+          },
+          "inbound": {
+            "description": "审批外部智能体的贡献",
+            "label": "入站审核"
           },
           "scopes": {
             "description": "外部客户端可以调用的能力",
@@ -24406,10 +24706,6 @@
           "wiki": {
             "description": "重建与检查计划",
             "label": "Wiki 维护"
-          },
-          "inbound": {
-            "label": "入站审核",
-            "description": "审批外部智能体的贡献"
           }
         },
         "mobileTrigger": "面板",
@@ -24601,57 +24897,6 @@
         "toastClean": "Wiki 无问题 —— 共 {count} 篇文章。",
         "toastLintFailed": "检查失败：{message}",
         "toastLinted": "检查完成：{orphans} 个孤儿页，{broken} 处失效链接。"
-      },
-      "inbound": {
-        "title": "入站审核",
-        "description": "来自 Cognia 之外的经验、技能草稿与笔记。在你接受之前，这里的内容不会改变任何东西。",
-        "empty": "没有待审核的内容。",
-        "filterAria": "按审核状态筛选",
-        "filter": {
-          "pending": "待审核",
-          "accepted": "已接受",
-          "rejected": "已拒绝",
-          "all": "全部"
-        },
-        "kind": {
-          "lesson": "经验",
-          "skill": "技能草稿",
-          "note": "笔记"
-        },
-        "status": {
-          "pending": "待审核",
-          "accepted": "已接受",
-          "rejected": "已拒绝"
-        },
-        "origin": {
-          "mcp": "MCP 客户端",
-          "ide-scanner": "IDE 扫描",
-          "crawler": "抓取任务"
-        },
-        "untrustedLabel": "由 Cognia 之外提交——请视为不可信内容",
-        "accept": "接受",
-        "reject": "拒绝",
-        "cancel": "取消",
-        "retry": "重试",
-        "retryAria": "重新处理 {title}",
-        "retryFailed": "重试失败。",
-        "detailAria": "展开 {title} 的详情",
-        "editAria": "编辑 {title} 的提交内容",
-        "pendingCount": "{count} 条待审核",
-        "acceptConfirmTitle": "接受这条提交？",
-        "acceptConfirmDesc": {
-          "lesson": "它将成为一条长期记忆。接受后不可在此撤销。",
-          "skill": "它将成为一个技能，并以「已禁用」创建——在你亲自启用之前不会运行。接受后不可在此撤销。",
-          "note": "它将归档为一条知识笔记。接受后不可在此撤销。"
-        },
-        "rejectConfirmTitle": "拒绝这条提交？",
-        "rejectConfirmDesc": "草稿会留存备查，但永远不会被应用。拒绝后不可在此撤销。",
-        "rejectionReason": "原因：{reason}",
-        "producedId": "已创建：{id}",
-        "materializeFailed": "尝试 {attempts} 次后仍无法应用：{error}",
-        "toastAccepted": "已接受，稍后应用。",
-        "toastRejected": "已拒绝。",
-        "toastRetried": "已应用。"
       }
     },
     "finder": {
@@ -25027,6 +25272,7 @@
         "low": "low",
         "max": "max",
         "medium": "medium",
+        "ultracode": "ultracode",
         "xhigh": "xhigh"
       },
       "model": {
@@ -25433,8 +25679,8 @@
             "label": "检索"
           }
         },
-        "title": "记忆设置",
-        "mobileTrigger": "分区"
+        "mobileTrigger": "分区",
+        "title": "记忆设置"
       },
       "overview": {
         "byScope": {
@@ -26780,14 +27026,33 @@
         "showKey": "显示密钥"
       },
       "live": {
-        "apiKey": "OpenAI API 密钥",
-        "description": "配置低延迟全双工语音，支持自动轮次检测和随时插话打断。",
+        "apiKey": "API 密钥",
+        "description": "低延迟、全双工语音，支持自动轮次检测与打断，可选多家服务商。",
+        "enabled": "启用实时语音",
+        "enabledHint": "在输入框中显示实时语音按钮。",
+        "fallback": "失败时尝试其他服务商",
+        "fallbackHint": "仅在开启麦克风之前生效；会话开始后不会更换服务商。",
         "instructions": "对话指令",
         "instructionsPlaceholder": "保持简洁自然，执行有影响的操作前先确认。",
         "model": "实时模型",
-        "privacy": "仅在实时语音会话开启时，麦克风音频才会流式发送至 OpenAI。",
+        "noProviders": "该地区暂无可用的实时语音服务商。",
+        "preferred": "首选服务商",
+        "preferredHint": "优先使用，其余作为备选。",
+        "preferredPlaceholder": "请选择服务商",
+        "privacy": "仅在实时语音会话进行期间，麦克风音频会直接传输至所选服务商，无法在本地脱敏。",
+        "providers": {
+          "google": "Gemini",
+          "openai": "OpenAI",
+          "xai": "Grok"
+        },
+        "providersTitle": "服务商",
+        "region": "地区",
+        "regionCn": "中国大陆",
+        "regionGlobal": "全球",
+        "regionHint": "会话不会跨地区自动切换。",
         "title": "实时语音",
-        "voice": "音色"
+        "voice": "音色",
+        "voiceDefault": "服务商默认"
       },
       "provider": {
         "apiKeyPlaceholder": {
@@ -27629,6 +27894,105 @@
       "show": "显示",
       "title": "系统托盘"
     },
+    "trayPanel": {
+      "actions": {
+        "add": "添加操作",
+        "builtIn": "内置",
+        "description": "面板中提供的操作及其顺序。每个操作都可以携带自定义输入框。",
+        "edit": "编辑",
+        "hide": "隐藏",
+        "moveDown": "下移",
+        "moveUp": "上移",
+        "remove": "删除",
+        "reset": "重置",
+        "show": "显示",
+        "title": "面板操作"
+      },
+      "behavior": {
+        "description": "位于托盘图标下方的弹窗，可用于委派任务或执行快捷操作。",
+        "leftClick": "点击托盘图标时",
+        "leftClickHint": "右键始终打开托盘菜单。",
+        "leftClickOptions": {
+          "none": "不做任何事",
+          "panel": "打开快捷面板",
+          "toggle-window": "显示或隐藏主窗口"
+        },
+        "preview": "预览",
+        "previewAction": "打开面板",
+        "previewHint": "在托盘图标最近所在的位置打开面板。",
+        "title": "托盘快捷面板"
+      },
+      "desktopOnly": "托盘快捷面板仅在桌面版中可用。",
+      "editor": {
+        "cancel": "取消",
+        "chord": "快捷键",
+        "commandId": "命令 id",
+        "description": "设置该操作何时出现、执行什么，以及需要收集哪些输入。",
+        "effect": "执行",
+        "effects": {
+          "command": "执行已注册命令",
+          "delegate": "委派任务",
+          "native": "执行托盘动作",
+          "navigate": "打开页面",
+          "slash": "执行斜杠命令"
+        },
+        "fields": "输入字段",
+        "fieldsHint": "执行前收集；在效果中用 '{{fieldId}}' 引用。",
+        "focusMainWindow": "同时切换到主窗口",
+        "icon": "图标",
+        "iconPlaceholder": "Lucide 图标名，例如 rocket",
+        "issues": {
+          "duplicateFieldId": "字段 id 重复：{id}",
+          "emptyEffect": "请填写该操作要执行的内容。",
+          "emptySelect": "下拉框「{id}」至少需要一个选项。",
+          "illegalTrigger": "只有「打开页面」和「执行命令」可以在面板打开时自动执行。",
+          "invalidFieldId": "字段 id「{id}」只能包含字母、数字、- 和 _。",
+          "missingChord": "请输入快捷键，例如 mod+1。",
+          "missingLabel": "请填写操作名称。",
+          "unknownPlaceholder": "没有匹配的字段：{ids}"
+        },
+        "label": "名称",
+        "nativeAction": "托盘动作",
+        "path": "路径",
+        "prompt": "提示词",
+        "promptHint": "使用 '{{fieldId}}' 引用输入字段。",
+        "promptPlaceholder": "审阅 '{{path}}' 并总结风险",
+        "save": "保存",
+        "slash": "斜杠命令",
+        "target": "目标",
+        "targetHint": "可填 newSession、activeSession，或用 '{{fieldId}}' 由输入决定。",
+        "title": "编辑操作",
+        "trigger": "触发方式",
+        "triggers": {
+          "hotkey": "快捷键",
+          "manual": "点击时",
+          "open": "面板打开时",
+          "submit": "主操作（回车）"
+        },
+        "when": "显示条件",
+        "whenHint": "可选。表达式为真时该操作才会显示。",
+        "whenPlaceholder": "例如 automation.running"
+      },
+      "fieldEditor": {
+        "add": "添加字段",
+        "empty": "没有输入字段 — 该操作会直接执行。",
+        "id": "Id",
+        "kind": "类型",
+        "kinds": {
+          "number": "数字",
+          "select": "下拉框",
+          "switch": "开关",
+          "text": "单行文本",
+          "textarea": "多行文本"
+        },
+        "label": "名称",
+        "options": "选项",
+        "optionsPlaceholder": "value=显示名，每行一个",
+        "remove": "删除字段",
+        "required": "必填",
+        "submitOnEnter": "回车提交"
+      }
+    },
     "workflow": {
       "fanout": {
         "adapterLabel": "适配器",
@@ -27658,105 +28022,6 @@
       "title": "工作区信任",
       "trustedAt": "信任于 {date}",
       "trustedFoldersLabel": "已信任的文件夹"
-    },
-    "trayPanel": {
-      "desktopOnly": "托盘快捷面板仅在桌面版中可用。",
-      "behavior": {
-        "title": "托盘快捷面板",
-        "description": "位于托盘图标下方的弹窗，可用于委派任务或执行快捷操作。",
-        "leftClick": "点击托盘图标时",
-        "leftClickHint": "右键始终打开托盘菜单。",
-        "leftClickOptions": {
-          "panel": "打开快捷面板",
-          "toggle-window": "显示或隐藏主窗口",
-          "none": "不做任何事"
-        },
-        "preview": "预览",
-        "previewHint": "在托盘图标最近所在的位置打开面板。",
-        "previewAction": "打开面板"
-      },
-      "actions": {
-        "title": "面板操作",
-        "description": "面板中提供的操作及其顺序。每个操作都可以携带自定义输入框。",
-        "add": "添加操作",
-        "reset": "重置",
-        "builtIn": "内置",
-        "edit": "编辑",
-        "remove": "删除",
-        "hide": "隐藏",
-        "show": "显示",
-        "moveUp": "上移",
-        "moveDown": "下移"
-      },
-      "editor": {
-        "title": "编辑操作",
-        "description": "设置该操作何时出现、执行什么，以及需要收集哪些输入。",
-        "label": "名称",
-        "icon": "图标",
-        "iconPlaceholder": "Lucide 图标名，例如 rocket",
-        "trigger": "触发方式",
-        "triggers": {
-          "manual": "点击时",
-          "submit": "主操作（回车）",
-          "open": "面板打开时",
-          "hotkey": "快捷键"
-        },
-        "chord": "快捷键",
-        "when": "显示条件",
-        "whenPlaceholder": "例如 automation.running",
-        "whenHint": "可选。表达式为真时该操作才会显示。",
-        "effect": "执行",
-        "effects": {
-          "delegate": "委派任务",
-          "slash": "执行斜杠命令",
-          "command": "执行已注册命令",
-          "navigate": "打开页面",
-          "native": "执行托盘动作"
-        },
-        "prompt": "提示词",
-        "promptPlaceholder": "审阅 {{path}} 并总结风险",
-        "promptHint": "使用 {{fieldId}} 引用输入字段。",
-        "target": "目标",
-        "targetHint": "可填 newSession、activeSession，或用 {{fieldId}} 由输入决定。",
-        "slash": "斜杠命令",
-        "commandId": "命令 id",
-        "path": "路径",
-        "nativeAction": "托盘动作",
-        "focusMainWindow": "同时切换到主窗口",
-        "fields": "输入字段",
-        "fieldsHint": "执行前收集；在效果中用 {{fieldId}} 引用。",
-        "save": "保存",
-        "cancel": "取消",
-        "issues": {
-          "missingLabel": "请填写操作名称。",
-          "duplicateFieldId": "字段 id 重复：{id}",
-          "invalidFieldId": "字段 id「{id}」只能包含字母、数字、- 和 _。",
-          "unknownPlaceholder": "没有匹配的字段：{ids}",
-          "emptyEffect": "请填写该操作要执行的内容。",
-          "illegalTrigger": "只有「打开页面」和「执行命令」可以在面板打开时自动执行。",
-          "missingChord": "请输入快捷键，例如 mod+1。",
-          "emptySelect": "下拉框「{id}」至少需要一个选项。"
-        }
-      },
-      "fieldEditor": {
-        "empty": "没有输入字段 — 该操作会直接执行。",
-        "add": "添加字段",
-        "remove": "删除字段",
-        "id": "Id",
-        "label": "名称",
-        "kind": "类型",
-        "kinds": {
-          "text": "单行文本",
-          "textarea": "多行文本",
-          "select": "下拉框",
-          "switch": "开关",
-          "number": "数字"
-        },
-        "options": "选项",
-        "optionsPlaceholder": "value=显示名，每行一个",
-        "required": "必填",
-        "submitOnEnter": "回车提交"
-      }
     }
   },
   "share": {
@@ -28258,6 +28523,7 @@
       "scanCodex": "扫描 ~/.agents/skills/",
       "scanCustom": "扫描指定目录…",
       "scanHome": "扫描 ~/.claude/skills/",
+      "scanOpencode": "扫描 OpenCode skills",
       "scanning": "正在扫描 {label}…",
       "title": "发现技能"
     },
@@ -29920,17 +30186,17 @@
       "costOverTime": {
         "description": "所选范围内每日估算花费。",
         "empty": "该范围内还没有用量。",
-        "title": "成本随时间",
-        "view": {
-          "label": "图表视图",
-          "heatmap": "热力图",
-          "bar": "柱状图"
-        },
         "heatmap": {
+          "cell": "{date}：{cost}，{requests} 次请求",
           "less": "少",
           "more": "多",
-          "cell": "{date}：{cost}，{requests} 次请求",
           "total": "最近 {days} 天共 {cost} · {requests} 次请求"
+        },
+        "title": "成本随时间",
+        "view": {
+          "bar": "柱状图",
+          "heatmap": "热力图",
+          "label": "图表视图"
         }
       },
       "display": {
@@ -29984,8 +30250,9 @@
       "range": {
         "30d": "最近 30 天",
         "7d": "最近 7 天",
-        "label": "时间范围",
-        "90d": "最近 90 天"
+        "90d": "最近 90 天",
+        "all": "全部时间",
+        "label": "时间范围"
       },
       "shareCard": {
         "action": "分享卡片",
@@ -30467,6 +30734,8 @@
     "skillToolTitle": "Skill 工具",
     "slashToolDesc": "暴露 SlashCommand 工具，让 Agent 运行已注册的斜杠命令。内置 UI 命令会返回在聊天框运行的提示。",
     "slashToolTitle": "SlashCommand 工具",
+    "spawnTaskToolDesc": "允许 Agent 将明确范围的后续工作暂存到命名侧聊中，供你检查并启动。",
+    "spawnTaskToolTitle": "派生任务",
     "teamCollabToolDesc": "让队友在团队运行期间协作——给同伴发消息、共享黑板、发起或参与共识投票、委派子任务。仅对 Agent 团队会话生效。",
     "teamCollabToolTitle": "团队协作工具",
     "terminalRepl": "交互式 REPL",
@@ -30632,14 +30901,64 @@
       "streaming": "回复中…"
     },
     "toggleWindow": "显示 / 隐藏窗口",
+    "trayPanelToggle": "快捷面板",
     "usage": {
       "auto": "自动（用量最高）",
       "empty": "暂无额度数据",
       "openSettings": "订阅设置…",
       "refresh": "刷新额度",
       "title": "订阅额度"
+    }
+  },
+  "trayPanel": {
+    "actions": {
+      "agentRuns": {
+        "label": "智能体运行"
+      },
+      "delegate": {
+        "autoSendLabel": "立即发送",
+        "description": "无需打开主窗口，直接把任务交给 Cognia。",
+        "label": "委派任务",
+        "promptLabel": "任务",
+        "promptPlaceholder": "描述你希望 Cognia 做什么…",
+        "targetLabel": "发送到"
+      },
+      "newChat": {
+        "label": "新建会话"
+      },
+      "openApp": {
+        "label": "打开 Cognia"
+      },
+      "scheduler": {
+        "label": "定时任务"
+      },
+      "settings": {
+        "label": "设置"
+      },
+      "stopAutomation": {
+        "label": "停止自动化"
+      }
     },
-    "trayPanelToggle": "快捷面板"
+    "dismiss": "关闭面板",
+    "empty": "暂无操作 — 可在「设置 › 桌面」中添加。",
+    "errors": {
+      "badTarget": "「{value}」不是有效的目标。",
+      "deliveryFailed": "Cognia 主窗口未响应。",
+      "emptyEffect": "该操作没有可执行的内容。",
+      "illegalTrigger": "该操作不能在面板打开时自动执行。",
+      "required": "请先填写必填项。",
+      "runFailed": "执行该操作失败。",
+      "runFailedFor": "执行「{action}」失败",
+      "unknownCommand": "未知命令：{id}",
+      "unknownPlaceholder": "未知占位符：{ids}"
+    },
+    "openSettings": "打开设置",
+    "run": "执行",
+    "targets": {
+      "activeSession": "当前会话",
+      "newSession": "新建会话"
+    },
+    "title": "Cognia"
   },
   "tts": {
     "nowPlaying": {
@@ -36165,56 +36484,6 @@
       "recentHeading": "最近",
       "searchPlaceholder": "搜索工作区…",
       "untrustedHint": "未受信任的工作区"
-    }
-  },
-  "trayPanel": {
-    "title": "Cognia",
-    "dismiss": "关闭面板",
-    "openSettings": "打开设置",
-    "run": "执行",
-    "empty": "暂无操作 — 可在「设置 › 桌面」中添加。",
-    "targets": {
-      "newSession": "新建会话",
-      "activeSession": "当前会话"
-    },
-    "actions": {
-      "delegate": {
-        "label": "委派任务",
-        "description": "无需打开主窗口，直接把任务交给 Cognia。",
-        "promptLabel": "任务",
-        "promptPlaceholder": "描述你希望 Cognia 做什么…",
-        "targetLabel": "发送到",
-        "autoSendLabel": "立即发送"
-      },
-      "newChat": {
-        "label": "新建会话"
-      },
-      "openApp": {
-        "label": "打开 Cognia"
-      },
-      "agentRuns": {
-        "label": "智能体运行"
-      },
-      "scheduler": {
-        "label": "定时任务"
-      },
-      "stopAutomation": {
-        "label": "停止自动化"
-      },
-      "settings": {
-        "label": "设置"
-      }
-    },
-    "errors": {
-      "required": "请先填写必填项。",
-      "unknownPlaceholder": "未知占位符：{ids}",
-      "badTarget": "「{value}」不是有效的目标。",
-      "illegalTrigger": "该操作不能在面板打开时自动执行。",
-      "emptyEffect": "该操作没有可执行的内容。",
-      "runFailed": "执行该操作失败。",
-      "runFailedFor": "执行「{action}」失败",
-      "deliveryFailed": "Cognia 主窗口未响应。",
-      "unknownCommand": "未知命令：{id}"
     }
   }
 }

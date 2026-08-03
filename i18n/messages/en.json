@@ -1569,6 +1569,76 @@
       "switchPasswordPlaceholder": "Password"
     }
   },
+  "agentMigration": {
+    "artifacts": {
+      "names": {
+        "commands": "Commands",
+        "mcp": "MCP servers",
+        "memory": "Memory",
+        "sessions": "Sessions",
+        "settings": "Settings",
+        "skills": "Skills",
+        "subagents": "Subagents"
+      },
+      "title": "Choose what to import"
+    },
+    "back": "Back",
+    "cancel": "Cancel",
+    "cardBody": "Move settings, histories, skills, agents, MCP servers, commands, and memory into Cognia.",
+    "cardTitle": "Coding-agent migration",
+    "close": "Close",
+    "continue": "Continue",
+    "description": "Import supported data from an installed coding agent. You can review every category before anything is written.",
+    "errors": {
+      "artifactFailed": "This item could not be imported.",
+      "importFailed": "The migration could not be completed.",
+      "previewFailed": "The migration preview could not be created.",
+      "scanFailed": "Installed coding agents could not be detected."
+    },
+    "import": "Import",
+    "preview": {
+      "action": "Preview",
+      "items": "{count, plural, one {# item} other {# items}}"
+    },
+    "progress": {
+      "artifact": "Importing {artifact}…",
+      "starting": "Starting import…"
+    },
+    "result": {
+      "aborted": "Migration stopped",
+      "complete": "Migration complete",
+      "description": "Review what Cognia imported from the selected coding agent.",
+      "imported": "{count} imported",
+      "title": "Migration results"
+    },
+    "retry": "Try again",
+    "status": {
+      "empty": "Empty",
+      "error": "Error",
+      "ready": "Ready",
+      "shared": "Already shared",
+      "unsupported": "Unsupported"
+    },
+    "step": "Step {current} of {total}",
+    "strategy": {
+      "duplicate": "Keep both",
+      "label": "Conflict handling",
+      "overwrite": "Replace existing",
+      "skip": "Keep existing"
+    },
+    "title": "Import from a coding agent",
+    "vendor": {
+      "installed": "Installed",
+      "notInstalled": "Not found",
+      "scanning": "Looking for installed agents…",
+      "title": "Choose a source"
+    },
+    "vendors": {
+      "claude-code": "Claude Code",
+      "codex": "Codex",
+      "opencode": "OpenCode"
+    }
+  },
   "agentMode": {
     "a2uiTemplatePreviewTitle": "A2UI template preview",
     "agentTeams": "Agent Teams",
@@ -4279,6 +4349,7 @@
         "trigger": "Attach"
       },
       "attachments": {
+        "analyzing": "Analyzing image…",
         "countLimit": "Only {max} attachments allowed.",
         "extracting": "Reading…",
         "fallbackFile": "file",
@@ -4294,6 +4365,7 @@
         "oversizeConfirm": "Send anyway",
         "oversizeTitle": "Large attachment",
         "preparing": "Preparing attachments…",
+        "preparingImages": "{count, plural, =1 {Preparing 1 image…} other {Preparing # images…}}",
         "preview": {
           "empty": "Nothing was extracted from this file.",
           "fileTab": "File",
@@ -4319,9 +4391,7 @@
         "reorderAria": "Reorder {filename}",
         "skipped": "{count, plural, =1 {1 attachment was} other {# attachments were}} skipped (unsupported file type).",
         "tokenBadge": "{tokens} tok",
-        "unsupported": "{count, plural, =1 {1 file isn't supported} other {# files aren't supported}}.",
-        "analyzing": "Analyzing image…",
-        "preparingImages": "{count, plural, =1 {Preparing 1 image…} other {Preparing # images…}}"
+        "unsupported": "{count, plural, =1 {1 file isn't supported} other {# files aren't supported}}."
       },
       "camera": {
         "captureAria": "Take or attach a photo",
@@ -4330,7 +4400,17 @@
         "permissionDenied": "Camera or photo access is required to attach a photo.",
         "unsupported": "Photo capture isn't available on this device."
       },
+      "commandHint": {
+        "needsArgs": "Add the required arguments"
+      },
+      "commandQueue": {
+        "ariaLabel": "Queued commands",
+        "failedTooltip": "/{name} failed",
+        "label": "{count, plural, one {# command} other {# commands}}",
+        "removeAria": "Remove /{name}"
+      },
       "commands": {
+        "batchFailed": "{count, plural, one {Command {names} failed} other {Commands {names} failed}}",
         "failed": "Command failed",
         "unavailable": "/{name} is not available yet."
       },
@@ -4353,7 +4433,20 @@
       },
       "effort": {
         "aria": "Thinking level",
-        "auto": "Auto"
+        "auto": "Auto",
+        "desc": {
+          "high": "Deep reasoning for complex tasks.",
+          "low": "Light reasoning for straightforward tasks.",
+          "max": "Maximum reasoning for the hardest tasks.",
+          "medium": "Balanced reasoning for everyday tasks.",
+          "off": "Use the model's default reasoning behavior.",
+          "ultracode": "Maximum-but-one reasoning plus the dynamic workflow tools.",
+          "xhigh": "Extra-deep reasoning for demanding tasks."
+        },
+        "faster": "Faster",
+        "hint": "Choose how much reasoning the model should use for this conversation.",
+        "hintAria": "About thinking levels",
+        "smarter": "Smarter"
       },
       "enhance": {
         "modes": {
@@ -4396,7 +4489,27 @@
       "ghostAcceptHint": "Tab",
       "ghostDismiss": "Dismiss suggestion",
       "helperHints": {
+        "chainingNote": "Put commands on separate lines to run them in order.",
+        "cheatsheetDescription": "Keyboard shortcuts and prefixes available in the message composer.",
+        "cheatsheetLabel": "Keyboard help",
+        "cheatsheetTitle": "Composer shortcuts",
         "dropImages": "Drop / paste files, folders or links",
+        "keys": {
+          "complete": "Complete the current command or mention",
+          "dismiss": "Dismiss suggestions",
+          "history": "Recall input history",
+          "newline": "Insert a new line",
+          "permissionMode": "Change permission mode",
+          "send": "Send the message"
+        },
+        "keysTitle": "Keyboard",
+        "prefixes": {
+          "memory": "Write to memory",
+          "mention": "Mention a file, agent, skill, or workflow",
+          "shell": "Run a shell command",
+          "slash": "Run a slash command"
+        },
+        "prefixesTitle": "Prefixes",
         "send": "⏎ Send · ⇧⏎ New line",
         "tryPrefix": "Try"
       },
@@ -4407,12 +4520,32 @@
       },
       "memory": {
         "appended": "Appended to {path}",
+        "desktopOnly": "File-backed memory is available in the desktop app.",
         "emptyPreview": "(start typing the memory line)",
         "failed": "Memory write failed",
         "needsLine": "Type the memory line after #.",
         "panelTitle": "Append to memory",
         "pickScope": "Pick Project or User memory in the popover to save.",
         "projectLabel": "Project memory",
+        "scope": {
+          "global": "global memory",
+          "workspace": "workspace memory"
+        },
+        "storeError": {
+          "disabled": "Long-term memory is disabled.",
+          "empty": "Type a fact to remember.",
+          "failed": "The memory could not be stored.",
+          "pii": "Sensitive information cannot be stored in memory.",
+          "temporary": "Memory is unavailable in temporary mode.",
+          "unavailable": "The memory store is unavailable."
+        },
+        "storedInMemory": "Stored in {scope}",
+        "targetLabel": {
+          "file:project": "Project memory file",
+          "file:user": "User memory file",
+          "store:global": "Global memory",
+          "store:workspace": "Workspace memory"
+        },
         "userLabel": "User memory"
       },
       "modelPicker": {
@@ -4596,8 +4729,12 @@
           "description": "Talk naturally, interrupt at any time, and keep the conversation moving hands-free.",
           "end": "End live voice",
           "errors": {
+            "disabled": "Live voice is turned off. Enable it in Settings → Speech.",
+            "mintFailed": "Could not start a session with any live voice provider. Check your API key and network, then try again.",
+            "noDeployments": "No live voice provider is set up yet. Add one in Settings → Speech.",
+            "noneEligible": "None of your live voice providers is available in this region on this device.",
             "sessionFailed": "The live voice connection was interrupted. End the session and try again.",
-            "startFailed": "Could not start live voice. Check your OpenAI key and microphone access."
+            "startFailed": "Could not start live voice. Check your provider key and microphone access."
           },
           "mute": "Mute microphone",
           "phases": {
@@ -4690,46 +4827,46 @@
         "continue": "Continue",
         "tryPrompt": "Try a prompt"
       },
+      "stats": {
+        "customize": "Customize stats",
+        "customizeTitle": "Show on the welcome page",
+        "dayCount": "{count}d",
+        "empty": "No usage recorded in this window yet.",
+        "heatmap": "Calendar heatmap",
+        "models": {
+          "empty": "No model usage in this window.",
+          "turns": "{count} turns"
+        },
+        "none": "—",
+        "range": {
+          "days": "{days}d",
+          "label": "Time range"
+        },
+        "tiles": {
+          "activeDays": "Active days",
+          "cost": "Total cost",
+          "currentStreak": "Current streak",
+          "longestStreak": "Longest streak",
+          "peakHour": "Peak hour",
+          "sessions": "Sessions",
+          "tokens": "Total tokens",
+          "topModel": "Top model",
+          "turns": "Turns"
+        },
+        "title": "Your activity",
+        "view": {
+          "label": "Dashboard view",
+          "models": "Models",
+          "overview": "Overview"
+        }
+      },
       "style": {
         "minimal": "Minimal",
         "rich": "Rich",
         "toggleLabel": "Switch welcome layout"
       },
       "subtitle": "Ask anything, jump into a capability, or pick up where you left off.",
-      "title": "What do you want to get done?",
-      "stats": {
-        "title": "Your activity",
-        "empty": "No usage recorded in this window yet.",
-        "none": "—",
-        "dayCount": "{count}d",
-        "customize": "Customize stats",
-        "customizeTitle": "Show on the welcome page",
-        "heatmap": "Calendar heatmap",
-        "view": {
-          "label": "Dashboard view",
-          "overview": "Overview",
-          "models": "Models"
-        },
-        "range": {
-          "label": "Time range",
-          "days": "{days}d"
-        },
-        "tiles": {
-          "sessions": "Sessions",
-          "turns": "Turns",
-          "tokens": "Total tokens",
-          "cost": "Total cost",
-          "activeDays": "Active days",
-          "currentStreak": "Current streak",
-          "longestStreak": "Longest streak",
-          "peakHour": "Peak hour",
-          "topModel": "Top model"
-        },
-        "models": {
-          "empty": "No model usage in this window.",
-          "turns": "{count} turns"
-        }
-      }
+      "title": "What do you want to get done?"
     },
     "filePreview": {
       "extractedChars": "{count, plural, =1 {1 char} other {# chars}} extracted",
@@ -4972,6 +5109,16 @@
       },
       "read": {
         "title": "Read"
+      },
+      "spawnTask": {
+        "aside": "aside",
+        "caveats": "Caveats",
+        "codeLocations": "Code locations",
+        "inherit": "inherits context",
+        "open": "Open task",
+        "situation": "Situation",
+        "solution": "Proposed solution",
+        "start": "Start task"
       },
       "webFetch": {
         "empty": "No content returned"
@@ -5919,6 +6066,20 @@
     "deleteConfirmDesc": "This action cannot be undone. The custom mode will be permanently removed.",
     "deleteSelected": "Delete selected",
     "deletedModes": "Deleted {count} modes",
+    "detail": {
+      "modelOverride": "Model override",
+      "noSystemPrompt": "This mode adds no system prompt.",
+      "none": "None",
+      "outputFormat": "Output format",
+      "permissionMode": "Permission mode",
+      "systemPrompt": "System prompt",
+      "tags": "Tags",
+      "tools": "Tools",
+      "updated": "Updated",
+      "usage": "Usage"
+    },
+    "detailEmptyDescription": "Pick a mode from the list to see what it changes.",
+    "detailEmptyTitle": "No mode selected",
     "duplicate": "Duplicate",
     "editMode": "Edit {name}",
     "exportedModes": "Exported {count} modes",
@@ -5927,6 +6088,7 @@
     "importedMode": "Imported mode \"{name}\"",
     "importedModes": "Imported {count} modes",
     "invalidFileFormat": "Invalid file format",
+    "mobileTrigger": "Modes",
     "modeDeleted": "Mode deleted",
     "modeDuplicated": "Mode duplicated",
     "modeExported": "Mode exported",
@@ -5937,6 +6099,7 @@
     "resultsCount": "Showing {shown} of {total}",
     "searchModes": "Search modes…",
     "selectAll": "Select all",
+    "selectMode": "Select {name}",
     "selected": "{count} selected",
     "sortByCreated": "Sort by created",
     "sortByLabel": "Sort by",
@@ -5944,23 +6107,7 @@
     "sortByName": "Sort by name",
     "sortByUpdated": "Sort by updated",
     "tools": "{count} tools",
-    "usedTimes": "Used {count} times",
-    "mobileTrigger": "Modes",
-    "selectMode": "Select {name}",
-    "detailEmptyTitle": "No mode selected",
-    "detailEmptyDescription": "Pick a mode from the list to see what it changes.",
-    "detail": {
-      "tools": "Tools",
-      "tags": "Tags",
-      "none": "None",
-      "outputFormat": "Output format",
-      "permissionMode": "Permission mode",
-      "modelOverride": "Model override",
-      "usage": "Usage",
-      "updated": "Updated",
-      "systemPrompt": "System prompt",
-      "noSystemPrompt": "This mode adds no system prompt."
-    }
+    "usedTimes": "Used {count} times"
   },
   "desktop": {
     "barCustomize": {
@@ -11907,6 +12054,8 @@
       "clearAfterSendHelp": "Empty the composer (text + attachments) after a successful send.",
       "composerSection": "Composer",
       "composerSectionHelp": "How the message box on this phone behaves.",
+      "effortSelectorMode": "Thinking-level slider",
+      "effortSelectorModeHelp": "Use a slider instead of a list when choosing the model's thinking level.",
       "inputHistory": "Recall input history",
       "inputHistoryHelp": "Press ↑ / ↓ in an empty composer to recall previously sent messages.",
       "persistDrafts": "Keep drafts",
@@ -15088,6 +15237,22 @@
     "triggerText": "Plan / tasks ({count})"
   },
   "plugins": {
+    "activation": {
+      "cancelled": "Activation cancelled at: {phase}",
+      "countLabel": "Step {processed} of {total}",
+      "failed": "Activation failed at: {phase}",
+      "label": "Activating {name}",
+      "phase": {
+        "commit": "Finishing activation",
+        "contributions": "Registering contributions",
+        "dependencies": "Enabling dependencies",
+        "hooks": "Running enable hooks",
+        "preflight": "Checking compatibility",
+        "runtime": "Starting the plugin",
+        "schema": "Preparing storage"
+      },
+      "progressAria": "Activating {name} — {phase}, step {processed} of {total}"
+    },
     "activeFilters": {
       "ariaLabel": "Active filters",
       "chip": {
@@ -18297,46 +18462,46 @@
     }
   },
   "safeMode": {
-    "title": "Cognia started in diagnostics mode",
-    "description": "The app failed to start twice in a row, so plugins, connectors and background work are held back until each subsystem passes its health check.",
-    "buildFooter": "Build {buildId}",
-    "suspect": {
-      "title": "Suspected cause",
-      "subsystem": "The {subsystem} subsystem failed its health check.",
-      "unknownSubsystem": "No single subsystem was identified."
-    },
-    "checkpoints": {
-      "title": "Subsystem health checks",
-      "description": "Each check is read-only. A failure stops the ones after it, because they depend on it.",
-      "running": "Running health checks",
-      "empty": "No health checks have run yet."
-    },
-    "status": {
-      "pending": "Not checked yet",
-      "passed": "Passed",
-      "failed": "Failed",
-      "skipped": "Skipped",
-      "disabled": "Kept off"
-    },
-    "subsystem": {
-      "database": "Local database",
-      "plugins": "Plugins",
-      "sidecar": "Agent sidecar",
-      "connectors": "Platform connectors",
-      "workflow": "Workflows",
-      "external-agent": "External agents"
-    },
     "actions": {
-      "retry": "Retry",
-      "keepDisabled": "Keep off"
+      "keepDisabled": "Keep off",
+      "retry": "Retry"
     },
     "available": {
-      "title": "Available while in diagnostics mode",
+      "about": "About and reset",
+      "backup": "Backup and export",
       "description": "Your local data stays readable, and you can export a report or a backup before trying again.",
       "logs": "Open logs and crash reports",
-      "backup": "Backup and export",
-      "about": "About and reset"
-    }
+      "title": "Available while in diagnostics mode"
+    },
+    "buildFooter": "Build {buildId}",
+    "checkpoints": {
+      "description": "Each check is read-only. A failure stops the ones after it, because they depend on it.",
+      "empty": "No health checks have run yet.",
+      "running": "Running health checks",
+      "title": "Subsystem health checks"
+    },
+    "description": "The app failed to start twice in a row, so plugins, connectors and background work are held back until each subsystem passes its health check.",
+    "status": {
+      "disabled": "Kept off",
+      "failed": "Failed",
+      "passed": "Passed",
+      "pending": "Not checked yet",
+      "skipped": "Skipped"
+    },
+    "subsystem": {
+      "connectors": "Platform connectors",
+      "database": "Local database",
+      "external-agent": "External agents",
+      "plugins": "Plugins",
+      "sidecar": "Agent sidecar",
+      "workflow": "Workflows"
+    },
+    "suspect": {
+      "subsystem": "The {subsystem} subsystem failed its health check.",
+      "title": "Suspected cause",
+      "unknownSubsystem": "No single subsystem was identified."
+    },
+    "title": "Cognia started in diagnostics mode"
   },
   "scheduler": {
     "action": "Action",
@@ -18473,6 +18638,7 @@
     "cloneSuccess": "Task cloned successfully",
     "cloneTask": "Clone Task",
     "close": "Close",
+    "code": "code:",
     "command": "Command",
     "commandArgs": "Command Arguments",
     "config": "Config",
@@ -18793,6 +18959,10 @@
       "successOnly": "Success Only"
     },
     "notifyOnStart": "Notify on start",
+    "occurrenceList": {
+      "moreTimes": "+{count} more",
+      "rowAria": "{name}, {count, plural, one {# upcoming time} other {# upcoming times}}"
+    },
     "onBootDelaySeconds": "Boot Delay (seconds)",
     "onEventId": "Event ID",
     "onEventSource": "Event Source",
@@ -19122,6 +19292,7 @@
         "unavailableOnWeb": "Native scheduler integration is available in the desktop build only."
       }
     },
+    "showLess": "Show less",
     "showMore": "Show more",
     "slashCommand": {
       "description": "Create a scheduled task or reminder"
@@ -19133,6 +19304,7 @@
       "nextRun": "Next Run"
     },
     "sourceConversationMissing": "The source IM conversation is no longer bound to a chat session.",
+    "stackTrace": "Stack trace",
     "startedAt": "Started at",
     "statistics": "Statistics",
     "stats": {
@@ -19314,10 +19486,7 @@
     "workflowScriptReadOnlyTitle": "Workflow-managed task",
     "workflowTriggerNotFound": "Workflow trigger not found.",
     "workingDir": "Working Directory",
-    "yes": "Yes",
-    "showLess": "Show less",
-    "stackTrace": "Stack trace",
-    "code": "code:"
+    "yes": "Yes"
   },
   "searchCache": {
     "allProviders": "All providers",
@@ -20123,11 +20292,11 @@
         "engine": "Web engine",
         "hideAdvanced": "Hide runtime details",
         "react": "React",
+        "runtime": "Runtime",
         "showAdvanced": "Show runtime details",
         "tauri": "Tauri",
         "title": "Version & build",
-        "version": "Version",
-        "runtime": "Runtime"
+        "version": "Version"
       },
       "versionLine": "version",
       "versionUnknown": "—",
@@ -20160,6 +20329,8 @@
       "localAccountsTitle": "Local accounts",
       "lockNow": "Lock now",
       "lockedNow": "Account locked",
+      "manageDescription": "Change your plan, billing details, or sign out.",
+      "manageTitle": "Manage account",
       "notSignedIn": "Not signed in",
       "pair": "Pair a device",
       "securityAutoLockOff": "Auto-lock is off",
@@ -20167,7 +20338,9 @@
       "securityManage": "Manage",
       "securityTitle": "Security & auto-lock",
       "sessionActionFailed": "Couldn't complete that — try again.",
+      "sessionDescription": "Your current sign-in and how long it stays active.",
       "sessionRefreshed": "Session refreshed",
+      "sessionTitle": "Session",
       "signedOut": "Signed out",
       "subscriptionManage": "Manage",
       "subscriptionTitle": "Subscription",
@@ -20176,11 +20349,7 @@
       "title": "Account",
       "usageFiveHour": "5-hour usage",
       "usageReset": "{remaining} left",
-      "usageSevenDay": "7-day usage",
-      "sessionTitle": "Session",
-      "sessionDescription": "Your current sign-in and how long it stays active.",
-      "manageTitle": "Manage account",
-      "manageDescription": "Change your plan, billing details, or sign out."
+      "usageSevenDay": "7-day usage"
     },
     "actions": {
       "cancel": "Cancel",
@@ -20277,6 +20446,10 @@
         "workingDirTitle": "Default working directory"
       },
       "description": "Configure defaults for the in-process Claude SDK sidecar — these flow into every new chat unless a character or session overrides them.",
+      "nav": {
+        "mobileTrigger": "Sections",
+        "title": "Agent runtime settings"
+      },
       "permissions": {
         "addBtn": "Add",
         "addToolPlaceholder": "Tool name (e.g. mcp__cognia-tools__file_hash)",
@@ -20356,6 +20529,7 @@
             "name": "Web clone"
           }
         },
+        "categoriesTitle": "Tool categories",
         "desktopOnlyHint": "Built-in tool categories run inside the desktop sidecar — switch to the desktop app to enable them.",
         "infoLabel": "Tools in {name}",
         "infoListTitle": "{count} tools",
@@ -20385,8 +20559,7 @@
           "verdictDeny": "Deny",
           "verdictLabel": "Verdict",
           "wildcardTool": "All tools (*)"
-        },
-        "categoriesTitle": "Tool categories"
+        }
       },
       "sessions": {
         "ago": {
@@ -20424,6 +20597,37 @@
         "resume": "Resume",
         "resumedToast": "Resumed `{title}`.",
         "save": "Save",
+        "sdk": {
+          "cancel": "Cancel",
+          "count": "{count, plural, one {# native session} other {# native sessions}}",
+          "delete": "Delete SDK session",
+          "deleteConfirm": "Delete permanently",
+          "deleteDescription": "This removes the native SDK transcript and all of its subagent transcripts. This action cannot be undone.",
+          "deleteTitle": "Delete native SDK session?",
+          "deleted": "SDK session deleted.",
+          "description": "Sessions stored by the Claude Agent SDK, including transcripts that are not yet linked to a Cognia chat.",
+          "disabled": "Enable Claude Agent SDK parity in Sidecar diagnostics to manage native sessions.",
+          "empty": "No native SDK sessions were found.",
+          "errors": {
+            "deleteFailed": "The SDK session could not be deleted.",
+            "forkFailed": "The SDK session could not be forked.",
+            "importFailed": "The SDK session could not be imported.",
+            "loadFailed": "SDK sessions could not be loaded.",
+            "renameFailed": "The SDK session could not be renamed."
+          },
+          "fork": "Fork SDK session",
+          "forked": "SDK session forked.",
+          "importStore": "Import into SessionStore",
+          "imported": "SDK session imported into SessionStore.",
+          "refresh": "Refresh SDK sessions",
+          "rename": "Rename SDK session",
+          "renameDescription": "Change the native SDK session title without changing its transcript.",
+          "renameTitle": "Rename native SDK session",
+          "renamed": "SDK session renamed.",
+          "save": "Save",
+          "title": "Native SDK sessions",
+          "titleLabel": "Session title"
+        },
         "title": "Sessions",
         "untitled": "(untitled)"
       },
@@ -20445,6 +20649,28 @@
         "countsTitle": "Linked surfaces",
         "description": "Read-only view of the in-process Claude SDK sidecar.",
         "desktopOnlyHint": "Restart is only available in the desktop build.",
+        "parity": {
+          "capabilities": "Configured capability coverage",
+          "checkpoint": {
+            "description": "Allow dry-run and confirmed file rewind for SDK user-message checkpoints.",
+            "label": "File checkpointing"
+          },
+          "description": "Roll out the complete Claude Agent SDK surface with independent controls for stateful, higher-risk capabilities.",
+          "disabledHint": "Enable the master flag before turning on stateful capabilities.",
+          "master": {
+            "description": "Use the versioned options, controls, events, hooks, and session API contract.",
+            "label": "Claude Agent SDK parity"
+          },
+          "prewarm": {
+            "description": "Keep isolated warm SDK processes ready for the next compatible request.",
+            "label": "Prewarm pool"
+          },
+          "sessionStore": {
+            "description": "Mirror native SDK session records into the encrypted, tenant-isolated host store.",
+            "label": "Session store"
+          },
+          "title": "Claude Agent SDK advanced features"
+        },
         "restartBtn": "Restart sidecar",
         "restartedToast": "Sidecar restart requested.",
         "running": "Running",
@@ -20478,10 +20704,6 @@
         "toolsLabel": "Always-loaded tools",
         "toolsPlaceholder": "Tool name, e.g. read_file",
         "unknownHint": "Not found in the current tool catalog — this pin won't take effect until a matching server or tool exists."
-      },
-      "nav": {
-        "title": "Agent runtime settings",
-        "mobileTrigger": "Sections"
       }
     },
     "agentTeams": {
@@ -21745,10 +21967,29 @@
       "searchPlaceholder": "Search characters…",
       "skillsCount": "{count, plural, =1 {# skill} other {# skills}}",
       "title": "Characters",
+      "trust": {
+        "rejectedToast": "Pack “{id}” was rejected: its signature did not verify ({reason}).",
+        "skippedSignature": "{count, plural, =1 {1 signed pack failed verification and was not loaded} other {# signed packs failed verification and were not loaded}}",
+        "unsigned": "Unsigned",
+        "unsignedTooltip": "This pack carries no publisher signature. It was imported as-is.",
+        "verified": "Verified",
+        "verifiedTooltip": "Signature verified — {fingerprint}"
+      },
       "updatedToast": "Updated {name}.",
       "validation": {
         "nameRequired": "Name is required.",
         "systemPromptRequired": "System prompt cannot be empty."
+      },
+      "warning": {
+        "characterScope": "{message} (character: {localId})",
+        "missingA2uiCatalog": "Missing A2UI catalog: {id}",
+        "missingConnector": "Missing connector: {id}",
+        "missingMcpPreset": "Missing MCP server preset: {id}",
+        "missingNativeTool": "Missing native tool: {id}",
+        "missingPluginSkill": "Missing plugin skill: {id}",
+        "missingProvider": "Missing provider: {id}",
+        "missingSkill": "Missing skill: {id}",
+        "missingThemePack": "Missing theme pack: {id}"
       }
     },
     "cliBridge": {
@@ -23435,6 +23676,10 @@
           "label": "Use compact composer layout"
         },
         "description": "Control how the message composer handles typing, sending, and drafts.",
+        "effortSelectorMode": {
+          "hint": "Show thinking levels as a continuous slider instead of a list.",
+          "label": "Use a slider for thinking levels"
+        },
         "inputHistory": {
           "hint": "Press Up / Down in an empty composer to recall previous messages.",
           "label": "Recall input history"
@@ -24378,6 +24623,57 @@
       "badgeLive": "live",
       "badgeWeb": "web",
       "description": "Expose this app's knowledge and runtime to external MCP clients.",
+      "inbound": {
+        "accept": "Accept",
+        "acceptConfirmDesc": {
+          "lesson": "This becomes a long-term memory. Accepting is final — it cannot be undone from here.",
+          "note": "This is filed as a knowledge note. Accepting is final — it cannot be undone from here.",
+          "skill": "This becomes a skill, created disabled so it cannot run until you enable it yourself. Accepting is final — it cannot be undone from here."
+        },
+        "acceptConfirmTitle": "Accept this submission?",
+        "cancel": "Cancel",
+        "description": "Lessons, skill drafts, and notes contributed from outside Cognia. Nothing here changes anything until you accept it.",
+        "detailAria": "Show details for {title}",
+        "editAria": "Edit the submitted content of {title}",
+        "empty": "Nothing to review.",
+        "filter": {
+          "accepted": "Accepted",
+          "all": "All",
+          "pending": "Pending",
+          "rejected": "Rejected"
+        },
+        "filterAria": "Filter by review status",
+        "kind": {
+          "lesson": "Lesson",
+          "note": "Note",
+          "skill": "Skill draft"
+        },
+        "materializeFailed": "Could not be applied after {attempts} attempt(s): {error}",
+        "origin": {
+          "crawler": "Crawler",
+          "ide-scanner": "IDE scanner",
+          "mcp": "MCP client"
+        },
+        "pendingCount": "{count} awaiting review",
+        "producedId": "Created: {id}",
+        "reject": "Reject",
+        "rejectConfirmDesc": "The draft is kept for the record but is never applied. Rejecting is final — it cannot be undone from here.",
+        "rejectConfirmTitle": "Reject this submission?",
+        "rejectionReason": "Reason: {reason}",
+        "retry": "Retry",
+        "retryAria": "Retry processing {title}",
+        "retryFailed": "Retry failed.",
+        "status": {
+          "accepted": "Accepted",
+          "pending": "Pending",
+          "rejected": "Rejected"
+        },
+        "title": "Inbound review",
+        "toastAccepted": "Accepted. It will be applied shortly.",
+        "toastRejected": "Rejected.",
+        "toastRetried": "Applied.",
+        "untrustedLabel": "Submitted from outside Cognia — treat as untrusted"
+      },
       "loading": "Loading…",
       "nav": {
         "badgeScopesAria": "{granted} of {total} permission scopes granted",
@@ -24390,6 +24686,10 @@
           "audit": {
             "description": "Every call the bridge handled",
             "label": "Audit log"
+          },
+          "inbound": {
+            "description": "Approve what outside agents contribute",
+            "label": "Inbound review"
           },
           "scopes": {
             "description": "What external clients may call",
@@ -24406,10 +24706,6 @@
           "wiki": {
             "description": "Rebuild and lint schedules",
             "label": "Wiki maintenance"
-          },
-          "inbound": {
-            "label": "Inbound review",
-            "description": "Approve what outside agents contribute"
           }
         },
         "mobileTrigger": "Panels",
@@ -24601,57 +24897,6 @@
         "toastClean": "Wiki is clean — {count, plural, one {# article} other {# articles}}, no issues.",
         "toastLintFailed": "Lint failed: {message}",
         "toastLinted": "Lint done: {orphans} orphans, {broken} broken."
-      },
-      "inbound": {
-        "title": "Inbound review",
-        "description": "Lessons, skill drafts, and notes contributed from outside Cognia. Nothing here changes anything until you accept it.",
-        "empty": "Nothing to review.",
-        "filterAria": "Filter by review status",
-        "filter": {
-          "pending": "Pending",
-          "accepted": "Accepted",
-          "rejected": "Rejected",
-          "all": "All"
-        },
-        "kind": {
-          "lesson": "Lesson",
-          "skill": "Skill draft",
-          "note": "Note"
-        },
-        "status": {
-          "pending": "Pending",
-          "accepted": "Accepted",
-          "rejected": "Rejected"
-        },
-        "origin": {
-          "mcp": "MCP client",
-          "ide-scanner": "IDE scanner",
-          "crawler": "Crawler"
-        },
-        "untrustedLabel": "Submitted from outside Cognia — treat as untrusted",
-        "accept": "Accept",
-        "reject": "Reject",
-        "cancel": "Cancel",
-        "retry": "Retry",
-        "retryAria": "Retry processing {title}",
-        "retryFailed": "Retry failed.",
-        "detailAria": "Show details for {title}",
-        "editAria": "Edit the submitted content of {title}",
-        "pendingCount": "{count} awaiting review",
-        "acceptConfirmTitle": "Accept this submission?",
-        "acceptConfirmDesc": {
-          "lesson": "This becomes a long-term memory. Accepting is final — it cannot be undone from here.",
-          "skill": "This becomes a skill, created disabled so it cannot run until you enable it yourself. Accepting is final — it cannot be undone from here.",
-          "note": "This is filed as a knowledge note. Accepting is final — it cannot be undone from here."
-        },
-        "rejectConfirmTitle": "Reject this submission?",
-        "rejectConfirmDesc": "The draft is kept for the record but is never applied. Rejecting is final — it cannot be undone from here.",
-        "rejectionReason": "Reason: {reason}",
-        "producedId": "Created: {id}",
-        "materializeFailed": "Could not be applied after {attempts} attempt(s): {error}",
-        "toastAccepted": "Accepted. It will be applied shortly.",
-        "toastRejected": "Rejected.",
-        "toastRetried": "Applied."
       }
     },
     "finder": {
@@ -25027,6 +25272,7 @@
         "low": "low",
         "max": "max",
         "medium": "medium",
+        "ultracode": "ultracode",
         "xhigh": "xhigh"
       },
       "model": {
@@ -25433,8 +25679,8 @@
             "label": "Retrieval"
           }
         },
-        "title": "Memory settings",
-        "mobileTrigger": "Sections"
+        "mobileTrigger": "Sections",
+        "title": "Memory settings"
       },
       "overview": {
         "byScope": {
@@ -26780,14 +27026,33 @@
         "showKey": "Show key"
       },
       "live": {
-        "apiKey": "OpenAI API key",
-        "description": "Configure low-latency, full-duplex speech with automatic turn detection and interruption.",
+        "apiKey": "API key",
+        "description": "Low-latency, full-duplex speech with automatic turn detection and interruption, across several providers.",
+        "enabled": "Enable live voice",
+        "enabledHint": "Adds the live voice button to the composer.",
+        "fallback": "Try other providers on failure",
+        "fallbackHint": "Only before the microphone opens — a live session never switches provider.",
         "instructions": "Conversation instructions",
         "instructionsPlaceholder": "Be concise, conversational, and confirm before consequential actions.",
         "model": "Realtime model",
-        "privacy": "Microphone audio is streamed to OpenAI only while a live voice session is active.",
+        "noProviders": "No live voice provider is available in this region yet.",
+        "preferred": "Primary provider",
+        "preferredHint": "Tried first; others are fallbacks.",
+        "preferredPlaceholder": "Pick a provider",
+        "privacy": "Microphone audio is streamed to the selected provider only while a live voice session is active. It cannot be redacted locally.",
+        "providers": {
+          "google": "Gemini",
+          "openai": "OpenAI",
+          "xai": "Grok"
+        },
+        "providersTitle": "Providers",
+        "region": "Region",
+        "regionCn": "Chinese mainland",
+        "regionGlobal": "Global",
+        "regionHint": "Sessions never fall back across this boundary.",
         "title": "Live voice",
-        "voice": "Voice"
+        "voice": "Voice",
+        "voiceDefault": "Provider default"
       },
       "provider": {
         "apiKeyPlaceholder": {
@@ -27629,6 +27894,105 @@
       "show": "Show",
       "title": "Tray"
     },
+    "trayPanel": {
+      "actions": {
+        "add": "Add action",
+        "builtIn": "Built-in",
+        "description": "What the panel offers, in order. Each action can carry its own input fields.",
+        "edit": "Edit",
+        "hide": "Hide",
+        "moveDown": "Move down",
+        "moveUp": "Move up",
+        "remove": "Remove",
+        "reset": "Reset",
+        "show": "Show",
+        "title": "Panel actions"
+      },
+      "behavior": {
+        "description": "A popover under the tray icon for delegating a task or firing a quick action.",
+        "leftClick": "Clicking the tray icon",
+        "leftClickHint": "Right-click always opens the tray menu.",
+        "leftClickOptions": {
+          "none": "Does nothing",
+          "panel": "Opens the quick panel",
+          "toggle-window": "Shows or hides the main window"
+        },
+        "preview": "Preview",
+        "previewAction": "Open the panel",
+        "previewHint": "Opens the panel where the tray icon last was.",
+        "title": "Tray quick panel"
+      },
+      "desktopOnly": "The tray quick panel is only available in the desktop build.",
+      "editor": {
+        "cancel": "Cancel",
+        "chord": "Shortcut",
+        "commandId": "Command id",
+        "description": "Choose when the action is offered, what it does, and which inputs it collects.",
+        "effect": "Does",
+        "effects": {
+          "command": "Run a registered command",
+          "delegate": "Delegate a task",
+          "native": "Run a tray action",
+          "navigate": "Open a page",
+          "slash": "Run a slash command"
+        },
+        "fields": "Input fields",
+        "fieldsHint": "Collected before the action runs; reference them as '{{fieldId}}'.",
+        "focusMainWindow": "Bring the main window forward",
+        "icon": "Icon",
+        "iconPlaceholder": "Lucide icon name, e.g. rocket",
+        "issues": {
+          "duplicateFieldId": "Duplicate field id: {id}",
+          "emptyEffect": "Fill in what this action should do.",
+          "emptySelect": "Dropdown \"{id}\" needs at least one option.",
+          "illegalTrigger": "Only \"open a page\" and \"run a command\" may run when the panel opens.",
+          "invalidFieldId": "Field id \"{id}\" may only use letters, digits, - and _.",
+          "missingChord": "Enter a shortcut, e.g. mod+1.",
+          "missingLabel": "Give the action a label.",
+          "unknownPlaceholder": "No field matches: {ids}"
+        },
+        "label": "Label",
+        "nativeAction": "Tray action",
+        "path": "Path",
+        "prompt": "Prompt",
+        "promptHint": "Reference an input field with '{{fieldId}}'.",
+        "promptPlaceholder": "Review '{{path}}' and summarise the risks",
+        "save": "Save",
+        "slash": "Slash command",
+        "target": "Destination",
+        "targetHint": "newSession, activeSession, or '{{fieldId}}' to let an input decide.",
+        "title": "Edit action",
+        "trigger": "Trigger",
+        "triggers": {
+          "hotkey": "Keyboard shortcut",
+          "manual": "On click",
+          "open": "When the panel opens",
+          "submit": "Primary (Enter)"
+        },
+        "when": "Condition",
+        "whenHint": "Optional. The action is hidden unless the expression is true.",
+        "whenPlaceholder": "e.g. automation.running"
+      },
+      "fieldEditor": {
+        "add": "Add field",
+        "empty": "No input fields — the action runs straight away.",
+        "id": "Id",
+        "kind": "Type",
+        "kinds": {
+          "number": "Number",
+          "select": "Dropdown",
+          "switch": "Switch",
+          "text": "Text",
+          "textarea": "Long text"
+        },
+        "label": "Label",
+        "options": "Options",
+        "optionsPlaceholder": "value=Label, one per line",
+        "remove": "Remove field",
+        "required": "Required",
+        "submitOnEnter": "Enter submits"
+      }
+    },
     "workflow": {
       "fanout": {
         "adapterLabel": "Adapter",
@@ -27658,105 +28022,6 @@
       "title": "Workspace Trust",
       "trustedAt": "Trusted {date}",
       "trustedFoldersLabel": "Trusted folders"
-    },
-    "trayPanel": {
-      "desktopOnly": "The tray quick panel is only available in the desktop build.",
-      "behavior": {
-        "title": "Tray quick panel",
-        "description": "A popover under the tray icon for delegating a task or firing a quick action.",
-        "leftClick": "Clicking the tray icon",
-        "leftClickHint": "Right-click always opens the tray menu.",
-        "leftClickOptions": {
-          "panel": "Opens the quick panel",
-          "toggle-window": "Shows or hides the main window",
-          "none": "Does nothing"
-        },
-        "preview": "Preview",
-        "previewHint": "Opens the panel where the tray icon last was.",
-        "previewAction": "Open the panel"
-      },
-      "actions": {
-        "title": "Panel actions",
-        "description": "What the panel offers, in order. Each action can carry its own input fields.",
-        "add": "Add action",
-        "reset": "Reset",
-        "builtIn": "Built-in",
-        "edit": "Edit",
-        "remove": "Remove",
-        "hide": "Hide",
-        "show": "Show",
-        "moveUp": "Move up",
-        "moveDown": "Move down"
-      },
-      "editor": {
-        "title": "Edit action",
-        "description": "Choose when the action is offered, what it does, and which inputs it collects.",
-        "label": "Label",
-        "icon": "Icon",
-        "iconPlaceholder": "Lucide icon name, e.g. rocket",
-        "trigger": "Trigger",
-        "triggers": {
-          "manual": "On click",
-          "submit": "Primary (Enter)",
-          "open": "When the panel opens",
-          "hotkey": "Keyboard shortcut"
-        },
-        "chord": "Shortcut",
-        "when": "Condition",
-        "whenPlaceholder": "e.g. automation.running",
-        "whenHint": "Optional. The action is hidden unless the expression is true.",
-        "effect": "Does",
-        "effects": {
-          "delegate": "Delegate a task",
-          "slash": "Run a slash command",
-          "command": "Run a registered command",
-          "navigate": "Open a page",
-          "native": "Run a tray action"
-        },
-        "prompt": "Prompt",
-        "promptPlaceholder": "Review {{path}} and summarise the risks",
-        "promptHint": "Reference an input field with {{fieldId}}.",
-        "target": "Destination",
-        "targetHint": "newSession, activeSession, or {{fieldId}} to let an input decide.",
-        "slash": "Slash command",
-        "commandId": "Command id",
-        "path": "Path",
-        "nativeAction": "Tray action",
-        "focusMainWindow": "Bring the main window forward",
-        "fields": "Input fields",
-        "fieldsHint": "Collected before the action runs; reference them as {{fieldId}}.",
-        "save": "Save",
-        "cancel": "Cancel",
-        "issues": {
-          "missingLabel": "Give the action a label.",
-          "duplicateFieldId": "Duplicate field id: {id}",
-          "invalidFieldId": "Field id \"{id}\" may only use letters, digits, - and _.",
-          "unknownPlaceholder": "No field matches: {ids}",
-          "emptyEffect": "Fill in what this action should do.",
-          "illegalTrigger": "Only \"open a page\" and \"run a command\" may run when the panel opens.",
-          "missingChord": "Enter a shortcut, e.g. mod+1.",
-          "emptySelect": "Dropdown \"{id}\" needs at least one option."
-        }
-      },
-      "fieldEditor": {
-        "empty": "No input fields — the action runs straight away.",
-        "add": "Add field",
-        "remove": "Remove field",
-        "id": "Id",
-        "label": "Label",
-        "kind": "Type",
-        "kinds": {
-          "text": "Text",
-          "textarea": "Long text",
-          "select": "Dropdown",
-          "switch": "Switch",
-          "number": "Number"
-        },
-        "options": "Options",
-        "optionsPlaceholder": "value=Label, one per line",
-        "required": "Required",
-        "submitOnEnter": "Enter submits"
-      }
     }
   },
   "share": {
@@ -28258,6 +28523,7 @@
       "scanCodex": "Scan ~/.agents/skills/",
       "scanCustom": "Scan a directory…",
       "scanHome": "Scan ~/.claude/skills/",
+      "scanOpencode": "Scan OpenCode skills",
       "scanning": "Scanning {label}…",
       "title": "Find skills"
     },
@@ -29920,17 +30186,17 @@
       "costOverTime": {
         "description": "Estimated daily spend across the selected range.",
         "empty": "No usage in this range yet.",
-        "title": "Cost over time",
-        "view": {
-          "label": "Chart view",
-          "heatmap": "Heatmap",
-          "bar": "Bar chart"
-        },
         "heatmap": {
+          "cell": "{date}: {cost} · {requests, plural, =0 {no requests} one {# request} other {# requests}}",
           "less": "Less",
           "more": "More",
-          "cell": "{date}: {cost} · {requests, plural, =0 {no requests} one {# request} other {# requests}}",
           "total": "{cost} over the last {days, plural, one {# day} other {# days}} · {requests, plural, one {# request} other {# requests}}"
+        },
+        "title": "Cost over time",
+        "view": {
+          "bar": "Bar chart",
+          "heatmap": "Heatmap",
+          "label": "Chart view"
         }
       },
       "display": {
@@ -29984,8 +30250,9 @@
       "range": {
         "30d": "Last 30 days",
         "7d": "Last 7 days",
-        "label": "Time range",
-        "90d": "Last 90 days"
+        "90d": "Last 90 days",
+        "all": "All time",
+        "label": "Time range"
       },
       "shareCard": {
         "action": "Share card",
@@ -30467,6 +30734,8 @@
     "skillToolTitle": "Skill tool",
     "slashToolDesc": "Expose the SlashCommand tool so the agent can run a registered slash command. Built-in UI commands return guidance to run them from the composer.",
     "slashToolTitle": "SlashCommand tool",
+    "spawnTaskToolDesc": "Let the agent stage a scoped follow-up task in a named sidechat for you to review and start.",
+    "spawnTaskToolTitle": "Spawn task",
     "teamCollabToolDesc": "Let teammates collaborate during a team run — message peers, share the blackboard, open or vote in a consensus, and delegate sub-tasks. Only applies to Agent Team sessions.",
     "teamCollabToolTitle": "Team collaboration tools",
     "terminalRepl": "Interactive REPL",
@@ -30632,14 +30901,64 @@
       "streaming": "Responding…"
     },
     "toggleWindow": "Show / hide window",
+    "trayPanelToggle": "Quick panel",
     "usage": {
       "auto": "Auto (highest usage)",
       "empty": "No usage data yet",
       "openSettings": "Subscription settings…",
       "refresh": "Refresh usage",
       "title": "Subscription usage"
+    }
+  },
+  "trayPanel": {
+    "actions": {
+      "agentRuns": {
+        "label": "Agent runs"
+      },
+      "delegate": {
+        "autoSendLabel": "Send immediately",
+        "description": "Hand a task to Cognia without opening the window.",
+        "label": "Delegate",
+        "promptLabel": "Task",
+        "promptPlaceholder": "Describe what Cognia should do…",
+        "targetLabel": "Send to"
+      },
+      "newChat": {
+        "label": "New conversation"
+      },
+      "openApp": {
+        "label": "Open Cognia"
+      },
+      "scheduler": {
+        "label": "Scheduled tasks"
+      },
+      "settings": {
+        "label": "Settings"
+      },
+      "stopAutomation": {
+        "label": "Stop automation"
+      }
     },
-    "trayPanelToggle": "Quick panel"
+    "dismiss": "Close panel",
+    "empty": "No actions yet — add one in Settings › Desktop.",
+    "errors": {
+      "badTarget": "\"{value}\" is not a valid destination.",
+      "deliveryFailed": "Cognia's main window didn't respond.",
+      "emptyEffect": "This action has nothing to run.",
+      "illegalTrigger": "This action can't run automatically when the panel opens.",
+      "required": "Fill in the required fields first.",
+      "runFailed": "Couldn't run that action.",
+      "runFailedFor": "Couldn't run “{action}”",
+      "unknownCommand": "Unknown command: {id}",
+      "unknownPlaceholder": "Unknown placeholder: {ids}"
+    },
+    "openSettings": "Open settings",
+    "run": "Run",
+    "targets": {
+      "activeSession": "Current conversation",
+      "newSession": "New conversation"
+    },
+    "title": "Cognia"
   },
   "tts": {
     "nowPlaying": {
@@ -36165,56 +36484,6 @@
       "recentHeading": "Recent",
       "searchPlaceholder": "Search workspaces…",
       "untrustedHint": "Untrusted workspace"
-    }
-  },
-  "trayPanel": {
-    "title": "Cognia",
-    "dismiss": "Close panel",
-    "openSettings": "Open settings",
-    "run": "Run",
-    "empty": "No actions yet — add one in Settings › Desktop.",
-    "targets": {
-      "newSession": "New conversation",
-      "activeSession": "Current conversation"
-    },
-    "actions": {
-      "delegate": {
-        "label": "Delegate",
-        "description": "Hand a task to Cognia without opening the window.",
-        "promptLabel": "Task",
-        "promptPlaceholder": "Describe what Cognia should do…",
-        "targetLabel": "Send to",
-        "autoSendLabel": "Send immediately"
-      },
-      "newChat": {
-        "label": "New conversation"
-      },
-      "openApp": {
-        "label": "Open Cognia"
-      },
-      "agentRuns": {
-        "label": "Agent runs"
-      },
-      "scheduler": {
-        "label": "Scheduled tasks"
-      },
-      "stopAutomation": {
-        "label": "Stop automation"
-      },
-      "settings": {
-        "label": "Settings"
-      }
-    },
-    "errors": {
-      "required": "Fill in the required fields first.",
-      "unknownPlaceholder": "Unknown placeholder: {ids}",
-      "badTarget": "\"{value}\" is not a valid destination.",
-      "illegalTrigger": "This action can't run automatically when the panel opens.",
-      "emptyEffect": "This action has nothing to run.",
-      "runFailed": "Couldn't run that action.",
-      "runFailedFor": "Couldn't run “{action}”",
-      "deliveryFailed": "Cognia's main window didn't respond.",
-      "unknownCommand": "Unknown command: {id}"
     }
   }
 }

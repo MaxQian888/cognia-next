@@ -159,8 +159,8 @@
       "summarization": "Summarization",
       "text-classification": "Text classification",
       "text-generation": "Text generation",
-      "text2text-generation": "Text-to-text generation",
       "text-to-speech": "Text to speech",
+      "text2text-generation": "Text-to-text generation",
       "token-classification": "Token classification",
       "translation": "Translation",
       "zero-shot-classification": "Zero-shot classification",
@@ -562,8 +562,8 @@
       "label": "Adapter"
     },
     "messageId": {
-      "label": "Message id",
       "hint": "Platform message id to recall / delete.",
+      "label": "Message id",
       "placeholder": "om_..."
     }
   },
@@ -583,6 +583,21 @@
     "ttlMs": {
       "hint": "0 = no expiry",
       "label": "TTL (ms, optional)"
+    }
+  },
+  "connectorForward": {
+    "adapter": {
+      "label": "Adapter"
+    },
+    "messageId": {
+      "hint": "Platform message id to forward.",
+      "label": "Message id",
+      "placeholder": "om_..."
+    },
+    "target": {
+      "hint": "Destination conversation key (platform:adapterId:chatId) or a raw receive id.",
+      "label": "Target conversation",
+      "placeholder": "lark:bot:oc_..."
     }
   },
   "connectorInbound": {
@@ -623,41 +638,19 @@
       "placeholder": "ou_abc, ou_def"
     }
   },
-  "integrationEventTrigger": {
-    "pluginId": {
-      "label": "Plugin (optional)",
-      "hint": "Limit events to one installed Marketplace plugin.",
-      "placeholder": "example-delivery"
-    },
-    "integrationId": {
-      "label": "Integration (optional)",
-      "hint": "Limit events to one integration definition from the plugin.",
-      "placeholder": "delivery"
-    },
-    "accountId": {
-      "label": "Account (optional)",
-      "hint": "Limit events to one connected account.",
-      "placeholder": "account_..."
-    },
-    "resourceKind": {
-      "label": "Resource kind (optional)",
-      "hint": "Limit events to a normalized resource kind.",
-      "placeholder": "repository"
-    },
-    "resourceId": {
-      "label": "Resource id (optional)",
-      "hint": "Limit events to one repository, workspace, team, or other resource.",
-      "placeholder": "owner/project"
-    },
-    "eventTypes": {
-      "label": "Event types (optional)",
-      "hint": "Comma-separated normalized event types; empty matches every event.",
-      "placeholder": "pull_request.opened, issue.updated"
-    }
-  },
   "connectorReaction": {
     "adapter": {
       "label": "Adapter"
+    },
+    "emoji": {
+      "hint": "Platform reaction code (Lark: THUMBSUP, OK, …) or a unicode emoji.",
+      "label": "Emoji",
+      "placeholder": "THUMBSUP"
+    },
+    "messageId": {
+      "hint": "Platform message id to react to.",
+      "label": "Message id",
+      "placeholder": "om_..."
     },
     "op": {
       "label": "Operation",
@@ -666,41 +659,21 @@
         "remove": "Remove reaction"
       }
     },
-    "messageId": {
-      "label": "Message id",
-      "hint": "Platform message id to react to.",
-      "placeholder": "om_..."
-    },
-    "emoji": {
-      "label": "Emoji",
-      "hint": "Platform reaction code (Lark: THUMBSUP, OK, …) or a unicode emoji.",
-      "placeholder": "THUMBSUP"
-    },
     "reactionId": {
-      "label": "Reaction id",
       "hint": "Id of the reaction to remove (from an earlier add node's output).",
+      "label": "Reaction id",
       "placeholder": "ZCaGnix..."
-    }
-  },
-  "connectorForward": {
-    "adapter": {
-      "label": "Adapter"
-    },
-    "messageId": {
-      "label": "Message id",
-      "hint": "Platform message id to forward.",
-      "placeholder": "om_..."
-    },
-    "target": {
-      "label": "Target conversation",
-      "hint": "Destination conversation key (platform:adapterId:chatId) or a raw receive id.",
-      "placeholder": "lark:bot:oc_..."
     }
   },
   "connectorSend": {
     "adapter": {
       "label": "Adapter",
       "placeholder": "telegram_main"
+    },
+    "cardJson": {
+      "hint": "A2UI surface object ('{'components, dataModel, rootId, …'}'). When set, sends an interactive card with the message content as plain-text fallback.",
+      "label": "A2UI card JSON (optional)",
+      "placeholder": "'{'\"components\": '{'...'}', \"dataModel\": '{}', \"rootId\": \"root\"'}'"
     },
     "content": {
       "label": "Message content"
@@ -733,35 +706,30 @@
     "waitTimeoutMs": {
       "hint": "How long to wait for delivery before continuing with the latest status, in milliseconds (default 30000, max 300000).",
       "label": "Delivery wait timeout (ms)"
-    },
-    "cardJson": {
-      "label": "A2UI card JSON (optional)",
-      "hint": "A2UI surface object ('{'components, dataModel, rootId, …'}'). When set, sends an interactive card with the message content as plain-text fallback.",
-      "placeholder": "'{'\"components\": '{'...'}', \"dataModel\": '{}', \"rootId\": \"root\"'}'"
     }
   },
   "connectorWaitReply": {
     "conversationKey": {
-      "label": "Conversation key",
-      "hint": "Composite key platform:adapterId:chatId — the conversation to listen on."
-    },
-    "senderIds": {
-      "label": "Sender ids (optional)",
-      "hint": "Comma-separated platform user ids; any sender when empty.",
-      "placeholder": "ou_abc, ou_def"
+      "hint": "Composite key platform:adapterId:chatId — the conversation to listen on.",
+      "label": "Conversation key"
     },
     "keywords": {
-      "label": "Keywords (optional)",
       "hint": "Comma-separated case-insensitive substrings; any match accepts the reply.",
+      "label": "Keywords (optional)",
       "placeholder": "approve, done"
     },
     "requireMention": {
-      "label": "Require @-mention",
-      "hint": "Only accept replies that @-mention the bot."
+      "hint": "Only accept replies that @-mention the bot.",
+      "label": "Require @-mention"
+    },
+    "senderIds": {
+      "hint": "Comma-separated platform user ids; any sender when empty.",
+      "label": "Sender ids (optional)",
+      "placeholder": "ou_abc, ou_def"
     },
     "timeoutMs": {
-      "label": "Timeout (ms)",
-      "hint": "Wait budget before resolving with replied=false (default 120000, max 3600000)."
+      "hint": "Wait budget before resolving with replied=false (default 120000, max 3600000).",
+      "label": "Timeout (ms)"
     }
   },
   "cron": {
@@ -1392,6 +1360,38 @@
       "placeholder": "https://api.example.com/v1/things"
     }
   },
+  "integrationEventTrigger": {
+    "accountId": {
+      "hint": "Limit events to one connected account.",
+      "label": "Account (optional)",
+      "placeholder": "account_..."
+    },
+    "eventTypes": {
+      "hint": "Comma-separated normalized event types; empty matches every event.",
+      "label": "Event types (optional)",
+      "placeholder": "pull_request.opened, issue.updated"
+    },
+    "integrationId": {
+      "hint": "Limit events to one integration definition from the plugin.",
+      "label": "Integration (optional)",
+      "placeholder": "delivery"
+    },
+    "pluginId": {
+      "hint": "Limit events to one installed Marketplace plugin.",
+      "label": "Plugin (optional)",
+      "placeholder": "example-delivery"
+    },
+    "resourceId": {
+      "hint": "Limit events to one repository, workspace, team, or other resource.",
+      "label": "Resource id (optional)",
+      "placeholder": "owner/project"
+    },
+    "resourceKind": {
+      "hint": "Limit events to a normalized resource kind.",
+      "label": "Resource kind (optional)",
+      "placeholder": "repository"
+    }
+  },
   "join": {
     "aggregate": {
       "hint": "Reduce the joined branch outputs in one step.",
@@ -1567,14 +1567,14 @@
       "hint": "How defining this fact is. /remember uses 7.",
       "label": "Importance (1–10)"
     },
+    "pathPattern": {
+      "label": "Workspace-relative path prefix"
+    },
     "piiGate": {
       "block": "Block (fail the step)",
       "hint": "Memories persist durably — block (fail on PII) or redact placeholders. Cannot be disabled.",
       "label": "PII gate",
       "redact": "Redact placeholders"
-    },
-    "pathPattern": {
-      "label": "Workspace-relative path prefix"
     },
     "projectId": {
       "label": "Project ID"

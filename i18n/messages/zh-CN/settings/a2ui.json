@@ -58,20 +58,20 @@
       "catalogHelp": "当 surface 未指定 catalogId 时使用。",
       "catalogLabel": "默认目录",
       "catalogPlaceholder": "选择目录",
-      "standardCatalog": "Cognia 标准目录",
       "description": "应用到新角色和面板。",
       "enabledHelp": "新角色继承此值。",
       "enabledLabel": "默认启用 A2UI",
+      "standardCatalog": "Cognia 标准目录",
       "title": "全局默认"
     },
     "loading": "加载中…",
-    "saveFailed": "保存失败：{error}",
     "persistence": {
       "description": "多少个 surface 在重启后保留。",
       "limitHelp": "更大的值在重启间保留更多状态。",
       "limitLabel": "LRU 上限",
       "title": "持久化"
     },
+    "saveFailed": "保存失败：{error}",
     "widget": {
       "description": "surface widget 未指定字段时的默认值。",
       "hostStrategies": {

@@ -1,18 +1,5 @@
 {
   "notFoundBackToLibrary": "Back to library",
   "notFoundDescription": "The workflow you tried to open doesn't exist or has been deleted.",
-  "notFoundTitle": "Workflow not found",
-  "templateLibrary": {
-    "create": "Create workflow",
-    "creating": "Creating…",
-    "emptyDescription": "Published workflow templates will appear here.",
-    "emptyTitle": "No workflow templates yet",
-    "noDescription": "No description",
-    "trust": {
-      "built-in": "Built in",
-      "signed-unknown": "Signed, unknown publisher",
-      "unsigned": "Unsigned",
-      "verified-publisher": "Verified publisher"
-    }
-  }
+  "notFoundTitle": "Workflow not found"
 }

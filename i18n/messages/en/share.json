@@ -120,7 +120,6 @@
     "copyImage": "Copy image",
     "copyImageDone": "Copied",
     "createYourOwn": "Make your own with Cognia",
-    "downloadImage": "Download image",
     "discoverItem": {
       "content": "Skill instructions",
       "invalid": "This shared item could not be loaded.",
@@ -142,6 +141,7 @@
       "templateNote": "This describes the template's inputs; the generated workflow is built in the app."
     },
     "download": "Download",
+    "downloadImage": "Download image",
     "error": {
       "integrity": "This share failed its integrity check.",
       "invalidKey": "This link is invalid or its key is wrong.",

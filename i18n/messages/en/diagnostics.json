@@ -332,6 +332,14 @@
     "showParsed": "Show summary",
     "showRaw": "Show raw error"
   },
+  "recommendedAction": {
+    "codexWsl2": "For the best Windows experience, run the Codex ACP route inside a WSL2 workspace when possible.",
+    "installCommand": "Install \"{command}\", or set an absolute path as this agent's command, before connecting.",
+    "installHintClaude": "Install the Claude Code CLI: `npm install -g @anthropic-ai/claude-code`, then reconnect.",
+    "installHintCodex": "Install the OpenAI Codex CLI: `npm install -g @openai/codex` (or `brew install codex`), then reconnect.",
+    "installHintGemini": "Install the Gemini CLI: `npm install -g @google/gemini-cli`, then reconnect.",
+    "installHintOpencode": "Install the OpenCode CLI: `npm install -g opencode-ai`, then reconnect."
+  },
   "recoveryHint": {
     "adjustPermissionMode": "Adjust the agent's permission mode, or approve the action it asked for.",
     "checkCommandAndArgs": "Check the agent's command and startup arguments.",
@@ -386,13 +394,5 @@
       "retrying": "Retrying…",
       "title": "Running on default settings"
     }
-  },
-  "recommendedAction": {
-    "installCommand": "Install \"{command}\", or set an absolute path as this agent's command, before connecting.",
-    "installHintCodex": "Install the OpenAI Codex CLI: `npm install -g @openai/codex` (or `brew install codex`), then reconnect.",
-    "installHintClaude": "Install the Claude Code CLI: `npm install -g @anthropic-ai/claude-code`, then reconnect.",
-    "installHintOpencode": "Install the OpenCode CLI: `npm install -g opencode-ai`, then reconnect.",
-    "installHintGemini": "Install the Gemini CLI: `npm install -g @google/gemini-cli`, then reconnect.",
-    "codexWsl2": "For the best Windows experience, run the Codex ACP route inside a WSL2 workspace when possible."
   }
 }

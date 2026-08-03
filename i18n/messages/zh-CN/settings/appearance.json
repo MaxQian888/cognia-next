@@ -42,10 +42,10 @@
     }
   },
   "accent": {
-    "label": "强调色",
     "description": "无需编辑完整主题即可为按钮与高亮重新着色。",
-    "usingTheme": "使用主题强调色",
-    "reset": "重置"
+    "label": "强调色",
+    "reset": "重置",
+    "usingTheme": "使用主题强调色"
   },
   "advanced": {
     "description": "向应用注入自定义 CSS。保存时会移除远程 @import / url(http)。错误的 CSS 可能让界面显示异常，请谨慎使用。",
@@ -186,6 +186,74 @@
       "translucent": "半透明"
     },
     "tonalityHint": "透明度仅在启用壁纸时生效。"
+  },
+  "cursor": {
+    "colorHint": "主题强调色会跟随当前主题；自定义颜色则在所有光标包上固定为同一种颜色。",
+    "colorLabel": "颜色",
+    "colorModes": {
+      "accent": "主题强调色",
+      "custom": "自定义颜色",
+      "pack": "光标包配色"
+    },
+    "customColorLabel": "自定义颜色",
+    "description": "使用设计好的光标包替换指针，并可叠加粒子效果。",
+    "effect": {
+      "clickBurstHint": "在点击位置额外迸发一簇粒子。",
+      "clickBurstLabel": "点击迸发",
+      "colorLabel": "颜色",
+      "colorModes": {
+        "accent": "主题强调色",
+        "custom": "自定义颜色",
+        "pack": "光标包配色",
+        "rainbow": "彩虹"
+      },
+      "customColorLabel": "自定义颜色",
+      "description": "指针移动时在其后方绘制的粒子。",
+      "intensityLabel": "强度",
+      "kindLabel": "特效",
+      "kinds": {
+        "bubbles": "气泡",
+        "flame": "火焰",
+        "glow": "辉光",
+        "none": "无",
+        "petals": "落樱",
+        "ribbon": "彩带",
+        "ripple": "涟漪",
+        "snow": "落雪",
+        "sparkle": "闪烁",
+        "stardust": "星尘",
+        "trail": "拖尾"
+      },
+      "reducedMotionNotice": "已开启减弱动态效果，因此不会绘制特效。",
+      "scaleLabel": "粒子大小",
+      "title": "光标特效",
+      "touchNotice": "触摸输入不会绘制指针特效。"
+    },
+    "enabledHint": "关闭后使用操作系统自带的指针。",
+    "enabledLabel": "自定义光标",
+    "families": {
+      "anime": "二次元",
+      "classic": "经典",
+      "playful": "趣味",
+      "system": "系统"
+    },
+    "nativeRoles": "以下角色仍使用系统指针：{roles}",
+    "roles": {
+      "crosshair": "十字准星",
+      "default": "默认",
+      "grab": "可抓取",
+      "grabbing": "抓取中",
+      "notAllowed": "禁用",
+      "pointer": "链接",
+      "progress": "忙碌",
+      "text": "文本"
+    },
+    "rolesLabel": "光标角色",
+    "sizeLabel": "大小",
+    "systemPack": "系统",
+    "systemPackHint": "你的系统指针",
+    "systemSelectedHint": "当前使用系统指针，因此没有可预览的内容。",
+    "title": "光标"
   },
   "customTheme": {
     "actions": {
@@ -563,14 +631,6 @@
     "enabledLabel": "启用背景",
     "formats": "PNG、JPEG、WebP、GIF、AVIF · 不超过 32 MB",
     "galleryTitle": "图库",
-    "gradient": {
-      "angle": "角度",
-      "end": "结束色",
-      "namePlaceholder": "渐变名称",
-      "save": "加入图库",
-      "start": "起始色",
-      "title": "构建渐变"
-    },
     "generator": {
       "accent": "生成的强调色",
       "action": "生成匹配主题",
@@ -583,6 +643,14 @@
         "dark": "暗色基底",
         "light": "亮色基底"
       }
+    },
+    "gradient": {
+      "angle": "角度",
+      "end": "结束色",
+      "namePlaceholder": "渐变名称",
+      "save": "加入图库",
+      "start": "起始色",
+      "title": "构建渐变"
     },
     "invalidType": "不支持的文件类型，请使用 PNG / JPEG / WebP / GIF / AVIF。",
     "noActive": "未选择壁纸。",
@@ -639,73 +707,5 @@
     "tooLarge": "文件过大（不超过 32 MB）。",
     "uploadHint": "把图片拖到这里或点击浏览",
     "uploading": "上传中…"
-  },
-  "cursor": {
-    "title": "光标",
-    "description": "使用设计好的光标包替换指针，并可叠加粒子效果。",
-    "enabledLabel": "自定义光标",
-    "enabledHint": "关闭后使用操作系统自带的指针。",
-    "sizeLabel": "大小",
-    "colorLabel": "颜色",
-    "colorHint": "主题强调色会跟随当前主题；自定义颜色则在所有光标包上固定为同一种颜色。",
-    "customColorLabel": "自定义颜色",
-    "rolesLabel": "光标角色",
-    "systemSelectedHint": "当前使用系统指针，因此没有可预览的内容。",
-    "systemPack": "系统",
-    "systemPackHint": "你的系统指针",
-    "nativeRoles": "以下角色仍使用系统指针：{roles}",
-    "families": {
-      "system": "系统",
-      "classic": "经典",
-      "playful": "趣味",
-      "anime": "二次元"
-    },
-    "colorModes": {
-      "pack": "光标包配色",
-      "accent": "主题强调色",
-      "custom": "自定义颜色"
-    },
-    "roles": {
-      "default": "默认",
-      "pointer": "链接",
-      "text": "文本",
-      "grab": "可抓取",
-      "grabbing": "抓取中",
-      "notAllowed": "禁用",
-      "progress": "忙碌",
-      "crosshair": "十字准星"
-    },
-    "effect": {
-      "title": "光标特效",
-      "description": "指针移动时在其后方绘制的粒子。",
-      "kindLabel": "特效",
-      "reducedMotionNotice": "已开启减弱动态效果，因此不会绘制特效。",
-      "intensityLabel": "强度",
-      "scaleLabel": "粒子大小",
-      "colorLabel": "颜色",
-      "customColorLabel": "自定义颜色",
-      "clickBurstLabel": "点击迸发",
-      "clickBurstHint": "在点击位置额外迸发一簇粒子。",
-      "touchNotice": "触摸输入不会绘制指针特效。",
-      "kinds": {
-        "none": "无",
-        "trail": "拖尾",
-        "ribbon": "彩带",
-        "glow": "辉光",
-        "ripple": "涟漪",
-        "sparkle": "闪烁",
-        "bubbles": "气泡",
-        "snow": "落雪",
-        "flame": "火焰",
-        "petals": "落樱",
-        "stardust": "星尘"
-      },
-      "colorModes": {
-        "accent": "主题强调色",
-        "pack": "光标包配色",
-        "custom": "自定义颜色",
-        "rainbow": "彩虹"
-      }
-    }
   }
 }

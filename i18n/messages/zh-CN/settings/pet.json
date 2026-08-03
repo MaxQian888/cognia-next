@@ -226,9 +226,22 @@
       "svg": "矢量吉祥物"
     }
   },
+  "sound": {
+    "description": "在你抚摸宠物或它作出反应时播放短促音效。默认关闭。",
+    "label": "音效",
+    "quietHours": {
+      "description": "在此时间段内静音宠物音效。",
+      "end": "到",
+      "label": "免打扰时段",
+      "start": "从"
+    },
+    "volume": {
+      "label": "音量（{value}%）"
+    }
+  },
   "spriteV2": {
-    "active": "使用中",
     "activate": "使用",
+    "active": "使用中",
     "agentPrompt": {
       "concept": "宠物设定：{concept}",
       "defaultConcept": "一只适合 Cognia 的友好自定义宠物",
@@ -256,19 +269,6 @@
     "import": "导入 v2 精灵图宠物",
     "importHint": "同时选择 pet.json 与对应的 spritesheet.webp 或 spritesheet.png。安装前 Cognia 会校验 v2 清单和 1536×2288 图集。",
     "installed": "精灵图宠物已安装并启用。"
-  },
-  "sound": {
-    "description": "在你抚摸宠物或它作出反应时播放短促音效。默认关闭。",
-    "label": "音效",
-    "quietHours": {
-      "description": "在此时间段内静音宠物音效。",
-      "end": "到",
-      "label": "免打扰时段",
-      "start": "从"
-    },
-    "volume": {
-      "label": "音量（{value}%）"
-    }
   },
   "title": "宠物",
   "twinAwareness": {

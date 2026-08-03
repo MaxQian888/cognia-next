@@ -83,8 +83,8 @@
   "delete": {
     "body": "「{name}」将被删除。引用它的角色会在下次保存时自动移除引用。",
     "bundles": {
-      "label": "同时删除该技能的 {count} 个录制",
-      "hint": "捕获内容与截图将从本机移除，且无法恢复。"
+      "hint": "捕获内容与截图将从本机移除，且无法恢复。",
+      "label": "同时删除该技能的 {count} 个录制"
     },
     "cancel": "取消",
     "confirm": "删除",
@@ -125,6 +125,7 @@
     "scanCodex": "扫描 ~/.agents/skills/",
     "scanCustom": "扫描指定目录…",
     "scanHome": "扫描 ~/.claude/skills/",
+    "scanOpencode": "扫描 OpenCode skills",
     "scanning": "正在扫描 {label}…",
     "title": "发现技能"
   },
@@ -386,6 +387,8 @@
       "toolbarButton": "录制技能"
     },
     "generate": {
+      "blockedByVariables": "仍有 {count} 个变量待确认，确认后才能生成技能。",
+      "blockedByVariablesHint": "打开审阅步骤，逐个确认或排除。",
       "failed": "技能生成失败。",
       "manualFallback": "改为根据时间线撰写",
       "manualFallbackHint": "完全不经过模型，直接用你审阅过的步骤生成一份完整技能。",
@@ -411,9 +414,7 @@
         "title": "该技能可使用的工具",
         "unknown": "模型给出了 {count} 个不存在的工具，已略去。"
       },
-      "truncated": "为控制长度，另有 {count} 步未包含在内。",
-      "blockedByVariables": "仍有 {count} 个变量待确认，确认后才能生成技能。",
-      "blockedByVariablesHint": "打开审阅步骤，逐个确认或排除。"
+      "truncated": "为控制长度，另有 {count} 步未包含在内。"
     },
     "generateFailed": "无法根据这段录制生成技能。",
     "generating": "正在生成技能…",
@@ -480,6 +481,7 @@
     },
     "redacted": "发送给模型前，敏感文本已被脱敏处理。",
     "review": {
+      "blockedByVariables": "{count} 个未确认变量",
       "blockers": {
         "noIncludedSteps": "至少保留一个步骤。",
         "sensitiveVariableHasValue": "「{name}」标为机密，但仍带着具体值。",
@@ -533,8 +535,7 @@
       "verify": "之后应确认",
       "verifyPlaceholder": "怎样才算这一步成功了？",
       "viewDetail": "详情",
-      "viewTimeline": "时间线",
-      "blockedByVariables": "{count} 个未确认变量"
+      "viewTimeline": "时间线"
     },
     "save": {
       "assetsPromoted": "已附上 {count} 张截图",
@@ -573,14 +574,14 @@
       "scopeWindow": "单个窗口",
       "start": "开始录制",
       "storage": "录制已占用 {used}，上限 {limit}",
-      "targetRequired": "请选择要录制的目标。",
-      "targetRefresh": "刷新",
-      "targetLoading": "正在查找已打开的窗口…",
-      "targetFailed": "无法列出已打开的窗口。请刷新后重试。",
+      "targetApplication": "要录制的应用",
       "targetEmpty": "没有可录制的窗口。",
+      "targetFailed": "无法列出已打开的窗口。请刷新后重试。",
+      "targetLoading": "正在查找已打开的窗口…",
       "targetMinimized": "已最小化",
-      "targetWindow": "要录制的窗口",
-      "targetApplication": "要录制的应用"
+      "targetRefresh": "刷新",
+      "targetRequired": "请选择要录制的目标。",
+      "targetWindow": "要录制的窗口"
     },
     "srStatus": "录制阶段 {stage}，第 {current} 步，共 {total} 步。",
     "stages": {
@@ -641,12 +642,12 @@
       "regenerate": "重新生成",
       "saveAsNew": "另存为新技能",
       "status": {
-        "recording": "录制中",
         "captured": "已捕获",
+        "discarded": "已丢弃",
         "drafting": "草稿",
-        "saved": "已保存",
         "interrupted": "已中断",
-        "discarded": "已丢弃"
+        "recording": "录制中",
+        "saved": "已保存"
       },
       "stepCount": "{count} 步",
       "stepCounts": "保留 {included} / {total} 步",

@@ -55,6 +55,7 @@
     "streaming": "Responding…"
   },
   "toggleWindow": "Show / hide window",
+  "trayPanelToggle": "Quick panel",
   "usage": {
     "auto": "Auto (highest usage)",
     "empty": "No usage data yet",

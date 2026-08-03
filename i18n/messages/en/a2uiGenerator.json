@@ -1,160 +1,395 @@
 {
+  "dashboardDataModel": {
+    "chartData": [
+      {
+        "name": "Mon",
+        "value": 120
+      },
+      {
+        "name": "Tue",
+        "value": 180
+      },
+      {
+        "name": "Wed",
+        "value": 150
+      },
+      {
+        "name": "Thu",
+        "value": 220
+      },
+      {
+        "name": "Fri",
+        "value": 190
+      },
+      {
+        "name": "Sat",
+        "value": 280
+      },
+      {
+        "name": "Sun",
+        "value": 250
+      }
+    ],
+    "status": {
+      "detail": "The latest update occurred within the past 5 minutes.",
+      "message": "The data source is synchronized and ready to refresh."
+    },
+    "summaryItems": [
+      {
+        "badge": "Live",
+        "id": "value-1",
+        "title": "Metric 1",
+        "value": "1,234"
+      },
+      {
+        "badge": "Stable",
+        "id": "value-2",
+        "title": "Metric 2",
+        "value": "567"
+      },
+      {
+        "badge": "Trend",
+        "id": "value-3",
+        "title": "Metric 3",
+        "value": "+12%"
+      }
+    ]
+  },
   "factories": {
     "ageCalculator": {
-      "header": { "text": "🎂 Age Calculator" },
-      "date-input": { "label": "Date of Birth" },
-      "calc-btn": { "text": "Calculate Age" }
+      "calc-btn": {
+        "text": "Calculate Age"
+      },
+      "date-input": {
+        "label": "Date of Birth"
+      },
+      "header": {
+        "text": "🎂 Age Calculator"
+      }
     },
     "bmiCalculator": {
-      "header": { "text": "🏃 BMI Calculator" },
-      "height-input": { "label": "Height (cm)" },
-      "weight-input": { "label": "Weight (kg)" },
-      "calc-btn": { "text": "Calculate BMI" }
+      "calc-btn": {
+        "text": "Calculate BMI"
+      },
+      "header": {
+        "text": "🏃 BMI Calculator"
+      },
+      "height-input": {
+        "label": "Height (cm)"
+      },
+      "weight-input": {
+        "label": "Weight (kg)"
+      }
     },
     "contact": {
-      "header": { "text": "✉️ Contact Us" },
-      "first-name": { "label": "First Name" },
-      "last-name": { "label": "Last Name" },
-      "email": { "label": "Email" },
+      "email": {
+        "label": "Email"
+      },
+      "first-name": {
+        "label": "First Name"
+      },
+      "header": {
+        "text": "✉️ Contact Us"
+      },
+      "last-name": {
+        "label": "Last Name"
+      },
+      "message": {
+        "label": "Message"
+      },
       "subject": {
         "label": "Subject",
         "options": [
-          { "value": "general", "label": "General Inquiry" },
-          { "value": "support", "label": "Technical Support" },
-          { "value": "feedback", "label": "Feedback" }
+          {
+            "label": "General Inquiry",
+            "value": "general"
+          },
+          {
+            "label": "Technical Support",
+            "value": "support"
+          },
+          {
+            "label": "Feedback",
+            "value": "feedback"
+          }
         ]
       },
-      "message": { "label": "Message" },
-      "submit-btn": { "text": "Send" }
+      "submit-btn": {
+        "text": "Send"
+      }
     },
     "dashboard": {
-      "refresh-btn": { "text": "Refresh" },
-      "summary": { "title": "Key Metrics" },
-      "status": { "title": "Data Status" },
-      "chart-section": { "title": "Trend" }
+      "chart-section": {
+        "title": "Trend"
+      },
+      "refresh-btn": {
+        "text": "Refresh"
+      },
+      "status": {
+        "title": "Data Status"
+      },
+      "summary": {
+        "title": "Key Metrics"
+      }
     },
     "expenseTracker": {
-      "header": { "text": "💰 Expense Tracker" },
-      "total-card": { "title": "Spent" },
-      "budget-card": { "title": "Budget" },
-      "amount-input": { "label": "Amount" },
+      "add-btn": {
+        "text": "Add Expense"
+      },
+      "amount-input": {
+        "label": "Amount"
+      },
+      "budget-card": {
+        "title": "Budget"
+      },
       "category-select": {
         "label": "Category",
         "options": [
-          { "value": "food", "label": "🍔 Food" },
-          { "value": "transport", "label": "🚗 Transport" },
-          { "value": "shopping", "label": "🛍️ Shopping" },
-          { "value": "entertainment", "label": "🎮 Entertainment" },
-          { "value": "other", "label": "📦 Other" }
+          {
+            "label": "🍔 Food",
+            "value": "food"
+          },
+          {
+            "label": "🚗 Transport",
+            "value": "transport"
+          },
+          {
+            "label": "🛍️ Shopping",
+            "value": "shopping"
+          },
+          {
+            "label": "🎮 Entertainment",
+            "value": "entertainment"
+          },
+          {
+            "label": "📦 Other",
+            "value": "other"
+          }
         ]
       },
-      "add-btn": { "text": "Add Expense" },
-      "expense-list": { "emptyText": "No records yet" }
+      "expense-list": {
+        "emptyText": "No records yet"
+      },
+      "header": {
+        "text": "💰 Expense Tracker"
+      },
+      "total-card": {
+        "title": "Spent"
+      }
     },
     "habitTracker": {
-      "header": { "text": "🎯 Habit Tracker" },
-      "habits-list": { "emptyText": "Add your first habit" },
-      "habit-input": { "placeholder": "New habit name" },
-      "add-btn": { "text": "Add" }
+      "add-btn": {
+        "text": "Add"
+      },
+      "habit-input": {
+        "placeholder": "New habit name"
+      },
+      "habits-list": {
+        "emptyText": "Add your first habit"
+      },
+      "header": {
+        "text": "🎯 Habit Tracker"
+      }
     },
     "healthTracker": {
-      "header": { "text": "🏃 Health Tracker" },
-      "steps-card": { "title": "👟 Steps" },
-      "water-card": { "title": "💧 Water" },
-      "steps-input": { "placeholder": "Steps" },
-      "water-1": { "text": "+1 cup" },
-      "water-2": { "text": "+2 cups" },
-      "water-3": { "text": "+3 cups" }
+      "header": {
+        "text": "🏃 Health Tracker"
+      },
+      "steps-card": {
+        "title": "👟 Steps"
+      },
+      "steps-input": {
+        "placeholder": "Steps"
+      },
+      "water-1": {
+        "text": "+1 cup"
+      },
+      "water-2": {
+        "text": "+2 cups"
+      },
+      "water-3": {
+        "text": "+3 cups"
+      },
+      "water-card": {
+        "title": "💧 Water"
+      }
     },
     "loanCalculator": {
-      "header": { "text": "🏠 Loan Calculator" },
-      "principal-input": { "label": "Loan Amount" },
-      "rate-input": { "label": "Annual Rate (%)" },
-      "years-input": { "label": "Loan Term (years)" },
-      "calc-btn": { "text": "Calculate" },
-      "monthly-card": { "title": "Monthly Payment" },
-      "total-card": { "title": "Total Payment" },
-      "interest-card": { "title": "Interest" }
+      "calc-btn": {
+        "text": "Calculate"
+      },
+      "header": {
+        "text": "🏠 Loan Calculator"
+      },
+      "interest-card": {
+        "title": "Interest"
+      },
+      "monthly-card": {
+        "title": "Monthly Payment"
+      },
+      "principal-input": {
+        "label": "Loan Amount"
+      },
+      "rate-input": {
+        "label": "Annual Rate (%)"
+      },
+      "total-card": {
+        "title": "Total Payment"
+      },
+      "years-input": {
+        "label": "Loan Term (years)"
+      }
     },
     "notes": {
-      "header": { "text": "📝 Quick Notes" },
-      "search": { "placeholder": "🔍 Search notes..." },
-      "note-title": { "placeholder": "Title", "label": "Title" },
-      "note-content": { "placeholder": "Write down your thoughts..." },
-      "save-btn": { "text": "Save Note" },
-      "notes-list": { "emptyText": "No notes yet" }
+      "header": {
+        "text": "📝 Quick Notes"
+      },
+      "note-content": {
+        "placeholder": "Write down your thoughts..."
+      },
+      "note-title": {
+        "label": "Title",
+        "placeholder": "Title"
+      },
+      "notes-list": {
+        "emptyText": "No notes yet"
+      },
+      "save-btn": {
+        "text": "Save Note"
+      },
+      "search": {
+        "placeholder": "🔍 Search notes..."
+      }
     },
     "pomodoro": {
-      "header": { "text": "🍅 Pomodoro Timer" },
-      "start-btn": { "text": "Start" },
-      "pause-btn": { "text": "Pause" },
-      "reset-btn": { "text": "Reset" },
-      "work-btn": { "text": "Work 25 min" },
-      "break-btn": { "text": "Break 5 min" },
-      "long-break-btn": { "text": "Long Break 15 min" }
+      "break-btn": {
+        "text": "Break 5 min"
+      },
+      "header": {
+        "text": "🍅 Pomodoro Timer"
+      },
+      "long-break-btn": {
+        "text": "Long Break 15 min"
+      },
+      "pause-btn": {
+        "text": "Pause"
+      },
+      "reset-btn": {
+        "text": "Reset"
+      },
+      "start-btn": {
+        "text": "Start"
+      },
+      "work-btn": {
+        "text": "Work 25 min"
+      }
     },
     "survey": {
-      "title": { "text": "📋 Quick Survey" },
-      "desc": { "text": "Please answer the following questions" },
-      "q1": { "label": "Your Name" },
+      "desc": {
+        "text": "Please answer the following questions"
+      },
+      "q1": {
+        "label": "Your Name"
+      },
       "q2": {
         "label": "Satisfaction",
         "options": [
-          { "value": "very", "label": "Very Satisfied" },
-          { "value": "good", "label": "Satisfied" },
-          { "value": "neutral", "label": "Neutral" },
-          { "value": "poor", "label": "Dissatisfied" }
+          {
+            "label": "Very Satisfied",
+            "value": "very"
+          },
+          {
+            "label": "Satisfied",
+            "value": "good"
+          },
+          {
+            "label": "Neutral",
+            "value": "neutral"
+          },
+          {
+            "label": "Dissatisfied",
+            "value": "poor"
+          }
         ]
       },
-      "q3": { "label": "Additional Suggestions" },
-      "submit-btn": { "text": "Submit" }
+      "q3": {
+        "label": "Additional Suggestions"
+      },
+      "submit-btn": {
+        "text": "Submit"
+      },
+      "title": {
+        "text": "📋 Quick Survey"
+      }
     },
     "timer": {
-      "header": { "text": "⏱️ Timer" },
-      "start-btn": { "text": "Start" },
-      "pause-btn": { "text": "Pause" },
-      "reset-btn": { "text": "Reset" },
-      "1min-btn": { "text": "1 min" },
-      "5min-btn": { "text": "5 min" },
-      "10min-btn": { "text": "10 min" }
+      "10min-btn": {
+        "text": "10 min"
+      },
+      "1min-btn": {
+        "text": "1 min"
+      },
+      "5min-btn": {
+        "text": "5 min"
+      },
+      "header": {
+        "text": "⏱️ Timer"
+      },
+      "pause-btn": {
+        "text": "Pause"
+      },
+      "reset-btn": {
+        "text": "Reset"
+      },
+      "start-btn": {
+        "text": "Start"
+      }
     },
     "tipCalculator": {
-      "header": { "text": "💰 Tip Calculator" },
-      "bill-input": { "label": "Bill Amount" },
-      "tip-slider": { "label": "Tip (%)" },
-      "people-input": { "label": "People" },
-      "tip-card": { "title": "Tip" },
-      "total-card": { "title": "Per Person" }
+      "bill-input": {
+        "label": "Bill Amount"
+      },
+      "header": {
+        "text": "💰 Tip Calculator"
+      },
+      "people-input": {
+        "label": "People"
+      },
+      "tip-card": {
+        "title": "Tip"
+      },
+      "tip-slider": {
+        "label": "Tip (%)"
+      },
+      "total-card": {
+        "title": "Per Person"
+      }
     },
     "todo": {
-      "header": { "text": "✅ Todo List" },
-      "task-input": { "placeholder": "Add a new task..." },
-      "due-date": { "placeholder": "Due date" },
-      "add-btn": { "text": "Add" },
-      "filter-all": { "text": "All" },
-      "filter-pending": { "text": "Pending" },
-      "filter-done": { "text": "Completed" },
-      "task-list": { "emptyText": "No tasks yet" }
+      "add-btn": {
+        "text": "Add"
+      },
+      "due-date": {
+        "placeholder": "Due date"
+      },
+      "filter-all": {
+        "text": "All"
+      },
+      "filter-done": {
+        "text": "Completed"
+      },
+      "filter-pending": {
+        "text": "Pending"
+      },
+      "header": {
+        "text": "✅ Todo List"
+      },
+      "task-input": {
+        "placeholder": "Add a new task..."
+      },
+      "task-list": {
+        "emptyText": "No tasks yet"
+      }
     }
-  },
-  "dashboardDataModel": {
-    "summaryItems": [
-      { "id": "value-1", "title": "Metric 1", "value": "1,234", "badge": "Live" },
-      { "id": "value-2", "title": "Metric 2", "value": "567", "badge": "Stable" },
-      { "id": "value-3", "title": "Metric 3", "value": "+12%", "badge": "Trend" }
-    ],
-    "status": {
-      "message": "The data source is synchronized and ready to refresh.",
-      "detail": "The latest update occurred within the past 5 minutes."
-    },
-    "chartData": [
-      { "name": "Mon", "value": 120 },
-      { "name": "Tue", "value": 180 },
-      { "name": "Wed", "value": 150 },
-      { "name": "Thu", "value": 220 },
-      { "name": "Fri", "value": 190 },
-      { "name": "Sat", "value": 280 },
-      { "name": "Sun", "value": 250 }
-    ]
   }
 }

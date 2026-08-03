@@ -81,8 +81,6 @@
     "you": "You"
   },
   "customize": {
-    "persistentRail": "Keep the icon rail on screen",
-    "persistentRailHint": "Closing the workbench leaves its activity icons in a narrow column you can drag back open. Turn this off to have the whole right column collapse away.",
     "dragHint": "Drag to reorder",
     "hidden": "Hidden",
     "hiddenEmpty": "Nothing hidden.",
@@ -90,6 +88,8 @@
     "hint": "Hiding an activity removes its rail button only — the panel stays reachable from the command palette and its shortcut.",
     "onRail": "On the rail",
     "onRailEmpty": "No activities on the rail.",
+    "persistentRail": "Keep the icon rail on screen",
+    "persistentRailHint": "Closing the workbench leaves its activity icons in a narrow column you can drag back open. Turn this off to have the whole right column collapse away.",
     "restoreDefaults": "Restore defaults",
     "showItem": "Show"
   },

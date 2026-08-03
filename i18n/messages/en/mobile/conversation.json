@@ -8,6 +8,8 @@
   "clearAfterSendHelp": "Empty the composer (text + attachments) after a successful send.",
   "composerSection": "Composer",
   "composerSectionHelp": "How the message box on this phone behaves.",
+  "effortSelectorMode": "Thinking-level slider",
+  "effortSelectorModeHelp": "Use a slider instead of a list when choosing the model's thinking level.",
   "inputHistory": "Recall input history",
   "inputHistoryHelp": "Press ↑ / ↓ in an empty composer to recall previously sent messages.",
   "persistDrafts": "Keep drafts",

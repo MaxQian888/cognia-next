@@ -1,0 +1,50 @@
+{
+  "actions": {
+    "agentRuns": {
+      "label": "Agent runs"
+    },
+    "delegate": {
+      "autoSendLabel": "Send immediately",
+      "description": "Hand a task to Cognia without opening the window.",
+      "label": "Delegate",
+      "promptLabel": "Task",
+      "promptPlaceholder": "Describe what Cognia should do…",
+      "targetLabel": "Send to"
+    },
+    "newChat": {
+      "label": "New conversation"
+    },
+    "openApp": {
+      "label": "Open Cognia"
+    },
+    "scheduler": {
+      "label": "Scheduled tasks"
+    },
+    "settings": {
+      "label": "Settings"
+    },
+    "stopAutomation": {
+      "label": "Stop automation"
+    }
+  },
+  "dismiss": "Close panel",
+  "empty": "No actions yet — add one in Settings › Desktop.",
+  "errors": {
+    "badTarget": "\"{value}\" is not a valid destination.",
+    "deliveryFailed": "Cognia's main window didn't respond.",
+    "emptyEffect": "This action has nothing to run.",
+    "illegalTrigger": "This action can't run automatically when the panel opens.",
+    "required": "Fill in the required fields first.",
+    "runFailed": "Couldn't run that action.",
+    "runFailedFor": "Couldn't run “{action}”",
+    "unknownCommand": "Unknown command: {id}",
+    "unknownPlaceholder": "Unknown placeholder: {ids}"
+  },
+  "openSettings": "Open settings",
+  "run": "Run",
+  "targets": {
+    "activeSession": "Current conversation",
+    "newSession": "New conversation"
+  },
+  "title": "Cognia"
+}

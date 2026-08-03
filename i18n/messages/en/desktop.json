@@ -1,22 +1,4 @@
 {
-  "chatRuntime": {
-    "title": "Chat is read-only right now",
-    "states": {
-      "available": "Chat is available.",
-      "readOnly": "Cached conversations remain available, but sending is disabled.",
-      "queued": "This action will be sent when the current host reconnects.",
-      "offline": "The current host is offline. Drafts stay in this browser and are not sent automatically.",
-      "requiresUnlock": "Unlock the local Vault to use this host.",
-      "requiresPairing": "Pair this browser with a host, or switch to standalone mode.",
-      "requiresGrant": "This device is missing the host permission required for chat.",
-      "incompatible": "The current host does not provide a compatible chat protocol.",
-      "unsupported": "Chat is not implemented for the current runtime target."
-    },
-    "actions": {
-      "pair": "Pair a host",
-      "connectionSettings": "Connection settings"
-    }
-  },
   "barCustomize": {
     "dragHint": "Drag to reorder",
     "hidden": "Hidden",
@@ -126,6 +108,24 @@
     "ungroupedWorkspace": "No workspace",
     "viewActive": "Show active conversations",
     "viewArchived": "Show archived conversations"
+  },
+  "chatRuntime": {
+    "actions": {
+      "connectionSettings": "Connection settings",
+      "pair": "Pair a host"
+    },
+    "states": {
+      "available": "Chat is available.",
+      "incompatible": "The current host does not provide a compatible chat protocol.",
+      "offline": "The current host is offline. Drafts stay in this browser and are not sent automatically.",
+      "queued": "This action will be sent when the current host reconnects.",
+      "readOnly": "Cached conversations remain available, but sending is disabled.",
+      "requiresGrant": "This device is missing the host permission required for chat.",
+      "requiresPairing": "Pair this browser with a host, or switch to standalone mode.",
+      "requiresUnlock": "Unlock the local Vault to use this host.",
+      "unsupported": "Chat is not implemented for the current runtime target."
+    },
+    "title": "Chat is read-only right now"
   },
   "commandPalette": {
     "actions": {

@@ -120,7 +120,6 @@
     "copyImage": "复制图片",
     "copyImageDone": "已复制",
     "createYourOwn": "用 Cognia 创建你自己的",
-    "downloadImage": "下载图片",
     "discoverItem": {
       "content": "技能说明",
       "invalid": "无法加载此分享条目。",
@@ -142,6 +141,7 @@
       "templateNote": "此处描述模板的输入项；生成的工作流在应用内构建。"
     },
     "download": "下载",
+    "downloadImage": "下载图片",
     "error": {
       "integrity": "此分享未通过完整性校验。",
       "invalidKey": "此链接无效，或密钥不正确。",

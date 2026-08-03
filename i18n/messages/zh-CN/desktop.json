@@ -1,22 +1,4 @@
 {
-  "chatRuntime": {
-    "title": "聊天当前为只读",
-    "states": {
-      "available": "聊天可用。",
-      "readOnly": "仍可查看缓存会话，但暂时不能发送消息。",
-      "queued": "当前主机重连后将发送此操作。",
-      "offline": "当前主机离线。草稿只保存在此浏览器中，不会自动发送。",
-      "requiresUnlock": "请先解锁本地 Vault，再使用当前主机。",
-      "requiresPairing": "请将此浏览器与主机配对，或切换到独立模式。",
-      "requiresGrant": "当前设备缺少主机授予的聊天权限。",
-      "incompatible": "当前主机未提供兼容的聊天协议。",
-      "unsupported": "当前运行目标尚未实现聊天能力。"
-    },
-    "actions": {
-      "pair": "配对主机",
-      "connectionSettings": "连接设置"
-    }
-  },
   "barCustomize": {
     "dragHint": "拖拽调整顺序",
     "hidden": "已隐藏",
@@ -126,6 +108,24 @@
     "ungroupedWorkspace": "未归属工作区",
     "viewActive": "显示活跃会话",
     "viewArchived": "显示已归档会话"
+  },
+  "chatRuntime": {
+    "actions": {
+      "connectionSettings": "连接设置",
+      "pair": "配对主机"
+    },
+    "states": {
+      "available": "聊天可用。",
+      "incompatible": "当前主机未提供兼容的聊天协议。",
+      "offline": "当前主机离线。草稿只保存在此浏览器中，不会自动发送。",
+      "queued": "当前主机重连后将发送此操作。",
+      "readOnly": "仍可查看缓存会话，但暂时不能发送消息。",
+      "requiresGrant": "当前设备缺少主机授予的聊天权限。",
+      "requiresPairing": "请将此浏览器与主机配对，或切换到独立模式。",
+      "requiresUnlock": "请先解锁本地 Vault，再使用当前主机。",
+      "unsupported": "当前运行目标尚未实现聊天能力。"
+    },
+    "title": "聊天当前为只读"
   },
   "commandPalette": {
     "actions": {
