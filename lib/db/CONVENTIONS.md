@@ -108,18 +108,29 @@ tests can exercise the trim cheaply.
 ## Tests
 
 - Co-locate `xxx.test.ts` next to the source (no `__tests__/` dirs).
-- Standard setup for CRUD modules:
+- Standard setup for ordinary singleton-database CRUD modules:
   ```ts
-  import "fake-indexeddb/auto"
-  // ...
-  beforeEach(async () => {
-    await getDb().delete()
-    __resetDbForTesting()
-    getDb()
-    await whenSeeded()
-    await getDb().<table>.clear() // if the seed touches your table
+  import { createDbTestFixture } from "@/lib/db/test-fixture"
+
+  const dbFixture = createDbTestFixture({
+    emptyTables: ["<seeded-table>"], // omit when the seed does not touch it
   })
+
+  beforeAll(dbFixture.initialize)
+  beforeEach(dbFixture.restore)
+  afterAll(dbFixture.dispose)
   ```
+  The fixture recreates the physical database once per suite, then closes and
+  reopens the connection and restores an all-table snapshot between tests. Do
+  not reintroduce `getDb().delete()` in an ordinary `beforeEach` hook.
+- Keep full physical-database recreation for schema/migration/seed tests,
+  account database switching, connection lifecycle assertions, backup/restore,
+  Jest module resets, and tests whose assertions depend on an auto-increment
+  key generator restarting. `pnpm test:db-fixture:audit` enforces these rules.
+  The default audit is a ratchet: it rejects unsafe fixture adoption and any
+  increase over `db-fixture-baseline.json`. Use
+  `pnpm test:db-fixture:audit:strict` only for the final migration gate; it
+  intentionally fails while qualified legacy suites remain.
 - Build fixtures with small `make*()` / `build*()` helpers rather than inline
   JSON blobs; query the DB through the module's public helpers.
 - **Type-only modules** (`*-types.ts`) still get a co-located test: a runtime

@@ -1,0 +1,16 @@
+{
+  "lib/accounts/legacy-migration.test.ts": "copies and verifies multiple physical databases",
+  "lib/db/mobile-outbound-queue.test.ts": "switches the active account database",
+  "lib/db/chat-drafts.test.ts": "fake timers stall fake IndexedDB connection reopening; retain full database recreation until timer-safe restore is supported",
+  "lib/db/schema-collapsed.test.ts": "compares collapsed and full schema construction",
+  "lib/db/schema.test.ts": "asserts schema, versionchange, blocked, and connection lifecycle behavior",
+  "lib/db/seed.test.ts": "asserts first-open seed behavior",
+  "lib/db/wasm-grant-ledger.test.ts": "forces the full historical schema chain",
+  "lib/companion/event-bridge.test.ts": "deletes and reseeds the physical database inside a lifecycle regression test",
+  "lib/claude/optical-archive-persist.test.ts": "asserts a browser-only persistence bridge that intentionally no-ops without window",
+  "lib/external-bridge/audit-log.test.ts": "asserts behavior after the physical database has been deleted and reset",
+  "lib/goal/seed-templates.test.ts": "asserts first-open built-in goal template seeding behavior",
+  "lib/runtime/target-database-migration.test.ts": "migrates between named source and target databases",
+  "lib/telemetry/inbox-events.test.ts": "asserts telemetry behavior after the physical database has been deleted",
+  "lib/workflow/definition/seed.test.ts": "asserts built-in workflow seed idempotency and first-open persistence behavior"
+}

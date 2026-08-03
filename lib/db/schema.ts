@@ -3783,10 +3783,43 @@ export function clearAccountDatabaseSelection(): void {
   closeCachedDb()
 }
 
+let _testDbRuntimeUsers = 0
+
+/**
+ * Test-only: explicitly allow the singleton Dexie database in a Node Jest
+ * environment after fake IndexedDB has been installed. Keeping this as a
+ * module-local capability avoids defining `window` and accidentally sending
+ * unrelated production modules down their browser-only branches.
+ */
+export function __enableDbRuntimeForTesting(): () => void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("__enableDbRuntimeForTesting() is only available when NODE_ENV=test")
+  }
+  if (typeof indexedDB === "undefined") {
+    throw new Error("__enableDbRuntimeForTesting() requires an IndexedDB implementation")
+  }
+
+  // Dexie snapshots its dependencies when the module is evaluated. Node tests
+  // commonly import schema.ts before their fixture installs fake-indexeddb, so
+  // refresh the dependency slots explicitly instead of relying on import order.
+  Dexie.dependencies.indexedDB = indexedDB
+  if (typeof IDBKeyRange !== "undefined") Dexie.dependencies.IDBKeyRange = IDBKeyRange
+
+  _testDbRuntimeUsers += 1
+  let active = true
+  return () => {
+    if (!active) return
+    active = false
+    _testDbRuntimeUsers = Math.max(0, _testDbRuntimeUsers - 1)
+  }
+}
+
 export function getDb(): CogniaDB {
   // SSR-safe: only instantiate Dexie on the client. Static export still
   // pre-renders pages where `window` is undefined, so we lazy-create.
-  if (typeof window === "undefined") {
+  const hasExplicitTestRuntime =
+    process.env.NODE_ENV === "test" && _testDbRuntimeUsers > 0 && typeof indexedDB !== "undefined"
+  if (typeof window === "undefined" && !hasExplicitTestRuntime) {
     throw new Error("getDb() called on the server — wrap usage in a client component")
   }
   if (!_db) {
