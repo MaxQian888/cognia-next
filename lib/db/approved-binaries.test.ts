@@ -1,6 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-
 import {
   clearApprovedBinariesForPlugin,
   findApprovedBinary,
@@ -8,18 +5,20 @@ import {
   recordBinaryApproval,
   revokeBinaryApproval,
 } from "./approved-binaries"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
 const HASH_A = "a".repeat(64)
 const HASH_B = "b".repeat(64)
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().approvedBinaries.clear()
 })
+afterAll(dbFixture.dispose)
 
 describe("approved-binaries ledger", () => {
   it("records an approval and finds it by (pluginId, binaryPath)", async () => {

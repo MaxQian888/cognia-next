@@ -1,8 +1,6 @@
-/** @jest-environment jsdom */
 // Coverage for the OpenRouter catalog cache CRUD (Dexie v93). Uses fake-indexeddb
 // to exercise the real Dexie query path in-memory.
 
-import "fake-indexeddb/auto"
 import {
   getOpenRouterCatalog,
   saveOpenRouterCatalog,
@@ -10,7 +8,8 @@ import {
   OPENROUTER_CATALOG_STALE_MS,
 } from "./openrouter-catalog"
 import type { ProviderModelDiscoveryEntry } from "@cognia/provider-types/provider"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
 const sampleModels: ProviderModelDiscoveryEntry[] = [
   {
@@ -23,12 +22,11 @@ const sampleModels: ProviderModelDiscoveryEntry[] = [
   },
 ]
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("openrouter-catalog cache", () => {
   it("returns undefined when nothing is cached", async () => {

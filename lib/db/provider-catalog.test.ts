@@ -1,7 +1,3 @@
-/** @jest-environment jsdom */
-
-import "fake-indexeddb/auto"
-
 import { CATALOG_SCHEMA_VERSION, type CatalogSnapshot } from "@cognia/provider-types/model-catalog"
 
 import {
@@ -13,7 +9,8 @@ import {
   putConnectionInventory,
   stageCatalogRevision,
 } from "./provider-catalog"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
 function snapshot(id: string, modelId = "openai:gpt-test"): CatalogSnapshot {
   return {
@@ -63,12 +60,13 @@ function snapshot(id: string, modelId = "openai:gpt-test"): CatalogSnapshot {
   }
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 describe("provider catalog revisions", () => {
   it("stages complete rows and atomically activates a verified revision", async () => {

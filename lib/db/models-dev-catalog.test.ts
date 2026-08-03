@@ -1,8 +1,6 @@
-/** @jest-environment jsdom */
 // Coverage for the models.dev catalog cache CRUD (Dexie v60). Uses
 // fake-indexeddb to exercise the real Dexie query path in-memory.
 
-import "fake-indexeddb/auto"
 import {
   getModelsDevCatalog,
   saveModelsDevCatalog,
@@ -10,7 +8,8 @@ import {
   MODELS_DEV_STALE_MS,
 } from "./models-dev-catalog"
 import type { NormalizedModelsDevCatalog } from "@cognia/provider-core/providers/models-dev"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
 const sampleProviders: NormalizedModelsDevCatalog = {
   anthropic: {
@@ -28,12 +27,11 @@ const sampleProviders: NormalizedModelsDevCatalog = {
   },
 }
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("models-dev-catalog cache", () => {
   it("returns undefined when nothing is cached", async () => {

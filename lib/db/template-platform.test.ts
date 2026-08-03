@@ -1,23 +1,15 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-
 import { createTemplateDefinition } from "@/lib/templates/contracts"
 import { DexieTemplateRepository } from "./template-platform"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await whenSeeded()
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
-
-afterAll(async () => {
-  await whenSeeded()
-  await getDb().delete()
-  __resetDbForTesting()
-})
+afterAll(dbFixture.dispose)
 
 async function makeDraft(id = "skill.summary") {
   return createTemplateDefinition({
