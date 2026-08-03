@@ -8,6 +8,14 @@ import {
   type CogniaDB,
 } from "./schema"
 
+export const DB_TEST_TIMEOUT_MS = 30_000
+
+// Jest 30 can retain its five-second runtime default for hooks in a later
+// worker even when a multi-project config reports a larger testTimeout. Every
+// suite importing this fixture performs a full-schema open at least once, so
+// bind the finite budget at the test-runtime boundary as well.
+jest.setTimeout(DB_TEST_TIMEOUT_MS)
+
 interface TableSnapshot {
   name: string
   values: unknown[]

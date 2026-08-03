@@ -1,7 +1,11 @@
 import { getDb } from "./schema"
-import { createDbTestFixture } from "./test-fixture"
+import { createDbTestFixture, DB_TEST_TIMEOUT_MS } from "./test-fixture"
 
 describe("createDbTestFixture", () => {
+  it("exposes the finite full-schema hook budget", () => {
+    expect(DB_TEST_TIMEOUT_MS).toBe(30_000)
+  })
+
   it("keeps getDb unavailable in an ordinary Node test runtime", () => {
     expect(() => getDb()).toThrow("getDb() called on the server — wrap usage in a client component")
   })
