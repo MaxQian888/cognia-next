@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import type { SDKMessage } from "@cognia/agent-config-types"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { __resetPlanRuntimeForTesting, getPlanRuntime } from "./runtime"
 import {
   captureExitPlanMode,
@@ -12,13 +10,15 @@ import {
 
 // 30s: the first cold Dexie open (full schema migration chain) can exceed the
 // 5s default on slower disks — same bump as the other cold-Dexie suites.
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   __resetPlanRuntimeForTesting()
 }, 30_000)
+
+afterAll(dbFixture.dispose)
 
 describe("parsePlanText", () => {
   it("splits dash and asterisk bullets", () => {

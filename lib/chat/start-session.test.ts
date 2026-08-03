@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import { startNewSession } from "./start-session"
-import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { getSession } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -14,14 +12,16 @@ jest.mock("@/lib/plugin/messaging/message-bus", () => ({
 
 const emitMock = emitSystemBusEvent as jest.MockedFunction<typeof emitSystemBusEvent>
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   emitMock.mockClear()
   useChatStore.getState().clear()
 })
+
+afterAll(dbFixture.dispose)
 
 describe("startNewSession", () => {
   it("persists the session and makes it the active one", async () => {

@@ -1,6 +1,4 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { readCachedPage, readCachedResult, writeCachedPage, writeCachedResult } from "./cache"
 import type { OcrPage, OcrResult } from "@/types/ocr"
 
@@ -14,12 +12,14 @@ const sample: OcrResult = {
   cached: false,
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+
+afterAll(dbFixture.dispose)
 
 describe("cache read/write", () => {
   it("readCachedResult returns null when the row is missing", async () => {

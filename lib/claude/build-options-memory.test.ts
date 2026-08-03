@@ -1,24 +1,21 @@
-/** @jest-environment jsdom */
 /**
  * Targeted coverage for the long-term-memory injection branch of
  * `resolveSendOptions`. Mirrors `build-options-twin.test.ts`.
  */
 
-import "fake-indexeddb/auto"
-
 import { resolveSendOptions } from "./build-options"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { AppSettings, Character } from "@cognia/agent-config-types"
 import type { Memory } from "@/types/memory/memory"
 import type { ApplyMemoryContextDeps } from "@/lib/memory/runtime/apply-memory-context"
 import { __resetMemoryBm25Cache } from "@/lib/memory/retrieve/retriever"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
   __resetMemoryBm25Cache()
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
 
 const baseCharacter: Character = {
@@ -54,6 +51,8 @@ function mem(text: string, over: Partial<Memory> = {}): Memory {
 function deps(over: Partial<ApplyMemoryContextDeps> = {}): ApplyMemoryContextDeps {
   return { loadCandidates: async () => [], loadProcedural: async () => [], ...over }
 }
+
+afterAll(dbFixture.dispose)
 
 describe("resolveSendOptions memory injection", () => {
   it("does not inject when memoryDeps is absent", async () => {

@@ -1,11 +1,8 @@
-/** @jest-environment jsdom */
 /**
  * Coverage for the project-instruction-file + markdown-subagent wiring in
  * `resolveSendOptions`. The on-disk loader is mocked — the pure loader itself
  * is covered by `lib/claude/instructions/*.test.ts`.
  */
-
-import "fake-indexeddb/auto"
 
 const loadProjectInstructions = jest.fn()
 jest.mock("@/lib/claude/instructions/load", () => ({
@@ -13,15 +10,15 @@ jest.mock("@/lib/claude/instructions/load", () => ({
 }))
 
 import { resolveSendOptions } from "./build-options"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { Character, ChatSession } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   loadProjectInstructions.mockReset()
   loadProjectInstructions.mockResolvedValue({
     section: "",
@@ -45,6 +42,8 @@ const project = {
   name: "Demo",
   roots: [{ id: "r1", path: "/proj", isPrimary: true }],
 } as unknown as Project
+
+afterAll(dbFixture.dispose)
 
 describe("resolveSendOptions — project instructions", () => {
   it("injects the discovered instruction section into the system prompt", async () => {

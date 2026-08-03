@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import { createGoal, getGoal, listGoalEvents, updateGoal } from "@/lib/db/goals"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { Goal, GoalConfig } from "@/types/goal"
 
 const onGoalTerminalMock = jest.fn().mockResolvedValue(undefined)
@@ -41,13 +39,15 @@ async function seedAwaiting(id = "g1"): Promise<void> {
   await updateGoal(id, { status: "paused", awaitingAcceptance: true })
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   onGoalTerminalMock.mockClear()
 })
+
+afterAll(dbFixture.dispose)
 
 describe("resolveGoalAcceptance", () => {
   it("accept commits completed, clears the flag, rotates generationId, fires linkage", async () => {

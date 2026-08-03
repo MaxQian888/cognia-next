@@ -1,14 +1,12 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { __resetSharedOcrRegistry, getSharedOcrRegistry } from "./registry"
 import { __resetOcrRuntime, installOcrRuntime } from "./runtime"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   __resetSharedOcrRegistry()
   __resetOcrRuntime()
 })
@@ -17,6 +15,8 @@ afterEach(() => {
   __resetSharedOcrRegistry()
   __resetOcrRuntime()
 })
+
+afterAll(dbFixture.dispose)
 
 describe("installOcrRuntime", () => {
   it("registers all 20 OCR providers in the shared registry", async () => {

@@ -1,12 +1,9 @@
-/** @jest-environment jsdom */
 /**
  * Targeted coverage for the twin-injection branch of `resolveSendOptions`.
  * The full resolver has its own tests covering precedence rules; here we
  * just check that the new opt-in path triggers correctly and degrades
  * cleanly.
  */
-
-import "fake-indexeddb/auto"
 
 // Mock the embedding module used by applyTwinContext so the test never
 // makes a real network call.
@@ -16,16 +13,16 @@ jest.mock("@cognia/provider-embedding/embedding", () => ({
 }))
 
 import { resolveSendOptions } from "./build-options"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { readTwinInjectLog, __resetTwinInjectLog } from "@/lib/twin/runtime/inject-log"
 import type { Character } from "@cognia/agent-config-types"
 import type { TwinRuntimeDepsForBuild } from "./build-options"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   __resetTwinInjectLog()
 })
 
@@ -49,6 +46,8 @@ const fakeDeps: TwinRuntimeDepsForBuild = {
     apiKey: "sk-test",
   },
 }
+
+afterAll(dbFixture.dispose)
 
 describe("resolveSendOptions twin injection", () => {
   it("does not invoke the twin runtime when ctx.twinDeps is absent", async () => {
