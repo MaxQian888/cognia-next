@@ -934,6 +934,7 @@
     },
     "distribution": "Distribution",
     "distributionPriority": "Priority order",
+    "distributionRoundRobin": "Round robin",
     "distributionWeighted": "Weighted",
     "droppedEffortToast": "Model {model} does not support a reasoning effort level, so that setting was ignored for this request.",
     "editAlias": "Edit alias",

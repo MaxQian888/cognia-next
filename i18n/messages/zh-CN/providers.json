@@ -934,6 +934,7 @@
     },
     "distribution": "分发方式",
     "distributionPriority": "优先级顺序",
+    "distributionRoundRobin": "轮询",
     "distributionWeighted": "加权",
     "droppedEffortToast": "模型 {model} 不支持思考强度（reasoning effort），本次请求已忽略该设置。",
     "editAlias": "编辑别名",
