@@ -27,9 +27,8 @@ import {
   subscribe as subscribeCapacitorDeeplink,
 } from "@/lib/capacitor/deeplink"
 import { close as closeCapacitorBrowser } from "@/lib/capacitor/browser"
-import { CONNECTOR_OAUTH_STATE_KEY, oauthRegistry } from "@/lib/connectors/oauth-registry"
+import { CONNECTOR_OAUTH_STATE_KEY } from "@/lib/connectors/oauth-state"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
-import { isPlatformKind } from "@/types/connectors/platform-kind"
 
 /** Matches: cognia://connector/oauth/<adapterType>?code=…&state=… */
 const OAUTH_PATH_RE = /^cognia:\/\/connector\/oauth\/([^?#/]+)/
@@ -99,6 +98,10 @@ async function handleOAuthUrl(raw: string): Promise<void> {
   }
 
   // ── Step 2: look up handler ────────────────────────────────────────────────
+  const [{ oauthRegistry }, { isPlatformKind }] = await Promise.all([
+    import("@/lib/connectors/oauth-registry"),
+    import("@/types/connectors/platform-kind"),
+  ])
   if (!isPlatformKind(adapterType)) {
     toast.error(`No OAuth handler for unknown platform: ${adapterType}`)
     return

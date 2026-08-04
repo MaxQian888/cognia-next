@@ -101,11 +101,20 @@ jest.mock("@/lib/db/schema", () => ({
   clearAccountDatabaseSelection: mockClearAccountDatabaseSelection,
 }))
 
+const mockEnsureActiveDatabaseReady = jest.fn(async () => ({
+  databaseName: "test",
+  restoredPluginTables: [],
+}))
+jest.mock("@/lib/db/boot", () => ({
+  ensureActiveDatabaseReady: mockEnsureActiveDatabaseReady,
+}))
+
 const mockDropAccountDatabase = jest.fn<Promise<void>, [string]>()
 const mockPurgeAccountLocalState = jest.fn<Promise<void>, [string]>()
 const mockActivateAccountLocalState = jest.fn<Promise<void>, [string]>()
 const mockClearAccountLocalState = jest.fn<void, []>()
 const mockPrepareRuntimeTarget = jest.fn()
+const mockPrepareDatabase = jest.fn<Promise<unknown>, []>()
 const mockRemoveRuntimeTargets = jest.fn<Promise<void>, [string]>()
 
 let createAccountStore: typeof import("./account-store").createAccountStore
@@ -143,6 +152,7 @@ function makeStore() {
     activateAccountLocalState: mockActivateAccountLocalState,
     clearAccountLocalState: mockClearAccountLocalState,
     prepareRuntimeTarget: mockPrepareRuntimeTarget,
+    prepareDatabase: mockPrepareDatabase,
     removeRuntimeTargets: mockRemoveRuntimeTargets,
   }
   return createAccountStore(dependencies)
@@ -197,6 +207,7 @@ beforeEach(() => {
     updatedAt: 1,
     lastUsedAt: 1,
   })
+  mockPrepareDatabase.mockResolvedValue({ databaseName: "test", restoredPluginTables: [] })
   mockRemoveRuntimeTargets.mockResolvedValue()
 })
 
@@ -429,6 +440,7 @@ describe("account store create and unlock", () => {
     expect(store.getState().locked).toBe(false)
     expect(store.getState().accountRevision).toBe(1)
     expect(mockActivateAccountDatabase).toHaveBeenCalledWith("acct_first")
+    expect(mockPrepareDatabase).toHaveBeenCalledTimes(1)
     expect(mockActivateAccountLocalState).toHaveBeenCalledWith("acct_first")
   })
 
@@ -463,6 +475,10 @@ describe("account store create and unlock", () => {
     expect(mockVerifyPassword).toHaveBeenCalledWith("secret", alpha.passwordVerifier)
     expect(mockSetActiveAccountId).toHaveBeenCalledWith("acct_alpha")
     expect(mockActivateAccountDatabase).toHaveBeenCalledWith("acct_alpha")
+    expect(mockPrepareDatabase).toHaveBeenCalledTimes(1)
+    expect(mockPrepareDatabase.mock.invocationCallOrder[0]).toBeLessThan(
+      mockActivateAccountLocalState.mock.invocationCallOrder[0]
+    )
     expect(mockActivateAccountLocalState).toHaveBeenCalledWith("acct_alpha")
     expect(store.getState().unlockedAccountId).toBe("acct_alpha")
     expect(store.getState().locked).toBe(false)

@@ -7204,6 +7204,7 @@
       "cascade": "{count} 个问题",
       "dbUpgradeBlocked": {
         "body": "Cognia 需要升级本地数据库，但另一个窗口或浏览器标签页仍打开着旧版本。请关闭其他窗口后重新加载。",
+        "connections": "当前窗口中的活动连接：{owners}",
         "reload": "重新加载",
         "title": "数据库升级被阻塞"
       },

@@ -16,6 +16,15 @@ jest.mock("@/lib/native/utils", () => ({
   isTauri: () => isTauriMock(),
 }))
 
+let mockDesktopRequested = true
+const mockMarkDesktopReady = jest.fn()
+jest.mock("@/lib/boot/capabilities", () => ({
+  getBootCapabilitySnapshot: () => (mockDesktopRequested ? 1 : 0),
+  subscribeBootCapabilities: () => () => {},
+  isBootCapabilityRequested: () => mockDesktopRequested,
+  markBootCapabilityReady: (...args: unknown[]) => mockMarkDesktopReady(...args),
+}))
+
 let mockPetRole:
   "main" | "web" | "overlay" | "popup" | "island" | "selection-toolbar" | "tray-panel" = "main"
 jest.mock("@/lib/pet/window-role", () => ({
@@ -32,6 +41,7 @@ describe("DesktopOnlyInitializers", () => {
   beforeEach(() => {
     isTauriMock.mockReset()
     mockPetRole = "main"
+    mockDesktopRequested = true
   })
 
   it("renders nothing on web (isTauri() === false)", async () => {
@@ -53,6 +63,17 @@ describe("DesktopOnlyInitializers", () => {
     // silently dropping one when the list changes. (WindowShowInitializer +
     // WebviewHeartbeatInitializer moved up to WindowLivenessInitializers.)
     expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(18)
+    expect(mockMarkDesktopReady).toHaveBeenCalledWith("desktop-tools")
+  })
+
+  it("does not load desktop subsystems until main profile requests them", async () => {
+    isTauriMock.mockReturnValue(true)
+    mockDesktopRequested = false
+    let container!: HTMLElement
+    await act(async () => {
+      container = render(<DesktopOnlyInitializers />).container
+    })
+    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(0)
   })
 
   it.each(["overlay", "popup", "island", "selection-toolbar", "tray-panel"] as const)(

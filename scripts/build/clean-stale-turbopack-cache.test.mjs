@@ -14,7 +14,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { dirSizeBytes, cleanStaleTurbopackCache } from "./clean-stale-turbopack-cache.mjs"
+import {
+  dirSizeBytes,
+  cleanStaleTurbopackCache,
+  cleanTurbopackCacheForMode,
+} from "./clean-stale-turbopack-cache.mjs"
 
 function tmpRoot() {
   return mkdtempSync(join(tmpdir(), "turbo-cache-"))
@@ -84,5 +88,27 @@ test("no-op and silent when the cache dir does not exist", () => {
   assert.equal(result.cleaned, false)
   assert.equal(result.sizeBytes, 0)
   assert.equal(messages.length, 0)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("cache-off mode purges only the Turbopack directory regardless of size", () => {
+  const root = tmpRoot()
+  const turbopackDir = join(root, ".next", "dev", "cache", "turbopack")
+  const siblingDir = join(root, ".next", "dev", "cache", "other")
+  mkdirSync(turbopackDir, { recursive: true })
+  mkdirSync(siblingDir, { recursive: true })
+  writeFileSync(join(turbopackDir, "tiny.sst"), Buffer.alloc(1))
+  writeFileSync(join(siblingDir, "keep.bin"), Buffer.alloc(1))
+
+  const result = cleanTurbopackCacheForMode({
+    cacheDir: turbopackDir,
+    persistentCacheEnabled: false,
+    thresholdBytes: 10_000,
+    log: () => {},
+  })
+
+  assert.equal(result.cleaned, true)
+  assert.equal(existsSync(turbopackDir), false)
+  assert.equal(existsSync(siblingDir), true)
   rmSync(root, { recursive: true, force: true })
 })

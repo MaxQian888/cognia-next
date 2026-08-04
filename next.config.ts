@@ -249,7 +249,8 @@ const nextConfig: NextConfig = {
     // this repo has fought before; the trade-off is slower cold starts (no
     // cross-session cache restore), which also makes the predev
     // `clean-stale-turbopack-cache.mjs` purge largely redundant for dev.
-    // turbopackFileSystemCacheForDev: false,
+    // Opt in only through the explicit cached development commands.
+    turbopackFileSystemCacheForDev: process.env.COGNIA_TURBOPACK_CACHE === "1",
   },
   // Build-time metadata for the About page. Inlined as NEXT_PUBLIC_* envs.
   env: {

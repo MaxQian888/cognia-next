@@ -21,6 +21,8 @@ import {
   backfillRootsForRow,
   clearAccountDatabaseSelection,
   getDb,
+  getOpenDatabaseConnectionOwners,
+  getDatabaseUpgradeBlockerOwners,
   startBlockedYieldRetry,
   whenSeeded,
   withDbReopenRetry,
@@ -74,6 +76,36 @@ describe("getDb", () => {
     const db = new CogniaDB("cognia-account-acct_one")
     expect(db.name).toBe("cognia-account-acct_one")
     db.close()
+  })
+
+  it("reports the owners of live CogniaDB connections", async () => {
+    const first = new CogniaDB("cognia-owner-test", "migration:source")
+    const second = new CogniaDB("cognia-owner-test", "migration:target")
+    await first.open()
+    await second.open()
+
+    expect(first.connectionId).not.toBe(second.connectionId)
+    expect(getOpenDatabaseConnectionOwners("cognia-owner-test")).toEqual([
+      "migration:source",
+      "migration:target",
+    ])
+
+    first.close()
+    second.close()
+    expect(getOpenDatabaseConnectionOwners("cognia-owner-test")).toEqual([])
+  })
+
+  it("does not seed built-ins until readiness is requested explicitly", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(await db.characters.count()).toBe(0)
+    expect(await db.skills.count()).toBe(0)
+
+    await whenSeeded()
+
+    expect(await db.characters.count()).toBeGreaterThan(0)
+    expect(await db.skills.count()).toBeGreaterThan(0)
   })
 
   it("backfills workspace roots from legacy directory fields and preserves existing roots", () => {
@@ -2887,6 +2919,38 @@ describe("cross-context upgrade yield channel", () => {
     expect(after).not.toBe(before)
   })
 
+  it("reports the holding module before yielding and records remote owner reports", async () => {
+    const before = getDb()
+    await before.open()
+    const channel = activeChannel()
+    channel.onmessage?.({
+      data: { type: "dexie-yield", dbName: before.name, origin: "requester" },
+    })
+    expect(channel.posted).toContainEqual({
+      type: "dexie-yield-owners",
+      dbName: before.name,
+      origin: expect.any(String),
+      targetOrigin: "requester",
+      connectionOwners: ["active-singleton"],
+    })
+
+    const requester = getDb()
+    requester.on("blocked").fire({ oldVersion: 1, newVersion: 2 })
+    const request = channel.posted.find(
+      (message) => (message as { type?: string }).type === "dexie-yield"
+    ) as { origin: string }
+    channel.onmessage?.({
+      data: {
+        type: "dexie-yield-owners",
+        dbName: before.name,
+        origin: "holder",
+        targetOrigin: request.origin,
+        connectionOwners: ["pet-overlay"],
+      },
+    })
+    expect(getDatabaseUpgradeBlockerOwners(before.name)).toEqual(["pet-overlay"])
+  })
+
   it("ignores yield requests for a different database name", () => {
     const before = getDb()
     const channel = activeChannel()
@@ -3258,7 +3322,7 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
     expect(true).toBe(true)
   })
 
-  it("seed catch handler logs unrelated errors", async () => {
+  it("seed readiness logs and surfaces unrelated errors", async () => {
     // Force the inner seed to reject with a non-DatabaseClosed error so we
     // hit the `console.error` branch. We achieve this by mocking
     // `seedBuiltIns` via jest.doMock with a fresh module load.
@@ -3270,7 +3334,7 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
       const fresh = await import("./schema")
       fresh.__resetDbForTesting()
       fresh.getDb()
-      await fresh.whenSeeded()
+      await expect(fresh.whenSeeded()).rejects.toThrow("boom")
       expect(errSpy).toHaveBeenCalledWith("seedBuiltIns failed", expect.any(Error))
       errSpy.mockRestore()
       fresh.__resetDbForTesting()
@@ -3293,7 +3357,7 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
       const fresh = await import("./schema")
       fresh.__resetDbForTesting()
 
-      await fresh.whenSeeded()
+      await expect(fresh.whenSeeded()).resolves.toBeUndefined()
 
       expect(seedBuiltIns).toHaveBeenCalledTimes(2)
       fresh.__resetDbForTesting()
@@ -3993,7 +4057,7 @@ describe("schema seed error handling isolation", () => {
       const fresh = await import("./schema")
       fresh.__resetDbForTesting()
       fresh.getDb()
-      await fresh.whenSeeded()
+      await expect(fresh.whenSeeded()).rejects.toBe("plain failure")
       expect(errSpy).toHaveBeenCalledWith("seedBuiltIns failed", "plain failure")
       errSpy.mockRestore()
       fresh.__resetDbForTesting()

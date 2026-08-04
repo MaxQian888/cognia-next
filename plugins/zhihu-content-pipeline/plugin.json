@@ -22,6 +22,13 @@
     "cognia": ">=0.1.0"
   },
   "activationEvents": ["startup", "onCommand:zhihu"],
+  "dexie": {
+    "tables": [
+      { "name": "topics", "schema": "&id, status, createdAt" },
+      { "name": "research", "schema": "&id, topicId, createdAt" },
+      { "name": "drafts", "schema": "&id, topicId, status, createdAt" }
+    ]
+  },
   "runtimeCompatibility": {
     "browser": {
       "availability": "supported",

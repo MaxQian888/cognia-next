@@ -2,6 +2,7 @@
 // If you call an external API from the browser, add its origin to the
 // `connect-src` directive there, otherwise the request will be blocked.
 import type { Metadata, Viewport } from "next"
+import { Suspense } from "react"
 // Geist ships as a self-hosted local font package (geist/font/*), so the build
 // never fetches from fonts.gstatic.com. This keeps offline / proxied / CI and
 // the Tauri + Capacitor static-export builds deterministic; the exposed CSS
@@ -24,30 +25,22 @@ import { RecoveryBootGate } from "@/components/providers/recovery-boot-gate"
 import { AccountAutoLock } from "@/components/account/account-auto-lock"
 import { AccountGate } from "@/components/account/account-gate"
 import { AccountStoreInitializer } from "@/components/providers/initializers/account-store-initializer"
-import { ExternalAgentInitializer } from "@/components/providers/initializers/external-agent-initializer"
 import { SubscriptionInitializer } from "@/components/providers/initializers/subscription-initializer"
 import { PluginRuntimeInitializer } from "@/components/providers/initializers/plugin-runtime-initializer"
 import { ChatMiddlewareFlagInitializer } from "@/components/providers/initializers/chat-middleware-flag-initializer"
-import { BackgroundTaskInitializer } from "@/components/providers/initializers/background-task-initializer"
 import { ApprovalJournalInitializer } from "@/components/providers/initializers/approval-journal-initializer"
-import { AutomationPolicyInitializer } from "@/components/providers/initializers/automation-policy-initializer"
 import { AuditRetentionInitializer } from "@/components/providers/initializers/audit-retention-initializer"
 import { StorageRetentionInitializer } from "@/components/providers/initializers/storage-retention-initializer"
 import { StoragePersistenceInitializer } from "@/components/providers/initializers/storage-persistence-initializer"
-import { AutoModeInitializer } from "@/components/providers/initializers/auto-mode-initializer"
 import { ProjectStoreInitializer } from "@/components/providers/initializers/project-store-initializer"
-import { ModelsDevCatalogInitializer } from "@/components/providers/initializers/models-dev-catalog-initializer"
-import { OpenRouterCatalogInitializer } from "@/components/providers/initializers/openrouter-catalog-initializer"
-import { OcrRuntimeInitializer } from "@/components/providers/initializers/ocr-runtime-initializer"
-import { ProviderCostMirrorInitializer } from "@/components/providers/initializers/provider-cost-mirror-initializer"
 import { WindowTitleInitializer } from "@/components/providers/initializers/window-title-initializer"
 import { ContextKeysInitializer } from "@/components/providers/initializers/context-keys-initializer"
 import { SessionFocusInitializer } from "@/components/providers/initializers/session-focus-initializer"
 import { AppShortcutDispatcher } from "@/components/providers/app-shortcut-dispatcher"
 import { DeferredBootInitializers } from "@/components/providers/initializers/deferred-boot-initializers"
+import { BootCapabilityRouteActivator } from "@/components/providers/initializers/boot-capability-route-activator"
+import { BootProfileStartupProbe } from "@/components/providers/initializers/boot-profile-startup-probe"
 import { WindowLivenessInitializers } from "@/components/providers/initializers/window-liveness-initializers"
-import { TwinWorkerInitializer } from "@/components/twin/twin-worker-initializer"
-import { ProjectKnowledgeWorkerInitializer } from "@/components/shell/project-kb-worker-initializer"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { WebDavStartupPromptProvider } from "@/components/providers/webdav-startup-prompt-provider"
 import { WebDavMobileAutosyncProvider } from "@/components/providers/webdav-mobile-autosync-provider"
@@ -216,7 +209,6 @@ export default async function RootLayout({
                            * getPluginManager(). */}
                           <PluginRuntimeInitializer />
                           <ChatMiddlewareFlagInitializer />
-                          <BackgroundTaskInitializer />
                           <ApprovalJournalInitializer />
                           <SubscriptionInitializer />
                           {/* Desktop-only boot initializers (Tauri). Consolidated +
@@ -225,30 +217,19 @@ export default async function RootLayout({
                            * build loads them at runtime. See the component for the
                            * full rationale. */}
                           <DesktopOnlyInitializers />
-                          <AutomationPolicyInitializer />
                           <AuditRetentionInitializer />
                           <StorageRetentionInitializer />
                           <StoragePersistenceInitializer />
-                          <AutoModeInitializer />
-                          <ExternalAgentInitializer />
                           <ProjectStoreInitializer />
-                          <ModelsDevCatalogInitializer />
-                          <OpenRouterCatalogInitializer />
-                          <OcrRuntimeInitializer />
-                          {/* Agent-team, scheduler, workflow-trigger, provider-
-                           * routing, gateway, and connector runtimes — bundled
-                           * behind one dynamic(ssr:false) boundary so their
-                           * subsystem graphs stay out of every route's
-                           * first-paint compile (ADR-0068 C3). Mount order
-                           * inside the bundle preserves the previous document
-                           * order here, incl. Routing-before-Gateway. */}
+                          {/* Capability-scoped dynamic boundaries keep optional
+                           * subsystem graphs out of the main profile's initial
+                           * compile. Production/eager requests every group;
+                           * ordering constraints stay within each group. */}
+                          <Suspense fallback={null}>
+                            <BootCapabilityRouteActivator />
+                          </Suspense>
+                          <BootProfileStartupProbe />
                           <DeferredBootInitializers />
-                          <TwinWorkerInitializer />
-                          {/* Keeps each workspace's project-scoped RAG index
-                           * (`projectChunks`) in sync with its `knowledgeBase`.
-                           * No-op when no vector backend is configured. */}
-                          <ProjectKnowledgeWorkerInitializer />
-                          <ProviderCostMirrorInitializer />
                           <ContextKeysInitializer />
                           {/* Drops the right rail's conversation-shaped leftovers
                            * (reveal intents, workspace target, artifact-list

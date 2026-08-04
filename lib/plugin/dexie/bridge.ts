@@ -189,7 +189,8 @@ export async function applyPluginTables(
  */
 export async function restorePluginTables(
   dbSource: DexieSource,
-  manifestDexie: Map<string, PluginManifestDexieBlock>
+  manifestDexie: Map<string, PluginManifestDexieBlock>,
+  options: { registerMissing?: boolean } = {}
 ): Promise<string[]> {
   // Serialized against applyPluginTables/removePluginTables via the shared lock
   // so the launch-time consolidated bump can't race a concurrent enable.
@@ -197,7 +198,8 @@ export async function restorePluginTables(
   return runSchemaMutationExclusive(dbName, async () => {
     const db = resolveDb(dbSource)
     const metas = await getAllPluginDexiaMeta()
-    if (metas.length === 0) return []
+    if (metas.length === 0 && !options.registerMissing) return []
+    const metaByPluginId = new Map(metas.map((meta) => [meta.pluginId, meta]))
 
     // `db.tables` is Dexie's CODE-declared schema — on a fresh process it holds
     // only the static core, never the plugin stores, even though those stores
@@ -215,11 +217,36 @@ export async function restorePluginTables(
     // one per launch (WKWebView never commits those perpetual upgrades → wedge).
     let requiresCreate = false
 
-    for (const meta of metas) {
-      const dexieBlock = manifestDexie.get(meta.pluginId)
+    const candidates = options.registerMissing
+      ? manifestDexie.entries()
+      : metas
+          .map((meta) => [meta.pluginId, manifestDexie.get(meta.pluginId)] as const)
+          .filter(
+            (entry): entry is readonly [string, PluginManifestDexieBlock] => entry[1] !== undefined
+          )
+    const registrations: Array<{ pluginId: string; tableNames: string[] }> = []
+
+    for (const [pluginId, dexieBlock] of candidates) {
       if (!dexieBlock) continue // plugin gone; leave its meta for removePluginTables
+      if (dexieBlock.tables.length > MAX_TABLES_PER_PLUGIN) {
+        throw new Error(
+          `Plugin "${pluginId}" declares ${dexieBlock.tables.length} tables, exceeding the maximum of ${MAX_TABLES_PER_PLUGIN}`
+        )
+      }
+      const tableNames = dexieBlock.tables.map((table) =>
+        toNamespacedTableName(pluginId, table.name)
+      )
+      const existingMeta = metaByPluginId.get(pluginId)
+      const existingNames = new Set(existingMeta?.tableNames ?? [])
+      if (
+        !existingMeta ||
+        existingNames.size !== tableNames.length ||
+        tableNames.some((name) => !existingNames.has(name))
+      ) {
+        registrations.push({ pluginId, tableNames })
+      }
       for (const t of dexieBlock.tables) {
-        const nsName = toNamespacedTableName(meta.pluginId, t.name)
+        const nsName = toNamespacedTableName(pluginId, t.name)
         if (liveTables.has(nsName)) continue // already declared this session
         patch[nsName] = t.schema
         if (!physicalStores.has(nsName)) requiresCreate = true
@@ -227,7 +254,16 @@ export async function restorePluginTables(
     }
 
     const restored = Object.keys(patch)
-    if (restored.length === 0) return []
+    if (restored.length === 0) {
+      for (const registration of registrations) {
+        await putPluginDexiaMeta({
+          ...registration,
+          dexieVersion: db.verno,
+          appliedAt: Date.now(),
+        })
+      }
+      return []
+    }
 
     // Adopt-in-place when nothing must be created: declare at the max of the
     // code ceiling and the persisted native version WITHOUT the +1, so Dexie
@@ -240,6 +276,13 @@ export async function restorePluginTables(
     db.close()
     db.version(targetVersion).stores(patch)
     await db.open()
+    for (const registration of registrations) {
+      await putPluginDexiaMeta({
+        ...registration,
+        dexieVersion: targetVersion,
+        appliedAt: Date.now(),
+      })
+    }
     return restored
   })
 }

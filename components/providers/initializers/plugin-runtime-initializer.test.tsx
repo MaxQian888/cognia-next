@@ -32,6 +32,17 @@ jest.mock("@/lib/plugin/character-pack/warning-refresh-wiring", () => ({
   installPackWarningRefreshWiring: () => mockInstallPackWarningRefreshWiring(),
 }))
 
+const mockMarkBootCapabilityReady = jest.fn()
+const mockMarkBootCapabilityFailed = jest.fn()
+let mockPluginRuntimeRequested = true
+jest.mock("@/lib/boot/capabilities", () => ({
+  markBootCapabilityReady: (...args: unknown[]) => mockMarkBootCapabilityReady(...args),
+  markBootCapabilityFailed: (...args: unknown[]) => mockMarkBootCapabilityFailed(...args),
+  getBootCapabilitySnapshot: () => 1,
+  subscribeBootCapabilities: () => () => {},
+  isBootCapabilityRequested: () => mockPluginRuntimeRequested,
+}))
+
 jest.mock("@/lib/plugin/messaging/message-bus", () => ({
   SystemEvents: { APP_READY: "system:app:ready", APP_CLOSING: "system:app:closing" },
   emitSystemBusEvent: jest.fn(),
@@ -60,6 +71,7 @@ describe("PluginRuntimeInitializer", () => {
     jest.clearAllMocks()
     mockInitializeManager.mockResolvedValue(undefined)
     mockInstallPackWarningRefreshWiring.mockReturnValue(warningRefreshTeardown)
+    mockPluginRuntimeRequested = true
     delete (window as typeof window & { __cogniaPluginRuntimeReady?: boolean })
       .__cogniaPluginRuntimeReady
   })
@@ -85,6 +97,7 @@ describe("PluginRuntimeInitializer", () => {
       pluginDirectory: "",
       enablePython: false,
     })
+    expect(mockMarkBootCapabilityReady).toHaveBeenCalledWith("plugin-runtime")
     // The Tauri path/window APIs must not be touched in web mode.
     expect(mockGetCurrentWindow).not.toHaveBeenCalled()
     expect(mockAppDataDir).not.toHaveBeenCalled()
@@ -191,9 +204,10 @@ describe("PluginRuntimeInitializer", () => {
 
     await waitFor(() => expect(mockResolveBootstrap).toHaveBeenCalledTimes(1))
     expect(mockInitializeManager).not.toHaveBeenCalled()
+    expect(mockMarkBootCapabilityReady).toHaveBeenCalledWith("plugin-runtime")
   })
 
-  it("swallows boot errors instead of crashing the layout", async () => {
+  it("reports boot errors and retries after a fresh capability request", async () => {
     mockDetectPlatform.mockReturnValue("web")
     mockResolveBootstrap.mockReturnValue({
       shouldInitialize: true,
@@ -201,7 +215,7 @@ describe("PluginRuntimeInitializer", () => {
     })
     mockInitializeManager.mockRejectedValue(new Error("boom"))
 
-    render(<PluginRuntimeInitializer />)
+    const { rerender } = render(<PluginRuntimeInitializer />)
 
     await waitFor(() => expect(mockInitializeManager).toHaveBeenCalledTimes(1))
     // No throw — the warn logger absorbed it (asserted via the mock).
@@ -209,6 +223,14 @@ describe("PluginRuntimeInitializer", () => {
       loggers: { plugin: { warn: jest.Mock } }
     }
     await waitFor(() => expect(loggers.plugin.warn).toHaveBeenCalled())
+    expect(mockMarkBootCapabilityFailed).toHaveBeenCalledWith("plugin-runtime", expect.any(Error))
+
+    mockPluginRuntimeRequested = false
+    rerender(<PluginRuntimeInitializer />)
+    mockInitializeManager.mockResolvedValue(undefined)
+    mockPluginRuntimeRequested = true
+    rerender(<PluginRuntimeInitializer />)
+    await waitFor(() => expect(mockInitializeManager).toHaveBeenCalledTimes(2))
   })
 
   it("emits APP_READY on the plugin bus after the manager boots", async () => {

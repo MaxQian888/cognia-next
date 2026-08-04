@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * predev guard against unbounded Turbopack FileSystem cache growth.
+ * predev guard for the selected Turbopack FileSystem cache mode.
  *
  * Next.js 16.1+ enables `experimental.turbopackFileSystemCacheForDev` by
  * default, persisting compiled modules to `.next/dev/cache/turbopack/` as
@@ -10,9 +10,10 @@
  * to tens of GB. Next exposes only an on/off flag, no max-size knob, so the
  * only mitigation is to purge periodically.
  *
- * This runs from the `predev` hook: if `.next/dev` exceeds the threshold
- * (default 10 GB, override with TURBOPACK_CACHE_MAX_GB) it is removed before
- * `next dev` starts, trading one slower cold start for bounded disk usage.
+ * This runs from the `predev` hook. The default cache-off mode removes only
+ * `.next/dev/cache/turbopack/`; cached mode keeps that directory until it
+ * exceeds the threshold (default 10 GB, override with
+ * TURBOPACK_CACHE_MAX_GB). Other `.next/dev` artifacts are never removed.
  * It must NEVER abort dev startup, so every failure is swallowed and the
  * process always exits 0.
  *
@@ -70,6 +71,31 @@ export function cleanStaleTurbopackCache({
   return { cleaned: false, sizeBytes }
 }
 
+/** Apply the cache cleanup policy for either default cache-off or opt-in cached mode. */
+export function cleanTurbopackCacheForMode({
+  cacheDir,
+  persistentCacheEnabled,
+  thresholdBytes,
+  log = console.log,
+}) {
+  if (persistentCacheEnabled) {
+    return cleanStaleTurbopackCache({
+      cacheDir,
+      thresholdBytes,
+      log,
+      label: ".next/dev/cache/turbopack",
+    })
+  }
+
+  const sizeBytes = dirSizeBytes(cacheDir)
+  if (existsSync(cacheDir)) {
+    rmSync(cacheDir, { recursive: true, force: true })
+    log("[clean-cache] persistent Turbopack cache is disabled — purged .next/dev/cache/turbopack.")
+    return { cleaned: true, sizeBytes }
+  }
+  return { cleaned: false, sizeBytes }
+}
+
 const __filename = fileURLToPath(import.meta.url)
 const isDirectRun = process.argv[1] && resolve(process.argv[1]) === __filename
 
@@ -77,8 +103,9 @@ if (isDirectRun) {
   try {
     const repoRoot = resolve(dirname(__filename), "..", "..")
     const thresholdGb = Number(process.env.TURBOPACK_CACHE_MAX_GB ?? 10)
-    cleanStaleTurbopackCache({
-      cacheDir: join(repoRoot, ".next", "dev"),
+    cleanTurbopackCacheForMode({
+      cacheDir: join(repoRoot, ".next", "dev", "cache", "turbopack"),
+      persistentCacheEnabled: process.env.COGNIA_TURBOPACK_CACHE === "1",
       thresholdBytes: thresholdGb * BYTES_PER_GB,
     })
   } catch (error) {

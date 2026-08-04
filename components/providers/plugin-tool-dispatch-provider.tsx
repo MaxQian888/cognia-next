@@ -21,7 +21,6 @@ import {
   subscribeProtocolAdapterCancel,
   sendProtocolAdapterMessage,
 } from "@/lib/claude/ipc"
-import { handlePluginToolExec } from "@/lib/claude/plugin-tool-ipc"
 import { dispatchProtocolAdapterExec } from "@/lib/claude/protocol-adapter-ipc"
 import { activeHostSupportsFeature } from "@/stores/remote-host/remote-host-store"
 import { loggers } from "@cognia/logging"
@@ -54,7 +53,8 @@ export function PluginToolDispatchProvider({ children }: { children: React.React
       }
       // handlePluginToolExec never throws (it collapses every failure onto the
       // response.error field); the write-back is the only thing that can.
-      void handlePluginToolExec(req)
+      void import("@/lib/claude/plugin-tool-ipc")
+        .then(({ handlePluginToolExec }) => handlePluginToolExec(req))
         .then((resp) =>
           req.remoteExecutionContext
             ? sendPluginToolResponse(resp, req.remoteExecutionContext)

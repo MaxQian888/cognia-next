@@ -93,6 +93,7 @@ export interface AccountStoreDependencies {
   activateAccountLocalState: (accountId: string) => Promise<void>
   clearAccountLocalState: () => void
   prepareRuntimeTarget: (accountId: string) => Promise<RuntimeTargetRecord>
+  prepareDatabase: () => Promise<unknown>
   removeRuntimeTargets: (accountId: string) => Promise<void>
 }
 
@@ -120,6 +121,10 @@ export function createAccountStore(
     activateAccountLocalState: activateBrowserAccountLocalState,
     clearAccountLocalState: clearBrowserAccountLocalState,
     prepareRuntimeTarget: prepareAccountRuntimeTarget,
+    prepareDatabase: async () => {
+      const { ensureActiveDatabaseReady } = await import("@/lib/db/boot")
+      return ensureActiveDatabaseReady()
+    },
     removeRuntimeTargets: removeAccountRuntimeTargets,
     ...dependencyOverrides,
   }
@@ -146,12 +151,17 @@ export function createAccountStore(
       return account
     }
 
+    const prepareSelectedDatabase = async (accountId: string, targetId?: string) => {
+      activateSelectedDatabase(accountId, targetId)
+      await dependencies.prepareDatabase()
+    }
+
     const activateUnlockedAccount = async (accountId: string): Promise<void> => {
       await dependencies.registry.setActiveAccountId(accountId)
       const target = shouldUseBrowserVault()
         ? await dependencies.prepareRuntimeTarget(accountId)
         : null
-      activateSelectedDatabase(accountId, target?.id)
+      await prepareSelectedDatabase(accountId, target?.id)
       setActiveRuntimeTargetContext(
         accountId,
         target?.id ?? (isCapacitor() ? "mobile-companion" : "local-host")
@@ -200,7 +210,7 @@ export function createAccountStore(
             const target = shouldUseBrowserVault()
               ? await dependencies.prepareRuntimeTarget(autoUnlockedAccountId)
               : null
-            activateSelectedDatabase(autoUnlockedAccountId, target?.id)
+            await prepareSelectedDatabase(autoUnlockedAccountId, target?.id)
             setActiveRuntimeTargetContext(
               autoUnlockedAccountId,
               target?.id ?? (isCapacitor() ? "mobile-companion" : "local-host")
@@ -281,7 +291,7 @@ export function createAccountStore(
             const target = useBrowserVault
               ? await dependencies.prepareRuntimeTarget(account.id)
               : null
-            activateSelectedDatabase(account.id, target?.id)
+            await prepareSelectedDatabase(account.id, target?.id)
             setActiveRuntimeTargetContext(
               account.id,
               target?.id ?? (isCapacitor() ? "mobile-companion" : "local-host")

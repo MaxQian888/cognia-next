@@ -14,12 +14,17 @@ describe("DbUpgradeBlockedDialog", () => {
     render(<DbUpgradeBlockedDialog />)
 
     act(() => {
-      dispatchDbUpgradeBlocked({ databaseName: "cognia", attempts: 20 })
+      dispatchDbUpgradeBlocked({
+        databaseName: "cognia",
+        attempts: 20,
+        connectionOwners: ["active-singleton", "target-migration:source"],
+      })
     })
 
     expect(screen.getByTestId("db-upgrade-blocked-dialog")).toBeInTheDocument()
     expect(screen.getByText("Database upgrade blocked")).toBeInTheDocument()
     expect(screen.getByText(/Close the other windows, then reload/)).toBeInTheDocument()
+    expect(screen.getByText(/active-singleton, target-migration:source/)).toBeInTheDocument()
   })
 
   it("offers reload as the only action", async () => {

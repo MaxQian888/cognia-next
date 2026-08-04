@@ -113,8 +113,8 @@ export async function migrateAccountDatabaseToTarget(
       return result
     }
 
-    const source = new CogniaDB(sourceDbName)
-    const target = new CogniaDB(targetDbName)
+    const source = new CogniaDB(sourceDbName, "target-migration:source")
+    const target = new CogniaDB(targetDbName, "target-migration:target")
     try {
       await source.open()
       await target.open()

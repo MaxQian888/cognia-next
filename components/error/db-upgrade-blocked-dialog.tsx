@@ -47,7 +47,14 @@ export function DbUpgradeBlockedDialog() {
       <AlertDialogContent data-testid="db-upgrade-blocked-dialog">
         <AlertDialogHeader>
           <AlertDialogTitle>{t("title")}</AlertDialogTitle>
-          <AlertDialogDescription>{t("body")}</AlertDialogDescription>
+          <AlertDialogDescription>
+            {t("body")}
+            {detail.connectionOwners?.length ? (
+              <span className="mt-2 block font-mono text-xs" data-testid="db-connection-owners">
+                {t("connections", { owners: detail.connectionOwners.join(", ") })}
+              </span>
+            ) : null}
+          </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogAction

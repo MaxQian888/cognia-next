@@ -7204,6 +7204,7 @@
       "cascade": "{count, plural, one {# problem} other {# problems}}",
       "dbUpgradeBlocked": {
         "body": "Cognia needs to upgrade its local database, but another window or browser tab still has the old version open. Close the other windows, then reload.",
+        "connections": "Open connections in this window: {owners}",
         "reload": "Reload",
         "title": "Database upgrade blocked"
       },

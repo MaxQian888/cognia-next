@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react"
+import { render, waitFor } from "@testing-library/react"
 
 jest.mock("@/lib/claude/ipc", () => ({
   subscribePluginToolExec: jest.fn(),
@@ -68,8 +68,10 @@ describe("PluginToolDispatchProvider", () => {
     await Promise.resolve()
 
     expect(mockHandle).toHaveBeenCalledWith(expect.objectContaining({ toolUseId: "t1", name: "x" }))
-    expect(mockSend).toHaveBeenCalledWith(
-      expect.objectContaining({ toolUseId: "t1", result: "ok" })
+    await waitFor(() =>
+      expect(mockSend).toHaveBeenCalledWith(
+        expect.objectContaining({ toolUseId: "t1", result: "ok" })
+      )
     )
   })
 
@@ -114,7 +116,7 @@ describe("PluginToolDispatchProvider", () => {
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(mockSend).toHaveBeenCalledWith(response, context)
+    await waitFor(() => expect(mockSend).toHaveBeenCalledWith(response, context))
   })
 
   it("fails a remote plugin tool closed when the proxy feature is not advertised", async () => {

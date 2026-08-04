@@ -326,7 +326,12 @@ function buildCollapsedSchema(db: Dexie): CollapsedSchemaCache | undefined {
   return { version: latest, stores }
 }
 
+let databaseConnectionSequence = 0
+
 export class CogniaDB extends Dexie {
+  readonly connectionOwner: string
+  readonly connectionId: string
+  private readonly connectionCreatedAt: number
   sessions!: Table<ChatSession, string>
   messages!: Table<StoredMessage, string>
   settings!: Table<AppSettings, "singleton">
@@ -669,8 +674,17 @@ export class CogniaDB extends Dexie {
   // v90 — Conversation folders. See `lib/db/session-folders.ts`.
   sessionFolders!: Table<SessionFolder, string>
 
-  constructor(name = LEGACY_COGNIA_DB_NAME) {
+  constructor(name = LEGACY_COGNIA_DB_NAME, connectionOwner = "unspecified") {
     super(name)
+    this.connectionOwner = connectionOwner
+    this.connectionId = `db-${++databaseConnectionSequence}`
+    this.connectionCreatedAt = Date.now()
+    registerKnownConnection(this)
+    this.on("ready", () => {
+      registerKnownConnection(this)
+      this.logConnectionEvent("open")
+    })
+    this.on("blocked", () => this.logConnectionEvent("blocked"))
 
     // Jest fast path: a previous construction in this worker already merged
     // the full version chain — declare only the latest cumulative schema.
@@ -3466,6 +3480,26 @@ export class CogniaDB extends Dexie {
   // v117 — host-local remote browser profile and public-domain grants.
   browserProfiles!: Table<import("./browser-profiles").BrowserProfileRow, string>
   browserDomainGrants!: Table<import("./browser-profiles").BrowserDomainGrantRow, string>
+
+  override close(closeOptions?: { disableAutoOpen: boolean }): void {
+    if (this.isOpen()) this.logConnectionEvent("close")
+    super.close(closeOptions)
+    unregisterKnownConnection(this)
+  }
+
+  private logConnectionEvent(event: "open" | "close" | "blocked"): void {
+    if (process.env.NODE_ENV !== "development") return
+    const backend = this.isOpen() ? this.backendDB() : null
+    console.debug("[db:connection]", {
+      event,
+      connectionId: this.connectionId,
+      owner: this.connectionOwner,
+      databaseName: this.name,
+      declaredVersion: this.verno,
+      nativeVersion: backend?.version ?? null,
+      elapsedMs: Date.now() - this.connectionCreatedAt,
+    })
+  }
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated
@@ -3530,14 +3564,45 @@ export type {
 } from "./crm-types"
 
 let _db: CogniaDB | null = null
+const _knownConnections = new Map<string, Set<CogniaDB>>()
 let _seedPromise: Promise<void> | null = null
 let _activeDatabaseName: string | null = null
 let _yieldChannel: BroadcastChannel | null = null
 let _tauriYieldListening = false
 let _tauriYieldUnlisten: (() => void) | null = null
 let _yieldOrigin: string | null = null
+const _reportedConnectionOwners = new Map<string, Set<string>>()
 /** Stops the in-flight blocked-open re-nudge loop, if any (see getDb). */
 let _stopBlockedRetry: (() => void) | null = null
+
+function registerKnownConnection(database: CogniaDB): void {
+  let connections = _knownConnections.get(database.name)
+  if (!connections) {
+    connections = new Set()
+    _knownConnections.set(database.name, connections)
+  }
+  connections.add(database)
+}
+
+function unregisterKnownConnection(database: CogniaDB): void {
+  const connections = _knownConnections.get(database.name)
+  if (!connections) return
+  connections.delete(database)
+  if (connections.size === 0) _knownConnections.delete(database.name)
+}
+
+/** Owners of live CogniaDB handles in this renderer realm, for blocked diagnostics. */
+export function getOpenDatabaseConnectionOwners(databaseName: string): string[] {
+  const connections = _knownConnections.get(databaseName)
+  if (!connections) return []
+  const owners: string[] = []
+  for (const database of connections) {
+    if (database.isOpen()) owners.push(database.connectionOwner)
+    else connections.delete(database)
+  }
+  if (connections.size === 0) _knownConnections.delete(databaseName)
+  return [...new Set(owners)].sort()
+}
 
 /** Interval between yield re-nudges while a schema upgrade stays blocked. */
 const BLOCKED_RENUDGE_INTERVAL_MS = 750
@@ -3580,10 +3645,12 @@ const DB_YIELD_CHANNEL_NAME = "cognia-db-yield"
 const TAURI_DB_YIELD_EVENT = "cognia://db-yield"
 
 interface DbYieldMessage {
-  type: "dexie-yield"
+  type: "dexie-yield" | "dexie-yield-owners"
   dbName: string
   /** Emitting realm's id, so a window skips the yield events it broadcast. */
   origin: string
+  targetOrigin?: string
+  connectionOwners?: string[]
 }
 
 /** Stable per-realm identity for {@link DbYieldMessage.origin}. */
@@ -3601,10 +3668,7 @@ function ensureYieldChannel(): BroadcastChannel | null {
     _yieldChannel = new BroadcastChannel(DB_YIELD_CHANNEL_NAME)
     _yieldChannel.onmessage = (event: MessageEvent) => {
       const msg = event.data as DbYieldMessage | undefined
-      if (msg?.type !== "dexie-yield") return
-      if (_db && _db.name === msg.dbName) {
-        closeCachedDb()
-      }
+      handleYieldMessage(msg, (reply) => _yieldChannel?.postMessage(reply))
     }
   } catch {
     _yieldChannel = null
@@ -3628,11 +3692,7 @@ function ensureTauriYieldListener(): void {
     .then(({ listen }) =>
       listen<DbYieldMessage>(TAURI_DB_YIELD_EVENT, (event) => {
         const msg = event.payload
-        if (msg?.type !== "dexie-yield") return
-        if (msg.origin === yieldOrigin()) return // our own broadcast — ignore
-        if (_db && _db.name === msg.dbName) {
-          closeCachedDb()
-        }
+        handleYieldMessage(msg, emitTauriYield)
       })
     )
     .then((unlisten) => {
@@ -3643,6 +3703,45 @@ function ensureTauriYieldListener(): void {
       // retries. The BroadcastChannel path stays as the best-effort fallback.
       _tauriYieldListening = false
     })
+}
+
+function handleYieldMessage(
+  message: DbYieldMessage | undefined,
+  reply: (message: DbYieldMessage) => void
+): void {
+  if (!message) return
+  if (message.type === "dexie-yield-owners") {
+    if (message.targetOrigin !== yieldOrigin()) return
+    let owners = _reportedConnectionOwners.get(message.dbName)
+    if (!owners) {
+      owners = new Set()
+      _reportedConnectionOwners.set(message.dbName, owners)
+    }
+    for (const owner of message.connectionOwners ?? []) owners.add(owner)
+    return
+  }
+  if (message.type !== "dexie-yield" || message.origin === yieldOrigin()) return
+  if (!_db || _db.name !== message.dbName) return
+  const connectionOwners = getOpenDatabaseConnectionOwners(message.dbName)
+  if (connectionOwners.length > 0) {
+    reply({
+      type: "dexie-yield-owners",
+      dbName: message.dbName,
+      origin: yieldOrigin(),
+      targetOrigin: message.origin,
+      connectionOwners,
+    })
+  }
+  closeCachedDb()
+}
+
+export function getDatabaseUpgradeBlockerOwners(databaseName: string): string[] {
+  return [
+    ...new Set([
+      ...getOpenDatabaseConnectionOwners(databaseName),
+      ...(_reportedConnectionOwners.get(databaseName) ?? []),
+    ]),
+  ].sort()
 }
 
 /** Mirror a yield request onto the Tauri event bus. No-op off Tauri. */
@@ -3823,7 +3922,7 @@ export function getDb(): CogniaDB {
     throw new Error("getDb() called on the server — wrap usage in a client component")
   }
   if (!_db) {
-    _db = new CogniaDB(_activeDatabaseName ?? LEGACY_COGNIA_DB_NAME)
+    _db = new CogniaDB(_activeDatabaseName ?? LEGACY_COGNIA_DB_NAME, "active-singleton")
     ensureYieldChannel()
     ensureTauriYieldListener()
     // Yield to another connection that needs to upgrade the schema. Plugin
@@ -3844,6 +3943,7 @@ export function getDb(): CogniaDB {
     // actively ask other contexts to yield over the BroadcastChannel.
     const opened = _db
     _db.on("blocked", () => {
+      _reportedConnectionOwners.delete(opened.name)
       console.info(
         "[db] schema upgrade is waiting for another connection (tab or plugin) to close; it will proceed automatically."
       )
@@ -3870,6 +3970,7 @@ export function getDb(): CogniaDB {
             dispatchDbUpgradeBlocked({
               databaseName: opened.name,
               attempts: BLOCKED_RENUDGE_MAX_ATTEMPTS,
+              connectionOwners: getDatabaseUpgradeBlockerOwners(opened.name),
             })
           },
         }
@@ -3877,35 +3978,10 @@ export function getDb(): CogniaDB {
     })
     // The upgrade landed (or the db opened cleanly): stop any pending re-nudge.
     _db.on("ready", () => {
+      _reportedConnectionOwners.delete(opened.name)
       _stopBlockedRetry?.()
       _stopBlockedRetry = null
     })
-    const seedTarget = _db
-    // Kick off seeding once per process. We import lazily to avoid a circular
-    // dependency: seed.ts imports the per-table CRUD modules which import this
-    // file. The promise is memoized so concurrent callers share the same run.
-    _seedPromise = import("./seed")
-      .then(({ seedBuiltIns }) => {
-        return withDbReopenRetry(() => {
-          if (_db !== seedTarget) return Promise.resolve()
-          return seedBuiltIns()
-        })
-      })
-      .catch((err) => {
-        // DatabaseClosedError fires when the db is deleted out from under us
-        // (common during tests and hard resets). Not actionable; suppress.
-        if (isDatabaseClosedError(err)) return
-        console.error("seedBuiltIns failed", err)
-        // The user-visible consequence is missing built-in skills, characters
-        // and teams — which reads as "those features don't exist here" rather
-        // than as a failure. Say so instead of only logging it.
-        dispatchDiagnostic(
-          createDiagnostic("seedFailed", {
-            source: "storage",
-            message: err instanceof Error ? err.message : String(err),
-          })
-        )
-      })
   }
   return _db
 }
@@ -3917,9 +3993,34 @@ export function getDb(): CogniaDB {
  * the rows reactively as soon as the seed completes.
  */
 export function whenSeeded(): Promise<void> {
-  // Touch getDb to ensure seeding has been kicked off.
-  getDb()
-  return _seedPromise ?? Promise.resolve()
+  if (_seedPromise) return _seedPromise
+  const seedTarget = getDb()
+  // Seeding is intentionally explicit: database boot first adopts any dynamic
+  // plugin stores, then calls this function. Keeping getDb() side-effect-free
+  // prevents a settings read from racing a plugin close→upgrade→open cycle.
+  _seedPromise = (async () => {
+    try {
+      const { seedBuiltIns } = await import("./seed")
+      await withDbReopenRetry(() => {
+        if (_db !== seedTarget) return Promise.resolve()
+        return seedBuiltIns()
+      })
+    } catch (err) {
+      // DatabaseClosedError fires when the db is deleted or switched out from
+      // under this attempt. The selected database will start its own seed.
+      if (isDatabaseClosedError(err)) return
+      _seedPromise = null
+      console.error("seedBuiltIns failed", err)
+      dispatchDiagnostic(
+        createDiagnostic("seedFailed", {
+          source: "storage",
+          message: err instanceof Error ? err.message : String(err),
+        })
+      )
+      throw err
+    }
+  })()
+  return _seedPromise
 }
 
 /**
@@ -3944,6 +4045,7 @@ export function __resetDbForTesting(): void {
   _tauriYieldUnlisten = null
   _tauriYieldListening = false
   _yieldOrigin = null
+  _reportedConnectionOwners.clear()
 }
 
 function closeCachedDb(): void {
