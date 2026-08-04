@@ -1,0 +1,33 @@
+{
+  "id": "sre-agent",
+  "name": "SRE Agent",
+  "version": "0.1.0",
+  "description": "Read-only incident investigation agent for joining logs, metrics, traces, and runbooks into evidence-backed timelines.",
+  "type": "frontend",
+  "capabilities": ["tools", "subagent"],
+  "main": "src/index.ts",
+  "author": { "name": "cognia-next" },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": [],
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts",
+      "reason": "The initial SRE Agent uses local mock evidence fixtures and read-only plugin tools."
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Mock-backed investigation works; real observability connectors will depend on reachable endpoints."
+    }
+  }
+}

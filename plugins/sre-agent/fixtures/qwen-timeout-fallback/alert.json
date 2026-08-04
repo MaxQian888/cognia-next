@@ -1,0 +1,8 @@
+{
+  "time": "2026-08-04T12:02:10.003Z",
+  "severity": "warning",
+  "service": "gateway",
+  "message": "gateway provider timeout and fallback increased",
+  "provider": "qwen-vllm-a",
+  "model": "qwen3-32b"
+}
