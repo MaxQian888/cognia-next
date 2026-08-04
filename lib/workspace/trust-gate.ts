@@ -12,9 +12,23 @@ export async function isWorkspaceRestricted(
   project: Pick<Project, "roots"> | null | undefined,
   opts: { enabled: boolean; onWeb: boolean }
 ): Promise<boolean> {
-  if (opts.onWeb || !opts.enabled || !project) return false
+  return (await resolveWorkspaceTrustForSend(project, opts)).restricted
+}
+
+export interface WorkspaceTrustForSend {
+  restricted: boolean
+  /** Present only when every active root has an explicit persisted grant. */
+  trustedRoots: string[]
+}
+
+export async function resolveWorkspaceTrustForSend(
+  project: Pick<Project, "roots"> | null | undefined,
+  opts: { enabled: boolean; onWeb: boolean }
+): Promise<WorkspaceTrustForSend> {
+  if (opts.onWeb || !opts.enabled || !project) return { restricted: false, trustedRoots: [] }
   const paths = allRootPaths(project)
-  if (paths.length === 0) return false
+  if (paths.length === 0) return { restricted: false, trustedRoots: [] }
   const verdicts = await Promise.all(paths.map((p) => isWorkspaceTrusted(p)))
-  return verdicts.some((trusted) => !trusted)
+  const restricted = verdicts.some((trusted) => !trusted)
+  return { restricted, trustedRoots: restricted ? [] : paths }
 }
