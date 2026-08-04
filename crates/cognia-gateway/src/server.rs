@@ -28,7 +28,7 @@ use crate::route_ticket::{
 use axum::{
     body::Body,
     extract::{ConnectInfo, Extension, State},
-    http::{HeaderMap, StatusCode},
+    http::{header::RETRY_AFTER, HeaderMap, HeaderValue, StatusCode},
     middleware::{from_fn_with_state, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -210,6 +210,7 @@ struct AppState {
     decisions: Arc<DecisionRegistry>,
     /// Per-provider upstream key-pool rotation cursors (shared with the state).
     key_rotation: Arc<KeyRotationMap>,
+    route_planner: Arc<crate::route_planner::RoutePlannerState>,
     /// Per-upstream-key cooldown / permanent-disable state (W1.1 + W3.1).
     key_cooldown: Arc<KeyCooldownMap>,
     /// In-flight concurrency caps (W1.2).
@@ -233,6 +234,7 @@ pub async fn spawn_server(
     snapshot: Arc<RwLock<Option<RoutingSnapshot>>>,
     decisions: Arc<DecisionRegistry>,
     key_rotation: Arc<KeyRotationMap>,
+    route_planner: Arc<crate::route_planner::RoutePlannerState>,
     key_cooldown: Arc<KeyCooldownMap>,
     concurrency: Arc<ConcurrencyLimiter>,
     on_request: Arc<dyn RequestObserver>,
@@ -293,6 +295,7 @@ pub async fn spawn_server(
         snapshot,
         decisions,
         key_rotation,
+        route_planner,
         key_cooldown,
         concurrency,
         // Transient by nature — nothing is in flight when a listener starts, so
@@ -428,7 +431,7 @@ async fn run_upstream_probe(state: &AppState, model: &str) -> UpstreamProbeOutco
     };
     let now_ms = chrono::Utc::now().timestamp_millis();
     let candidates = expand_key_pools(
-        resolve_candidates(&snapshot, model),
+        route_candidates(state, &snapshot, &cfg, model, &Value::Null, "gateway-probe").await,
         &state.key_rotation,
         &state.key_cooldown,
         now_ms,
@@ -635,6 +638,7 @@ async fn middleware(
             None,
             Some(message),
             false,
+            None,
         );
         (status, Json(json!({ "error": { "message": message } }))).into_response()
     };
@@ -898,7 +902,7 @@ async fn openai_embeddings(
     let cfg = state.config.read().clone();
     let snapshot = state.snapshot.read().clone();
     let Some(snapshot) = snapshot else {
-        return logged_error(
+        let response = logged_error(
             &state,
             &ctx,
             format,
@@ -907,6 +911,7 @@ async fn openai_embeddings(
             "no routing snapshot yet — open the Cognia window once so it can publish providers",
             None,
         );
+        return response;
     };
 
     let Some(model) = body["model"].as_str().map(|s| s.to_string()) else {
@@ -954,7 +959,7 @@ async fn openai_embeddings(
     // skip pooled keys the upstream just parked (W1.1) / permanently disabled
     // (W3.1) — the same cooldown state the chat path records.
     let now_ms = chrono::Utc::now().timestamp_millis();
-    let all = resolve_candidates(&snapshot, &model);
+    let all = route_candidates(&state, &snapshot, &cfg, &model, &body, "gateway-embeddings").await;
     let candidates: Vec<Candidate> = expand_key_pools(
         all.into_iter()
             .filter(|c| c.provider.protocol == "openai")
@@ -964,19 +969,30 @@ async fn openai_embeddings(
         now_ms,
     );
     if candidates.is_empty() {
-        return logged_error(
+        let status = if crate::route_planner::model_is_known(&snapshot, &model) {
+            StatusCode::SERVICE_UNAVAILABLE
+        } else {
+            StatusCode::NOT_FOUND
+        };
+        let response = logged_error(
             &state,
             &ctx,
             format,
-            StatusCode::NOT_FOUND,
+            status,
             "invalid_request_error",
             &format!("embeddings model \"{model}\" matches no enabled OpenAI-compatible provider"),
             Some(&model),
         );
+        return with_retry_after(
+            response,
+            route_retry_after_ms(&snapshot, &state.key_cooldown, &model, now_ms),
+        );
     }
 
     let mut failures: Vec<String> = Vec::new();
-    for candidate in candidates.iter().take(cfg.attempt_budget(candidates.len())) {
+    let attempt_limit = route_attempt_limit(&cfg, &snapshot, candidates.len());
+    let mut retry_wait_remaining_ms = cfg.max_retry_wait_ms;
+    for (attempt_index, candidate) in candidates.iter().take(attempt_limit).enumerate() {
         let started = Instant::now();
 
         // W1.2: per-upstream-key cap for THIS attempt; released when the loop
@@ -1033,6 +1049,14 @@ async fn openai_embeddings(
                     None,
                     None,
                 );
+                wait_before_retry(
+                    &cfg,
+                    attempt_index,
+                    None,
+                    &mut retry_wait_remaining_ms,
+                    attempt_index + 1 < attempt_limit,
+                )
+                .await;
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
             }
@@ -1074,14 +1098,22 @@ async fn openai_embeddings(
                 retry_after_ms,
                 None,
             );
-            // R4: an auth failure on a ticket route never switches accounts
-            // unless the ticket explicitly allows it — surface it instead.
+            // R4: authentication failures never switch credentials/providers
+            // unless a verified route ticket explicitly allows auth failover.
             let auth_failure = status == 401 || status == 403;
-            let ticket_blocks_failover = ctx
+            let auth_failover_allowed = ctx
                 .ticket
                 .as_ref()
-                .is_some_and(|t| auth_failure && !t.allow_auth_failover);
-            if cfg.should_retry(status) && !ticket_blocks_failover {
+                .is_some_and(|ticket| ticket.allow_auth_failover);
+            if cfg.should_retry(status) && (!auth_failure || auth_failover_allowed) {
+                wait_before_retry(
+                    &cfg,
+                    attempt_index,
+                    retry_after_ms,
+                    &mut retry_wait_remaining_ms,
+                    attempt_index + 1 < attempt_limit,
+                )
+                .await;
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
             }
@@ -1167,7 +1199,7 @@ async fn openai_responses(
     let cfg = state.config.read().clone();
 
     if let Some(reason) = responses_translate::unsupported_feature(&body) {
-        return logged_error(
+        let response = logged_error(
             &state,
             &ctx,
             format,
@@ -1176,11 +1208,12 @@ async fn openai_responses(
             &reason,
             None,
         );
+        return response;
     }
 
     let snapshot = state.snapshot.read().clone();
     let Some(snapshot) = snapshot else {
-        return logged_error(
+        let response = logged_error(
             &state,
             &ctx,
             format,
@@ -1189,7 +1222,14 @@ async fn openai_responses(
             "no routing snapshot yet — open the Cognia window once so it can publish providers",
             None,
         );
+        return response;
     };
+
+    let body = crate::route_planner::apply_parameter_defaults(
+        &snapshot,
+        body.get("model").and_then(Value::as_str).unwrap_or(""),
+        &body,
+    );
 
     let ir = match responses_translate::request_to_ir(&body) {
         Ok(ir) => ir,
@@ -1225,27 +1265,38 @@ async fn openai_responses(
 
     let now_ms = chrono::Utc::now().timestamp_millis();
     let candidates = expand_key_pools(
-        resolve_candidates(&snapshot, &model),
+        route_candidates(&state, &snapshot, &cfg, &model, &body, "gateway-responses").await,
         &state.key_rotation,
         &state.key_cooldown,
         now_ms,
     );
     if candidates.is_empty() {
-        return logged_error(
+        let status = if crate::route_planner::model_is_known(&snapshot, &model) {
+            StatusCode::SERVICE_UNAVAILABLE
+        } else {
+            StatusCode::NOT_FOUND
+        };
+        let response = logged_error(
             &state,
             &ctx,
             format,
-            StatusCode::NOT_FOUND,
+            status,
             "invalid_request_error",
             &format!(
                 "model \"{model}\" matches no alias, provider:model, or enabled provider model"
             ),
             Some(&model),
         );
+        return with_retry_after(
+            response,
+            route_retry_after_ms(&snapshot, &state.key_cooldown, &model, now_ms),
+        );
     }
 
     let mut failures: Vec<String> = Vec::new();
-    for candidate in candidates.iter().take(cfg.attempt_budget(candidates.len())) {
+    let attempt_limit = route_attempt_limit(&cfg, &snapshot, candidates.len());
+    let mut retry_wait_remaining_ms = cfg.max_retry_wait_ms;
+    for (attempt_index, candidate) in candidates.iter().take(attempt_limit).enumerate() {
         let started = Instant::now();
 
         // W1.2: per-upstream-key cap for THIS attempt.
@@ -1312,6 +1363,14 @@ async fn openai_responses(
                     None,
                     None,
                 );
+                wait_before_retry(
+                    &cfg,
+                    attempt_index,
+                    None,
+                    &mut retry_wait_remaining_ms,
+                    attempt_index + 1 < attempt_limit,
+                )
+                .await;
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
             }
@@ -1349,14 +1408,22 @@ async fn openai_responses(
                 retry_after_ms,
                 None,
             );
-            // R4: an auth failure on a ticket route never switches accounts
-            // unless the ticket explicitly allows it — surface it instead.
+            // R4: authentication failures never switch credentials/providers
+            // unless a verified route ticket explicitly allows auth failover.
             let auth_failure = status == 401 || status == 403;
-            let ticket_blocks_failover = ctx
+            let auth_failover_allowed = ctx
                 .ticket
                 .as_ref()
-                .is_some_and(|t| auth_failure && !t.allow_auth_failover);
-            if cfg.should_retry(status) && !ticket_blocks_failover {
+                .is_some_and(|ticket| ticket.allow_auth_failover);
+            if cfg.should_retry(status) && (!auth_failure || auth_failover_allowed) {
+                wait_before_retry(
+                    &cfg,
+                    attempt_index,
+                    retry_after_ms,
+                    &mut retry_wait_remaining_ms,
+                    attempt_index + 1 < attempt_limit,
+                )
+                .await;
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
             }
@@ -1492,6 +1559,7 @@ fn logged_error(
         None,
         Some(message),
         false,
+        None,
     );
     (status, Json(error_body(format, err_code, message))).into_response()
 }
@@ -1516,6 +1584,7 @@ fn all_failed(
         None,
         Some(&message),
         false,
+        None,
     );
     (
         StatusCode::BAD_GATEWAY,
@@ -1651,6 +1720,98 @@ fn concurrency_rejected(
     )
 }
 
+fn route_retry_after_ms(
+    snapshot: &RoutingSnapshot,
+    cooldown: &KeyCooldownMap,
+    model: &str,
+    now_ms: i64,
+) -> Option<i64> {
+    let provider_ids = crate::route_planner::route_provider_ids(snapshot, model);
+    snapshot
+        .providers
+        .iter()
+        .filter(|provider| provider_ids.contains(&provider.id) && provider.rotation_enabled)
+        .filter_map(|provider| {
+            let pool: Vec<String> = provider
+                .api_keys
+                .iter()
+                .map(|key| key.trim().to_string())
+                .filter(|key| !key.is_empty())
+                .collect();
+            cooldown::all_cooling_retry_after_ms(cooldown, &provider.id, &pool, now_ms)
+        })
+        .min()
+}
+
+fn with_retry_after(mut response: Response, retry_after_ms: Option<i64>) -> Response {
+    if let Some(milliseconds) = retry_after_ms {
+        let seconds = (milliseconds.max(1) + 999) / 1000;
+        if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
+            response.headers_mut().insert(RETRY_AFTER, value);
+        }
+    }
+    response
+}
+
+fn route_attempt_limit(cfg: &GatewayConfig, snapshot: &RoutingSnapshot, available: usize) -> usize {
+    let configured = cfg.attempt_budget(available);
+    snapshot
+        .routing_policy
+        .as_ref()
+        .map(|policy| configured.min(policy.max_fallback_attempts.max(1) as usize))
+        .unwrap_or(configured)
+}
+
+async fn wait_before_retry(
+    cfg: &GatewayConfig,
+    attempt_index: usize,
+    retry_after_ms: Option<i64>,
+    remaining_ms: &mut u32,
+    has_next_attempt: bool,
+) {
+    if !has_next_attempt || *remaining_ms == 0 {
+        return;
+    }
+    let exponent = attempt_index.min(16) as u32;
+    let local = cfg
+        .retry_backoff_base_ms
+        .saturating_mul(2u32.saturating_pow(exponent))
+        .min(cfg.retry_backoff_max_ms);
+    let hinted = retry_after_ms
+        .filter(|_| cfg.respect_retry_after)
+        .and_then(|value| u32::try_from(value).ok());
+    let delay = hinted.unwrap_or(local).min(*remaining_ms);
+    *remaining_ms = remaining_ms.saturating_sub(delay);
+    if delay > 0 {
+        tokio::time::sleep(Duration::from_millis(u64::from(delay))).await;
+    }
+}
+
+async fn route_candidates(
+    state: &AppState,
+    snapshot: &RoutingSnapshot,
+    cfg: &GatewayConfig,
+    model: &str,
+    body: &Value,
+    session_id: &str,
+) -> Vec<Candidate> {
+    if cfg.gateway_local_routing_v2 && snapshot.routing_policy.is_some() {
+        return crate::route_planner::plan_candidates(
+            snapshot,
+            model,
+            body,
+            &state.route_planner,
+            &state.in_flight.snapshot(),
+        );
+    }
+    if !cfg.gateway_local_routing_v2 {
+        if let Some(candidates) = live_decision(state, snapshot, model, body, session_id).await {
+            return candidates;
+        }
+    }
+    resolve_candidates(snapshot, model)
+}
+
 /// Ask the renderer for a live routing decision (full engine).
 async fn live_decision(
     state: &AppState,
@@ -1720,7 +1881,7 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
     let cfg = state.config.read().clone();
     let snapshot = state.snapshot.read().clone();
     let Some(snapshot) = snapshot else {
-        return logged_error(
+        let response = logged_error(
             &state,
             &ctx,
             format,
@@ -1729,6 +1890,7 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
             "no routing snapshot yet — open the Cognia window once so it can publish providers",
             None,
         );
+        return response;
     };
 
     let Some(model) = body["model"].as_str().map(|s| s.to_string()) else {
@@ -1750,6 +1912,7 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
             return resp;
         }
     }
+    let body = crate::route_planner::apply_parameter_defaults(&snapshot, &model, &body);
     let stream = body["stream"].as_bool().unwrap_or(false);
     let now_ms = chrono::Utc::now().timestamp_millis();
 
@@ -1837,26 +2000,32 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
         )
     } else {
         expand_key_pools(
-            match live_decision(&state, &snapshot, &model, &body, &session_id).await {
-                Some(candidates) => candidates,
-                None => resolve_candidates(&snapshot, &model),
-            },
+            route_candidates(&state, &snapshot, &cfg, &model, &body, &session_id).await,
             &state.key_rotation,
             &state.key_cooldown,
             now_ms,
         )
     };
     if candidates.is_empty() {
-        return logged_error(
+        let status = if crate::route_planner::model_is_known(&snapshot, &model) {
+            StatusCode::SERVICE_UNAVAILABLE
+        } else {
+            StatusCode::NOT_FOUND
+        };
+        let response = logged_error(
             &state,
             &ctx,
             format,
-            StatusCode::NOT_FOUND,
+            status,
             "invalid_request_error",
             &format!(
                 "model \"{model}\" matches no alias, provider:model, or enabled provider model"
             ),
             Some(&model),
+        );
+        return with_retry_after(
+            response,
+            route_retry_after_ms(&snapshot, &state.key_cooldown, &model, now_ms),
         );
     }
 
@@ -1894,7 +2063,9 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
     }
 
     let mut failures: Vec<String> = Vec::new();
-    for candidate in candidates.iter().take(cfg.attempt_budget(candidates.len())) {
+    let attempt_limit = route_attempt_limit(&cfg, &snapshot, candidates.len());
+    let mut retry_wait_remaining_ms = cfg.max_retry_wait_ms;
+    for (attempt_index, candidate) in candidates.iter().take(attempt_limit).enumerate() {
         let started = Instant::now();
 
         // W1.2: per-upstream-key in-flight cap for THIS attempt. On failover the
@@ -2009,6 +2180,14 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
                     None,
                     Some(&session_id),
                 );
+                wait_before_retry(
+                    &cfg,
+                    attempt_index,
+                    None,
+                    &mut retry_wait_remaining_ms,
+                    attempt_index + 1 < attempt_limit,
+                )
+                .await;
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
             }
@@ -2049,14 +2228,22 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
                 retry_after_ms,
                 Some(&session_id),
             );
-            // R4: an auth failure on a ticket route never switches accounts
-            // unless the ticket explicitly allows it — surface it instead.
+            // R4: authentication failures never switch credentials/providers
+            // unless a verified route ticket explicitly allows auth failover.
             let auth_failure = status == 401 || status == 403;
-            let ticket_blocks_failover = ctx
+            let auth_failover_allowed = ctx
                 .ticket
                 .as_ref()
-                .is_some_and(|t| auth_failure && !t.allow_auth_failover);
-            if cfg.should_retry(status) && !ticket_blocks_failover {
+                .is_some_and(|ticket| ticket.allow_auth_failover);
+            if cfg.should_retry(status) && (!auth_failure || auth_failover_allowed) {
+                wait_before_retry(
+                    &cfg,
+                    attempt_index,
+                    retry_after_ms,
+                    &mut retry_wait_remaining_ms,
+                    attempt_index + 1 < attempt_limit,
+                )
+                .await;
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
             }
@@ -2077,6 +2264,7 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
                     None,
                     Some(&message),
                     false,
+                    Some(candidate),
                 );
                 let mut builder = axum::http::Response::builder()
                     .status(StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY))
@@ -2578,9 +2766,16 @@ fn outcome_payload(
     session_id: Option<&str>,
 ) -> Value {
     let (input_tokens, output_tokens) = usage.unwrap_or((None, None));
+    let key_fingerprint = candidate
+        .provider
+        .api_key
+        .as_deref()
+        .map(cooldown::key_fingerprint);
     json!({
         "providerId": candidate.provider.id,
         "modelId": candidate.model_id,
+        "deploymentId": candidate.provider.deployment_id,
+        "keyFingerprint": key_fingerprint,
         "ok": ok,
         "latencyMs": latency_ms,
         "inputTokens": input_tokens,
@@ -2607,9 +2802,17 @@ fn emit_request_log(
     output_tokens: Option<u64>,
     error: Option<&str>,
     stream: bool,
+    candidate: Option<&Candidate>,
 ) {
+    let id = uuid::Uuid::new_v4().to_string();
+    let decision_id = id.clone();
+    let selected_deployment = candidate.and_then(|value| value.provider.deployment_id.as_deref());
+    let key_fingerprint = candidate
+        .and_then(|value| value.provider.api_key.as_deref())
+        .map(cooldown::key_fingerprint);
     let payload = json!({
-        "id": uuid::Uuid::new_v4().to_string(),
+        "id": id,
+        "decisionId": decision_id,
         "at": chrono::Utc::now().to_rfc3339(),
         "route": route,
         "remoteIp": remote_ip,
@@ -2622,6 +2825,8 @@ fn emit_request_log(
         "outputTokens": output_tokens,
         "error": error,
         "stream": stream,
+        "selectedDeployment": selected_deployment,
+        "keyFingerprint": key_fingerprint,
     });
     let _ = host.emit(REQUEST_LOG_EVENT, payload);
 }
@@ -2652,6 +2857,7 @@ fn log_success(
         output_tokens,
         None,
         stream,
+        Some(candidate),
     );
     // Draw the consumed tokens down against the calling key's quota.
     let consumed = input_tokens
@@ -2663,11 +2869,7 @@ fn log_success(
         }
     }
     // Record the upstream account's success for rotation + per-account usage.
-    record_key_success(
-        &state.key_rotation,
-        &candidate.provider.id,
-        candidate.provider.api_key.as_deref(),
-    );
+    record_key_success(&state.key_rotation, candidate);
 }
 
 /// Extract token usage from one passthrough SSE payload so streaming passthrough
@@ -2713,6 +2915,7 @@ fn emit_request_log_ctx(
     output_tokens: Option<u64>,
     error: Option<&str>,
     stream: bool,
+    candidate: Option<&Candidate>,
 ) {
     emit_request_log(
         host,
@@ -2727,6 +2930,7 @@ fn emit_request_log_ctx(
         output_tokens,
         error,
         stream,
+        candidate,
     );
 }
 
@@ -2866,6 +3070,26 @@ mod tests {
     }
 
     #[test]
+    fn route_retry_after_reports_all_cooling_pool() {
+        let snapshot: RoutingSnapshot = serde_json::from_value(serde_json::json!({
+            "aliases": [{ "alias": "fast", "entries": [{ "providerId": "groq", "modelId": "m" }] }],
+            "providers": [{
+                "id": "groq", "protocol": "openai", "baseUrl": "https://g/v1",
+                "enabled": true, "rotationEnabled": true, "apiKeys": ["a", "b"]
+            }],
+            "generatedAtMs": 1
+        }))
+        .unwrap();
+        let cooldown = KeyCooldownMap::default();
+        cooldown::record_cooldown(&cooldown, "groq", "a", 5_000, "429");
+        cooldown::record_cooldown(&cooldown, "groq", "b", 3_000, "429");
+        assert_eq!(
+            route_retry_after_ms(&snapshot, &cooldown, "fast", 1_000),
+            Some(2_000)
+        );
+    }
+
+    #[test]
     fn gate_keys_are_endpoint_independent() {
         // The shared-budget invariant: chat, embeddings and responses all reach
         // the limiter through these two helpers, so a single configured cap is
@@ -2881,7 +3105,7 @@ mod tests {
         c.key_id = None;
         assert_eq!(gw_gate_key(&c), "gw:_");
 
-        let candidate = resolve_candidates(&models_snapshot(), "llama-3.3-70b")
+        let candidate = crate::execute::resolve_candidates(&models_snapshot(), "llama-3.3-70b")
             .into_iter()
             .next()
             .expect("groq candidate");
@@ -3058,7 +3282,7 @@ mod tests {
         // …and a stall must be reported as a FAILURE. Both pumps used to emit
         // `ok: true` unconditionally at stream end, which would have logged a
         // hung upstream as a healthy turn.
-        let candidate = resolve_candidates(&models_snapshot(), "llama-3.3-70b")
+        let candidate = crate::execute::resolve_candidates(&models_snapshot(), "llama-3.3-70b")
             .into_iter()
             .next()
             .expect("groq candidate");
@@ -3084,7 +3308,7 @@ mod tests {
         // and /v1/responses have no chat session, so they MUST send null —
         // otherwise their traffic would stick a real conversation to whatever
         // deployment happened to serve an embedding.
-        let candidate = resolve_candidates(&models_snapshot(), "llama-3.3-70b")
+        let candidate = crate::execute::resolve_candidates(&models_snapshot(), "llama-3.3-70b")
             .into_iter()
             .next()
             .expect("groq candidate");
@@ -3129,7 +3353,7 @@ mod tests {
         // is serialized to the renderer — so the tally MUST key on the provider
         // id alone. Working rule 7: pin the intentional invariant.
         let tracker = InFlightTracker::default();
-        let candidate = resolve_candidates(&models_snapshot(), "llama-3.3-70b")
+        let candidate = crate::execute::resolve_candidates(&models_snapshot(), "llama-3.3-70b")
             .into_iter()
             .next()
             .expect("groq candidate");

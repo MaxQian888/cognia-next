@@ -739,6 +739,10 @@ fn plugin_storage_dir(data_dir: &Path) -> PathBuf {
     data_dir.join(".cognia").join("plugins")
 }
 
+fn agent_session_store_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("cognia").join("agent-sessions.sqlite")
+}
+
 async fn run_serve(
     store: &std::sync::Arc<SqliteAppStore>,
     tls_material: &tls::TlsMaterial,
@@ -754,6 +758,7 @@ async fn run_serve(
     // configure command. Failures are logged but don't block startup —
     // a missing file just means no provider is configured yet.
     let data_dir = store_data_dir();
+    app_lib::configure_agent_session_store_path(agent_session_store_path(&data_dir));
     app_lib::task_workspace::install(data_dir.clone())
         .map_err(|error| format!("task workspace: {error}"))?;
     // The headless host serves the same sidecar `host_rpc` protocol as the
@@ -1037,7 +1042,7 @@ async fn run_serve(
 
 #[cfg(test)]
 mod tests {
-    use super::{plugin_storage_dir, Cli, CliCommand};
+    use super::{agent_session_store_path, plugin_storage_dir, Cli, CliCommand};
     use clap::Parser;
     use std::path::Path;
 
@@ -1046,6 +1051,14 @@ mod tests {
         assert_eq!(
             plugin_storage_dir(Path::new("/srv/cognia")),
             Path::new("/srv/cognia/.cognia/plugins")
+        );
+    }
+
+    #[test]
+    fn agent_session_store_is_scoped_beneath_the_server_data_directory() {
+        assert_eq!(
+            agent_session_store_path(Path::new("/srv/cognia")),
+            Path::new("/srv/cognia/cognia/agent-sessions.sqlite")
         );
     }
 

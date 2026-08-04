@@ -52,6 +52,7 @@ export function GatewayProvider() {
     p: settings?.providerSettings,
     c: settings?.customProviders,
     m: settings?.modelMappings,
+    r: settings?.routingConfig,
   })
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -79,6 +80,7 @@ export function GatewayProvider() {
           providerSettings: live.providerSettings,
           customProviders: live.customProviders,
           modelMappings: live.modelMappings,
+          routingConfig: live.routingConfig,
         },
         Date.now(),
         profileMeta
@@ -103,6 +105,7 @@ export function GatewayProvider() {
             providerSettings: live.providerSettings,
             customProviders: live.customProviders,
             modelMappings: live.modelMappings,
+            routingConfig: live.routingConfig,
           },
           Date.now(),
           freshMeta

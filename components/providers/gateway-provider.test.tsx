@@ -91,7 +91,18 @@ const settingsState = {
     defaultProvider: "openai",
     providerSettings: { openai: { providerId: "openai", apiKey: "k", enabled: true } },
     customProviders: [],
-    modelMappings: [],
+    modelMappings: [
+      {
+        id: "fast",
+        alias: "fast",
+        providers: [{ providerId: "openai", modelId: "gpt-4o-mini" }],
+        distribution: "priority",
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ],
+    routingConfig: { strategy: "least-busy", maxFallbackAttempts: 2 },
     autoRouting: { dataPolicy: "local-only" },
   },
 }
@@ -117,6 +128,7 @@ describe("GatewayProvider", () => {
     mockBuildDeps.mockClear()
     mockResolveDecision.mockClear()
     for (const k of Object.keys(handlers)) delete handlers[k]
+    settingsState.settings.routingConfig.maxFallbackAttempts = 2
   })
   afterEach(() => {
     jest.runOnlyPendingTimers()
@@ -132,7 +144,14 @@ describe("GatewayProvider", () => {
     })
     expect(mockGetStatus).toHaveBeenCalled()
     expect(mockPushSnapshot).toHaveBeenCalledWith(
-      expect.objectContaining({ providers: expect.any(Array), aliases: expect.any(Array) })
+      expect.objectContaining({
+        providers: expect.any(Array),
+        aliases: expect.any(Array),
+        routingPolicy: expect.objectContaining({
+          auto: expect.objectContaining({ strategy: "least-busy" }),
+          maxFallbackAttempts: 2,
+        }),
+      })
     )
   })
 
@@ -144,6 +163,28 @@ describe("GatewayProvider", () => {
       await Promise.resolve()
     })
     expect(mockPushSnapshot).not.toHaveBeenCalled()
+  })
+
+  it("re-publishes when routing policy settings change", async () => {
+    const view = render(<GatewayProvider />)
+    await act(async () => {
+      jest.advanceTimersByTime(1500)
+      for (let i = 0; i < 12; i += 1) await Promise.resolve()
+    })
+    mockPushSnapshot.mockClear()
+
+    settingsState.settings.routingConfig.maxFallbackAttempts = 5
+    view.rerender(<GatewayProvider />)
+    await act(async () => {
+      jest.advanceTimersByTime(1500)
+      for (let i = 0; i < 12; i += 1) await Promise.resolve()
+    })
+
+    expect(mockPushSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routingPolicy: expect.objectContaining({ maxFallbackAttempts: 5 }),
+      })
+    )
   })
 
   it("forwards request-outcome events into telemetry", () => {

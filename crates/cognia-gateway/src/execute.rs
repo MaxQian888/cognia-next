@@ -25,11 +25,17 @@ pub struct Candidate {
 /// and reset on restart — a fresh cursor after restart is harmless.
 #[derive(Default)]
 pub struct ProviderKeyRotation {
-    /// Round-robin cursor: the pool index last handed out.
-    last_index: usize,
+    /// Round-robin cursor: the pool index handed out by the next reservation.
+    next_index: usize,
     /// Per-key cumulative successful-use counts (drives `least-used` + the
     /// per-account usage surface).
     use_counts: HashMap<String, u64>,
+    /// Attempt reservations, advanced while holding the map lock so concurrent
+    /// least-used requests cannot all observe the same unused credential.
+    reservation_counts: HashMap<String, u64>,
+    /// Ordered usable-pool identity. Cursor changes never carry across a pool
+    /// replacement, preventing removed credentials from influencing selection.
+    pool_fingerprint: String,
 }
 
 /// Rotation cursors keyed by provider id. Lives on `GatewayState`, shared with
@@ -40,7 +46,19 @@ pub type KeyRotationMap = Mutex<HashMap<String, ProviderKeyRotation>>;
 /// round-robin this advances (and persists) the per-provider cursor; random
 /// picks a fresh start; least-used picks the account with the fewest recorded
 /// successes.
-fn rotation_start(strategy: &str, pool: &[String], st: &mut ProviderKeyRotation) -> usize {
+fn rotation_start(
+    strategy: &str,
+    pool: &[String],
+    raw_pool_fingerprint: &str,
+    st: &mut ProviderKeyRotation,
+) -> usize {
+    let pool_fingerprint = raw_pool_fingerprint.to_string();
+    if st.pool_fingerprint != pool_fingerprint {
+        st.pool_fingerprint = pool_fingerprint;
+        st.next_index = 0;
+        st.use_counts.retain(|key, _| pool.contains(key));
+        st.reservation_counts.retain(|key, _| pool.contains(key));
+    }
     match strategy {
         "random" => {
             use rand::Rng;
@@ -50,18 +68,28 @@ fn rotation_start(strategy: &str, pool: &[String], st: &mut ProviderKeyRotation)
             let mut best = 0usize;
             let mut best_count = u64::MAX;
             for (i, key) in pool.iter().enumerate() {
-                let count = st.use_counts.get(key).copied().unwrap_or(0);
+                // A reserved-and-successful attempt appears in both maps but
+                // is one use, not two. `max` also lets in-flight reservations
+                // influence selection before their outcome is known.
+                let count = st
+                    .use_counts
+                    .get(key)
+                    .copied()
+                    .unwrap_or(0)
+                    .max(st.reservation_counts.get(key).copied().unwrap_or(0));
                 if count < best_count {
                     best_count = count;
                     best = i;
                 }
             }
+            *st.reservation_counts.entry(pool[best].clone()).or_insert(0) += 1;
             best
         }
         // round-robin (default): hand out the next slot and remember it.
         _ => {
-            st.last_index = (st.last_index + 1) % pool.len();
-            st.last_index
+            let selected = st.next_index % pool.len();
+            st.next_index = (selected + 1) % pool.len();
+            selected
         }
     }
 }
@@ -88,12 +116,13 @@ pub fn expand_key_pools(
     let mut out = Vec::with_capacity(candidates.len());
     for candidate in candidates {
         let raw_pool: Vec<String> = if candidate.provider.rotation_enabled {
+            let mut seen = std::collections::HashSet::new();
             candidate
                 .provider
                 .api_keys
                 .iter()
                 .map(|k| k.trim().to_string())
-                .filter(|k| !k.is_empty())
+                .filter(|k| !k.is_empty() && seen.insert(k.clone()))
                 .collect()
         } else {
             Vec::new()
@@ -116,8 +145,17 @@ pub fn expand_key_pools(
                 .as_deref()
                 .unwrap_or("round-robin");
             let mut guard = rotation.lock();
-            let st = guard.entry(candidate.provider.id.clone()).or_default();
-            rotation_start(strategy, &pool, st)
+            let rotation_key = format!(
+                "{}|{}",
+                candidate.provider.id,
+                candidate
+                    .provider
+                    .deployment_id
+                    .as_deref()
+                    .unwrap_or(&candidate.provider.id)
+            );
+            let st = guard.entry(rotation_key).or_default();
+            rotation_start(strategy, &pool, &raw_pool.join("\u{1f}"), st)
         } else {
             0
         };
@@ -137,10 +175,21 @@ pub fn expand_key_pools(
 /// Record a successful upstream call against a pooled key so `least-used`
 /// rotation and the per-account usage surface reflect real traffic. A no-op
 /// for keyless providers.
-pub fn record_key_success(rotation: &KeyRotationMap, provider_id: &str, api_key: Option<&str>) {
+pub fn record_key_success(rotation: &KeyRotationMap, candidate: &Candidate) {
+    let provider_id = &candidate.provider.id;
+    let api_key = candidate.provider.api_key.as_deref();
     let Some(key) = api_key else { return };
     let mut guard = rotation.lock();
-    let st = guard.entry(provider_id.to_string()).or_default();
+    let rotation_key = format!(
+        "{}|{}",
+        provider_id,
+        candidate
+            .provider
+            .deployment_id
+            .as_deref()
+            .unwrap_or(provider_id)
+    );
+    let st = guard.entry(rotation_key).or_default();
     *st.use_counts.entry(key.to_string()).or_insert(0) += 1;
 }
 
@@ -683,6 +732,60 @@ mod tests {
             first[0].provider.api_key.as_deref(),
             second[0].provider.api_key.as_deref()
         );
+        assert_eq!(first[0].provider.api_key.as_deref(), Some("sk-a"));
+    }
+
+    #[test]
+    fn pool_changes_reset_round_robin_without_removed_keys() {
+        let rotation = KeyRotationMap::default();
+        let cooldown = KeyCooldownMap::default();
+        let _ = expand_key_pools(
+            vec![pooled_candidate(&["sk-a", "sk-b"], true, None)],
+            &rotation,
+            &cooldown,
+            0,
+        );
+        let changed = expand_key_pools(
+            vec![pooled_candidate(&["sk-x", "sk-y"], true, None)],
+            &rotation,
+            &cooldown,
+            0,
+        );
+        assert_eq!(changed[0].provider.api_key.as_deref(), Some("sk-x"));
+        assert!(changed.iter().all(|candidate| !matches!(
+            candidate.provider.api_key.as_deref(),
+            Some("sk-a" | "sk-b")
+        )));
+    }
+
+    #[test]
+    fn least_used_reservations_avoid_concurrent_stampedes() {
+        let rotation = KeyRotationMap::default();
+        let cooldown = KeyCooldownMap::default();
+        let first = expand_key_pools(
+            vec![pooled_candidate(
+                &["sk-a", "sk-b"],
+                true,
+                Some("least-used"),
+            )],
+            &rotation,
+            &cooldown,
+            0,
+        );
+        let second = expand_key_pools(
+            vec![pooled_candidate(
+                &["sk-a", "sk-b"],
+                true,
+                Some("least-used"),
+            )],
+            &rotation,
+            &cooldown,
+            0,
+        );
+        assert_ne!(
+            first[0].provider.api_key.as_deref(),
+            second[0].provider.api_key.as_deref()
+        );
     }
 
     #[test]
@@ -690,9 +793,11 @@ mod tests {
         let rotation = KeyRotationMap::default();
         let cooldown = KeyCooldownMap::default();
         // sk-a used twice, sk-b once → least-used should start at sk-c (zero).
-        record_key_success(&rotation, "groq", Some("sk-a"));
-        record_key_success(&rotation, "groq", Some("sk-a"));
-        record_key_success(&rotation, "groq", Some("sk-b"));
+        for key in ["sk-a", "sk-a", "sk-b"] {
+            let mut candidate = pooled_candidate(&["sk-a", "sk-b", "sk-c"], true, None);
+            candidate.provider.api_key = Some(key.to_string());
+            record_key_success(&rotation, &candidate);
+        }
         let out = expand_key_pools(
             vec![pooled_candidate(
                 &["sk-a", "sk-b", "sk-c"],

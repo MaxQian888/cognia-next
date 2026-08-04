@@ -131,6 +131,23 @@ export function GatewayOverviewPanel({
               })
             : t("snapshotNone")}
         </p>
+        <p className="text-xs text-muted-foreground" data-testid="gateway-routing-authority">
+          {status?.localRoutingEnabled
+            ? t("localRoutingActive", {
+                revision: status.routingPolicyRevision ?? t("routingRevisionUnavailable"),
+              })
+            : t("localRoutingLegacy")}
+        </p>
+        {status?.localRoutingEnabled && status.routingStrategy ? (
+          <p className="text-xs text-muted-foreground" data-testid="gateway-auto-strategy">
+            {t("autoStrategy", { strategy: status.routingStrategy })}
+          </p>
+        ) : null}
+        {status?.routingStrategyUnavailable ? (
+          <p className="text-xs text-destructive" role="alert">
+            {t("strategyUnavailable", { strategy: status.routingStrategyUnavailable })}
+          </p>
+        ) : null}
       </SettingsCard>
 
       <UpstreamSelfCheckCard running={running} onProbed={onRefreshStatus} />

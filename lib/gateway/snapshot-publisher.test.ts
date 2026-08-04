@@ -8,7 +8,7 @@ import type { ModelMapping } from "@cognia/provider-types/model-mapping"
 
 const mapping = (
   alias: string,
-  providers: Array<{ providerId: string; modelId: string }>,
+  providers: ModelMapping["providers"],
   enabled = true
 ): ModelMapping => ({
   id: `m-${alias}`,
@@ -42,6 +42,7 @@ describe("buildGatewaySnapshot", () => {
       byLegacyId: {
         openai: {
           deploymentId: "openai",
+          models: {},
           transport: {
             authScheme: "bearer",
             staticHeaders: [["x-tenant", "t1"]],
@@ -120,6 +121,80 @@ describe("buildGatewaySnapshot", () => {
     const snap = buildGatewaySnapshot(slice, 1)
     expect(snap.aliases.map((a) => a.alias)).toEqual(["fast"])
     expect(snap.aliases[0].entries.map((e) => e.providerId)).toEqual(["groq", "openai"])
+  })
+
+  it("publishes V2 alias distribution and the local auto-routing policy", () => {
+    const weighted = mapping("balanced", [
+      { providerId: "groq", modelId: "llama", weight: 3 },
+      { providerId: "openai", modelId: "gpt-4o-mini", weight: 1 },
+    ])
+    weighted.distribution = "weighted"
+    const snap = buildGatewaySnapshot(
+      {
+        modelMappings: [weighted],
+        routingConfig: {
+          strategy: "least-busy",
+          maxFallbackAttempts: 4,
+        },
+      },
+      42
+    )
+
+    expect(snap.routingPolicy).toMatchObject({
+      schemaVersion: 2,
+      policyRevision: "42",
+      auto: { modelId: "auto", strategy: "least-busy" },
+      maxFallbackAttempts: 4,
+    })
+    expect(snap.aliases[0]).toMatchObject({
+      distribution: "weighted",
+      entries: [
+        { providerId: "groq", modelId: "llama", weight: 3 },
+        { providerId: "openai", modelId: "gpt-4o-mini", weight: 1 },
+      ],
+    })
+  })
+
+  it("projects deployment availability and capabilities into routing entries", () => {
+    const snap = buildGatewaySnapshot(
+      { modelMappings: [mapping("vision", [{ providerId: "openai", modelId: "gpt-v" }])] },
+      7,
+      {
+        profileVersion: 7,
+        byLegacyId: {
+          openai: {
+            deploymentId: "deployment-openai",
+            enabled: true,
+            region: "local",
+            models: {
+              "gpt-v": { tools: true, vision: true, streaming: true, contextTokens: 128_000 },
+            },
+          },
+        },
+      }
+    )
+
+    expect(snap.aliases[0].entries[0]).toMatchObject({
+      deploymentId: "deployment-openai",
+      available: true,
+      locality: "local",
+      capabilities: { tools: true, vision: true, streaming: true, contextTokens: 128_000 },
+    })
+  })
+
+  it("degrades unsupported strategies explicitly to reliability", () => {
+    const snap = buildGatewaySnapshot(
+      {
+        modelMappings: [mapping("fast", [{ providerId: "groq", modelId: "llama" }])],
+        routingConfig: { strategy: "plugin:private-selector" },
+      },
+      9
+    )
+
+    expect(snap.routingPolicy?.auto).toMatchObject({
+      strategy: "reliability",
+      strategyUnavailable: "plugin:private-selector",
+    })
   })
 
   it("dedupes provider ids referenced by aliases and settings", () => {

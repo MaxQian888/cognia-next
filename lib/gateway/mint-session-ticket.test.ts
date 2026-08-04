@@ -26,6 +26,7 @@ jest.mock("@/stores/settings", () => ({
         providerSettings: {},
         customProviders: [],
         modelMappings: [],
+        routingConfig: { strategy: "difficulty", maxFallbackAttempts: 2 },
       },
     }),
   },
@@ -142,6 +143,13 @@ describe("mintSessionRouteTicket", () => {
         credentialAffinity: "session-sticky",
         allowAuthFailover: false,
       })
+    )
+    expect(buildSnapshotMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routingConfig: { strategy: "difficulty", maxFallbackAttempts: 2 },
+      }),
+      expect.any(Number),
+      undefined
     )
   })
 

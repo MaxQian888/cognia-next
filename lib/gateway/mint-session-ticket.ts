@@ -106,6 +106,7 @@ export async function mintSessionRouteTicket(
         providerSettings: live.providerSettings,
         customProviders: live.customProviders,
         modelMappings: live.modelMappings,
+        routingConfig: live.routingConfig,
       },
       Date.now(),
       profileMeta

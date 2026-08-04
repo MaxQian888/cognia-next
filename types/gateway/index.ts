@@ -28,6 +28,16 @@ export interface GatewayConfig {
   maxRetries: number
   /** Upstream statuses that advance the failover walk. */
   retryStatusCodes: number[]
+  /** Exponential retry backoff floor in milliseconds. */
+  retryBackoffBaseMs: number
+  /** Exponential retry backoff ceiling in milliseconds. */
+  retryBackoffMaxMs: number
+  /** Total time budget spent waiting between attempts. */
+  maxRetryWaitMs: number
+  /** Prefer upstream recovery headers over the local backoff schedule. */
+  respectRetryAfter: boolean
+  /** Rollout kill switch for the Rust-local V2 planner. */
+  gatewayLocalRoutingV2: boolean
   /** Model/alias ids the gateway advertises + serves. Empty = expose all. */
   exposedModels: string[]
   /** List only aliases in `/v1/models` (hide raw provider model ids). */
@@ -75,6 +85,11 @@ export const DEFAULT_GATEWAY_CONFIG: GatewayConfig = {
   requestTimeoutSecs: 300,
   maxRetries: 0,
   retryStatusCodes: [408, 409, 429, 500, 502, 503, 504],
+  retryBackoffBaseMs: 250,
+  retryBackoffMaxMs: 4000,
+  maxRetryWaitMs: 60000,
+  respectRetryAfter: true,
+  gatewayLocalRoutingV2: true,
   exposedModels: [],
   hideRawProviderModels: false,
   cooldownFallbackSecs: 20,
@@ -110,6 +125,14 @@ export interface GatewayStatus {
   snapshotGeneratedAtMs: number | null
   snapshotProviderCount: number
   snapshotAliasCount: number
+  /** Active V2 policy revision; absent for legacy snapshots. */
+  routingPolicyRevision?: string | null
+  /** Effective built-in strategy used for the virtual `auto` model. */
+  routingStrategy?: GatewayRoutingStrategy | null
+  /** Requested plugin/custom strategy that degraded to reliability. */
+  routingStrategyUnavailable?: string | null
+  /** True when requests are planned locally without renderer IPC. */
+  localRoutingEnabled?: boolean
 }
 
 /** A scoped API key WITH its secret — returned only on create / reveal. */
@@ -161,12 +184,83 @@ export interface GatewayApiKeyPatch {
 export interface GatewaySnapshotEntry {
   providerId: string
   modelId: string
+  /** Optional deployment-level weight used by weighted alias distribution. */
+  weight?: number
+  deploymentId?: string
+  available?: boolean
+  locality?: "local" | "remote"
+  capabilities?: {
+    tools?: boolean
+    vision?: boolean
+    structuredOutput?: boolean
+    streaming?: boolean
+    contextTokens?: number
+  }
+  pricingPer1M?: number
+  latencyMs?: number
+  successRate?: number
+  conditions?: { maxCostPer1M?: number; maxLatencyMs?: number }
 }
 
 /** An alias and its routing-engine-ordered entries. */
 export interface GatewayAliasSnapshot {
   alias: string
+  /** Explicit aliases own their distribution policy. Legacy snapshots default to priority. */
+  distribution?: "priority" | "weighted" | "round-robin"
   entries: GatewaySnapshotEntry[]
+  parameterDefaults?: {
+    temperature?: number
+    maxTokens?: number
+    topP?: number
+    frequencyPenalty?: number
+    presencePenalty?: number
+  }
+}
+
+export type GatewayRoutingStrategy =
+  | "reliability"
+  | "quality"
+  | "cost"
+  | "speed"
+  | "balanced"
+  | "adaptive"
+  | "least-busy"
+  | "difficulty"
+
+export interface GatewayAutoRoutingPolicy {
+  modelId: string
+  strategy: GatewayRoutingStrategy | (string & {})
+  candidateAliases: string[]
+  thresholds?: { balanced: number; powerful: number }
+  /** Requested plugin/custom strategy that degraded to reliability. */
+  strategyUnavailable?: string
+}
+
+/** Versioned, secret-free policy executed on the Rust request hot path. */
+export interface GatewayRoutingPolicySnapshotV2 {
+  schemaVersion: 2
+  policyRevision: string
+  auto: GatewayAutoRoutingPolicy
+  maxFallbackAttempts: number
+  tierAliases?: Record<string, string>
+  providerConstraints?: Array<{
+    providerId: string
+    maxRequestsPerMinute?: number
+    maxTokensPerMinute?: number
+    dailyCostBudget?: number
+    priority?: number
+    enabled: boolean
+    currentRequestsPerMinute?: number
+    currentTokensPerMinute?: number
+    currentDailyCost?: number
+    circuitOpen?: boolean
+  }>
+  circuitBreaker?: {
+    enabled: boolean
+    failureThreshold?: number
+    windowDurationMs?: number
+    cooldownMs?: number
+  }
 }
 
 /** Upstream multi-account rotation strategy — mirrors the app's
@@ -210,6 +304,8 @@ export interface GatewayRoutingSnapshot {
   aliases: GatewayAliasSnapshot[]
   providers: GatewayProviderSnapshot[]
   generatedAtMs: number
+  /** Present on V2 publishers; absent snapshots retain legacy priority behavior. */
+  routingPolicy?: GatewayRoutingPolicySnapshotV2
   /** Provider Profile Store CAS version this snapshot projects (R3). */
   profileVersion?: number
   /** Publisher identity; required alongside profileVersion. */
@@ -280,12 +376,32 @@ export interface GatewayRequestLogRow {
   outputTokens: number | null
   error: string | null
   stream: boolean
+  decisionId?: string | null
+  policyRevision?: string | null
+  strategy?: GatewayRoutingStrategy | string | null
+  distribution?: "priority" | "weighted" | "round-robin" | null
+  routingLatencyMs?: number | null
+  selectedDeployment?: string | null
+  attempts?: Array<{
+    providerId: string
+    modelId: string
+    deploymentId?: string | null
+    status?: number | null
+    latencyMs: number
+    reason?: string | null
+    keyFingerprint?: string | null
+  }>
+  fallbackReason?: string | null
+  keyFingerprint?: string | null
 }
 
 /** Per-attempt outcome (from the `gateway://request-outcome` event). */
 export interface GatewayRequestOutcome {
   providerId: string
   modelId: string
+  deploymentId?: string | null
+  /** Redacted upstream credential identity; never contains the secret. */
+  keyFingerprint?: string | null
   ok: boolean
   latencyMs: number
   inputTokens: number | null

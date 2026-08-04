@@ -126,6 +126,7 @@ export function ModelAliasEditor({ open, onOpenChange, mapping }: ModelAliasEdit
                 <SelectContent>
                   <SelectItem value="priority">{t("distributionPriority")}</SelectItem>
                   <SelectItem value="weighted">{t("distributionWeighted")}</SelectItem>
+                  <SelectItem value="round-robin">{t("distributionRoundRobin")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>

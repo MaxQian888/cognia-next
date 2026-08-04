@@ -17,6 +17,52 @@ use serde::Deserialize;
 pub struct SnapshotEntry {
     pub provider_id: String,
     pub model_id: String,
+    #[serde(default)]
+    pub weight: Option<u32>,
+    #[serde(default)]
+    pub deployment_id: Option<String>,
+    #[serde(default)]
+    pub available: Option<bool>,
+    #[serde(default)]
+    pub locality: Option<String>,
+    #[serde(default)]
+    pub capabilities: Option<CandidateCapabilities>,
+    #[serde(default)]
+    pub pricing_per_1_m: Option<f64>,
+    #[serde(default)]
+    pub latency_ms: Option<f64>,
+    #[serde(default)]
+    pub success_rate: Option<f64>,
+    #[serde(default)]
+    pub conditions: Option<EntryConditions>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CandidateCapabilities {
+    #[serde(default)]
+    pub tools: Option<bool>,
+    #[serde(default)]
+    pub vision: Option<bool>,
+    #[serde(default)]
+    pub structured_output: Option<bool>,
+    #[serde(default)]
+    pub streaming: Option<bool>,
+    #[serde(default)]
+    pub context_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryConditions {
+    #[serde(default)]
+    pub max_cost_per_1_m: Option<f64>,
+    #[serde(default)]
+    pub max_latency_ms: Option<f64>,
+}
+
+fn default_distribution() -> String {
+    "priority".to_string()
 }
 
 /// Wire/auth behavior for a provider entry (ADR-0090 Phase 2). Projected from
@@ -52,9 +98,70 @@ pub enum SnapshotAuthority {
 #[serde(rename_all = "camelCase")]
 pub struct AliasSnapshot {
     pub alias: String,
+    #[serde(default = "default_distribution")]
+    pub distribution: String,
     /// Pre-ordered by the renderer's routing engine: primary first, then the
     /// fallback chain. The gateway walks it in order.
     pub entries: Vec<SnapshotEntry>,
+    #[serde(default)]
+    pub parameter_defaults: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoRoutingPolicy {
+    pub model_id: String,
+    pub strategy: String,
+    #[serde(default)]
+    pub candidate_aliases: Vec<String>,
+    #[serde(default)]
+    pub thresholds: Option<AutoRoutingThresholds>,
+    #[serde(default)]
+    pub strategy_unavailable: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AutoRoutingThresholds {
+    pub balanced: f64,
+    pub powerful: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutingPolicySnapshotV2 {
+    pub schema_version: u32,
+    pub policy_revision: String,
+    pub auto: AutoRoutingPolicy,
+    pub max_fallback_attempts: u32,
+    #[serde(default)]
+    pub tier_aliases: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub provider_constraints: Vec<ProviderConstraintSnapshot>,
+    #[serde(default)]
+    pub circuit_breaker: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderConstraintSnapshot {
+    pub provider_id: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub max_requests_per_minute: Option<u64>,
+    #[serde(default)]
+    pub max_tokens_per_minute: Option<u64>,
+    #[serde(default)]
+    pub daily_cost_budget: Option<f64>,
+    #[serde(default)]
+    pub priority: Option<i64>,
+    #[serde(default)]
+    pub current_requests_per_minute: Option<u64>,
+    #[serde(default)]
+    pub current_tokens_per_minute: Option<u64>,
+    #[serde(default)]
+    pub current_daily_cost: Option<f64>,
+    #[serde(default)]
+    pub circuit_open: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -103,6 +210,8 @@ pub struct RoutingSnapshot {
     #[serde(default)]
     pub providers: Vec<ProviderSnapshot>,
     pub generated_at_ms: i64,
+    #[serde(default)]
+    pub routing_policy: Option<RoutingPolicySnapshotV2>,
     /// Provider Profile Store CAS version this snapshot projects. Legacy
     /// (pre-Phase-2) publishers omit it.
     #[serde(default)]
@@ -139,6 +248,175 @@ impl RoutingSnapshot {
     pub fn validate(&self) -> Result<(), String> {
         if self.profile_version.is_some() && self.authority.is_none() {
             return Err("versioned snapshot must declare its authority".into());
+        }
+        let mut provider_ids = std::collections::HashSet::new();
+        let mut deployment_ids = std::collections::HashSet::new();
+        for provider in &self.providers {
+            let provider_id = provider.id.trim().to_ascii_lowercase();
+            if provider_id.is_empty() || !provider_ids.insert(provider_id) {
+                return Err(format!("duplicate provider '{}'", provider.id));
+            }
+            if let Some(deployment_id) = provider.deployment_id.as_deref() {
+                let deployment_id = deployment_id.trim().to_ascii_lowercase();
+                if deployment_id.is_empty() || !deployment_ids.insert(deployment_id) {
+                    return Err(format!(
+                        "duplicate deployment '{}'",
+                        provider.deployment_id.as_deref().unwrap_or_default()
+                    ));
+                }
+            }
+            if let Some(strategy) = provider.rotation_strategy.as_deref() {
+                if !matches!(strategy, "round-robin" | "random" | "least-used") {
+                    return Err(format!(
+                        "provider {}: unknown rotation strategy '{strategy}'",
+                        provider.id
+                    ));
+                }
+            }
+        }
+
+        let mut aliases = std::collections::HashSet::new();
+        for alias in &self.aliases {
+            let normalized = alias.alias.trim().to_ascii_lowercase();
+            if normalized.is_empty() || !aliases.insert(normalized) {
+                return Err(format!("duplicate alias '{}'", alias.alias));
+            }
+            if !matches!(
+                alias.distribution.as_str(),
+                "priority" | "weighted" | "round-robin"
+            ) {
+                return Err(format!(
+                    "alias {}: unknown distribution '{}'",
+                    alias.alias, alias.distribution
+                ));
+            }
+            if alias.entries.is_empty() {
+                return Err(format!("alias {}: no candidates", alias.alias));
+            }
+            let mut entries = std::collections::HashSet::new();
+            for entry in &alias.entries {
+                if entry.provider_id.trim().is_empty() || entry.model_id.trim().is_empty() {
+                    return Err(format!("alias {}: blank deployment entry", alias.alias));
+                }
+                let identity = format!(
+                    "{}:{}",
+                    entry.provider_id.to_ascii_lowercase(),
+                    entry.model_id.to_ascii_lowercase()
+                );
+                if !entries.insert(identity) {
+                    return Err(format!("alias {}: duplicate deployment entry", alias.alias));
+                }
+                if entry
+                    .locality
+                    .as_deref()
+                    .is_some_and(|value| !matches!(value, "local" | "remote"))
+                {
+                    return Err(format!("alias {}: invalid locality", alias.alias));
+                }
+                if [entry.pricing_per_1_m, entry.latency_ms, entry.success_rate]
+                    .into_iter()
+                    .flatten()
+                    .any(|value| !value.is_finite() || value < 0.0)
+                    || entry.success_rate.is_some_and(|value| value > 1.0)
+                {
+                    return Err(format!("alias {}: invalid routing metric", alias.alias));
+                }
+            }
+            let executable = alias.entries.iter().any(|entry| {
+                self.providers.iter().any(|provider| {
+                    provider.id == entry.provider_id
+                        && provider.enabled
+                        && crate::execute::is_executable_protocol(&provider.protocol)
+                        && !provider.base_url.trim().is_empty()
+                })
+            });
+            if !executable {
+                return Err(format!("alias {}: no executable candidates", alias.alias));
+            }
+            if alias.distribution == "weighted"
+                && alias
+                    .entries
+                    .iter()
+                    .any(|entry| entry.weight.unwrap_or(1) == 0)
+            {
+                return Err(format!("alias {}: weights must be positive", alias.alias));
+            }
+        }
+        if let Some(policy) = &self.routing_policy {
+            if policy.schema_version != 2 {
+                return Err(format!(
+                    "unsupported routing policy schema {}",
+                    policy.schema_version
+                ));
+            }
+            if policy.policy_revision.trim().is_empty() {
+                return Err("routing policy revision must not be blank".into());
+            }
+            if policy.auto.model_id != "auto" {
+                return Err("routing policy virtual model must be 'auto'".into());
+            }
+            if !matches!(
+                policy.auto.strategy.as_str(),
+                "reliability"
+                    | "quality"
+                    | "cost"
+                    | "speed"
+                    | "balanced"
+                    | "adaptive"
+                    | "least-busy"
+                    | "difficulty"
+            ) {
+                return Err(format!(
+                    "unknown built-in routing strategy '{}'",
+                    policy.auto.strategy
+                ));
+            }
+            if policy.max_fallback_attempts == 0 {
+                return Err("maxFallbackAttempts must be positive".into());
+            }
+            if policy.auto.candidate_aliases.is_empty()
+                || policy
+                    .auto
+                    .candidate_aliases
+                    .iter()
+                    .any(|candidate| !aliases.contains(&candidate.to_ascii_lowercase()))
+            {
+                return Err("auto policy references an unknown or empty candidate alias".into());
+            }
+            if let Some(thresholds) = &policy.auto.thresholds {
+                if !(0.0..=1.0).contains(&thresholds.balanced)
+                    || !(0.0..=1.0).contains(&thresholds.powerful)
+                    || thresholds.balanced > thresholds.powerful
+                {
+                    return Err("auto difficulty thresholds are invalid".into());
+                }
+            }
+            for constraint in &policy.provider_constraints {
+                if !provider_ids.contains(&constraint.provider_id.to_ascii_lowercase()) {
+                    return Err(format!(
+                        "provider constraint references unknown provider '{}'",
+                        constraint.provider_id
+                    ));
+                }
+                if constraint
+                    .daily_cost_budget
+                    .is_some_and(|value| !value.is_finite() || value < 0.0)
+                    || constraint
+                        .current_daily_cost
+                        .is_some_and(|value| !value.is_finite() || value < 0.0)
+                {
+                    return Err(format!(
+                        "provider {}: invalid budget metric",
+                        constraint.provider_id
+                    ));
+                }
+            }
+            if aliases.contains(&policy.auto.model_id.to_ascii_lowercase()) {
+                return Err(format!(
+                    "auto model '{}' collides with an alias",
+                    policy.auto.model_id
+                ));
+            }
         }
         for provider in &self.providers {
             let Some(transport) = &provider.transport else {
@@ -277,5 +555,82 @@ mod tests {
         );
         assert!(pooled.rotation_enabled);
         assert_eq!(pooled.rotation_strategy.as_deref(), Some("least-used"));
+    }
+
+    #[test]
+    fn validates_v2_policy_and_alias_distribution() {
+        let value = serde_json::json!({
+            "aliases": [{
+                "alias": "fast",
+                "distribution": "round-robin",
+                "entries": [
+                    { "providerId": "groq", "modelId": "llama", "weight": 1 },
+                    { "providerId": "anthropic", "modelId": "claude", "weight": 1 }
+                ]
+            }],
+            "providers": [
+                { "id": "groq", "protocol": "openai", "baseUrl": "https://g/v1", "enabled": true },
+                { "id": "anthropic", "protocol": "anthropic", "baseUrl": "https://a/v1", "enabled": true }
+            ],
+            "routingPolicy": {
+                "schemaVersion": 2,
+                "policyRevision": "7",
+                "auto": { "modelId": "auto", "strategy": "reliability", "candidateAliases": ["fast"] },
+                "maxFallbackAttempts": 3
+            },
+            "generatedAtMs": 7
+        });
+        let snapshot: RoutingSnapshot = serde_json::from_value(value).unwrap();
+        assert_eq!(snapshot.aliases[0].distribution.as_str(), "round-robin");
+        assert_eq!(snapshot.routing_policy.as_ref().unwrap().schema_version, 2);
+        assert!(snapshot.validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_duplicate_aliases_and_auto_model_collisions() {
+        let value = serde_json::json!({
+          "aliases": [
+            { "alias": "auto", "entries": [{ "providerId": "groq", "modelId": "m" }] },
+            { "alias": "AUTO", "entries": [{ "providerId": "groq", "modelId": "m" }] }
+          ],
+          "providers": [{ "id": "groq", "protocol": "openai", "baseUrl": "https://g/v1", "enabled": true }],
+          "routingPolicy": {
+            "schemaVersion": 2,
+            "policyRevision": "1",
+            "auto": { "modelId": "auto", "strategy": "reliability", "candidateAliases": [] },
+            "maxFallbackAttempts": 3
+          },
+          "generatedAtMs": 1
+        });
+        let snapshot: RoutingSnapshot = serde_json::from_value(value).unwrap();
+        assert!(snapshot.validate().unwrap_err().contains("duplicate alias"));
+    }
+
+    #[test]
+    fn rejects_unknown_strategies_and_missing_auto_aliases() {
+        let mut value = serde_json::json!({
+          "aliases": [{ "alias": "fast", "entries": [{ "providerId": "groq", "modelId": "m" }] }],
+          "providers": [{ "id": "groq", "protocol": "openai", "baseUrl": "https://g/v1", "enabled": true }],
+          "routingPolicy": {
+            "schemaVersion": 2,
+            "policyRevision": "1",
+            "auto": { "modelId": "auto", "strategy": "plugin:x", "candidateAliases": ["fast"] },
+            "maxFallbackAttempts": 3
+          },
+          "generatedAtMs": 1
+        });
+        let snapshot: RoutingSnapshot = serde_json::from_value(value.clone()).unwrap();
+        assert!(snapshot
+            .validate()
+            .unwrap_err()
+            .contains("unknown built-in"));
+
+        value["routingPolicy"]["auto"]["strategy"] = serde_json::json!("reliability");
+        value["routingPolicy"]["auto"]["candidateAliases"] = serde_json::json!(["missing"]);
+        let snapshot: RoutingSnapshot = serde_json::from_value(value).unwrap();
+        assert!(snapshot
+            .validate()
+            .unwrap_err()
+            .contains("unknown or empty"));
     }
 }
