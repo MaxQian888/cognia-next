@@ -404,6 +404,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     getPluginEventHooks().dispatchWorkflowError(workflow.id, sortError)
     getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
     emitCompletionFanout("failed", { error: { message } })
+    if (timeoutHandle) clearTimeout(timeoutHandle)
     await releaseRunResources(runId)
     return { runId, status: "failed", error: { message } }
   }
@@ -472,6 +473,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
       await persistRunState({ runId, workflowId: workflow.id, status: "failed" })
       getPluginEventHooks().dispatchWorkflowError(workflow.id, new Error(message))
       getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
+      if (timeoutHandle) clearTimeout(timeoutHandle)
       await releaseRunResources(runId)
       return { runId, status: "failed", error: { message } }
     }
