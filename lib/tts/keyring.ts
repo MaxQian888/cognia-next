@@ -21,6 +21,8 @@ export type KeyringProviderId =
   | "deepgram"
   | "xiaomi"
   | "mistral"
+  /** Live voice only — xAI has no TTS provider, so `keyringProviderFor` never returns it. */
+  | "xai"
 
 export const KEYRING_PROVIDER_IDS: KeyringProviderId[] = [
   "openai",
@@ -32,6 +34,7 @@ export const KEYRING_PROVIDER_IDS: KeyringProviderId[] = [
   "deepgram",
   "xiaomi",
   "mistral",
+  "xai",
 ]
 
 /** Map a TTSProvider → the keyring account it consumes. */

@@ -56,9 +56,16 @@ describe("keyringProviderFor", () => {
 })
 
 describe("KEYRING_PROVIDER_IDS", () => {
-  it("matches the nine keyed provider accounts", () => {
-    expect(KEYRING_PROVIDER_IDS).toHaveLength(9)
-    expect(new Set(KEYRING_PROVIDER_IDS).size).toBe(9)
+  it("lists every keyring account exactly once", () => {
+    expect(KEYRING_PROVIDER_IDS).toHaveLength(10)
+    expect(new Set(KEYRING_PROVIDER_IDS).size).toBe(10)
+  })
+
+  it("carries xai, which is a live-voice account with no TTS provider", () => {
+    // The keyring backs both subsystems, so its account list is a superset of
+    // the TTS providers: `keyringProviderFor` never returns xai, but live voice
+    // still needs somewhere to store the key.
+    expect(KEYRING_PROVIDER_IDS).toContain("xai")
   })
 })
 
