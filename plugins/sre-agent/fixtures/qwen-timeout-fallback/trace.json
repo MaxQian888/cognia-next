@@ -1,0 +1,45 @@
+{
+  "trace_id": "9aa10000000000000000000000000001",
+  "root": "span-root",
+  "spans": [
+    {
+      "span_id": "span-root",
+      "service": "gateway",
+      "name": "POST /v1/responses",
+      "duration_ms": 186287,
+      "status": "ok"
+    },
+    {
+      "span_id": "span-provider-a",
+      "parent_span_id": "span-root",
+      "service": "gateway",
+      "name": "provider.call qwen-vllm-a",
+      "duration_ms": 45115,
+      "status": "error"
+    },
+    {
+      "span_id": "span-vllm-enqueue",
+      "parent_span_id": "span-provider-a",
+      "service": "vllm-server",
+      "name": "vllm.scheduler.enqueue",
+      "duration_ms": 2100,
+      "status": "ok"
+    },
+    {
+      "span_id": "span-vllm-decode",
+      "parent_span_id": "span-provider-a",
+      "service": "vllm-server",
+      "name": "vllm.decode",
+      "duration_ms": 42120,
+      "status": "error"
+    },
+    {
+      "span_id": "span-provider-b",
+      "parent_span_id": "span-root",
+      "service": "gateway",
+      "name": "provider.call qwen-vllm-b",
+      "duration_ms": 140312,
+      "status": "ok"
+    }
+  ]
+}

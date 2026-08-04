@@ -45,6 +45,7 @@ describe("browser-builtin-registry", () => {
       "cognia-workspace-tools",
       "pet-daily-quests",
       "ripgrep-tools",
+      "sre-agent",
       "strix-security",
       "zhihu-content-pipeline",
     ])
@@ -184,6 +185,17 @@ describe("browser-builtin-registry", () => {
       expect(manifest.skills?.length).toBeGreaterThan(0)
       expect(manifest.dexie).toBeDefined()
       expect(manifest.description).toBeTruthy()
+    })
+
+    it("discovers the SRE Agent with materialized tools and subagent", () => {
+      const manifest = getBrowserBuiltinRegistryEntry("sre-agent")?.manifest
+      expect(manifest?.tools?.map((tool) => tool.name)).toEqual([
+        "sre_query_logs",
+        "sre_query_trace",
+        "sre_query_metrics",
+        "sre_validate_timeline",
+      ])
+      expect(manifest?.subagents?.[0]?.id).toBe("incident-diagnostician")
     })
   })
 })
