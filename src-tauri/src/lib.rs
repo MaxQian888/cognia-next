@@ -1,5 +1,13 @@
 mod a2ui_bridge;
 mod account_auth;
+mod agent_session_store;
+
+/// Configure the shared Claude Agent SDK session mirror before a host starts
+/// its sidecar. Desktop setup and `cognia-server` deliberately call the same
+/// narrow entry point so `sessionStore.*` host RPCs have identical storage.
+pub fn configure_agent_session_store_path(path: std::path::PathBuf) {
+    agent_session_store::configure_path(path);
+}
 mod agents;
 // ADR-0067 Tier B prep — extracted to `crates/cognia-secrets`; re-aliased so
 // `crate::api_key::ApiKeyState` (claude, subscription, companion_api, headless)
@@ -500,6 +508,26 @@ pub fn run() {
             // raw read/write/ensure_dir commands). Pure in-memory inserts — the
             // renderer extends it with the active workspace roots once it loads.
             files::seed_default_allowed_roots();
+
+            // Hand the WASM plugin host its Tauri-backed surfaces (ADR-0013,
+            // api-version 0.2). Clipboard and notifications are served
+            // in-process; AI and workflow go through the renderer bridge this
+            // also creates. Headless hosts (`cognia-server`) never run this, so
+            // their `WasmPluginState::services` stays `None` and every
+            // capability needing a backend answers HOST_UNAVAILABLE while
+            // logger / secrets / process keep working.
+            {
+                use tauri::Manager as _;
+                let wasm_state = app.state::<plugin_api::wasm::WasmPluginState>();
+                plugin_api::wasm::WasmPluginHost::install_host_services(
+                    &wasm_state,
+                    std::sync::Arc::new(
+                        plugin_api::wasm::services::tauri::TauriWasmHostServices::new(
+                            app.handle().clone(),
+                        ),
+                    ),
+                );
+            }
             let _ = app;
             Ok(())
         })
@@ -590,6 +618,7 @@ pub fn run() {
             claude::commands::claude_protocol_adapter_message,
             claude::commands::claude_close_session,
             claude::commands::claude_session_control,
+            claude::commands::agent_session_api,
             claude::commands::claude_feature_call,
             claude::commands::claude_feature_abort,
             claude::commands::claude_sidecar_status,
@@ -602,6 +631,12 @@ pub fn run() {
             hooks::commands::set_trusted_workspaces,
             agents::commands::read_agent_config,
             agents::commands::write_agent_config,
+            // Where Claude Code / Codex / OpenCode keep their trees on this
+            // host ($CLAUDE_CONFIG_DIR / $CODEX_HOME / $XDG_*). Every importer
+            // takes its scan roots from this one answer — see lib/agent-roots/.
+            agents::commands::agent_vendor_roots,
+            // Project-scoped `.mcp.json` (read-only — it's usually committed).
+            agents::commands::read_project_mcp_config,
             // ADR-0062 — external-agent session-history import. Reads OpenCode's
             // local SQLite store read-only for the session importer.
             session_import::opencode_sessions_read,
@@ -1189,6 +1224,7 @@ pub fn run() {
             plugin_api::signature::plugin_create_signature,
             plugin_api::signature::plugin_verify_signature,
             plugin_api::signature::plugin_verify_detached_signature,
+            plugin_api::signature::plugin_verify_pack_signature,
             plugin_api::signature::plugin_public_key_fingerprint,
             plugin_api::wasm::commands::plugin_wasm_load,
             plugin_api::wasm::commands::plugin_wasm_activate,
@@ -1196,6 +1232,7 @@ pub fn run() {
             plugin_api::wasm::commands::plugin_wasm_call,
             plugin_api::wasm::commands::plugin_wasm_unload,
             plugin_api::wasm::commands::plugin_wasm_list,
+            plugin_api::wasm::commands::plugin_wasm_renderer_response,
             plugin_api::wasm::installer::plugin_wasm_install_from_url,
             plugin_api::wasm::installer::plugin_wasm_install_from_git,
             plugin_api::github::installer::plugin_install_from_github,
@@ -1919,6 +1956,18 @@ pub fn run() {
                     }
                     Err(e) => log::warn!("background-job supervisor unavailable: {e}"),
                 }
+            }
+
+            // Where the Claude Agent SDK session mirror lives (ADR-0090 Stage
+            // 4). Only the PATH is set here: the database is opened on the
+            // first `sessionStore.*` host_rpc, so a user who never runs an
+            // agent session never gets the file. Same reason it sits beside
+            // the job supervisor — both must be configured before the sidecar
+            // can serve its first host_rpc.
+            if let Ok(dir) = app.path().app_data_dir() {
+                agent_session_store::configure_path(
+                    dir.join("cognia").join("agent-sessions.sqlite"),
+                );
             }
 
             // Inbound LLM gateway auto-start (ADR-0043 M3). Mirrors the

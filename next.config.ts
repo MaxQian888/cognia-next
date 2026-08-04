@@ -171,6 +171,7 @@ const nextConfig: NextConfig = {
   // browser bundle via the standalone/BYOK chat engine, so transpiling it is
   // correct for the static export too, not a test-only concession.
   transpilePackages: [
+    "@agentclientprotocol/sdk",
     "ai",
     "@ai-sdk/alibaba",
     "@ai-sdk/amazon-bedrock",

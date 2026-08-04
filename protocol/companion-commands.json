@@ -9713,6 +9713,19 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "plugin_verify_pack_signature",
+      "since": 2,
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "plugin_verify_signature",
       "since": 2,
       "target": "client",
@@ -9779,6 +9792,19 @@
     },
     {
       "name": "plugin_wasm_install_from_url",
+      "since": 2,
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "plugin_wasm_renderer_response",
       "since": 2,
       "target": "client",
       "operation": "side-effect",
