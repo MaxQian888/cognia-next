@@ -214,9 +214,13 @@ export function UsagePanel({
         Usage
       </Text>
       <PanelViewport viewportRows={viewport} scroll={scroll}>
+        <Text>
+          <Text color={theme.muted}>{"Turns".padEnd(16)}</Text>
+          {usageHistory.length}
+        </Text>
         {rows.map((row) => (
           <Text key={row.label}>
-            <Text color={theme.muted}>{row.label.padEnd(12)}</Text>
+            <Text color={theme.muted}>{row.label.padEnd(16)}</Text>
             {row.value}
           </Text>
         ))}

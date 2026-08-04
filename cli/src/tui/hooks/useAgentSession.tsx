@@ -38,7 +38,7 @@ import { resolveCliLoggingConfig } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import type { ThinkingLevel } from "../../config/schema"
 import type { Cell, LogInput, PermissionMode, TuiAction } from "../state/types"
-import { sidecarExitedLog, turnErrorLog } from "../runtime/log-ingest"
+import { sidecarExitedLog, turnErrorLog, turnLifecycleLog } from "../runtime/log-ingest"
 
 export type CreateSession = (params: {
   config: ResolvedConfig
@@ -493,6 +493,7 @@ export function useAgentSession({
         return null
       }
       // Fire UserPromptSubmit hooks before the turn (observational here).
+      onLog(turnLifecycleLog(Date.now(), "started", session.sessionId))
       hookRunner.onPrompt(prompt)
       // Open a rewind checkpoint for this turn (cellCount = state before it ran).
       checkpoint.beginTurn(getCellCount(), prompt)
@@ -519,6 +520,7 @@ export function useAgentSession({
       })
       abortRef.current = null
       if (!ok) {
+        onLog(turnLifecycleLog(Date.now(), "interrupted", session.sessionId))
         // Always clear any orphaned gate resolver from the failed turn.
         gate.reset()
         // Only drop the session when it's genuinely unusable (dead sidecar /
@@ -537,6 +539,7 @@ export function useAgentSession({
         }
         return null
       }
+      onLog(turnLifecycleLog(Date.now(), "completed", session.sessionId))
       // Hand the captured reply (text + usage) back so a self-driving caller
       // (`/goal`, `/loop`) can feed it to a turn-driver. Plain chat ignores it.
       return result ?? null

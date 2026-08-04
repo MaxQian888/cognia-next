@@ -7,8 +7,9 @@
  * Only the App subscribes; it threads `columns` (→ width) and a derived row
  * budget (→ list windowing) down as props so the leaf components stay pure.
  */
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useStdout } from "ink"
+import { recordResizeDuration } from "../runtime/render-diagnostics"
 
 export interface TerminalSize {
   columns: number
@@ -42,10 +43,20 @@ export function useTerminalSize(override?: ResizableStdout): TerminalSize {
   const ink = useStdout()
   const stdout = override ?? (ink.stdout as ResizableStdout | undefined)
   const [size, setSize] = useState<TerminalSize>(() => readSize(stdout))
+  const resizeStarted = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (resizeStarted.current === null) return
+    recordResizeDuration(performance.now() - resizeStarted.current)
+    resizeStarted.current = null
+  }, [size])
 
   useEffect(() => {
     if (!stdout?.on) return
-    const onResize = () => setSize(readSize(stdout))
+    const onResize = () => {
+      resizeStarted.current = performance.now()
+      setSize(readSize(stdout))
+    }
     // Re-read on (re)subscribe in case the size changed between the initial
     // render and the effect firing.
     onResize()

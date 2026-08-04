@@ -140,21 +140,13 @@ export async function discoverCustomAgentModes(
 }
 
 /**
- * The built-in modes meaningful in the terminal CLI: those that declare NO tool
- * list. A mode's `tools` become a RESTRICTIVE allow-list in `resolveSendOptions`
- * (`opts.allowedTools` is a whitelist), and the desktop's tool-bearing modes
- * (web-design / code-gen / data-analysis / research / ppt-generation / workflow
- * / academic) reference desktop-only tools — `execute_code`, `academic_search`,
- * preview surfaces — that don't exist in the CLI. Offering them would whitelist
- * those phantom tools and block every real CLI tool. So the CLI exposes only the
- * tool-less built-ins (general / plan / build / writing); their value is the
- * system prompt + permission ruleset, which all apply correctly. Custom modes
- * may still declare `tools` — the user authoring one knows they're scoping the
- * allow-list.
+ * The TUI and GUI intentionally share one built-in catalog. Keeping a filtered
+ * terminal copy made the active mode differ depending on which surface opened
+ * the same session and also caused valid persisted GUI selections to resolve to
+ * plain chat in the TUI. Backend capability enforcement remains the tool
+ * resolver's responsibility; mode discovery must not silently change identity.
  */
-export const CLI_BUILTIN_AGENT_MODES: AgentModeConfig[] = BUILT_IN_AGENT_MODES.filter(
-  (m) => !m.tools || m.tools.length === 0
-)
+export const CLI_BUILTIN_AGENT_MODES: AgentModeConfig[] = BUILT_IN_AGENT_MODES
 
 /** Every selectable mode: CLI built-ins first, then discovered custom modes. */
 export function listAgentModes(customModes: AgentModeConfig[]): AgentModeConfig[] {
@@ -164,8 +156,7 @@ export function listAgentModes(customModes: AgentModeConfig[]): AgentModeConfig[
 /**
  * Resolve an active mode id to its config. CLI built-in ids win over custom ones
  * (a custom file can't shadow `plan`/`build`/…); returns `undefined` for an
- * unknown id, a desktop-only built-in (not exposed in the CLI), or when no mode
- * is selected — all of which degrade safely to plain chat.
+ * unknown id or when no mode is selected — both degrade safely to plain chat.
  */
 export function resolveAgentMode(
   modeId: string | undefined | null,

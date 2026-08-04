@@ -21,11 +21,7 @@ pub(crate) struct ContractFilters {
     pub(crate) permissions: Vec<String>,
 }
 
-pub(crate) fn run(
-    filters: ContractFilters,
-    json_output: bool,
-    ui: &mut RuntimeUi,
-) -> Result<()> {
+pub(crate) fn run(filters: ContractFilters, json_output: bool, ui: &mut RuntimeUi) -> Result<()> {
     let catalog: Value = serde_json::from_str(AUTHORING_CATALOG_JSON)
         .context("embedded plugin contract catalog is invalid")?;
     let report = match build_report(&catalog, filters) {
@@ -54,10 +50,7 @@ pub(crate) fn run(
     Ok(())
 }
 
-fn build_report(
-    catalog: &Value,
-    filters: ContractFilters,
-) -> std::result::Result<Value, String> {
+fn build_report(catalog: &Value, filters: ContractFilters) -> std::result::Result<Value, String> {
     let capability_filters = unique(filters.capabilities);
     let contribution_filters = unique(filters.contributions);
     let plugin_type_filters = unique(filters.plugin_types);
@@ -96,12 +89,16 @@ fn build_report(
     validate_filters(
         "plugin point",
         &point_filters,
-        all_plugin_points.iter().filter_map(|item| field(item, "id")),
+        all_plugin_points
+            .iter()
+            .filter_map(|item| field(item, "id")),
     )?;
     validate_filters(
         "plugin point kind",
         &point_kind_filters,
-        all_plugin_points.iter().filter_map(|item| field(item, "kind")),
+        all_plugin_points
+            .iter()
+            .filter_map(|item| field(item, "kind")),
     )?;
     validate_filters(
         "permission",
@@ -166,7 +163,9 @@ fn build_report(
         })
         .map(|(plugin_type, contract)| (plugin_type.clone(), contract.clone()))
         .collect();
-    let filter_point_records = !point_filter_set.is_empty() || !point_kind_filter_set.is_empty();
+    let filter_point_records = !point_filter_set.is_empty()
+        || !point_kind_filter_set.is_empty()
+        || !permission_filter_set.is_empty();
     let selected_plugin_points: Vec<Value> = all_plugin_points
         .iter()
         .filter(|item| {
@@ -176,6 +175,9 @@ fn build_report(
                     && (point_kind_filter_set.is_empty()
                         || field(item, "kind")
                             .is_some_and(|kind| point_kind_filter_set.contains(kind)))
+                    && (permission_filter_set.is_empty()
+                        || field(item, "permission")
+                            .is_some_and(|permission| permission_filter_set.contains(permission)))
         })
         .map(|item| (*item).clone())
         .collect();

@@ -14,6 +14,7 @@ import { logtoCommand as defaultLogto } from "./logto-command"
 import { larkCommand as defaultLark } from "./lark-command"
 import { evalCommand as defaultEval } from "./eval-command"
 import { durabilityCommand as defaultDurability } from "./durability-command"
+import { sdkCommand as defaultSdk } from "./sdk-command"
 import { serveCommand as defaultServe } from "../serve/serve-command"
 import { realOutput, type OutputSink } from "./output"
 import { VERSION } from "../version"
@@ -48,7 +49,9 @@ Usage:
                      --account <id> [--home dir] [--json]
                      [--to journal|sqlite|<generation>] [--from auto|snapshot|journal|sqlite]
                      [--activate] [--generation id] [--confirm]
-                     headless persistence: inspect, migrate, recover, roll back
+                      headless persistence: inspect, migrate, recover, roll back
+  cognia-agent sdk <capabilities|sessions|info|messages|rename|tag|fork|delete|settings>
+                     typed Claude Agent SDK management (never raw option JSON)
   cognia-agent serve [--server-url u] [--account id] [--home dir]
                      [--flush-debounce ms]           headless brain for cognia-server
                      (COGNIA_SERVER_URL / COGNIA_SERVICE_TOKEN / COGNIA_BRIDGE_URL /
@@ -89,6 +92,7 @@ const KNOWN_COMMANDS = new Set([
   "lark",
   "eval",
   "durability",
+  "sdk",
 ])
 
 export interface MainDeps {
@@ -103,6 +107,7 @@ export interface MainDeps {
   lark?: typeof defaultLark
   eval?: typeof defaultEval
   durability?: typeof defaultDurability
+  sdk?: typeof defaultSdk
   out?: OutputSink
 }
 
@@ -167,6 +172,11 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       return (deps.eval ?? defaultEval)(args, { out })
     case "durability":
       return (deps.durability ?? defaultDurability)(args, { out })
+    case "sdk":
+      return (deps.sdk ?? defaultSdk)(args, { out }).catch((error) => {
+        out.error(error instanceof Error ? error.message : String(error))
+        return 1
+      })
     default:
       out.error(`unknown command "${args.command}"\n\n${HELP}`)
       return 2

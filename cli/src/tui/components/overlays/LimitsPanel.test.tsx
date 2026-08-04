@@ -115,6 +115,14 @@ describe("LimitsPanel", () => {
     expect(container.textContent).toContain("No subscription limit data")
   })
 
+  it("shows progress immediately without flashing the empty state", () => {
+    const { container } = render(
+      <LimitsPanel snapshots={[]} loading analysis={analysis} now={NOW} onClose={() => {}} />
+    )
+    expect(container.textContent).toContain("Loading provider limits")
+    expect(container.textContent).not.toContain("No subscription limit data")
+  })
+
   it("badges the active provider and always shows it even with no data", () => {
     // The active provider returned no usable source → empty meters. It must still
     // render (badged `● active`) rather than collapse to just the credit provider.

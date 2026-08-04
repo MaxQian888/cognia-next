@@ -340,6 +340,8 @@ export const statusBarSchema = z
   .object({
     segments: z.array(z.enum(STATUS_SEGMENTS)).optional(),
     theme: z.enum(STATUS_THEMES).optional(),
+    /** Show the idle /settings + /inspect discoverability suffix. */
+    showHints: z.boolean().optional(),
   })
   .strict()
 
@@ -401,6 +403,9 @@ export const renderConfigSchema = z
      * every cell individually measured, which turns off context-burst folding —
      * hence opt-in (default off). */
     clickToExpand: z.boolean().optional(),
+    /** Maximum rendered transcript rows replayed into native scrollback after a
+     * resize/repaint. Zero disables the cap; session data remains complete. */
+    terminalResizeReplayMaxRows: z.number().int().min(0).max(1000000).optional(),
   })
   .strict()
 
@@ -419,6 +424,7 @@ export const RENDER_DEFAULTS: ResolvedRenderConfig = {
   verboseByDefault: false,
   streamReveal: true,
   clickToExpand: false,
+  terminalResizeReplayMaxRows: 10000,
 }
 
 /** Fill missing render-pref fields with {@link RENDER_DEFAULTS}. */

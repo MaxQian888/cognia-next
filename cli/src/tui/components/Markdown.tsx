@@ -18,6 +18,7 @@ import { stringWidth, truncateToWidth } from "../markdown/width"
 import { osc8Link, supportsHyperlinks } from "../markdown/hyperlink"
 import { useTheme } from "../theme/context"
 import type { MdLine, MdSpan, TableAlign } from "../markdown/types"
+import { sanitizeTerminalText } from "../render/terminal-block"
 
 /** Whether the host terminal renders OSC-8 hyperlinks. Detected once per render
  * tree at the {@link Markdown} root and read by {@link Span} so links become
@@ -406,12 +407,13 @@ export function MarkdownLine({
 }
 
 export function Markdown({ raw, streaming = false }: { raw: string; streaming?: boolean }) {
+  const safeRaw = React.useMemo(() => sanitizeTerminalText(raw), [raw])
   // The in-flight streaming body grows every paced-reveal tick; route it through
   // a dedicated single-entry cache so its throwaway prefixes never evict the
   // committed transcript cells from the shared LRU.
   const lines = React.useMemo(
-    () => (streaming ? tokenizeTransient(raw) : tokenizeCached(raw)),
-    [raw, streaming]
+    () => (streaming ? tokenizeTransient(safeRaw) : tokenizeCached(safeRaw)),
+    [safeRaw, streaming]
   )
   // Fit the fenced-code frame to the live terminal width (minus the 2-col
   // gutter) so its rules don't wrap on a narrow terminal. `useStdout` does not

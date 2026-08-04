@@ -4,7 +4,7 @@
 import { PassThrough } from "node:stream"
 
 import { StdioTransport, type SidecarHandle } from "./stdio-transport"
-import { SIDECAR_EVENT, A2UI_EVENT } from "./protocol"
+import { SIDECAR_EVENT, AGENT_EVENT, A2UI_EVENT } from "./protocol"
 
 function makeHandle() {
   const stdout = new PassThrough()
@@ -64,6 +64,19 @@ describe("StdioTransport — stdout → subscribers", () => {
     await flush()
     expect(a2ui).toHaveLength(1)
     expect(main).toHaveLength(1)
+  })
+
+  it("routes agent_event to BOTH the canonical and raw channels", async () => {
+    const h = makeHandle()
+    const t = new StdioTransport(h.handle)
+    const raw: unknown[] = []
+    const canonical: unknown[] = []
+    t.subscribe(SIDECAR_EVENT, (payload) => raw.push(payload))
+    t.subscribe(AGENT_EVENT, (payload) => canonical.push(payload))
+    h.emit({ type: "agent_event", envelope: { sessionId: "s1" } })
+    await flush()
+    expect(canonical).toHaveLength(1)
+    expect(raw).toHaveLength(1)
   })
 
   it("unsubscribe is idempotent and stops delivery", async () => {

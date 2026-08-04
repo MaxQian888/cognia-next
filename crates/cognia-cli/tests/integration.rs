@@ -199,10 +199,7 @@ fn plugin_contract_json_returns_the_complete_canonical_inventory_without_writing
     assert_eq!(parsed["selectionCounts"], parsed["catalogCounts"]);
     assert_eq!(parsed["filters"]["capabilities"], serde_json::json!([]));
     assert_eq!(parsed["filters"]["pluginPoints"], serde_json::json!([]));
-    assert_eq!(
-        parsed["filters"]["pluginPointKinds"],
-        serde_json::json!([])
-    );
+    assert_eq!(parsed["filters"]["pluginPointKinds"], serde_json::json!([]));
     assert_eq!(parsed["filters"]["permissions"], serde_json::json!([]));
     assert!(parsed["capabilities"]
         .as_array()
@@ -289,21 +286,31 @@ fn plugin_contract_filters_points_kinds_and_permissions() {
         "contract",
         "--point",
         "chat.input.actions",
+        "--point",
+        "workflow.node",
         "--point-kind",
         "ui-slot",
+        "--point-kind",
+        "runtime",
         "--permission",
         "extension:ui",
+        "--permission",
+        "extension:workflow",
         "--json",
     ]);
 
     assert_eq!(code, Some(0), "stderr: {stderr}");
     let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(parsed["schemaVersion"], 2);
-    assert_eq!(parsed["selectionCounts"]["pluginPoints"], 1);
-    assert_eq!(parsed["selectionCounts"]["permissions"], 1);
+    assert_eq!(parsed["selectionCounts"]["pluginPoints"], 2);
+    assert_eq!(parsed["selectionCounts"]["permissions"], 2);
     assert_eq!(parsed["pluginPoints"][0]["id"], "chat.input.actions");
     assert_eq!(parsed["pluginPoints"][0]["formFactor"], "row");
-    assert_eq!(parsed["permissions"], serde_json::json!(["extension:ui"]));
+    assert_eq!(parsed["pluginPoints"][1]["id"], "workflow.node");
+    assert_eq!(
+        parsed["permissions"],
+        serde_json::json!(["extension:ui", "extension:workflow"])
+    );
 }
 
 #[test]
@@ -346,11 +353,7 @@ fn plugin_contract_json_rejects_every_unknown_selector_with_a_structured_error()
             "not-a-point-kind",
             "unknown plugin point kind",
         ),
-        (
-            "--permission",
-            "not:a-permission",
-            "unknown permission",
-        ),
+        ("--permission", "not:a-permission", "unknown permission"),
     ] {
         let (code, stdout, stderr) = run_cognia(&["plugin", "contract", flag, value, "--json"]);
 

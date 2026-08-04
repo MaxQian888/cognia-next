@@ -12,6 +12,7 @@ import {
   CLI_BUILTIN_AGENT_MODES,
   type ModeFs,
 } from "./agent-mode"
+import { BUILT_IN_AGENT_MODES } from "@/types/agent/agent-mode"
 
 describe("customModeFileSchema", () => {
   it("accepts a minimal mode and rejects unknown keys", () => {
@@ -163,14 +164,9 @@ describe("resolveAgentMode", () => {
 })
 
 describe("CLI_BUILTIN_AGENT_MODES", () => {
-  it("exposes only tool-less built-ins (no desktop-only tool whitelists)", () => {
-    const ids = CLI_BUILTIN_AGENT_MODES.map((m) => m.id)
-    expect(ids).toEqual(expect.arrayContaining(["general", "plan", "build", "writing"]))
-    // Tool-bearing desktop modes are excluded so they can't whitelist phantom
-    // tools and block every real CLI tool.
-    expect(ids).not.toContain("code-gen")
-    expect(ids).not.toContain("academic")
-    for (const m of CLI_BUILTIN_AGENT_MODES) expect(m.tools ?? []).toHaveLength(0)
+  it("stays in sync with the GUI built-in mode catalog", () => {
+    expect(CLI_BUILTIN_AGENT_MODES).toBe(BUILT_IN_AGENT_MODES)
+    expect(CLI_BUILTIN_AGENT_MODES.map((m) => m.id)).toEqual(BUILT_IN_AGENT_MODES.map((m) => m.id))
   })
 })
 

@@ -289,6 +289,10 @@ describe("App", () => {
     )
 
     await waitFor(() => expect(container.textContent ?? "").toContain("! 2 bg interrupted"))
+    expect(backgroundTasks.countInterruptedCliBackgroundRuns).toHaveBeenCalledWith({
+      home: "/tmp/cognia",
+      owner: "s1",
+    })
   })
 
   it("does not poll running background runs on input-only rerenders", () => {
@@ -553,7 +557,7 @@ describe("App", () => {
 
   it("runs /handoff and shows a notice", async () => {
     const { create } = fakeSession()
-    const pushHandoff = jest.fn().mockResolvedValue(undefined)
+    const pushHandoff = jest.fn().mockResolvedValue(true)
     const { container } = render(
       <App config={config} sessionId="s1" createSession={create} pushHandoff={pushHandoff} />
     )
@@ -564,6 +568,21 @@ describe("App", () => {
     })
     await waitFor(() => expect(container.textContent).toContain("Pushed this session"))
     expect(pushHandoff).toHaveBeenCalledWith("s1")
+  })
+
+  it("reports /handoff failure when the desktop is not reachable", async () => {
+    const { create } = fakeSession()
+    const pushHandoff = jest.fn().mockResolvedValue(false)
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} pushHandoff={pushHandoff} />
+    )
+    type("/handoff")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("No running Cognia desktop"))
+    expect(container.textContent).not.toContain("Pushed this session")
   })
 
   it("reports an unknown command", async () => {
@@ -582,16 +601,16 @@ describe("App", () => {
     await waitFor(() => expect(container.textContent).toContain("No plan to refine"))
   })
 
-  it("exits on /exit", () => {
+  it("exits on /exit", async () => {
     const { create } = fakeSession()
     const onExit = jest.fn()
     render(<App config={config} sessionId="s1" createSession={create} onExit={onExit} />)
     type("/exit")
     submit()
-    expect(onExit).toHaveBeenCalled()
+    await waitFor(() => expect(onExit).toHaveBeenCalled())
   })
 
-  it("exits on a double Ctrl+C", () => {
+  it("exits on a double Ctrl+C", async () => {
     const { create } = fakeSession()
     const onExit = jest.fn()
     render(
@@ -599,7 +618,7 @@ describe("App", () => {
     )
     act(() => __fireInput("c", { ctrl: true }))
     act(() => __fireInput("c", { ctrl: true }))
-    expect(onExit).toHaveBeenCalled()
+    await waitFor(() => expect(onExit).toHaveBeenCalled())
   })
 
   it("does not exit on a single Ctrl+C", () => {
@@ -628,6 +647,38 @@ describe("App", () => {
     expect(container.textContent).toContain("Press Ctrl+C again to exit")
   })
 
+  it.each([
+    ["Ctrl+C", () => __fireInput("c", { ctrl: true })],
+    ["Esc", () => __fireInput("", { escape: true })],
+  ])("%s aborts the actual in-flight turn signal", async (_label, interrupt) => {
+    let capturedSignal: AbortSignal | undefined
+    const create: CreateSession = () => ({
+      sessionId: "ses-blocking",
+      send: jest.fn(
+        (_prompt, opts) =>
+          new Promise<RunAndCaptureResult>((_resolve, reject) => {
+            capturedSignal = opts.signal
+            opts.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+              once: true,
+            })
+          })
+      ),
+      close: jest.fn(async () => undefined),
+    })
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} now={() => 1000} />
+    )
+    type("keep running")
+    submit()
+    await waitFor(() => expect(capturedSignal).toBeDefined())
+
+    if (_label === "Ctrl+C") type("queued draft")
+    act(interrupt)
+
+    await waitFor(() => expect(capturedSignal?.aborted).toBe(true))
+    await waitFor(() => expect(container.textContent).toContain("Interrupted."))
+  })
+
   it("clears the composer draft on the first Ctrl+C instead of arming the exit ladder", () => {
     const { create } = fakeSession()
     const onExit = jest.fn()
@@ -651,7 +702,7 @@ describe("App", () => {
     expect(onExit).not.toHaveBeenCalled()
   })
 
-  it("exits on a second Ctrl+C within the 1s double-press window", () => {
+  it("exits on a second Ctrl+C within the 1s double-press window", async () => {
     const { create } = fakeSession()
     const onExit = jest.fn()
     let t = 1000
@@ -663,7 +714,40 @@ describe("App", () => {
     // Second press at t=1500 — within the 1s window.
     t = 1500
     act(() => __fireInput("c", { ctrl: true }))
-    expect(onExit).toHaveBeenCalled()
+    await waitFor(() => expect(onExit).toHaveBeenCalled())
+  })
+
+  it("completes a double-Ctrl+C exit without waiting for live-session cleanup", async () => {
+    let releaseClose: (() => void) | undefined
+    const close = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseClose = resolve
+        })
+    )
+    const create: CreateSession = () => ({
+      sessionId: "ses-live",
+      async send() {
+        return result("ok")
+      },
+      close,
+    })
+    const onExit = jest.fn()
+    let t = 1000
+    render(
+      <App config={config} sessionId="s1" createSession={create} onExit={onExit} now={() => t} />
+    )
+    type("start sidecar")
+    submit()
+    await waitFor(() => expect(close).not.toHaveBeenCalled())
+
+    act(() => __fireInput("c", { ctrl: true }))
+    t = 1500
+    act(() => __fireInput("c", { ctrl: true }))
+
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1))
+    expect(onExit).toHaveBeenCalledTimes(1)
+    releaseClose?.()
   })
 
   it("opens the help overlay on /help", () => {
@@ -1539,12 +1623,12 @@ describe("App", () => {
     expect(container.textContent).toContain("claude-x")
   })
 
-  it("opens the theme picker on a bare /statusbar", () => {
+  it("opens the full customization picker on a bare /statusbar", () => {
     const { create } = fakeSession()
     const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
     type("/statusbar")
     submit()
-    expect(container.textContent).toContain("Status-bar theme")
+    expect(container.textContent).toContain("Customize status bar")
   })
 
   it("captures a `# fact` line to memory instead of sending it to the model", async () => {

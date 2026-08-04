@@ -8,11 +8,13 @@ describe("Help", () => {
   beforeEach(() => __resetInk())
 
   it("renders the command catalog and key hints", () => {
-    const { container } = render(<Help onClose={() => {}} />)
+    const { container } = render(<Help onClose={() => {}} maxRows={10} />)
     const text = container.textContent ?? ""
     expect(text).toContain("Commands")
     expect(text).toContain("/model")
     expect(text).toContain("Shift+Enter")
+    expect(text).toContain("PgUp/PgDn scroll")
+    expect(text).toContain("esc close")
   })
 
   it("closes on Enter", () => {

@@ -45,6 +45,7 @@ function buildDeps(over: Partial<GlobalKeysDeps> = {}): GlobalKeysDeps {
     now: () => 1000,
     doExit: jest.fn(),
     cancelBackendConnect: jest.fn(),
+    cancelBackendInstall: jest.fn(),
     agent: { abort: jest.fn(), switchMode: jest.fn() } as unknown as AgentSessionApi,
     abortRuntime: jest.fn(),
     askUser: { resolve: jest.fn() } as unknown as AskUserOverlayApi,
@@ -149,6 +150,44 @@ describe("useGlobalKeys", () => {
     act(() => __fireInput("", { escape: true }))
     expect(deps.agent.abort).toHaveBeenCalled()
     expect(deps.abortRuntime).toHaveBeenCalled()
+  })
+
+  it("interrupts a live turn on Ctrl+C even when the composer has a draft", () => {
+    const initial = createInitialState(config, "s1", true, [])
+    const deps = buildDeps({
+      busy: true,
+      state: {
+        ...initial,
+        turnStatus: "streaming",
+        input: { ...initial.input, buffer: bufferFromText("queued draft") },
+      } as TuiState,
+    })
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("c", { ctrl: true }))
+    expect(deps.agent.abort).toHaveBeenCalled()
+    expect(deps.dispatch).not.toHaveBeenCalledWith({ type: "INPUT_CLEAR" })
+  })
+
+  it("interrupts a live turn on Esc while a permission overlay is open", () => {
+    const initial = createInitialState(config, "s1", true, [])
+    const deps = buildDeps({
+      busy: true,
+      overlayOpen: true,
+      state: {
+        ...initial,
+        turnStatus: "streaming",
+        overlay: {
+          kind: "permission",
+          req: { requestId: "req-1", toolName: "bash", input: {} },
+          choices: [{ label: "Allow once", value: "allow" }],
+          index: 0,
+        },
+      } as unknown as TuiState,
+    })
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("", { escape: true }))
+    expect(deps.agent.abort).toHaveBeenCalled()
+    expect(deps.dispatch).toHaveBeenCalledWith({ type: "OVERLAY_CLOSE" })
   })
 
   it("toggles all collapse on the collapseAll chord (Ctrl+T)", () => {

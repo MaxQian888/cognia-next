@@ -12,7 +12,10 @@ import { createInitialState } from "../../tui/state/initial"
 import { tuiReducer } from "../../tui/state/reducer"
 import type { TuiAction } from "../../tui/state/types"
 
-import { externalAgentEventToActions } from "./external-event-mapper"
+import {
+  externalAgentEventToActions,
+  externalAgentEventToCanonicalFallback,
+} from "./external-event-mapper"
 
 const timestamp = new Date("2026-07-16T00:00:00.000Z")
 
@@ -459,6 +462,17 @@ describe("externalAgentEventToActions", () => {
     expect(externalAgentEventToActions(event({ type: "done", success: true }))).toEqual([])
   })
 
+  it("preserves ACP context occupancy without fabricating billable usage", () => {
+    const canonical = externalAgentEventToCanonicalFallback(
+      event({ type: "usage_update", used: 24_000, size: 1_000_000 })
+    )
+    expect(canonical).toEqual({
+      kind: "usage",
+      partial: true,
+      usage: { used: 24_000, size: 1_000_000 },
+    })
+  })
+
   it("golden-reduces a scripted ACP turn into assistant, todo, and diff cells", () => {
     const permission = jest.fn()
     const events = [
@@ -531,5 +545,31 @@ describe("externalAgentEventToActions", () => {
     )
     state = actions.reduce(tuiReducer, state)
     expect(state.cells.at(-1)).toMatchObject({ kind: "error", message: "boom" })
+  })
+
+  it("preserves non-legacy protocol events in the canonical stream", () => {
+    expect(
+      externalAgentEventToCanonicalFallback(
+        event({
+          type: "elicitation_request",
+          request: {
+            id: "ask-1",
+            mode: "form",
+            message: "Choose a target",
+            requestedSchema: { properties: {} },
+            raw: {},
+          },
+        })
+      )
+    ).toMatchObject({
+      kind: "elicitation-request",
+      requestId: "ask-1",
+      prompt: "Choose a target",
+    })
+    expect(
+      externalAgentEventToCanonicalFallback(
+        event({ type: "progress", progress: 0.5, message: "Working" })
+      )
+    ).toEqual({ kind: "activity", phase: "requesting", detail: "Working" })
   })
 })

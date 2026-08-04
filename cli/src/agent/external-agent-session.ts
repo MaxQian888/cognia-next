@@ -1,6 +1,7 @@
 import os from "node:os"
 
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
+import type { CanonicalAgentEvent } from "@cognia/agent-config-types/agent-execution"
 import type {
   AcpConfigOption,
   AcpPermissionMode,
@@ -10,6 +11,7 @@ import type {
   ExternalAgentConfig,
   ExternalAgentExecutionOptions,
   ExternalAgentResult,
+  ExternalAgentEvent,
 } from "@/types/agent/external-agent"
 import {
   getExternalAgentManager,
@@ -32,11 +34,15 @@ import type { AcpMcpServerConfig } from "@/types/agent/external-agent"
 import type { SessionCreateOptions } from "@/lib/ai/agent/external/protocol-adapter"
 
 import { resolveHome } from "../config/load"
+import { resolveBackendModel } from "../config/active-model"
 import { loadMcpServers } from "../mcp/load-mcp-config"
 import { applyDisabled, readDisabled, readDisabledTools } from "../mcp/mcp-state"
 import { toAcpMcpServers } from "../tui/runtime/backend-bridge"
 import type { ResolvedConfig } from "../config/schema"
-import { externalAgentEventToActions } from "../runtime/external/external-event-mapper"
+import {
+  externalAgentEventToActions,
+  externalAgentEventToCanonicalFallback,
+} from "../runtime/external/external-event-mapper"
 import type { TuiAction } from "../tui/state/types"
 import { createIdleWatchdog } from "./idle-watchdog"
 import { isResumableLink, readExternalLink, writeExternalLink } from "./external-session-link"
@@ -71,6 +77,7 @@ import {
 import { buildAttachmentContent } from "./attachments/build"
 import { clearCliSubagentContext } from "./subagent-dispatch"
 import type { PermissionResponder } from "./permission-gate"
+import { canonicalFromCapture, createEnvelopeEmitter } from "./runtime/turn-events"
 
 /**
  * The wall-clock budget handed to the shared manager for one turn.
@@ -169,12 +176,19 @@ export interface ExternalAgentSessionManager {
   removeAgent(agentId: string): Promise<void>
 }
 
-/** Convert an ACP select option in the semantic `model` category to TUI rows. */
-export function acpModelOptions(configOptions: AcpConfigOption[] | undefined): AgentModelOption[] {
-  const modelOption = configOptions?.find(
-    (option): option is Extract<AcpConfigOption, { type: "select" }> =>
-      option.category === "model" && option.type === "select"
+function modelConfigOption(configOptions: AcpConfigOption[] | undefined) {
+  const selectable = configOptions?.filter(
+    (option): option is Extract<AcpConfigOption, { type: "select" }> => option.type === "select"
   )
+  return (
+    selectable?.find((option) => option.category === "model_config") ??
+    selectable?.find((option) => option.category === "model")
+  )
+}
+
+/** Convert the stable `model_config` option (or gated legacy `model`) to TUI rows. */
+export function acpModelOptions(configOptions: AcpConfigOption[] | undefined): AgentModelOption[] {
+  const modelOption = modelConfigOption(configOptions)
   if (!modelOption) return []
   return modelOption.options
     .flatMap((entry) => ("group" in entry ? entry.options : [entry]))
@@ -400,6 +414,38 @@ function actionToCaptureEvent(action: TuiAction): CaptureStreamEvent | undefined
   }
 }
 
+function actionToCanonicalEvent(action: TuiAction): CanonicalAgentEvent {
+  const capture = actionToCaptureEvent(action)
+  if (capture) return canonicalFromCapture(capture)
+  switch (action.type) {
+    case "TOOL_UPDATE":
+      return {
+        kind: "tool-call",
+        toolCallId: action.callKey,
+        toolName: action.toolName ?? "external",
+        input: action.input ?? {},
+      }
+    case "NOTICE":
+      return {
+        kind:
+          action.severity === "warn" || action.severity === "error" ? "warning" : "informational",
+        ...(action.severity === "warn" || action.severity === "error"
+          ? { code: "external_agent", message: action.message }
+          : { content: action.message, level: "notice" as const }),
+      } as CanonicalAgentEvent
+    case "TURN_ERROR":
+      return { kind: "failure", code: action.category ?? "external_agent", message: action.message }
+    case "COMMIT_PLAN":
+      return { kind: "informational", content: action.raw, level: "suggestion" }
+    default:
+      return {
+        kind: "informational",
+        content: `External event: ${action.type}`,
+        level: "info",
+      }
+  }
+}
+
 /**
  * Create a persistent external-agent session with the same interface — and the
  * same Cognia meaning — as the built-in sidecar.
@@ -419,8 +465,10 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         : `Unknown external-agent backend: ${backend}`
     )
   }
+  let turnSequence = 0
 
   const now = params.now ?? Date.now
+  const requestedModel = resolveBackendModel(params.config, params.connection?.presetId)
   const sessionId = params.sessionId ?? mintSessionId(now())
   const agentId = params.connection?.agentId ?? `cli-external-${sessionId}`
   // The controller registered this agent, so it also removes it; a session that
@@ -486,6 +534,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
   // the context version changes, so a bridge can never outlive the context it
   // was minted for.
   let broker: ToolHostBroker | null = null
+  let activeTurnOptions: SendTurnOptions | undefined
   let brokerAttempt = 0
   let skillsAnnounced = false
   let databaseErrorShown = false
@@ -540,8 +589,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
    * "ready with fewer tools" lie this work removes.
    */
   const ensureToolHost = async (
-    session: ResolvedCliSessionContext,
-    opts: SendTurnOptions
+    session: ResolvedCliSessionContext
   ): Promise<AcpMcpServerConfig[]> => {
     if (!toolHostEnabled) {
       publish(session, false)
@@ -554,17 +602,20 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       broker = await startToolHost({
         session,
         attempt: brokerAttempt,
-        gate: opts.gate,
+        gate: async (request) =>
+          activeTurnOptions
+            ? activeTurnOptions.gate(request)
+            : { decision: "deny", message: "No active turn" },
         execHostTool,
         onToolCall: (event) =>
-          opts.onAction?.({
+          activeTurnOptions?.onAction?.({
             type: "TOOL_CALL",
             callKey: event.callKey,
             toolName: event.name,
             input: (event.input ?? {}) as Record<string, unknown>,
           }),
         onToolResult: (event) =>
-          opts.onAction?.({
+          activeTurnOptions?.onAction?.({
             type: "TOOL_RESULT",
             callKey: event.callKey,
             toolName: event.name,
@@ -639,8 +690,25 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       if (closed) throw new Error("agent session is closed")
       await ensureAgent()
       const { session, restarted } = await reconcile()
+      const turnNumber = turnSequence++
+      const envelopeEmitter = opts.onEnvelope
+        ? createEnvelopeEmitter({
+            identity: {
+              sessionId,
+              runId: `${sessionId}:r${turnNumber}`,
+              turnId: `${sessionId}:t${turnNumber}`,
+              attemptId: `${sessionId}:t${turnNumber}:a0`,
+              hostRef: `external-agent:${backend}`,
+              runtime: backend,
+            },
+            onEnvelope: opts.onEnvelope,
+            now: () => new Date(now()),
+          })
+        : undefined
       if (restarted) {
-        opts.onAction?.({ type: "NOTICE", message: CONTEXT_RESTART_NOTICE })
+        const action = { type: "NOTICE" as const, message: CONTEXT_RESTART_NOTICE }
+        if (envelopeEmitter) envelopeEmitter.emit(actionToCanonicalEvent(action))
+        else opts.onAction?.(action)
       }
       if (!skillsAnnounced && session.activeSkillIds.length > 0) {
         skillsAnnounced = true
@@ -672,7 +740,8 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           "session_error"
         )
       }
-      const cogniaServers = await ensureToolHost(session, opts)
+      activeTurnOptions = opts
+      const cogniaServers = await ensureToolHost(session)
 
       appendTranscript(
         home,
@@ -705,12 +774,10 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       try {
         const execution = manager.execute(agentId, flattened.text, {
           ...(externalSessionId ? { sessionId: externalSessionId } : {}),
-          // The model stays `config.model` — the contract there is "the model the
-          // user explicitly asked this BACKEND for", an agent-owned id. The
-          // resolved `sendOptions.model` is Cognia's provider catalog talking, and
-          // substituting it would silently rewrite which model Codex/Claude Code
-          // actually runs.
-          ...(params.config.model ? { model: params.config.model } : {}),
+          // External model memory is keyed by backend/preset. The top-level
+          // `config.model` is a legacy built-in-provider pin and may name a
+          // completely different ecosystem model.
+          ...(requestedModel ? { model: requestedModel } : {}),
           // The CANONICAL prompt, not `config.systemPrompt` — this is what makes
           // project instructions, output style, the active mode and the skill
           // catalog reach an external agent at all.
@@ -772,8 +839,16 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           onEvent: (event) => {
             watchdog.bump()
             if (event.sessionId) observedSessionId = event.sessionId
-            for (const action of externalAgentEventToActions(event)) {
-              if (opts.onAction) {
+            const actions = externalAgentEventToActions(event)
+            if (envelopeEmitter && actions.length === 0) {
+              envelopeEmitter.emit(
+                externalAgentEventToCanonicalFallback(event as ExternalAgentEvent)
+              )
+            }
+            for (const action of actions) {
+              if (envelopeEmitter) {
+                envelopeEmitter.emit(actionToCanonicalEvent(action))
+              } else if (opts.onAction) {
                 opts.onAction(action)
               } else {
                 const capture = actionToCaptureEvent(action)
@@ -816,6 +891,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       } finally {
         watchdog.stop()
         clearDispatch()
+        activeTurnOptions = undefined
       }
 
       if (result.sessionId && result.sessionId !== externalSessionId) {
@@ -847,7 +923,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           content: result.finalResponse,
           meta: {
             backend,
-            ...(params.config.model ? { model: params.config.model } : {}),
+            ...(requestedModel ? { model: requestedModel } : {}),
             ...(usage ? { usage } : {}),
           },
         },
@@ -882,15 +958,16 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       if (closed) return []
       if (!initialized) await ensureAgent()
       if (externalSessionId) return readLiveModelOptions(manager, agentId, externalSessionId)
-      if (!manager.createSession || !manager.closeSession) return []
+      if (!manager.createSession) return []
 
-      // ACP config options are session-scoped. Before the first turn, create a
-      // disposable discovery session so `/model` can still populate the picker;
-      // the real conversation session is created later with the selected model.
+      // ACP config options are session-scoped. Opening `/model` before the first
+      // turn creates the real conversation session and retains it, so the picker
+      // cannot mutate a disposable probe that is immediately discarded.
       const resolved = await assembler.resolveSession()
-      const probe = await manager.createSession(agentId, {
+      const cogniaServers = await ensureToolHost(resolved)
+      const created = await manager.createSession(agentId, {
         cwd: resolved.cwd,
-        mcpServers: toAcpMcpServers(resolved.mcpServers),
+        mcpServers: [...cogniaServers, ...(mcpServers ??= toAcpMcpServers(resolved.mcpServers))],
         additionalDirectories: resolved.additionalDirectories,
         systemPrompt: resolved.sendOptions.systemPrompt,
         instructionEnvelope: {
@@ -902,11 +979,15 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           },
         },
       })
-      try {
-        return readLiveModelOptions(manager, agentId, probe.id)
-      } finally {
-        await manager.closeSession(agentId, probe.id).catch(() => undefined)
-      }
+      externalSessionId = created.id
+      sessionContextVersion = resolved.contextVersion
+      writeExternalLink(
+        home,
+        sessionId,
+        { backend, externalSessionId: created.id, contextVersion: resolved.contextVersion },
+        params.transcriptFs
+      )
+      return readLiveModelOptions(manager, agentId, created.id)
     },
     /**
      * Apply a `/model` pick to the live session so the thread survives it.
@@ -922,12 +1003,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
 
       const configResult = manager.getConfigOptions?.(agentId, externalSessionId)
       const modelOption =
-        configResult?.status === "ok"
-          ? configResult.data.find(
-              (option): option is Extract<AcpConfigOption, { type: "select" }> =>
-                option.category === "model" && option.type === "select"
-            )
-          : undefined
+        configResult?.status === "ok" ? modelConfigOption(configResult.data) : undefined
       if (modelOption && manager.setConfigOption) {
         try {
           await manager.setConfigOption(agentId, externalSessionId, modelOption.id, model)

@@ -138,6 +138,10 @@ export function SkillPanel({
         setIndex((i) => Math.min(filtered.length - 1, i + 1))
         return
       }
+      if (key.tab) {
+        if (current) onToggle(current.id)
+        return
+      }
       if (input === " ") {
         if (current) onToggle(current.id)
         return

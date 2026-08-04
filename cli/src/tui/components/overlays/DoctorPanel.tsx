@@ -148,6 +148,23 @@ export function DoctorPanel({
         </Text>
       </Box>
 
+      {report.tuiRenderer ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold color={theme.muted}>
+            Terminal renderer
+          </Text>
+          <Text>{`Engine       ${report.tuiRenderer.engine}`}</Text>
+          <Text>{`Blocks       ${report.tuiRenderer.visibleBlocks}/${report.tuiRenderer.totalBlocks} visible · ${(report.tuiRenderer.blockCacheHitRate * 100).toFixed(1)}% cache hits`}</Text>
+          <Text>{`Latency      ${report.tuiRenderer.renderDurationMs.p95.toFixed(1)}ms render p95 · ${report.tuiRenderer.resizeDurationMs.p95.toFixed(1)}ms resize p95`}</Text>
+          <Text>{`Capabilities graphics=${report.tuiRenderer.capabilities.graphics ?? "none"} · links=${report.tuiRenderer.capabilities.hyperlinks ? "yes" : "no"} · tty=${report.tuiRenderer.capabilities.tty ? "yes" : "no"}`}</Text>
+          {report.tuiRenderer.unknownParts > 0 ? (
+            <Text
+              color={theme.warning}
+            >{`Unknown/rejected parts ${report.tuiRenderer.unknownParts}`}</Text>
+          ) : null}
+        </Box>
+      ) : null}
+
       {/* Workspace */}
       <Box flexDirection="column" marginTop={1}>
         <Text bold color={theme.muted}>

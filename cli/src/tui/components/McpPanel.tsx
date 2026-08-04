@@ -23,6 +23,8 @@ import {
   enterAction,
   filterMcpServers,
   fixHint,
+  connectionIssueDetails,
+  connectionIssueTitle,
   statusBadge,
   MCP_PANEL_FOOTER,
   type McpPanelServer,
@@ -67,6 +69,7 @@ export function McpPanel({
   const filtered = filterMcpServers(servers, query)
   const safeIndex = filtered.length > 0 ? Math.min(index, filtered.length - 1) : 0
   const current = filtered[safeIndex]
+  const detailLines = current ? connectionIssueDetails(current) : []
 
   /** Run a server row's context action (shared by Enter and a click). */
   const activate = (s: McpPanelServer) => {
@@ -84,7 +87,10 @@ export function McpPanel({
     }
   }
 
-  const win = windowList(filtered.length, safeIndex, maxRows)
+  // Detail rows share the overlay's row budget with the server list. This keeps
+  // a verbose stderr tail inside the panel instead of squeezing other regions.
+  const listRows = Math.max(1, maxRows - (detailLines.length > 0 ? detailLines.length + 1 : 0))
+  const win = windowList(filtered.length, safeIndex, listRows)
   const visible = filtered.slice(win.start, win.end)
 
   // Mouse (fullscreen `scroll` only): header = title + filter line (2 rows).
@@ -213,6 +219,19 @@ export function McpPanel({
           ) : null}
         </>
       )}
+      {current && detailLines.length > 0 ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold color={current.status === "needs_auth" ? theme.warning : theme.danger}>
+            {connectionIssueTitle(current)}
+          </Text>
+          {detailLines.map((line, i) => (
+            <Text key={`${current.name}-detail-${i}`} color={theme.muted} wrap="truncate-end">
+              {i === 0 ? "  " : "  ↳ "}
+              {line}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
       <OverlayFooter hint={MCP_PANEL_FOOTER} />
     </Box>
   )

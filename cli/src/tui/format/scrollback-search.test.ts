@@ -226,6 +226,30 @@ describe("cellToText", () => {
     expect(searchCells([plan], "step two")).toHaveLength(1)
   })
 
+  it("extracts canonical commentary, content, and event cells", () => {
+    const cells: Cell[] = [
+      { id: "c1", kind: "commentary", messageId: "m1", text: "checking", done: true },
+      {
+        id: "p1",
+        kind: "content-part",
+        partId: "part-1",
+        part: { type: "custom", customType: "report", summary: "structured content" },
+      },
+      {
+        id: "e1",
+        kind: "canonical-event",
+        eventId: "event-1",
+        level: "warning",
+        title: "Runtime warning",
+        summary: "retrying",
+      },
+    ]
+
+    expect(searchCells(cells, "checking")).toHaveLength(1)
+    expect(searchCells(cells, "structured content")).toHaveLength(1)
+    expect(searchCells(cells, "retrying")).toHaveLength(1)
+  })
+
   it("returns empty text for an unknown kind (defensive default)", () => {
     const weird = { id: "x", kind: "mystery" } as unknown as Cell
     expect(cellToText(weird)).toBe("")

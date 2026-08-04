@@ -5,6 +5,10 @@
 //! surface of its own.
 
 pub(crate) mod bridge_client;
+// RFC 8785 canonical JSON — the signing-side twin of
+// lib/plugin/character-pack/canonical-json.ts. Both are driven by one shared
+// golden-vector fixture so they cannot silently diverge.
+pub(crate) mod canonical_json;
 pub(crate) mod contract;
 pub(crate) mod frontend_build;
 pub(crate) mod packaging;

@@ -15,7 +15,20 @@ const BEL = ""
  * Wrap `label` in an OSC-8 hyperlink to `url`. The visible text is exactly
  * `label`, so display width is unchanged (the escapes are zero-width).
  */
-export function osc8Link(url: string, label: string): string {
+export function isSafeHyperlink(url: string): boolean {
+  if (/\p{Cc}/u.test(url)) return false
+  try {
+    const parsed = new URL(url)
+    return (
+      parsed.protocol === "https:" || parsed.protocol === "http:" || parsed.protocol === "mailto:"
+    )
+  } catch {
+    return false
+  }
+}
+
+export function osc8Link(url: string, label: string, trusted = false): string {
+  if (!trusted && !isSafeHyperlink(url)) return label
   return `${OSC8_OPEN}${url}${BEL}${label}${OSC8_OPEN}${BEL}`
 }
 

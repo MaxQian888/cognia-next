@@ -3,7 +3,18 @@
  */
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 
-import { captureEventToActions, toolCallKey } from "./event-mapper"
+import {
+  CANONICAL_TUI_CLASSIFICATION,
+  captureEventToActions,
+  canonicalEnvelopeToActions,
+  classifyCanonicalEvent,
+  toolCallKey,
+} from "./event-mapper"
+import {
+  CANONICAL_AGENT_EVENT_KINDS,
+  type AgentEventEnvelope,
+  type CanonicalAgentEvent,
+} from "@cognia/agent-config-types/agent-execution"
 
 describe("toolCallKey", () => {
   it("combines tool name and serialized input", () => {
@@ -153,5 +164,86 @@ describe("captureEventToActions", () => {
 
   it("ignores unknown event types", () => {
     expect(captureEventToActions({ type: "mystery" } as unknown as CaptureStreamEvent)).toEqual([])
+  })
+})
+
+describe("canonicalEnvelopeToActions", () => {
+  const envelope = (event: CanonicalAgentEvent): AgentEventEnvelope => ({
+    schemaVersion: 1,
+    eventId: `e-${event.kind}`,
+    sequence: 1,
+    sessionId: "s1",
+    runId: "r1",
+    turnId: "t1",
+    attemptId: "a1",
+    hostRef: "test",
+    runtime: "fake",
+    timestamp: "2026-08-04T00:00:00.000Z",
+    event,
+  })
+
+  it("classifies every known canonical event explicitly", () => {
+    expect(Object.keys(CANONICAL_TUI_CLASSIFICATION).sort()).toEqual(
+      [...CANONICAL_AGENT_EVENT_KINDS].sort()
+    )
+    for (const kind of CANONICAL_AGENT_EVENT_KINDS) {
+      expect(classifyCanonicalEvent(kind)).not.toBe("unsupported")
+    }
+  })
+
+  it("maps canonical streaming events through the existing reducer actions", () => {
+    expect(
+      canonicalEnvelopeToActions(envelope({ kind: "commentary-delta", delta: "Checking" }))
+    ).toEqual([
+      {
+        type: "COMMENTARY_DELTA",
+        eventId: "e-commentary-delta",
+        messageId: "e-commentary-delta",
+        delta: "Checking",
+        done: false,
+      },
+    ])
+    expect(canonicalEnvelopeToActions(envelope({ kind: "text-delta", delta: "hello" }))).toEqual([
+      { type: "INFLIGHT_TEXT", delta: "hello" },
+    ])
+  })
+
+  it("upserts and removes structured content parts by stable id", () => {
+    const part = {
+      type: "file" as const,
+      name: "notes.txt",
+      uri: "artifact://s1/notes.txt",
+      mediaType: "text/plain",
+    }
+    expect(
+      canonicalEnvelopeToActions(
+        envelope({ kind: "content-part", partId: "p1", operation: "upsert", part })
+      )
+    ).toEqual([{ type: "CONTENT_PART_UPSERT", partId: "p1", part }])
+    expect(
+      canonicalEnvelopeToActions(
+        envelope({ kind: "content-part", partId: "p1", operation: "remove" })
+      )
+    ).toEqual([{ type: "CONTENT_PART_REMOVE", partId: "p1" }])
+  })
+
+  it("renders future event kinds as a safe unsupported summary", () => {
+    const future = envelope({
+      kind: "text-delta",
+      delta: "unused",
+    }) as unknown as AgentEventEnvelope
+    ;(future.event as unknown as Record<string, unknown>) = {
+      kind: "future-secret-event",
+      token: "must-not-render",
+    }
+    expect(canonicalEnvelopeToActions(future)).toEqual([
+      {
+        type: "CANONICAL_EVENT_NOTICE",
+        eventId: "e-text-delta",
+        level: "warning",
+        title: "Unsupported event",
+        summary: "future-secret-event",
+      },
+    ])
   })
 })

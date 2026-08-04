@@ -13,6 +13,7 @@ import type { ResolvedConfig } from "../../../config/schema"
 import type { TuiState } from "../../state/types"
 import type { TranscriptCursor } from "../../hooks/useTranscriptCursor"
 import type { MentionProviders } from "../../mention/providers"
+import { terminalLayout } from "../../layout/terminal-layout"
 
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
 
@@ -44,6 +45,7 @@ function baseProps(over: Partial<BottomRegionProps> = {}): BottomRegionProps {
     overlayOpen: false,
     columns: 80,
     popupRows: 6,
+    layout: terminalLayout(80, 24),
     warningColor: "yellow",
     streamStartedAt: null,
     lastActivityAt: null,
@@ -81,6 +83,7 @@ describe("BottomRegion", () => {
     const { container } = wrap(<BottomRegion {...baseProps()} />)
     // The Input composer renders its prompt prefix; the footer renders the cwd.
     expect(container.textContent).toContain("/work")
+    expect(container.textContent).toContain("zzz")
   })
 
   it("renders the find bar instead of the composer while finding", () => {
@@ -118,5 +121,28 @@ describe("BottomRegion", () => {
     const { container } = wrap(<BottomRegion {...baseProps({ overlayOpen: true, state })} />)
     // Footer still renders (cwd present) but the composer is unmounted.
     expect(container.textContent).toContain("/work")
+  })
+
+  it("does not let connection toasts consume modal overlay rows", () => {
+    const state = baseState({
+      toasts: [
+        {
+          id: "mcp-failed",
+          severity: "warn",
+          message: 'MCP server "context7" failed to load',
+          hint: "Open /mcp to see the error.",
+          createdAt: Date.now(),
+        },
+      ],
+    })
+    const { container } = wrap(<BottomRegion {...baseProps({ overlayOpen: true, state })} />)
+    expect(container.textContent).not.toContain("context7")
+  })
+
+  it("retains the composer/activity but hides mascot and footer in the tiny layout", () => {
+    const { container } = wrap(
+      <BottomRegion {...baseProps({ columns: 30, layout: terminalLayout(30, 8) })} />
+    )
+    expect(container.textContent).not.toContain("⚙ /settings")
   })
 })

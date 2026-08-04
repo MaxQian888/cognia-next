@@ -21,6 +21,7 @@ import {
 } from "@/lib/claude/run-and-capture"
 import { setSessionMode as defaultSetSessionMode } from "@/lib/claude/ipc"
 import type { SendOptions } from "@cognia/agent-config-types"
+import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 
 /** A concrete permission mode value (excludes `undefined`). */
 type PermissionModeValue = NonNullable<SendOptions["permissionMode"]>
@@ -59,6 +60,7 @@ import {
   type CliContextAssembler,
 } from "./session-context"
 import { registerTurnSubagentContext } from "./turn-dispatch"
+import { createEnvelopeEmitter } from "./runtime/turn-events"
 
 export type { AttachmentSummary }
 
@@ -151,6 +153,9 @@ export interface AgentModelOption {
 
 export interface SendTurnOptions {
   gate: PermissionResponder
+  /** Preferred canonical stream. When present, the session does not invoke
+   * `onEvent`, preventing the same event from being applied twice. */
+  onEnvelope?: (envelope: AgentEventEnvelope) => void
   onEvent?: (event: CaptureStreamEvent) => void
   /** Direct reducer actions for sessions whose native event vocabulary is
    * richer than CaptureStreamEvent (external ACP/Codex agents). */
@@ -263,6 +268,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   // path folds it into the cached system prompt (the interactive channel caches
   // its SendOptions and cannot re-resolve the prompt per turn).
   let sendOptionsOverrideMode: PermissionModeValue | null = null
+  let turnSequence = 0
 
   async function ensureReady() {
     if (closed) throw new Error("agent session is closed")
@@ -354,6 +360,21 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         ? prependTextBlock(turn.content, twinContextBlock(turn.dynamicTwinContext))
         : turn.content
       let result: RunAndCaptureResult
+      const turnNumber = turnSequence++
+      const envelopeEmitter = opts.onEnvelope
+        ? createEnvelopeEmitter({
+            identity: {
+              sessionId,
+              runId: `${sessionId}:r${turnNumber}`,
+              turnId: `${sessionId}:t${turnNumber}`,
+              attemptId: `${sessionId}:t${turnNumber}:a0`,
+              hostRef: "desktop-sidecar",
+              runtime: sendOptions.execution?.runtimeAdapter ?? "builtin",
+            },
+            onEnvelope: opts.onEnvelope,
+            now: () => new Date(now()),
+          })
+        : undefined
       try {
         result = await capture(sessionId, turnContent, sendOptions, {
           signal: opts.signal,
@@ -362,7 +383,11 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
           // mid-flight.
           idleTimeoutMs: params.config.streamIdleTimeoutMs,
           onPermissionRequest: opts.gate,
-          onEvent: opts.onEvent,
+          onEvent: envelopeEmitter
+            ? (event) => {
+                envelopeEmitter.fromCapture(event)
+              }
+            : opts.onEvent,
         })
       } finally {
         clearDispatch()
@@ -370,6 +395,23 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         // never surfaced, so clear unconditionally in case a nested run left an
         // entry behind.
         clearCliSubagentContext(sessionId)
+      }
+      if (envelopeEmitter) {
+        for (const surfaceId of result.a2uiSurfaceOrder) {
+          const surface = result.a2uiSurfaces[surfaceId]
+          if (!surface) continue
+          envelopeEmitter.emit({
+            kind: "content-part",
+            partId: `a2ui:${surfaceId}`,
+            operation: "upsert",
+            part: {
+              type: "a2ui",
+              surfaceId,
+              source: "mcp-bridge",
+              payload: { ...surface },
+            },
+          })
+        }
       }
       appendTranscript(
         home,

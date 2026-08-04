@@ -55,6 +55,16 @@
 //!   cognia plugin embed-version <wasm> <ver> [--out wasm] [--json]
 //!     Manually inject the api-version custom section (normally automatic).
 //!
+//!   cognia pack sign <file.cognia-pack.json> --key <path> [--out PATH] [--json]
+//!     Ed25519-sign a Character Pack. The signature lands in-band in the
+//!     file's own `signature` object and covers the RFC 8785 canonical JSON
+//!     of the `pack` object alone, so a schema rewrite never invalidates it.
+//!
+//!   cognia pack verify <file.cognia-pack.json> [--public-key <b64>]
+//!     [--require-signature] [--json]
+//!     Report `verified` / `unsigned` / `invalid` exactly as the host would.
+//!     Unsigned exits 0; an invalid signature always exits non-zero.
+//!
 //!   cognia release-key [--json]
 //!     Inspect the embedded public key used for CLI release-artifact verification.
 //!
@@ -83,7 +93,7 @@ mod engine;
 mod shared;
 mod ui;
 
-use cli::{dispatch_plugin, Cli, TopCommand};
+use cli::{dispatch_pack, dispatch_plugin, Cli, TopCommand};
 use shared::exit::{JSON_FAILURE_EXIT_CODE, LINT_ERROR_EXIT_CODE};
 use shared::JsonFailureExit;
 use ui::runtime::{ColorMode, UiFlags};
@@ -115,6 +125,7 @@ fn main() -> eyre::Result<()> {
     // + (with RUST_BACKTRACE=1) backtrace.
     let result: Result<()> = match cli.command {
         TopCommand::Plugin { command } => dispatch_plugin(command, &mut ui),
+        TopCommand::Pack { command } => dispatch_pack(command, &mut ui),
         TopCommand::Acp => {
             ui.verbose("running acp");
             commands::acp::run(&ui)

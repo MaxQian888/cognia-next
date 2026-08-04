@@ -81,6 +81,8 @@ export interface GlobalKeysDeps {
   /** Abort an in-flight external-backend connect (Esc during `"connecting"`),
    * reclaiming the half-registered agent and routing to the failure page. */
   cancelBackendConnect: () => void
+  /** Abort an in-progress external-agent installer (Esc during `installing`). */
+  cancelBackendInstall: () => void
   agent: AgentSessionApi
   abortRuntime: () => void
   askUser: AskUserOverlayApi
@@ -189,7 +191,32 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
       else dispatch({ type: "NOTICE", message: emptyMessage })
     }
 
+    const interruptConversation = (): void => {
+      if (ctrlCTimer.current) {
+        clearTimeout(ctrlCTimer.current)
+        ctrlCTimer.current = null
+      }
+      if (state.lastCtrlCAt) dispatch({ type: "CLEAR_CTRL_C" })
+      agent.abort()
+      abortRuntime()
+      if (state.overlay.kind === "permission") dispatch({ type: "OVERLAY_CLOSE" })
+      else if (state.overlay.kind === "askUser") {
+        askUser.resolve({ selected: [], text: "", cancelled: true })
+      }
+      disarmBacktrack()
+      dispatch({ type: "NOTICE", message: "Interrupted" })
+    }
+
     if (key.ctrl && input === "c") {
+      // A live conversation always wins over draft clearing and the exit
+      // ladder. Otherwise a queued draft makes Ctrl+C appear broken, and a
+      // previously armed idle Ctrl+C can exit the TUI instead of stopping the
+      // turn. Once interrupted, the normal double-press exit ladder starts
+      // fresh on the next keypress.
+      if (busy) {
+        interruptConversation()
+        return
+      }
       // A Ctrl+C with draft text in the composer clears the draft first (Claude
       // Code behaviour) — it never interrupts the turn or counts toward exit.
       // Only an empty composer falls through to the interrupt / double-press-to-
@@ -229,20 +256,7 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
         doExit()
       } else {
         dispatch({ type: "CTRL_C", at })
-        if (busy) {
-          agent.abort()
-          abortRuntime()
-          // A turn-blocking overlay (permission prompt / ask_user question) would
-          // otherwise linger after the abort with an orphaned resolver. Close the
-          // permission overlay; settle ask_user as cancelled so its store doesn't
-          // immediately re-open it (the bridge re-fires on an unresolved prompt).
-          if (state.overlay.kind === "permission") dispatch({ type: "OVERLAY_CLOSE" })
-          else if (state.overlay.kind === "askUser")
-            askUser.resolve({ selected: [], text: "", cancelled: true })
-          dispatch({ type: "NOTICE", message: "Interrupted · Press Ctrl+C again to exit" })
-        } else {
-          dispatch({ type: "NOTICE", message: "Press Ctrl+C again to exit" })
-        }
+        dispatch({ type: "NOTICE", message: "Press Ctrl+C again to exit" })
         // Clear the double-press window after 3 s so a single press doesn't
         // linger indefinitely — the next Ctrl+C restarts the cycle.
         if (ctrlCTimer.current) clearTimeout(ctrlCTimer.current)
@@ -267,11 +281,17 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
       return
     }
     if (state.phase === "connect-failed") return
-    // While an install runs, swallow every key: interrupting an `npm install`
-    // or a vendor script mid-write can leave a half-installed binary. The page
-    // is display-only and auto-advances (retry on success, failure page on
-    // error), so there is nothing to drive here.
-    if (state.phase === "installing") return
+    if (state.phase === "installing") {
+      if (key.escape) deps.cancelBackendInstall()
+      return
+    }
+    // Like Ctrl+C, Esc must stop a live conversation before local UI layers
+    // consume it. Permission/ask-user overlays are part of the active turn, so
+    // cancelling only the overlay leaves the model/tool execution running.
+    if (key.escape && busy && overlayOpen) {
+      interruptConversation()
+      return
+    }
     // Find-in-viewport (Ctrl+F): while the find bar is open it owns all input —
     // printable keys extend the query (live incremental search), arrows / Enter
     // step matches, Ctrl+Y copies the focused match, Esc closes. The composer is
@@ -373,6 +393,30 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
       }
       if (key.pageDown) {
         scroll.pageDown()
+        return
+      }
+      if (key.ctrl && input === "u") {
+        scroll.halfPageUp()
+        return
+      }
+      if (key.ctrl && input === "d") {
+        scroll.halfPageDown()
+        return
+      }
+      if (key.ctrl && key.upArrow) {
+        scroll.lineUp()
+        return
+      }
+      if (key.ctrl && key.downArrow) {
+        scroll.lineDown()
+        return
+      }
+      if (bufferText(state.input.buffer).length === 0 && input === "g") {
+        scroll.toTop()
+        return
+      }
+      if (bufferText(state.input.buffer).length === 0 && input === "G") {
+        scroll.toBottom()
         return
       }
       // Mouse reports only arrive in `scroll` mode (SGR tracking is on). Scroll

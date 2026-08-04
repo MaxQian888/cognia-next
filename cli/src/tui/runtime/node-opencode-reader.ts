@@ -35,14 +35,27 @@ interface SqliteModule {
 }
 
 /** Candidate on-disk locations for `opencode.db`, most-specific first. */
-export function candidateDbPaths(home: string, env: NodeJS.ProcessEnv = process.env): string[] {
+export function candidateDbPaths(
+  home: string,
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform
+): string[] {
   const out: string[] = []
+  const push = (candidate: string) => {
+    if (!out.includes(candidate)) out.push(candidate)
+  }
   const xdg = env.XDG_DATA_HOME
-  if (xdg) out.push(path.join(xdg, "opencode", "opencode.db"))
-  out.push(path.join(home, ".local", "share", "opencode", "opencode.db"))
-  // Unverified fallback: opencode (Bun) uses the XDG path even on Windows;
-  // the Roaming probe only covers a hypothetical future relocation.
-  out.push(path.join(home, "AppData", "Roaming", "opencode", "opencode.db"))
+  if (xdg) push(path.join(xdg, "opencode", "opencode.db"))
+  // OpenCode currently uses this XDG-style path on every observed platform.
+  push(path.join(home, ".local", "share", "opencode", "opencode.db"))
+  // Match `dirs::data_dir()` in the desktop reader without letting a generic
+  // platform fallback shadow the known store above.
+  if (platform === "win32" && env.APPDATA) {
+    push(path.join(env.APPDATA, "opencode", "opencode.db"))
+  } else if (platform === "darwin") {
+    push(path.join(home, "Library", "Application Support", "opencode", "opencode.db"))
+  }
+  push(path.join(home, "AppData", "Roaming", "opencode", "opencode.db"))
   return out
 }
 

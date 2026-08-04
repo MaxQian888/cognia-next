@@ -24,7 +24,7 @@ export type EffortLayout = "wide" | "compact"
 /** The width below which the inline tier scale no longer fits. The scale needs
  * roughly `Σ(label+2) + arrows` columns; the six default tiers want ~58, so 64
  * leaves a little slack for the cursor + borders before we fall back. */
-export const EFFORT_WIDE_MIN_WIDTH = 64
+export const EFFORT_WIDE_MIN_WIDTH = 90
 
 /** Pick the layout for a given overlay width. */
 export function effortLayout(width: number | undefined): EffortLayout {
@@ -37,8 +37,11 @@ export function effortLayout(width: number | undefined): EffortLayout {
  * readable band. Leaves margin for the border, padding, and the leading cursor.
  */
 export function effortGaugeWidth(width: number | undefined): number {
-  const inner = typeof width === "number" && Number.isFinite(width) ? width - 8 : 32
-  return Math.max(12, Math.min(44, Math.floor(inner)))
+  // Reserve the focus gutter, Faster/Smarter labels, borders and padding. The
+  // old `width - 8` calculation let the track consume columns owned by the
+  // trailing label, so Ink wrapped it and the scale no longer lined up.
+  const inner = typeof width === "number" && Number.isFinite(width) ? width - 21 : 32
+  return Math.max(12, Math.min(72, Math.floor(inner)))
 }
 
 /** Per-cell state of the gauge track — drives the component's glyph + colour. */

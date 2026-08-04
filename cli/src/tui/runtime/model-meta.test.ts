@@ -33,7 +33,10 @@ describe("resolveModelMeta", () => {
       })
     )
     expect(meta.modelId).toBe("deepseek-chat")
-    expect(meta.contextWindow).toBe(64_000)
+    // The GUI's synchronous picker treats the built-in provider catalog as the
+    // model authority. A stale models.dev row may still refine pricing, but it
+    // must not roll DeepSeek's shared 1M window back to an old value.
+    expect(meta.contextWindow).toBe(1_048_576)
     // Catalog pricing wins over the static-table fallback for the base rates.
     expect(meta.pricing).toMatchObject({ promptPer1M: 0.27, completionPer1M: 1.1 })
   })

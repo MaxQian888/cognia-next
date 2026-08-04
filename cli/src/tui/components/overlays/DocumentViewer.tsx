@@ -28,6 +28,8 @@ export interface DocumentViewerProps {
   format: DocumentFormat
   lang?: string
   onClose: () => void
+  /** Copy the complete, unwindowed document (used by `/transcript`). */
+  onCopy?: (body: string) => void
   /** Test seam: viewport height in rows (defaults to the terminal height). */
   viewportRows?: number
 }
@@ -44,11 +46,14 @@ export function DocumentViewer({
   format,
   lang,
   onClose,
+  onCopy,
   viewportRows,
 }: DocumentViewerProps) {
   const theme = useTheme()
   const { stdout } = useStdout()
   const [scroll, setScroll] = React.useState(0)
+  const [searchDraft, setSearchDraft] = React.useState<string | null>(null)
+  const [search, setSearch] = React.useState({ query: "", matches: [] as number[], index: 0 })
 
   const prepared = React.useMemo(
     () => prepareDocumentLines(body, format, lang),
@@ -63,14 +68,71 @@ export function DocumentViewer({
     [total, viewport]
   )
 
+  const searchableLines = React.useMemo(
+    () =>
+      prepared.kind === "text"
+        ? prepared.lines
+        : prepared.lines.map((line) => {
+            if ("spans" in line) return line.spans.map((span) => span.text).join("")
+            if (line.kind === "code") return line.text
+            if (line.kind === "table") {
+              return [line.header, ...line.rows]
+                .flatMap((row) => row)
+                .flatMap((spans) => spans)
+                .map((span) => span.text)
+                .join(" ")
+            }
+            return ""
+          }),
+    [prepared]
+  )
+
+  const commitSearch = React.useCallback(
+    (query: string) => {
+      const normalized = query.trim().toLowerCase()
+      const matches = normalized
+        ? searchableLines.flatMap((line, index) =>
+            line.toLowerCase().includes(normalized) ? [index] : []
+          )
+        : []
+      setSearch({ query: query.trim(), matches, index: 0 })
+      setSearchDraft(null)
+      if (matches[0] !== undefined) setScroll(clampScroll(matches[0], total, viewport))
+    },
+    [searchableLines, total, viewport]
+  )
+
+  const moveMatch = React.useCallback(
+    (delta: number) => {
+      if (search.matches.length === 0) return
+      const index = (search.index + delta + search.matches.length) % search.matches.length
+      setSearch({ ...search, index })
+      setScroll(clampScroll(search.matches[index], total, viewport))
+    },
+    [search, total, viewport]
+  )
+
   useInput((input, key) => {
+    if (searchDraft !== null) {
+      if (key.escape) return setSearchDraft(null)
+      if (key.return) return commitSearch(searchDraft)
+      if (key.backspace || key.delete) return setSearchDraft((value) => value?.slice(0, -1) ?? null)
+      if (input && !key.ctrl && !key.meta) return setSearchDraft((value) => (value ?? "") + input)
+      return
+    }
     if (key.escape || key.return || input === "q") return onClose()
     if (key.upArrow) return move(-1)
     if (key.downArrow) return move(1)
     if (key.pageUp || input === "b") return move(-viewport)
     if (key.pageDown || input === " ") return move(viewport)
+    if (key.ctrl && input === "u") return move(-Math.max(1, Math.floor(viewport / 2)))
+    if (key.ctrl && input === "d") return move(Math.max(1, Math.floor(viewport / 2)))
     if (input === "g") return setScroll(0)
     if (input === "G") return setScroll(maxScroll(total, viewport))
+    if (input === "/") return setSearchDraft("")
+    if (input === "n") return moveMatch(1)
+    if (input === "N") return moveMatch(-1)
+    if (input === "y" && onCopy) return onCopy(body)
     // Mouse wheel (SGR tracking is on in fullscreen): scroll a few lines per
     // notch; other mouse events are swallowed so they don't fall through.
     const mouse = parseMouseEvent(input)
@@ -99,7 +161,9 @@ export function DocumentViewer({
               .map((line, i) => <Text key={start + i}>{line.length > 0 ? line : " "}</Text>)}
       </Box>
       <Text color={theme.muted} dimColor>
-        {`${positionLabel(start, viewport, total)} · ↑/↓ scroll · PgUp/PgDn page · g/G top/bottom · q/esc close`}
+        {searchDraft !== null
+          ? `/${searchDraft}█ · enter search · esc cancel`
+          : `${positionLabel(start, viewport, total)}${search.query ? ` · ${search.matches.length === 0 ? "0" : search.index + 1}/${search.matches.length} matches` : ""} · ↑/↓ scroll · PgUp/PgDn page · g/G top/bottom · / search · n/N next/prev${onCopy ? " · y copy all" : ""} · q/esc close`}
       </Text>
     </Box>
   )

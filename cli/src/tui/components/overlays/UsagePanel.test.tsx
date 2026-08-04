@@ -19,6 +19,8 @@ describe("UsagePanel", () => {
     expect(text).toContain("Usage")
     expect(text).toContain("Input")
     expect(text).toContain("1.2k")
+    expect(text).toContain("Model")
+    expect(text).toContain("claude-x")
   })
 
   it("renders the token trend, composition bar and top tools when data is present", () => {

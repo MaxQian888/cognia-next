@@ -15,6 +15,7 @@ import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../config/schema"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import type { SidecarBootstrap } from "../runtime/bootstrap"
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
+import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 import { getCliSubagentContext } from "./subagent-dispatch"
 import { DISPATCH_AGENT_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-tool"
 import type { AgentSummary } from "./discover-agents"
@@ -135,6 +136,73 @@ describe("withCliDisabledMcpTools", () => {
 })
 
 describe("createAgentSession", () => {
+  it("prefers canonical envelopes and never double-applies the legacy callback", async () => {
+    const capture = jest.fn(async (_sessionId, _content, _options, cap) => {
+      cap?.onEvent?.({ type: "text-delta", delta: "hello" })
+      return result("hello")
+    })
+    const session = createAgentSession({
+      config: cfg(),
+      sessionId: "s_envelope",
+      home: HOME,
+      now: () => 1000,
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture: capture as never,
+      transcriptFs: memFs().fsx,
+    })
+    const envelopes: AgentEventEnvelope[] = []
+    const legacy = jest.fn()
+
+    await session.send("hi", {
+      gate: createPermissionGate({ yes: true }),
+      onEnvelope: (envelope) => envelopes.push(envelope),
+      onEvent: legacy,
+    })
+
+    expect(envelopes.map((item) => item.event)).toEqual([{ kind: "text-delta", delta: "hello" }])
+    expect(legacy).not.toHaveBeenCalled()
+  })
+
+  it("emits captured A2UI surfaces through the canonical content-part stream", async () => {
+    const capture = jest.fn(async () => ({
+      ...result(""),
+      a2uiSurfaceOrder: ["surface-1"],
+      a2uiSurfaces: {
+        "surface-1": {
+          rootId: "root",
+          components: { root: { component: "Text", text: "Hello" } },
+          dataModel: {},
+        },
+      },
+    }))
+    const session = createAgentSession({
+      config: cfg(),
+      sessionId: "s_a2ui",
+      home: HOME,
+      now: () => 1000,
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture: capture as never,
+      transcriptFs: memFs().fsx,
+    })
+    const envelopes: AgentEventEnvelope[] = []
+    await session.send("hi", {
+      gate: createPermissionGate({ yes: true }),
+      onEnvelope: (envelope) => envelopes.push(envelope),
+    })
+    expect(envelopes.at(-1)?.event).toMatchObject({
+      kind: "content-part",
+      partId: "a2ui:surface-1",
+      operation: "upsert",
+      part: { type: "a2ui", surfaceId: "surface-1", source: "mcp-bridge" },
+    })
+  })
+
   it("auto-approves read-only tools in the options handed to capture", async () => {
     const capture = jest.fn().mockResolvedValue(result("ok"))
     const session = createAgentSession({

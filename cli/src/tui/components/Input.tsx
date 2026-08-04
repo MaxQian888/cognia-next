@@ -712,6 +712,7 @@ function InputImpl({
           <SlashPalette
             matches={slashMatches}
             index={safeIndex}
+            query={sQuery ?? ""}
             maxRows={popupRows}
             width={width}
           />

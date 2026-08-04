@@ -35,7 +35,7 @@ export interface RenderTuiDeps {
    * `createSession` from the live `agentBackend`, so `/backend` can switch
    * without restarting the command. */
   createExternalSession?: React.ComponentProps<typeof App>["createExternalSession"]
-  pushHandoff?: (sessionId: string) => void | Promise<void>
+  pushHandoff?: (sessionId: string) => boolean | Promise<boolean>
   sessionId?: string
   render?: typeof inkRender
   /** Slash command to run once on mount (launch flags: `--continue`/`--resume`). */

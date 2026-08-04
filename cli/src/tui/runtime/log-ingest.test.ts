@@ -3,6 +3,7 @@ import {
   sidecarExitedLog,
   turnErrorLog,
   type LogIngestSubscriptions,
+  turnLifecycleLog,
 } from "./log-ingest"
 import type { LogInput } from "../state/types"
 
@@ -165,5 +166,15 @@ describe("one-off log builders", () => {
       message: "boom",
     })
     expect(turnErrorLog(7, "boom")).not.toHaveProperty("origin")
+  })
+
+  it("builds privacy-safe lifecycle lines without prompt content", () => {
+    expect(turnLifecycleLog(9, "completed", "s1")).toEqual({
+      ts: 9,
+      level: "info",
+      channel: "system",
+      origin: "s1",
+      message: "turn completed",
+    })
   })
 })

@@ -14,6 +14,7 @@ import { CellView } from "./CellView"
 import { useTheme } from "../theme/context"
 import { groupContextRuns, summarizeContextGroup } from "../format/context-group"
 import type { Cell, ToolCell } from "../state/types"
+import { cellToTerminalBlock } from "../render/cell-terminal-block"
 
 /** Reports its measured row-height for the find cursor's row map. Wraps a cell
  * only while find is active (measurement is gated), so the static-history path
@@ -54,6 +55,26 @@ const HEADER_ID = "__banner__"
 
 type Row = { id: string; cell?: Cell }
 
+/** Keep the newest complete cells whose rendered height fits the replay budget.
+ * The first over-budget cell is retained so a single tall result is not lost. */
+export function limitReplayCells(
+  cells: Cell[],
+  maxRows: number,
+  width: number,
+  verbose: boolean
+): Cell[] {
+  if (maxRows === 0) return cells
+  let rows = 0
+  let start = cells.length
+  while (start > 0) {
+    const next = cellToTerminalBlock(cells[start - 1], { width, verbose }).rowCount + 1
+    if (rows > 0 && rows + next > maxRows) break
+    rows += next
+    start -= 1
+  }
+  return cells.slice(start)
+}
+
 /** In verbose mode, tool/thinking cells render expanded regardless of their own
  * collapsed flag — the user opted into detailed output globally. */
 function applyVerbose(cell: Cell, verbose: boolean): Cell {
@@ -71,6 +92,7 @@ function TranscriptImpl({
   measuring = false,
   focusedCellId = null,
   onCellHeight,
+  replayMaxRows = 10000,
 }: {
   cells: Cell[]
   header?: React.ReactNode
@@ -93,6 +115,8 @@ function TranscriptImpl({
   focusedCellId?: string | null
   /** Receives `(cellId, height)` for every cell while {@link measuring}. */
   onCellHeight?: (id: string, height: number) => void
+  /** Native-scrollback repaint cap. Zero replays the complete transcript. */
+  replayMaxRows?: number
 }) {
   const theme = useTheme()
   const renderCell = (cell: Cell) => {
@@ -145,9 +169,13 @@ function TranscriptImpl({
     )
   }
 
+  const replayCells =
+    epoch > 0
+      ? limitReplayCells(cells, replayMaxRows, process.stdout.columns ?? 80, verbose)
+      : cells
   const rows: Row[] = header
-    ? [{ id: HEADER_ID }, ...cells.map((cell) => ({ id: cell.id, cell }))]
-    : cells.map((cell) => ({ id: cell.id, cell }))
+    ? [{ id: HEADER_ID }, ...replayCells.map((cell) => ({ id: cell.id, cell }))]
+    : replayCells.map((cell) => ({ id: cell.id, cell }))
   return (
     <Static key={epoch} items={rows}>
       {(row: Row) =>

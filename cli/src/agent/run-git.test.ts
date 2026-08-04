@@ -10,6 +10,15 @@ describe("runExec", () => {
     expect(res.stdout).toBe("hi")
   })
 
+  it("keeps all standard streams connected for tool children", async () => {
+    const res = await runExec(process.execPath, [
+      "-e",
+      "const fs=require('node:fs');process.stdout.write([0,1,2].map((fd)=>{try{fs.fstatSync(fd);return 'open'}catch{return 'closed'}}).join(','))",
+    ])
+    expect(res.code).toBe(0)
+    expect(res.stdout).toBe("open,open,open")
+  })
+
   it("surfaces a non-zero exit code without throwing", async () => {
     const res = await runExec(process.execPath, ["-e", "process.exit(3)"])
     expect(res.code).toBe(3)

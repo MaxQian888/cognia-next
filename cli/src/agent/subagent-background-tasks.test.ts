@@ -167,6 +167,17 @@ describe("CLI background subagent tasks", () => {
     })
   })
 
+  it("counts interrupted history only for the current chat session", async () => {
+    const home = makeHome()
+    await startCliBackgroundJournal(home)
+    await getDb().backgroundTasks.bulkPut([
+      row({ runId: "mine", sessionId: "session-a", status: "interrupted" }),
+      row({ runId: "other", sessionId: "session-b", status: "interrupted" }),
+    ])
+
+    await expect(countInterruptedCliBackgroundRuns({ home, owner: "session-a" })).resolves.toBe(1)
+  })
+
   it("supports live runs without an explicit CLI home", async () => {
     const run = deferred<string>()
 

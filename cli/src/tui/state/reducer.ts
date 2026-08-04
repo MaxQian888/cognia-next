@@ -323,10 +323,13 @@ function withOverlayIndex(overlay: Overlay, index: number): Overlay {
 const STREAM_ACTIVITY = new Set<TuiAction["type"]>([
   "INFLIGHT_TEXT",
   "INFLIGHT_THINKING",
+  "COMMENTARY_DELTA",
+  "CONTENT_PART_UPSERT",
   "TOOL_CALL",
   "TOOL_UPDATE",
   "TOOL_RESULT",
   "SET_USAGE",
+  "SET_CONTEXT_USAGE",
 ])
 
 export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
@@ -367,6 +370,101 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         ...state,
         inflight: { ...state.inflight, thinking: state.inflight.thinking + action.delta },
       }
+    case "COMMENTARY_DELTA": {
+      const existing = state.cells.findIndex(
+        (cell) => cell.kind === "commentary" && cell.messageId === action.messageId
+      )
+      if (existing >= 0) {
+        const cells = [...state.cells]
+        const cell = cells[existing]
+        if (cell.kind !== "commentary") return state
+        cells[existing] = {
+          ...cell,
+          text: cell.text + action.delta,
+          done: action.done,
+        }
+        return { ...state, cells }
+      }
+      return {
+        ...state,
+        cells: [
+          ...state.cells,
+          {
+            id: makeId(state.seq),
+            kind: "commentary",
+            messageId: action.messageId,
+            text: action.delta,
+            done: action.done,
+          },
+        ],
+        seq: state.seq + 1,
+      }
+    }
+    case "CONTENT_PART_UPSERT": {
+      const existing = state.cells.findIndex(
+        (cell) => cell.kind === "content-part" && cell.partId === action.partId
+      )
+      if (existing >= 0) {
+        const cells = [...state.cells]
+        const cell = cells[existing]
+        if (cell.kind !== "content-part") return state
+        cells[existing] = { ...cell, part: action.part }
+        return { ...state, cells }
+      }
+      return {
+        ...state,
+        cells: [
+          ...state.cells,
+          {
+            id: makeId(state.seq),
+            kind: "content-part",
+            partId: action.partId,
+            part: action.part,
+          },
+        ],
+        seq: state.seq + 1,
+      }
+    }
+    case "CONTENT_PART_REMOVE": {
+      const cells = state.cells.filter(
+        (cell) => cell.kind !== "content-part" || cell.partId !== action.partId
+      )
+      return cells.length === state.cells.length ? state : { ...state, cells }
+    }
+    case "CANONICAL_EVENT_NOTICE": {
+      if (action.ephemeral) {
+        return {
+          ...state,
+          toasts: pushToast(state.toasts, {
+            id: action.eventId,
+            severity: action.level === "warning" ? "warn" : action.level,
+            message: `${action.title}: ${action.summary}`,
+          }),
+        }
+      }
+      if (
+        state.cells.some(
+          (cell) => cell.kind === "canonical-event" && cell.eventId === action.eventId
+        )
+      ) {
+        return state
+      }
+      return {
+        ...state,
+        cells: [
+          ...state.cells,
+          {
+            id: makeId(state.seq),
+            kind: "canonical-event",
+            eventId: action.eventId,
+            level: action.level,
+            title: action.title,
+            summary: action.summary,
+          },
+        ],
+        seq: state.seq + 1,
+      }
+    }
     case "COMMIT_PLAN": {
       // Programmatic plan capture from the `/plan explore` pipeline: the Plan
       // subagent's markdown IS the plan (no ExitPlanMode tool call). Route it
@@ -646,6 +744,24 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         usageHistory: pushUsageHistory(state.usageHistory, action.usage),
         costHistory: pushCostHistory(state.costHistory, action.usage, state.modelMeta?.pricing),
         usageSeenThisTurn: true,
+      }
+    }
+    case "SET_CONTEXT_USAGE": {
+      const turnModel =
+        resolveBackendModel(state.config, state.backendCapabilities?.presetId) ?? "default"
+      return {
+        ...state,
+        usage: {
+          ...state.usage,
+          contextTokens: action.used,
+          contextWindow: action.size,
+        },
+        modelMeta: {
+          ...state.modelMeta,
+          modelId: turnModel,
+          contextWindow: action.size,
+          runtime: true,
+        },
       }
     }
     case "SET_RATE_LIMITS":
@@ -1320,6 +1436,15 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         },
       }
     }
+    case "LIMITS_LOADED":
+      // A refresh may finish after the user has closed or replaced the panel.
+      // Never resurrect a stale limits overlay in that case.
+      return state.overlay.kind === "limits" && state.overlay.requestId === action.requestId
+        ? {
+            ...state,
+            overlay: { ...state.overlay, snapshots: action.snapshots, loading: false },
+          }
+        : state
     case "OVERLAY_CLOSE": {
       const { savedCursor, ...restInput } = state.input
       const buffer = state.input.buffer
@@ -1672,6 +1797,10 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       // route; `backendInstallError` tells them why the last attempt failed.
       const { backendInstall: _install, ...rest } = state
       return { ...rest, phase: "connect-failed", backendInstallError: action.message }
+    }
+    case "BACKEND_INSTALL_CANCEL": {
+      const { backendInstall: _install, backendInstallError: _error, ...rest } = state
+      return { ...rest, phase: "connect-failed" }
     }
     case "SET_BACKEND": {
       // Drop the previous backend's capabilities immediately — rendering them

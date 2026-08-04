@@ -1702,7 +1702,9 @@ fn apply_flow_state(
     process: &Arc<dyn HostedTerminalProcess>,
     paused: bool,
 ) -> Result<(), HostError> {
-    process.set_flow_paused(paused).map_err(HostError::Process)?;
+    process
+        .set_flow_paused(paused)
+        .map_err(HostError::Process)?;
     broadcast_transport_state(
         inner,
         session_id,
@@ -1897,7 +1899,10 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(host.path_injection().prepend, vec![PathBuf::from("/app/cli")]);
+        assert_eq!(
+            host.path_injection().prepend,
+            vec![PathBuf::from("/app/cli")]
+        );
     }
 
     /// Slowest-consumer-wins: the PTY stays parked while ANY attachment has an

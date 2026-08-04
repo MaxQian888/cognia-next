@@ -400,6 +400,31 @@ describe("App — external backend startup", () => {
     expect(text).toContain("added 1 package")
   })
 
+  it("cancels a running install with Esc and returns to the recovery page", async () => {
+    let installSignal: AbortSignal | undefined
+    const runInstallFn: React.ComponentProps<typeof App>["runInstallFn"] = async (deps) => {
+      installSignal = deps.signal
+      return new Promise<never>(() => {})
+    }
+    const { container } = renderApp(fakeConnect(failedInstallable), {
+      trusted: true,
+      resolveInstallOptionFn: async () => installOption,
+      runInstallFn,
+    })
+
+    await settle()
+    act(() => __fireInput("", { return: true }))
+    await settle()
+    expect(container.textContent).toContain("Installing GitHub Copilot CLI")
+
+    act(() => __fireInput("", { escape: true }))
+    await settle()
+
+    expect(installSignal?.aborted).toBe(true)
+    expect(container.textContent).toContain("Install GitHub Copilot CLI (npm)")
+    expect(container.textContent).not.toContain("Installing GitHub Copilot CLI")
+  })
+
   it("reconnects automatically after a successful install", async () => {
     const connect = jest
       .fn<ReturnType<typeof connectBackend>, Parameters<typeof connectBackend>>()

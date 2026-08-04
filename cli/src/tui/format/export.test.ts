@@ -101,6 +101,31 @@ describe("formatCellsAsMarkdown", () => {
     expect(out).toContain("### Error\n\nit broke")
   })
 
+  it("exports canonical commentary, content, and event cells", () => {
+    const cells: Cell[] = [
+      { id: "1", kind: "commentary", messageId: "m1", text: "checking", done: true },
+      {
+        id: "2",
+        kind: "content-part",
+        partId: "p1",
+        part: { type: "custom", customType: "report", summary: "structured content" },
+      },
+      {
+        id: "3",
+        kind: "canonical-event",
+        eventId: "e1",
+        level: "warning",
+        title: "Runtime warning",
+        summary: "retrying",
+      },
+    ]
+
+    const out = formatCellsAsMarkdown(cells)
+    expect(out).toContain("### Commentary\n\nchecking")
+    expect(out).toContain("### Content\n\nreport\nstructured content")
+    expect(out).toContain("### Event\n\nRuntime warning: retrying")
+  })
+
   it("drops notices — they are UI chatter, not conversation", () => {
     const cells: Cell[] = [
       { id: "1", kind: "notice", message: "Copied to the clipboard." },

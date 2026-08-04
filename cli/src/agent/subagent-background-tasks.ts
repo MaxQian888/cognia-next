@@ -162,10 +162,15 @@ export function countRunningCliBackgroundRuns(owner?: string): number {
 }
 
 export async function countInterruptedCliBackgroundRuns(
-  options: { home?: string } = {}
+  options: { home?: string; owner?: string } = {}
 ): Promise<number> {
   const records = await readJournalRecords(options.home)
-  return records.filter((record) => record.host === "cli" && record.status === "interrupted").length
+  return records.filter(
+    (record) =>
+      record.host === "cli" &&
+      record.status === "interrupted" &&
+      (options.owner === undefined || record.sessionId === options.owner)
+  ).length
 }
 
 export function __clearAllCliBackgroundRunsForTesting(): void {

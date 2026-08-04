@@ -1,4 +1,4 @@
-import { osc8Link, supportsHyperlinks } from "./hyperlink"
+import { isSafeHyperlink, osc8Link, supportsHyperlinks } from "./hyperlink"
 
 const ESC = ""
 const BEL = ""
@@ -14,6 +14,13 @@ describe("osc8Link", () => {
     const out = osc8Link("https://a.test", "click here")
     expect(out).toContain("click here")
     expect(out.startsWith(`${ESC}]8;;`)).toBe(true)
+  })
+
+  it("rejects hostile and untrusted local targets", () => {
+    expect(osc8Link("javascript:alert(1)", "unsafe")).toBe("unsafe")
+    expect(osc8Link("https://safe.test/\u001b]0;bad", "unsafe")).toBe("unsafe")
+    expect(isSafeHyperlink("file:///tmp/private")).toBe(false)
+    expect(osc8Link("file:///tmp/trusted", "file", true)).toContain("file:///tmp/trusted")
   })
 })
 

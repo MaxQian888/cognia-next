@@ -15,6 +15,8 @@
 
 /** Tauri event channel the renderer subscribes to; reused verbatim by the CLI. */
 export const SIDECAR_EVENT = "claude://message"
+/** Canonical AgentEventEnvelope channel, matching the desktop Rust bridge. */
+export const AGENT_EVENT = "agent://message"
 /** Dedicated A2UI dispatch channel (desktop parity; unused by CLI v1). */
 export const A2UI_EVENT = "a2ui://dispatch"
 
@@ -53,6 +55,13 @@ export type InboundMessage =
       requestId: string
       method: string
       params?: unknown
+    }
+  | {
+      type: "session_api"
+      requestId: string
+      method: string
+      params?: unknown
+      sendOptions?: unknown
     }
   | { type: "close"; sessionId: string }
 
@@ -93,6 +102,7 @@ export const COMMAND = {
   TOOL_RESULT_DECISION: "claude_tool_result_decision",
   PLUGIN_TOOL_RESPONSE: "claude_plugin_tool_response",
   SESSION_CONTROL: "claude_session_control",
+  SESSION_API: "agent_session_api",
   SIDECAR_STATUS: "claude_sidecar_status",
 } as const
 
@@ -175,6 +185,14 @@ export function commandToInbound(
         requestId: String(args.requestId),
         method: String(args.method),
         params: args.params,
+      }
+    case COMMAND.SESSION_API:
+      return {
+        type: "session_api",
+        requestId: String(args.requestId),
+        method: String(args.method),
+        params: args.params,
+        sendOptions: args.sendOptions,
       }
     case COMMAND.SIDECAR_STATUS:
       return null // local read — handled by the transport, no stdin write

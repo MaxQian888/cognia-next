@@ -86,7 +86,12 @@ export async function resolveModelMeta(
     const row = await loadCatalog()
     if (row) {
       const entry = findCatalogModel(row, provider, modelId)
-      if (entry && typeof entry.contextLength === "number" && entry.contextLength > 0) {
+      if (
+        !staticConfig?.contextLength &&
+        entry &&
+        typeof entry.contextLength === "number" &&
+        entry.contextLength > 0
+      ) {
         contextWindow = entry.contextLength
       }
       catalogLookup = (p, m) => findCatalogModel(row, p, m)?.pricing

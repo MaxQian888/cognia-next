@@ -29,10 +29,10 @@ describe("effortLayout", () => {
 describe("effortGaugeWidth", () => {
   it("scales with width but stays inside the readable band", () => {
     expect(effortGaugeWidth(10)).toBe(12) // floor clamp
-    expect(effortGaugeWidth(1000)).toBe(44) // ceil clamp
+    expect(effortGaugeWidth(1000)).toBe(72) // ceil clamp
     const mid = effortGaugeWidth(50)
     expect(mid).toBeGreaterThanOrEqual(12)
-    expect(mid).toBeLessThanOrEqual(44)
+    expect(mid).toBeLessThanOrEqual(72)
   })
 
   it("falls back to a sensible default for unknown width", () => {

@@ -18,7 +18,7 @@ import {
   type StatusTheme,
 } from "../../config/schema"
 import { getBuiltinTheme } from "../theme/builtins"
-import { stringWidth } from "../markdown/width"
+import { stringWidth, truncateToWidth } from "../markdown/width"
 import type { ThemePalette } from "../theme/palette"
 import {
   cacheHitRatio,
@@ -178,7 +178,11 @@ function segmentText(
       return isBuiltinBackend(config.agentBackend) ? "default" : null
     }
     case "provider":
-      return config.provider
+      // The provider segment is an identity readout, so it must follow the
+      // backend that is answering. `config.provider` remains the built-in
+      // provider setting used by `/provider` and Cognia's own tool host; on an
+      // external backend it is intentionally not the agent shown to the user.
+      return backendIdentity(config, ctx.capabilities?.presetId).provider
     case "mode":
       return modeSegmentText(config, ctx.capabilities)
     case "tokens": {
@@ -340,7 +344,15 @@ export function fitStatusSegments(segments: StatusSegmentView[], columns: number
     kept.splice(dropAt, 1)
     truncated = true
   }
-  return { segments: kept.map((k) => k.s), truncated }
+  const fitted = kept.map((k) => k.s)
+  if (fitted.length === 1) {
+    if (stringWidth(fitted[0].text) > columns - (truncated ? ELLIPSIS_WIDTH : 0)) {
+      const textBudget = Math.max(1, columns - ELLIPSIS_WIDTH)
+      fitted[0] = { ...fitted[0], text: truncateToWidth(fitted[0].text, textBudget) }
+      truncated = true
+    }
+  }
+  return { segments: fitted, truncated }
 }
 
 /** A determinate progress bar: `progressBar(3, 5)` → "▰▰▰▱▱". */

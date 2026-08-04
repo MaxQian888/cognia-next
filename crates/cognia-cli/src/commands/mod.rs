@@ -19,6 +19,8 @@ pub(crate) mod lint;
 pub(crate) mod list;
 pub(crate) mod logs;
 pub(crate) mod new;
+pub(crate) mod pack_sign;
+pub(crate) mod pack_verify;
 pub(crate) mod release_key;
 pub(crate) mod release_verify;
 pub(crate) mod reload;

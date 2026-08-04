@@ -14,7 +14,9 @@ pub(crate) mod semver;
 pub(crate) use encoding::{b64_decode, b64_encode};
 pub(crate) use exit::JsonFailureExit;
 pub(crate) use manifest::read_plugin_manifest;
-pub(crate) use process::run_streaming;
+pub(crate) use process::{
+    clear_process_interrupt, request_process_interrupt, run_streaming, ProcessInterrupted,
+};
 pub(crate) use semver::looks_like_semver;
 
 #[cfg(test)]

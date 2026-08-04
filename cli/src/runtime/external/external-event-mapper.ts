@@ -16,9 +16,139 @@ import type {
 } from "@/types/agent/external-agent"
 
 import type { TuiAction } from "../../tui/state/types"
+import type { CanonicalAgentEvent } from "@cognia/agent-config-types/agent-execution"
 
 export interface ExternalEventMapperOptions {
   onPermissionRequest?: (event: ExternalAgentPermissionRequestEvent) => void
+}
+
+/** Preserve protocol events that do not have a legacy reducer action. The
+ * canonical stream is the audit-complete path; legacy consumers keep their
+ * historical projections through {@link externalAgentEventToActions}. */
+export function externalAgentEventToCanonicalFallback(
+  event: ExternalAgentEvent
+): CanonicalAgentEvent {
+  switch (event.type) {
+    case "session_start":
+      return { kind: "lifecycle", phase: "started", detail: "External agent session started" }
+    case "session_end":
+      return {
+        kind: "lifecycle",
+        phase: event.reason === "cancelled" ? "interrupted" : "ended",
+        ...(event.error ? { detail: event.error } : {}),
+      }
+    case "message_start":
+      return { kind: "activity", phase: "requesting", detail: "External agent is responding" }
+    case "message_delta":
+      return event.delta.type === "thinking"
+        ? { kind: "thinking-delta", delta: event.delta.text }
+        : { kind: "text-delta", delta: event.delta.text }
+    case "message_end":
+      return { kind: "activity", phase: "idle" }
+    case "thinking":
+      return { kind: "thinking-delta", delta: event.thinking }
+    case "commentary_delta":
+      return {
+        kind: "commentary-delta",
+        delta: event.text,
+        ...(event.messageId ? { messageId: event.messageId } : {}),
+        ...(typeof event.done === "boolean" ? { done: event.done } : {}),
+      }
+    case "tool_use_delta":
+      return {
+        kind: "tool-progress",
+        toolCallId: event.toolUseId,
+        toolName: "external",
+        elapsedMs: 0,
+      }
+    case "tool_use_end":
+      return {
+        kind: "informational",
+        content: `External tool input completed: ${event.toolUseId}`,
+        level: "info",
+      }
+    case "permission_request":
+      return {
+        kind: "permission-request",
+        requestId: event.request.requestId ?? event.request.id,
+        toolName: event.request.toolInfo.name,
+        ...(event.request.rawInput ? { input: event.request.rawInput } : {}),
+      }
+    case "permission_response":
+      return {
+        kind: "permission-resolved",
+        requestId: event.response.requestId,
+        behavior: event.response.granted ? "allow" : "deny",
+      }
+    case "elicitation_request":
+      return {
+        kind: "elicitation-request",
+        requestId: event.request.id,
+        source: event.request.origin ?? "external-agent",
+        prompt: event.request.message,
+        ...(event.request.requestedSchema
+          ? { schema: event.request.requestedSchema as unknown as Record<string, unknown> }
+          : {}),
+      }
+    case "elicitation_complete":
+      return { kind: "elicitation-resolved", requestId: event.elicitationId, outcome: "answered" }
+    case "commands_update":
+      return {
+        kind: "commands-changed",
+        commands: event.commands.map((command) => ({
+          name: command.name,
+          ...(command.description ? { description: command.description } : {}),
+          source: "external-agent",
+        })),
+      }
+    case "config_options_update":
+      return {
+        kind: "informational",
+        content: `${event.configOptions.length} external configuration options available`,
+        level: "info",
+      }
+    case "mode_update":
+      return { kind: "informational", content: `External mode: ${event.modeId}`, level: "notice" }
+    case "usage_update":
+      return {
+        kind: "usage",
+        partial: true,
+        usage: { used: event.used, size: event.size, ...(event.cost ? { cost: event.cost } : {}) },
+      }
+    case "session_info_update":
+      return {
+        kind: "informational",
+        content: event.title
+          ? `Session title: ${event.title}`
+          : "External session metadata updated",
+        level: "info",
+      }
+    case "progress":
+      return {
+        kind: "activity",
+        phase: "requesting",
+        detail: event.message ?? `Progress ${Math.round(event.progress * 100)}%`,
+      }
+    case "done":
+      return {
+        kind: "lifecycle",
+        phase: event.success ? "ended" : "interrupted",
+        ...(event.stopReason ? { detail: event.stopReason } : {}),
+      }
+    case "error":
+      return {
+        kind: "failure",
+        code: event.code ?? "external_agent",
+        message: event.error,
+        retryable: event.recoverable ?? false,
+      }
+    default:
+      return {
+        kind: "informational",
+        content: `External event: ${event.type}`,
+        level: "info",
+      }
+  }
 }
 
 /** Translate one protocol event into the existing TUI reducer vocabulary. */

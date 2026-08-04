@@ -174,4 +174,25 @@ describe("DocumentViewer", () => {
     )
     expect(container.textContent).toContain("all")
   })
+
+  it("searches, jumps between matches, and copies the complete document", () => {
+    const onCopy = jest.fn()
+    const { container } = render(
+      <DocumentViewer
+        title="Transcript"
+        body={longBody}
+        format="text"
+        onClose={() => {}}
+        onCopy={onCopy}
+        viewportRows={10}
+      />
+    )
+    fire("/")
+    for (const char of "line 50") fire(char)
+    fire("", { return: true })
+    expect(container.textContent).toContain("line 50")
+    expect(container.textContent).toContain("1/1 matches")
+    fire("y")
+    expect(onCopy).toHaveBeenCalledWith(longBody)
+  })
 })

@@ -76,6 +76,7 @@ function passthroughTestProps(props) {
   const out = {}
   if (props && typeof props === "object") {
     if (props["data-testid"]) out["data-testid"] = props["data-testid"]
+    if (props.flexGrow !== undefined) out["data-flex-grow"] = String(props.flexGrow)
     if (props.id) out.id = props.id
   }
   return out

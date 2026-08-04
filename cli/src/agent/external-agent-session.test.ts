@@ -366,6 +366,29 @@ describe("createExternalAgentSession", () => {
     expect(events).toEqual(["text-delta", "usage"])
   })
 
+  it("prefers canonical envelopes over both legacy external callbacks", async () => {
+    const { manager } = fakeManager()
+    const session = createExternalAgentSession({
+      disableToolHost: true,
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" },
+      manager,
+      transcriptFs: memoryTranscript().fs,
+      now: () => 42,
+    })
+    const kinds: string[] = []
+    const onEvent = jest.fn()
+    const onAction = jest.fn()
+    await session.send("go", {
+      gate: async () => ({ decision: "allow" }),
+      onEnvelope: (envelope) => kinds.push(envelope.event.kind),
+      onEvent,
+      onAction,
+    })
+    expect(kinds).toEqual(["text-delta", "usage"])
+    expect(onEvent).not.toHaveBeenCalled()
+    expect(onAction).not.toHaveBeenCalled()
+  })
+
   it("cancels the live external session, switches mode, and removes the agent on close", async () => {
     const { manager } = fakeManager()
     const session = createExternalAgentSession({
@@ -420,7 +443,7 @@ describe("createExternalAgentSession", () => {
           {
             id: "model",
             name: "Model",
-            category: "model",
+            category: "model_config",
             type: "select",
             currentValue: "claude-sonnet-4-5",
             options: [
@@ -447,7 +470,7 @@ describe("createExternalAgentSession", () => {
       expect(manager.setSessionModel).not.toHaveBeenCalled()
     })
 
-    it("discovers ACP models before the first turn through a disposable session", async () => {
+    it("creates and retains the real ACP session when models are opened before the first turn", async () => {
       const { manager } = fakeManager()
       const createSession = jest.fn(async () => ({ id: "acp-model-probe" }))
       const closeSession = jest.fn(async () => undefined)
@@ -459,7 +482,7 @@ describe("createExternalAgentSession", () => {
           {
             id: "model",
             name: "Model",
-            category: "model",
+            category: "model_config",
             type: "select",
             currentValue: "claude-sonnet-4-5",
             options: [{ value: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" }],
@@ -475,7 +498,50 @@ describe("createExternalAgentSession", () => {
         "cli-external-cli-session",
         expect.objectContaining({ cwd: "/work" })
       )
-      expect(closeSession).toHaveBeenCalledWith("cli-external-cli-session", "acp-model-probe")
+      await session.send("go", { gate: async () => ({ decision: "allow" }) })
+      expect(manager.execute).toHaveBeenCalledWith(
+        "cli-external-cli-session",
+        expect.any(String),
+        expect.objectContaining({ sessionId: "acp-model-probe" })
+      )
+      expect(closeSession).not.toHaveBeenCalledWith("cli-external-cli-session", "acp-model-probe")
+    })
+
+    it("prefers model_config over a legacy model category", async () => {
+      const { manager } = fakeManager()
+      ;(manager.getConfigOptions as jest.Mock).mockReturnValue({
+        status: "ok",
+        data: [
+          {
+            id: "legacy-model",
+            name: "Legacy",
+            category: "model",
+            type: "select",
+            currentValue: "legacy",
+            options: [{ value: "legacy", name: "Legacy" }],
+          },
+          {
+            id: "stable-model",
+            name: "Model",
+            category: "model_config",
+            type: "select",
+            currentValue: "stable",
+            options: [{ value: "stable", name: "Stable" }],
+          },
+        ],
+      })
+      const session = newSession(manager)
+      await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+      await expect(session.listModels?.()).resolves.toEqual([{ id: "stable", name: "Stable" }])
+      await expect(session.setModel?.("stable")).resolves.toBe(true)
+      expect(manager.setConfigOption).toHaveBeenCalledWith(
+        "cli-external-cli-session",
+        "acp-session-1",
+        "stable-model",
+        "stable"
+      )
+      expect(manager.setSessionModel).not.toHaveBeenCalled()
     })
 
     it("reports no live switch before the first turn (nothing to switch yet)", async () => {
@@ -876,7 +942,8 @@ describe("external-agent turn bounds", () => {
       disableToolHost: true,
       config: {
         ...baseConfig,
-        model: "gpt-5-codex",
+        model: "stale-built-in-model",
+        agentBackends: { "claude-code": { model: "claude-opus-4-1" } },
         systemPrompt: "be terse",
         allowedTools: ["Read", "Bash"],
         additionalRoots: ["/shared"],
@@ -891,7 +958,7 @@ describe("external-agent turn bounds", () => {
     })
 
     expect(getExecuteOptions()).toMatchObject({
-      model: "gpt-5-codex",
+      model: "claude-opus-4-1",
       systemPrompt: "be terse",
       allowedTools: ["Read", "Bash"],
       signal: controller.signal,

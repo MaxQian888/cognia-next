@@ -12,6 +12,7 @@ import { DiffView } from "./DiffView"
 import { useTheme } from "../theme/context"
 import { useRenderPrefs } from "../render/context"
 import { useElapsedSeconds } from "../render/use-elapsed-seconds"
+import { sanitizeCell } from "../render/sanitize-cell"
 import { diffFilePath, formatEditDiff } from "../markdown/diff"
 import { langFromPath } from "../markdown/highlight"
 import { renderResultLines, resultToText, toolResultLang } from "../format/result-render"
@@ -43,6 +44,9 @@ import type {
   AssistantCell,
   Cell,
   BashCell,
+  CanonicalEventCell,
+  CommentaryCell,
+  ContentPartCell,
   ErrorCell,
   NoticeCell,
   PlanCell,
@@ -146,7 +150,7 @@ function linkifyToolSummary(cell: ToolCell, summary: string): string {
   const abs = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath)
   const vscodeTerm = (process.env.TERM_PROGRAM ?? "").toLowerCase() === "vscode"
   const line = toolFileLine(cell.toolName, cell.input)
-  return osc8Link(fileUri(abs, line, vscodeTerm ? "vscode" : "generic"), summary)
+  return osc8Link(fileUri(abs, line, vscodeTerm ? "vscode" : "generic"), summary, true)
 }
 
 function ToolView({ cell }: { cell: ToolCell }) {
@@ -483,6 +487,109 @@ function NoticeView({ cell }: { cell: NoticeCell }) {
   )
 }
 
+function CommentaryView({ cell }: { cell: CommentaryCell }) {
+  const theme = useTheme()
+  return (
+    <Box flexDirection="column">
+      <Text color={theme.secondary} dimColor>
+        {cell.done ? "◆" : "◇"} commentary
+      </Text>
+      <Box paddingLeft={2}>
+        <Markdown raw={cell.text} streaming={!cell.done} />
+      </Box>
+    </Box>
+  )
+}
+
+function ContentPartView({ cell }: { cell: ContentPartCell }) {
+  const theme = useTheme()
+  const part = cell.part
+  switch (part.type) {
+    case "sources":
+      return (
+        <Box flexDirection="column">
+          <Text color={theme.secondary} bold>
+            Sources ({part.sources.length})
+          </Text>
+          {part.sources.map((source, index) => {
+            const label = source.title ?? source.origin ?? source.url ?? source.id
+            const display =
+              source.url && supportsHyperlinks(process.env) ? osc8Link(source.url, label) : label
+            return (
+              <Text key={source.id} color={theme.muted}>
+                [{index + 1}] {display}
+                {typeof source.score === "number" ? ` · ${Math.round(source.score * 100)}%` : ""}
+                {source.snippet ? ` — ${source.snippet}` : ""}
+              </Text>
+            )
+          })}
+        </Box>
+      )
+    case "file":
+      return (
+        <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
+          <Text bold>
+            File · {part.name}
+            {part.mediaType ? ` · ${part.mediaType}` : ""}
+            {typeof part.size === "number" ? ` · ${formatBytes(part.size)}` : ""}
+          </Text>
+          <Text color={theme.muted}>{part.uri}</Text>
+          {part.preview ? <Text>{part.preview}</Text> : null}
+          <Text color={theme.accent} dimColor>
+            /open {cell.partId} · /view {cell.partId}
+          </Text>
+        </Box>
+      )
+    case "a2ui":
+      return (
+        <Box flexDirection="column" borderStyle="round" borderColor={theme.accent} paddingX={1}>
+          <Text color={theme.accent} bold>
+            A2UI surface · {part.surfaceId}
+          </Text>
+          <Text color={theme.muted}>
+            Source: {part.source} · open with /view {cell.partId}
+          </Text>
+        </Box>
+      )
+    case "artifact-ref":
+      return (
+        <Text color={theme.secondary}>
+          Artifact · {part.title ?? part.artifactId} · /view {cell.partId}
+        </Text>
+      )
+    case "canvas-ref":
+      return (
+        <Text color={theme.secondary}>
+          Canvas · {part.title ?? part.canvasId} · /open {cell.partId}
+        </Text>
+      )
+    case "custom":
+      return (
+        <Box flexDirection="column">
+          <Text color={theme.secondary} bold>
+            {part.customType}
+          </Text>
+          <Text color={theme.muted}>{part.summary}</Text>
+          <Text color={theme.accent} dimColor>
+            Structured fallback · /view {cell.partId}
+          </Text>
+        </Box>
+      )
+  }
+}
+
+function CanonicalEventView({ cell }: { cell: CanonicalEventCell }) {
+  const theme = useTheme()
+  const color =
+    cell.level === "error" ? theme.danger : cell.level === "warning" ? theme.warning : theme.muted
+  return (
+    <Text color={color} dimColor={cell.level === "info"}>
+      {cell.level === "error" ? "✗" : cell.level === "warning" ? "⚠" : "•"} {cell.title}:{" "}
+      {cell.summary}
+    </Text>
+  )
+}
+
 function BashView({ cell }: { cell: BashCell }) {
   const theme = useTheme()
   const color =
@@ -517,6 +624,7 @@ function BashView({ cell }: { cell: BashCell }) {
 }
 
 export function CellView({ cell }: { cell: Cell }) {
+  cell = sanitizeCell(cell)
   switch (cell.kind) {
     case "user":
       return <UserView cell={cell} />
@@ -534,9 +642,13 @@ export function CellView({ cell }: { cell: Cell }) {
       return <ErrorView cell={cell} />
     case "notice":
       return <NoticeView cell={cell} />
+    case "commentary":
+      return <CommentaryView cell={cell} />
+    case "content-part":
+      return <ContentPartView cell={cell} />
+    case "canonical-event":
+      return <CanonicalEventView cell={cell} />
     case "bash":
       return <BashView cell={cell} />
-    default:
-      return null
   }
 }

@@ -20,7 +20,7 @@ jest.mock("ink", () => {
   }
 })
 
-import { Transcript } from "./Transcript"
+import { limitReplayCells, Transcript } from "./Transcript"
 import type { Cell } from "../state/types"
 
 describe("Transcript", () => {
@@ -174,5 +174,28 @@ describe("Transcript", () => {
     expect(collapsed.container.textContent ?? "").not.toContain("SECRET_FILE_BODY")
     const verbose = render(<Transcript cells={cells} verbose />)
     expect(verbose.container.textContent ?? "").toContain("SECRET_FILE_BODY")
+  })
+
+  it("limits repaint replay by rendered rows while keeping complete newest cells", () => {
+    const cells: Cell[] = Array.from({ length: 6 }, (_, index) => ({
+      id: String(index),
+      kind: "user" as const,
+      text: `row-${index}`,
+    }))
+    const limited = limitReplayCells(cells, 6, 80, false)
+    expect(limited.map((cell) => cell.id)).toEqual(["4", "5"])
+    expect(limitReplayCells(cells, 0, 80, false)).toBe(cells)
+  })
+
+  it("applies the replay cap only after a repaint", () => {
+    const cells: Cell[] = Array.from({ length: 6 }, (_, index) => ({
+      id: String(index),
+      kind: "user" as const,
+      text: `row-${index}`,
+    }))
+    render(<Transcript cells={cells} replayMaxRows={6} />)
+    expect(mockStaticRenders.at(-1)).toBe(6)
+    render(<Transcript cells={cells} replayMaxRows={6} epoch={1} />)
+    expect(mockStaticRenders.at(-1)).toBe(2)
   })
 })

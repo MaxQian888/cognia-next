@@ -153,3 +153,19 @@ export function turnErrorLog(now: number, message: string, category?: string): L
     message,
   }
 }
+
+/** Privacy-safe turn lifecycle entry. It records progress without copying the
+ * prompt or response into the diagnostics buffer. */
+export function turnLifecycleLog(
+  now: number,
+  phase: "started" | "completed" | "interrupted",
+  origin?: string
+): LogInput {
+  return {
+    ts: now,
+    level: phase === "interrupted" ? "warn" : "info",
+    channel: "system",
+    ...(origin ? { origin } : {}),
+    message: `turn ${phase}`,
+  }
+}

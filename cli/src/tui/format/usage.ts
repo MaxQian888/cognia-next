@@ -276,6 +276,7 @@ export function usagePanelRows(
     windowOverride && windowOverride > 0 ? windowOverride : getModelContextWindow(modelId)
   const costKnown = hasBaseRate(pricing)
   const rows: UsageRow[] = [
+    { label: "Model", value: modelId || "default" },
     { label: "Input", value: formatTokens(u.inputTokens) },
     { label: "Output", value: formatTokens(u.outputTokens) },
     // Reasoning tokens are a subset of output (already billed at the output
@@ -283,6 +284,10 @@ export function usagePanelRows(
     ...(u.reasoningTokens && u.reasoningTokens > 0
       ? [{ label: "Reasoning", value: formatTokens(u.reasoningTokens) }]
       : []),
+    {
+      label: "Total",
+      value: formatTokens((u.inputTokens ?? 0) + (u.outputTokens ?? 0)),
+    },
     { label: "Cache read", value: formatTokens(u.cacheReadInputTokens) },
     { label: "Cache write", value: formatTokens(u.cacheCreationInputTokens) },
     { label: "Cache hit", value: `${Math.round(cacheHitRatio(usage) * 100)}%` },
@@ -293,6 +298,10 @@ export function usagePanelRows(
   ]
   if (totals) {
     rows.push(
+      { label: "Session input", value: formatTokens(totals.inputTokens) },
+      { label: "Session output", value: formatTokens(totals.outputTokens) },
+      { label: "Session cache r", value: formatTokens(totals.cacheReadTokens) },
+      { label: "Session cache w", value: formatTokens(totals.cacheCreationTokens) },
       { label: "Session tokens", value: formatTokens(totals.inputTokens + totals.outputTokens) },
       { label: "Session cost", value: formatCostKnown(totals.costUsd, costKnown) },
       {

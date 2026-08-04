@@ -32,6 +32,8 @@ import { LimitsPanel } from "../overlays/LimitsPanel"
 import { StatusPanel } from "../overlays/StatusPanel"
 import { DoctorPanel } from "../overlays/DoctorPanel"
 import { DocumentViewer } from "../overlays/DocumentViewer"
+import { A2UISurfaceOverlay } from "../overlays/A2UISurfaceOverlay"
+import { createUserAction, formatActionForAI } from "@/lib/a2ui/events"
 import { InspectOverlay } from "../overlays/InspectOverlay"
 import { AgentsPanel } from "../overlays/AgentsPanel"
 import { AgentStatsPanel } from "../overlays/AgentStatsPanel"
@@ -998,6 +1000,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
       {state.overlay.kind === "limits" && (
         <LimitsPanel
           snapshots={state.overlay.snapshots}
+          loading={state.overlay.loading}
           analysis={state.overlay.analysis}
           now={state.overlay.now}
           rateLimits={state.overlay.rateLimits}
@@ -1006,7 +1009,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
         />
       )}
       {state.overlay.kind === "help" && (
-        <Help onClose={() => dispatch({ type: "OVERLAY_CLOSE" })} />
+        <Help maxRows={overlayRows} onClose={() => dispatch({ type: "OVERLAY_CLOSE" })} />
       )}
       {state.overlay.kind === "historySearch" && (
         <HistorySearch
@@ -1082,6 +1085,43 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           body={state.overlay.body}
           format={state.overlay.format}
           lang={state.overlay.lang}
+          onCopy={(text) => {
+            void copyToClipboard(text).then((result) =>
+              dispatch({
+                type: "NOTICE",
+                message: result.ok
+                  ? "Copied the complete document to the clipboard."
+                  : "Couldn't copy the document to the clipboard.",
+              })
+            )
+          }}
+          onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
+      )}
+      {state.overlay.kind === "a2ui" && (
+        <A2UISurfaceOverlay
+          surface={state.overlay.surface}
+          onSubmit={(submitted) => {
+            const action = createUserAction(
+              state.overlay.kind === "a2ui" ? state.overlay.surface.surfaceId : "unknown",
+              submitted.action,
+              submitted.componentId,
+              submitted.data
+            )
+            dispatch({ type: "OVERLAY_CLOSE" })
+            void agent.send(formatActionForAI(action))
+          }}
+          onRaw={(body) =>
+            dispatch({
+              type: "OVERLAY_OPEN",
+              overlay: {
+                kind: "document",
+                title: `A2UI raw data · ${state.overlay.kind === "a2ui" ? state.overlay.surface.surfaceId : "surface"}`,
+                body,
+                format: "text",
+              },
+            })
+          }
           onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
       )}

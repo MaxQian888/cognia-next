@@ -35,6 +35,7 @@ import { mouseCommand } from "./mouse-command"
 import { selectCommand } from "./select-command"
 import { editorCommands } from "./editor-command"
 import type { CommandDescriptor, CommandEffect } from "./types"
+import { cellToTerminalBlock } from "../render/cell-terminal-block"
 
 /** Back-compat alias for consumers that referenced the old shape. */
 export type SlashCommand = CommandDescriptor
@@ -180,6 +181,23 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
         ? { kind: "send", prompt: prev }
         : { kind: "notice", message: "Nothing to re-send yet." }
     },
+  },
+  {
+    name: "transcript",
+    aliases: ["history"],
+    description: "open the complete searchable transcript pager",
+    category: "chat",
+    handler: (ctx) => ({
+      kind: "openOverlay",
+      overlay: {
+        kind: "document",
+        title: "Transcript",
+        body: ctx.state.cells
+          .map((cell) => cellToTerminalBlock(cell, { width: 160, verbose: true }).plainText)
+          .join("\n"),
+        format: "text",
+      },
+    }),
   },
   {
     name: "copy",

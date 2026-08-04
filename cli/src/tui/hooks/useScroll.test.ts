@@ -48,6 +48,15 @@ describe("useScroll", () => {
     expect(result.current.atBottom).toBe(true)
   })
 
+  it("scrolls by half a viewport", () => {
+    const { result } = renderHook(() => useScroll())
+    act(() => result.current.measure(100, 20))
+    act(() => result.current.halfPageUp())
+    expect(result.current.offset).toBe(70)
+    act(() => result.current.halfPageDown())
+    expect(result.current.atBottom).toBe(true)
+  })
+
   it("jumps to the top and back to the bottom", () => {
     const { result } = renderHook(() => useScroll())
     act(() => result.current.measure(50, 20))
@@ -93,5 +102,43 @@ describe("useScroll", () => {
     // Still pinned to the top (offset 0) since we're not sticking.
     expect(result.current.offset).toBe(0)
     expect(result.current.hidden.below).toBe(60)
+  })
+
+  it("preserves the top block anchor across width-dependent height corrections", () => {
+    const { result } = renderHook(() => useScroll())
+    act(() =>
+      result.current.setBlockMetrics([
+        { id: "a", rows: 3 },
+        { id: "b", rows: 5 },
+      ])
+    )
+    act(() => result.current.measure(8, 3))
+    act(() => result.current.toRow(4))
+    expect(result.current.offset).toBe(3)
+    act(() =>
+      result.current.setBlockMetrics([
+        { id: "a", rows: 8 },
+        { id: "b", rows: 5 },
+      ])
+    )
+    // scrollToRow(4) biased to top=3 => anchor b+0; b now starts at row 8.
+    expect(result.current.offset).toBe(8)
+  })
+
+  it("counts appended rows while scrolled up and clears them at End", () => {
+    const { result } = renderHook(() => useScroll())
+    act(() => result.current.setBlockMetrics([{ id: "a", rows: 10 }]))
+    act(() => result.current.measure(10, 4))
+    act(() => result.current.toTop())
+    act(() =>
+      result.current.setBlockMetrics([
+        { id: "a", rows: 10 },
+        { id: "b", rows: 7 },
+      ])
+    )
+    expect(result.current.offset).toBe(0)
+    expect(result.current.newRowsBelow).toBe(7)
+    act(() => result.current.toBottom())
+    expect(result.current.newRowsBelow).toBe(0)
   })
 })

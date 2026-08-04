@@ -1166,6 +1166,56 @@ describe("tuiReducer", () => {
     expect(s.overlay.kind).toBe("none")
   })
 
+  it("applies completed limits only while the same panel is still open", () => {
+    const limits = {
+      kind: "limits" as const,
+      snapshots: [],
+      loading: true,
+      requestId: 7,
+      analysis: {
+        turns: 0,
+        highContextTurns: 0,
+        highContextPct: 0,
+        highContextThreshold: 150_000,
+        dispatchCalls: 0,
+        totalToolCalls: 0,
+        topTools: [],
+      },
+      now: 1,
+    }
+    let s = reduce(base(), { type: "OVERLAY_OPEN", overlay: limits })
+    s = reduce(s, { type: "LIMITS_LOADED", requestId: 7, snapshots: [] })
+    expect(s.overlay).toMatchObject({ kind: "limits", loading: false })
+
+    s = reduce(s, { type: "OVERLAY_CLOSE" })
+    const closed = reduce(s, { type: "LIMITS_LOADED", requestId: 7, snapshots: [] })
+    expect(closed.overlay.kind).toBe("none")
+  })
+
+  it("ignores a completed limits refresh from an older request", () => {
+    const current = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "limits",
+        snapshots: [],
+        loading: true,
+        requestId: 2,
+        analysis: {
+          turns: 0,
+          highContextTurns: 0,
+          highContextPct: 0,
+          highContextThreshold: 150_000,
+          dispatchCalls: 0,
+          totalToolCalls: 0,
+          topTools: [],
+        },
+        now: 1,
+      },
+    })
+    const next = reduce(current, { type: "LIMITS_LOADED", requestId: 1, snapshots: [] })
+    expect(next).toBe(current)
+  })
+
   it("MCP_STATUS_PATCH updates one server's live status in the mcp panel", () => {
     let s = reduce(base(), {
       type: "OVERLAY_OPEN",
@@ -1992,6 +2042,14 @@ describe("tuiReducer", () => {
     expect(s.modelMeta?.modelId).toBe("claude-x")
     expect(s.modelMeta?.contextWindow).toBe(1_000_000)
     expect(s.modelMeta?.pricing).toEqual({ promptPer1M: 3, completionPer1M: 15 })
+  })
+
+  it("SET_CONTEXT_USAGE updates live occupancy without accumulating token totals", () => {
+    const initial = createInitialState(DEFAULT_RESOLVED_CONFIG, "s1")
+    const next = tuiReducer(initial, { type: "SET_CONTEXT_USAGE", used: 42_000, size: 1_000_000 })
+    expect(next.usage).toMatchObject({ contextTokens: 42_000, contextWindow: 1_000_000 })
+    expect(next.modelMeta).toMatchObject({ contextWindow: 1_000_000, runtime: true })
+    expect(next.sessionTotals).toEqual(initial.sessionTotals)
   })
 
   it("SET_USAGE estimates cost from modelMeta pricing when the SDK reports none", () => {

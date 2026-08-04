@@ -9,8 +9,11 @@
 import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
+import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 
-import { captureEventToActions } from "../state/event-mapper"
+import { captureEventFromCanonical } from "@/lib/ai/agent/execution/event-envelope"
+import { canonicalEnvelopeToActions, captureEventToActions } from "../state/event-mapper"
+import { recordUnknownPart } from "../runtime/render-diagnostics"
 import { classifyError } from "../format/error-classify"
 import { formatActiveSkillsNotice } from "../runtime/active-skills"
 import { formatAttachmentNotice } from "../runtime/attachment-notice"
@@ -27,6 +30,7 @@ export interface TurnSession {
     opts: {
       gate: PermissionResponder
       onAction?: (action: TuiAction) => void
+      onEnvelope?: (envelope: AgentEventEnvelope) => void
       onEvent?: (event: CaptureStreamEvent) => void
       onActiveSkills?: (skillIds: string[]) => void
       onAttachments?: (summary: AttachmentSummary) => void
@@ -204,6 +208,23 @@ export async function runTurn(
   try {
     const result = await opts.session.send(opts.prompt, {
       gate: opts.gate,
+      onEnvelope: (envelope) => {
+        const actions = canonicalEnvelopeToActions(envelope)
+        for (const action of actions) {
+          if (
+            action.type === "CANONICAL_EVENT_NOTICE" &&
+            (action.title === "Unsupported event" || action.title === "Rejected content part")
+          ) {
+            recordUnknownPart()
+          }
+          opts.dispatch(action)
+          if (action.type === "TOOL_CALL" || action.type === "TOOL_UPDATE") {
+            opts.onToolCall?.(action.toolName ?? "", action.input ?? {})
+          }
+        }
+        const legacy = captureEventFromCanonical(envelope.event)
+        if (legacy) opts.hooks?.onCapture(legacy)
+      },
       onAction: (action) => {
         opts.dispatch(action)
         if (action.type === "TOOL_CALL") opts.onToolCall?.(action.toolName, action.input)

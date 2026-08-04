@@ -41,6 +41,14 @@ describe("renderConfigSchema + resolveRenderConfig", () => {
   it("rejects a fractional / out-of-range line count", () => {
     expect(renderConfigSchema.safeParse({ toolResultMaxLines: 1.5 }).success).toBe(false)
     expect(renderConfigSchema.safeParse({ pagerThresholdLines: 0 }).success).toBe(false)
+    expect(renderConfigSchema.safeParse({ terminalResizeReplayMaxRows: -1 }).success).toBe(false)
+  })
+
+  it("defaults resize replay to 10,000 rows and accepts zero as unlimited", () => {
+    expect(RENDER_DEFAULTS.terminalResizeReplayMaxRows).toBe(10_000)
+    expect(
+      resolveRenderConfig({ terminalResizeReplayMaxRows: 0 }).terminalResizeReplayMaxRows
+    ).toBe(0)
   })
 
   it("accepts notices + clipboard on the config file", () => {

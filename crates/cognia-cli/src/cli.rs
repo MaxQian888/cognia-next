@@ -44,6 +44,15 @@ pub(crate) enum TopCommand {
         #[command(subcommand)]
         command: PluginCommand,
     },
+    /// Character Pack authoring subcommands (`.cognia-pack.json`).
+    ///
+    /// Packs are not plugins: they carry no code, and their signature lives
+    /// in-band in the file rather than in a detached `.sig`. Hence a separate
+    /// command group from `cognia plugin sign` / `verify`.
+    Pack {
+        #[command(subcommand)]
+        command: PackCommand,
+    },
     /// Bridge stdio to the cognia ACP server so ACP clients (Zed, Neovim,
     /// JetBrains) can drive cognia. Configure your editor with
     /// `{"command": "cognia", "args": ["acp"]}`.
@@ -78,6 +87,51 @@ pub(crate) enum TopCommand {
         /// the release key is provisioned.
         #[arg(long)]
         signature: Option<PathBuf>,
+        /// Emit a machine-readable JSON report instead of human prose.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum PackCommand {
+    /// Ed25519-sign a `.cognia-pack.json`, writing the signature in-band.
+    ///
+    /// The signed bytes are the RFC 8785 canonical JSON of the `pack` object
+    /// alone — `schemaVersion` and `signature` are deliberately outside them,
+    /// so a host that rewrites the file to a newer schema keeps the signature
+    /// valid. The signature is self-verified before anything is written.
+    ///
+    /// The output is re-serialized with keys in canonical (sorted) order.
+    Sign {
+        /// The `.cognia-pack.json` to sign.
+        file: PathBuf,
+        /// Path to the private key file (32 raw bytes, base64-encoded one
+        /// line). `cognia plugin keygen` generates one.
+        #[arg(long)]
+        key: PathBuf,
+        /// Write the signed pack here instead of updating `file` in place.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Emit a machine-readable JSON report instead of human prose.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check a `.cognia-pack.json`'s in-band signature the way the host will.
+    ///
+    /// Reports `verified`, `unsigned`, or `invalid`. Unsigned exits 0 — Cognia
+    /// accepts unsigned packs and labels them — while an invalid signature
+    /// always exits non-zero.
+    Verify {
+        /// The `.cognia-pack.json` to check.
+        file: PathBuf,
+        /// Require this exact base64 public key instead of trusting the one
+        /// embedded in the file. The only check that detects a re-signed pack.
+        #[arg(long)]
+        public_key: Option<String>,
+        /// Treat an unsigned pack as a failure. For CI.
+        #[arg(long)]
+        require_signature: bool,
         /// Emit a machine-readable JSON report instead of human prose.
         #[arg(long)]
         json: bool,
@@ -529,6 +583,42 @@ pub(crate) enum PluginCommand {
     },
 }
 
+pub(crate) fn dispatch_pack(command: PackCommand, ui: &mut RuntimeUi) -> Result<()> {
+    match command {
+        PackCommand::Sign {
+            file,
+            key,
+            out,
+            json,
+        } => {
+            ui.flags.json = json;
+            ui.verbose(format!(
+                "running pack sign file={} key={} out={} json={json}",
+                file.display(),
+                key.display(),
+                out.as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "<in-place>".to_string()),
+            ));
+            commands::pack_sign::run(file, key, out, ui)
+        }
+        PackCommand::Verify {
+            file,
+            public_key,
+            require_signature,
+            json,
+        } => {
+            ui.flags.json = json;
+            ui.verbose(format!(
+                "running pack verify file={} public_key={} require_signature={require_signature} json={json}",
+                file.display(),
+                public_key.as_deref().unwrap_or("<embedded>"),
+            ));
+            commands::pack_verify::run(file, public_key, require_signature, ui)
+        }
+    }
+}
+
 pub(crate) fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Result<()> {
     match command {
         PluginCommand::New {
@@ -882,5 +972,70 @@ mod tests {
         assert_eq!(bundle, Some(PathBuf::from("plugin-dir")));
         assert_eq!(plugin_id, None);
         assert!(!json);
+    }
+
+    #[test]
+    fn pack_sign_parses_file_key_output_and_json() {
+        let cli = Cli::try_parse_from([
+            "cognia",
+            "pack",
+            "sign",
+            "example.cognia-pack.json",
+            "--key",
+            "private-key.txt",
+            "--out",
+            "signed.cognia-pack.json",
+            "--json",
+        ])
+        .expect("pack sign arguments should parse");
+        let TopCommand::Pack {
+            command:
+                PackCommand::Sign {
+                    file,
+                    key,
+                    out,
+                    json,
+                },
+        } = cli.command
+        else {
+            panic!("expected pack sign command");
+        };
+
+        assert_eq!(file, PathBuf::from("example.cognia-pack.json"));
+        assert_eq!(key, PathBuf::from("private-key.txt"));
+        assert_eq!(out, Some(PathBuf::from("signed.cognia-pack.json")));
+        assert!(json);
+    }
+
+    #[test]
+    fn pack_verify_parses_public_key_signature_requirement_and_json() {
+        let cli = Cli::try_parse_from([
+            "cognia",
+            "pack",
+            "verify",
+            "example.cognia-pack.json",
+            "--public-key",
+            "base64-public-key",
+            "--require-signature",
+            "--json",
+        ])
+        .expect("pack verify arguments should parse");
+        let TopCommand::Pack {
+            command:
+                PackCommand::Verify {
+                    file,
+                    public_key,
+                    require_signature,
+                    json,
+                },
+        } = cli.command
+        else {
+            panic!("expected pack verify command");
+        };
+
+        assert_eq!(file, PathBuf::from("example.cognia-pack.json"));
+        assert_eq!(public_key.as_deref(), Some("base64-public-key"));
+        assert!(require_signature);
+        assert!(json);
     }
 }

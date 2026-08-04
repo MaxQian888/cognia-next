@@ -65,6 +65,13 @@ describe("main", () => {
     expect(durability).toHaveBeenCalled()
   })
 
+  it("dispatches sdk management", async () => {
+    const s = sink()
+    const sdk = jest.fn().mockResolvedValue(0)
+    expect(await main(["sdk", "capabilities"], { out: s.out, sdk })).toBe(0)
+    expect(sdk.mock.calls[0][0].subcommand).toBe("capabilities")
+  })
+
   it("lists durability in the help text", async () => {
     const s = sink()
     await main(["--help"], { out: s.out })

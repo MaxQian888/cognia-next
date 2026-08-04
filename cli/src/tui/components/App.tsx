@@ -116,6 +116,7 @@ import { appendHistory } from "../input/history-store"
 import { useAgentSession, type CreateSession } from "../hooks/useAgentSession"
 import { useLogIngest } from "../hooks/use-log-ingest"
 import { useTerminalSize } from "../hooks/useTerminalSize"
+import { terminalLayout } from "../layout/terminal-layout"
 import { addToolApproval, readToolApprovals } from "../../agent/tool-approvals"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import { mintSessionId } from "../../agent/run"
@@ -195,6 +196,7 @@ export type InstallOptionResolver = (
 export type InstallRunner = (deps: {
   method: InstallMethod
   onLine: (line: string) => void
+  signal?: AbortSignal
 }) => Promise<RunInstallResult>
 
 /**
@@ -224,6 +226,7 @@ async function defaultResolveInstallOption(
 async function defaultRunInstall(deps: {
   method: InstallMethod
   onLine: (line: string) => void
+  signal?: AbortSignal
 }): Promise<RunInstallResult> {
   const { runInstall } = await import("../runtime/backend-install")
   return runInstall(deps)
@@ -257,7 +260,7 @@ export interface AppProps {
   resolveInstallOptionFn?: InstallOptionResolver
   /** Run the chosen install method. Injected so tests never spawn an installer. */
   runInstallFn?: InstallRunner
-  pushHandoff?: (sessionId: string) => void | Promise<void>
+  pushHandoff?: (sessionId: string) => boolean | Promise<boolean>
   /** Override the exit + clock for tests. */
   onExit?: () => void
   now?: () => number
@@ -506,6 +509,7 @@ export function App({
   // The install option resolved for the current failure (a ref so the failure
   // page's "install" handler reads the latest without recreating the callback).
   const installOptionRef = useRef<BackendInstallOption | null>(null)
+  const installAbortRef = useRef<AbortController | null>(null)
   const activeBackend = state.config.agentBackend ?? "builtin"
   useEffect(() => {
     // Invalidate an in-flight external catalog read whenever the selected/live
@@ -734,6 +738,7 @@ export function App({
   // list rows fit before scrolling. The live frame reflows the instant this
   // updates; only the heavy `<Static>` repaint below is debounced.
   const { columns, rows } = useTerminalSize()
+  const layoutBudget = terminalLayout(columns, rows)
   // Row budget for inline popups, which sit above the composer so they stay
   // compact. (`overlayRows`, which depends on the resolved `fullscreen` flag, is
   // computed once that's known — see below.)
@@ -783,7 +788,9 @@ export function App({
   // Under-reserving lets a long list build a box taller than the terminal, which
   // squeezes the list and clips the highlighted row (the cursor "disappears" as
   // you scroll down). See overlay-layout.ts for the per-region breakdown.
-  const overlayRows = overlayListRows(rows, fullscreen)
+  const overlayRows = layoutBudget.overlayFullscreen
+    ? Math.max(1, rows - 2)
+    : overlayListRows(rows, fullscreen && !overlayOpen)
   // Fullscreen mouse model (default = native click-drag selection). Drives the
   // alt-screen mouse escapes below and whether the wheel scrolls the transcript.
   const mouseMode = state.config.mouse ?? DEFAULT_MOUSE_MODE
@@ -877,7 +884,7 @@ export function App({
   const activeProvider = activeMetaTarget.provider
   useEffect(() => {
     let cancelled = false
-    void countInterruptedCliBackgroundRuns({ home })
+    void countInterruptedCliBackgroundRuns({ home, owner: state.sessionId })
       .then((count) => {
         if (!cancelled) setInterruptedBackgroundSubagents(count)
       })
@@ -887,7 +894,7 @@ export function App({
     return () => {
       cancelled = true
     }
-  }, [home])
+  }, [home, state.sessionId])
 
   useEffect(() => {
     let cancelled = false
@@ -1090,11 +1097,32 @@ export function App({
     else void agentRef.current.exitCopilot()
   }, [copilotWorkflowId])
 
+  const exitingRef = useRef(false)
   const doExit = useCallback(() => {
+    if (exitingRef.current) return
+    exitingRef.current = true
     dispatch({ type: "EXIT" })
+    agent.abort()
+    getRuntimeAbort()?.abort()
+    // Unmount Ink immediately. Session/backend cleanup is best-effort and may
+    // wait on an unresponsive child process; keeping the TUI mounted until it
+    // settles makes a successful exit look hung and invites another Ctrl+C,
+    // which kills the pnpm process and surfaces as ELIFECYCLE.
     if (onExit) onExit()
     else exit()
-  }, [exit, onExit])
+    void (async () => {
+      try {
+        await agent.close()
+        const lifecycle = lifecycleRef.current
+        if (lifecycle) await lifecycle.dispose()
+        else await disconnectBackend(connectionRef.current)
+        connectionRef.current = null
+      } catch {
+        // Exiting must not be converted into an unhandled rejection when a
+        // backend has already stopped or refuses to acknowledge shutdown.
+      }
+    })()
+  }, [agent, exit, getRuntimeAbort, onExit])
 
   // Startup trust gate: "Yes, proceed" trusts the current cwd and enters chat.
   const trustCwd = useCallback(() => {
@@ -1533,10 +1561,15 @@ export function App({
           display: option.method.display,
         })
         const run = runInstallFn ?? defaultRunInstall
+        const controller = new AbortController()
+        installAbortRef.current = controller
         void run({
           method: option.method,
           onLine: (line) => dispatch({ type: "BACKEND_INSTALL_OUTPUT", chunk: `${line}\n` }),
+          signal: controller.signal,
         }).then((result) => {
+          if (installAbortRef.current === controller) installAbortRef.current = null
+          if (controller.signal.aborted) return
           if (result.ok) {
             // The binary is now on PATH — re-enter the connect flow, which
             // re-probes and proceeds to the handshake.
@@ -1572,6 +1605,12 @@ export function App({
     },
     [doExit, runCommandLine, runInstallFn]
   )
+
+  const cancelBackendInstall = useCallback(() => {
+    installAbortRef.current?.abort()
+    installAbortRef.current = null
+    dispatch({ type: "BACKEND_INSTALL_CANCEL" })
+  }, [])
 
   // Launch-flag command (`--continue` / `--resume [id]`): run exactly once, and
   // only after the startup trust gate has cleared — resuming a session while
@@ -2094,6 +2133,7 @@ export function App({
     now,
     doExit,
     cancelBackendConnect,
+    cancelBackendInstall,
     agent,
     abortRuntime,
     askUser,
@@ -2137,9 +2177,10 @@ export function App({
         provider={identity.provider}
         {...(identity.model ? { model: identity.model } : {})}
         cwd={state.config.cwd}
+        density={layoutBudget.bannerDensity}
       />
     ),
-    [identity, state.config.cwd]
+    [identity, state.config.cwd, layoutBudget.bannerDensity]
   )
   const lastPlanRaw = state.lastPlan?.raw
   const footerPlanTitle = useMemo(
@@ -2263,48 +2304,66 @@ export function App({
     )
   }
 
+  const overlays = (
+    <AppOverlays
+      state={state}
+      dispatch={dispatch}
+      agent={agent}
+      columns={columns}
+      overlayRows={overlayRows}
+      activeModel={activeModel}
+      home={home}
+      resolvePermission={resolvePermission}
+      persist={persist}
+      persistProviderModelFn={persistProviderModelFn}
+      persistBackendModelFn={persistBackendModelFn}
+      persistCredentialFn={persistCredentialFn}
+      persistPluginTools={persistPluginTools}
+      openModelPicker={openModelPicker}
+      applySettings={applySettings}
+      activateSettings={activateSettings}
+      applySubagentModelEdit={applySubagentModelEdit}
+      applyHistorySearch={applyHistorySearch}
+      doResume={doResume}
+      runCommandLine={runCommandLine}
+      submitForm={submitForm}
+      onPlanDecision={onPlanDecision}
+      askUser={askUser}
+      mcpPanelDeps={mcpPanelDeps}
+      clearLogs={clearLogs}
+    />
+  )
+
   return (
     <ThemeProvider palette={themePalette}>
       <RenderPrefsProvider prefs={renderPrefs}>
         <Box flexDirection="column" width={columns} {...(fullscreen ? { height: rows } : {})}>
-          <TranscriptRegion
-            state={state}
-            fullscreen={fullscreen}
-            banner={banner}
-            identity={identity}
-            activeModel={activeModel}
-            scroll={scroll}
-            scrollContentRef={scrollContentRef}
-            cursor={cursor}
-            mutedColor={themePalette.muted}
-          />
-          <AppOverlays
-            state={state}
-            dispatch={dispatch}
-            agent={agent}
-            columns={columns}
-            overlayRows={overlayRows}
-            activeModel={activeModel}
-            home={home}
-            resolvePermission={resolvePermission}
-            persist={persist}
-            persistProviderModelFn={persistProviderModelFn}
-            persistBackendModelFn={persistBackendModelFn}
-            persistCredentialFn={persistCredentialFn}
-            persistPluginTools={persistPluginTools}
-            openModelPicker={openModelPicker}
-            applySettings={applySettings}
-            activateSettings={activateSettings}
-            applySubagentModelEdit={applySubagentModelEdit}
-            applyHistorySearch={applyHistorySearch}
-            doResume={doResume}
-            runCommandLine={runCommandLine}
-            submitForm={submitForm}
-            onPlanDecision={onPlanDecision}
-            askUser={askUser}
-            mcpPanelDeps={mcpPanelDeps}
-            clearLogs={clearLogs}
-          />
+          {!(fullscreen && overlayOpen) ? (
+            <TranscriptRegion
+              state={state}
+              fullscreen={fullscreen}
+              banner={banner}
+              identity={identity}
+              activeModel={activeModel}
+              scroll={scroll}
+              scrollContentRef={scrollContentRef}
+              cursor={cursor}
+              mutedColor={themePalette.muted}
+              layout={layoutBudget}
+            />
+          ) : null}
+          {fullscreen && overlayOpen ? (
+            <Box
+              data-testid="fullscreen-overlay-region"
+              flexDirection="column"
+              flexGrow={1}
+              overflow="hidden"
+            >
+              {overlays}
+            </Box>
+          ) : (
+            overlays
+          )}
           <BottomRegion
             state={state}
             dispatch={dispatch}
@@ -2312,6 +2371,7 @@ export function App({
             overlayOpen={overlayOpen}
             columns={columns}
             popupRows={popupRows}
+            layout={layoutBudget}
             warningColor={themePalette.warning}
             streamStartedAt={streamStartedAt}
             lastActivityAt={lastActivityAt}
