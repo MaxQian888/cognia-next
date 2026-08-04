@@ -1,8 +1,3 @@
-/**
- * @jest-environment jsdom
- */
-import "fake-indexeddb/auto"
-
 const mockHooksManager = {
   dispatchWorkflowStart: jest.fn(),
   dispatchWorkflowStepComplete: jest.fn(),
@@ -25,8 +20,15 @@ import {
 } from "./capability-preflight"
 import { runWorkflow } from "./orchestrator"
 import { listRunEvents } from "./event-log"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { TriggerEvent, VisualWorkflow, WorkflowNode } from "@/types/workflow/visual"
+
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 function node(id: string, type: WorkflowNode["type"]): WorkflowNode {
   return { id, type, typeVersion: 1, position: { x: 0, y: 0 }, data: { label: id, params: {} } }
@@ -116,10 +118,6 @@ describe("runWorkflow capability preflight integration", () => {
   jest.setTimeout(30_000)
 
   beforeEach(async () => {
-    await getDb().delete()
-    __resetDbForTesting()
-    getDb()
-    await whenSeeded()
     await getDb().workflowRuns.clear()
     await getDb().workflowRunEvents.clear()
     jest.clearAllMocks()

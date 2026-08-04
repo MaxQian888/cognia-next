@@ -1,6 +1,4 @@
 /**
- * @jest-environment jsdom
- *
  * Focused test for the `action.mcp.invokeTool` executor's plugin-event
  * dispatch wiring (Tier 2 of ADR 0016). The MCP SDK is mocked at the
  * module level so we never spin up a real server, then we drive the
@@ -11,8 +9,6 @@
  * shared file can't accommodate that without breaking the existing
  * action.mcp tests.
  */
-
-import "fake-indexeddb/auto"
 
 const callTool = jest.fn(async () => ({
   isError: false,
@@ -36,7 +32,8 @@ jest.mock("@modelcontextprotocol/sdk/client/sse.js", () => ({
   SSEClientTransport,
 }))
 
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import "./built-ins"
 import { getExecutor } from "./registry"
 import { getPluginEventHooks } from "@/lib/plugin"
@@ -67,17 +64,18 @@ function makeCtx<T extends Record<string, unknown>>(
   } as StepExecutionContext<T>
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   callTool.mockClear()
   close.mockClear()
   connect.mockClear()
   StreamableHTTPClientTransport.mockClear()
   SSEClientTransport.mockClear()
 })
+afterAll(dbFixture.dispose)
 
 describe("action.mcp.invokeTool — plugin event dispatch", () => {
   it("fires connect / toolCall / toolResult / disconnect through getPluginEventHooks", async () => {

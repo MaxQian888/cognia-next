@@ -1,6 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createWorkflow, updateWorkflow } from "@/lib/db/workflows"
 import { executeRunWorkflowTyped } from "./run-workflow-typed-tool"
 import { publishWorkflow } from "./publish-workflow"
@@ -21,12 +20,13 @@ afterEach(() => {
   lookupOverride = null
 })
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 const inputSchema = {
   type: "object",

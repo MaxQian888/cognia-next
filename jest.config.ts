@@ -106,6 +106,10 @@ const baseTestPathIgnorePatterns = [
   "/out/",
   "/src-tauri/",
   "/sidecar/",
+  // Git worktrees for parallel agent sessions (see `modulePathIgnorePatterns`).
+  // Collecting them runs a second, older copy of every suite against the main
+  // tree's node_modules and reports failures nobody can act on.
+  "/.claude/worktrees/",
   // `services/workspace-runtime/` uses Node's built-in `node:test` runner.
   // Importing those TAP suites through Jest reports an empty Jest suite while
   // the nested tests keep running in the background.
@@ -285,7 +289,19 @@ const projectCommon: Config = {
   },
 
   // An array of regexp pattern strings, matched against all module paths before considered 'visible' to the module loader
-  modulePathIgnorePatterns: ["<rootDir>/out/", "<rootDir>/.next/", "<rootDir>/target/"],
+  //
+  // `.claude/worktrees/` holds git worktrees created for parallel agent
+  // sessions. Each is a FULL second checkout, so without this every workspace
+  // package appears twice and Jest's Haste map refuses to resolve any of them
+  // ("several different files ... provide a module for that particular name") —
+  // which fails suites in the MAIN tree that have nothing to do with the
+  // worktree. It also stops the same test being collected and run twice.
+  modulePathIgnorePatterns: [
+    "<rootDir>/out/",
+    "<rootDir>/.next/",
+    "<rootDir>/target/",
+    "<rootDir>/.claude/worktrees/",
+  ],
 
   // A list of paths to modules that run some code to configure or set up the testing framework before each test.
   // jest.setup.ts is env-agnostic — every DOM touch is behind a
@@ -325,7 +341,7 @@ const projectCommon: Config = {
   // have transformed it (that is how `@workflow/serde`, a transitive ESM-only
   // dep of `@ai-sdk/provider-utils@5`, slipped through).
   transformIgnorePatterns: [
-    "/node_modules/(?!.*(?:\\.pnpm/ai@|/node_modules/ai/|\\bai/dist/|@ai-sdk\\+|@ai-sdk/|@standard-schema\\+|@standard-schema/|@workflow\\+|@workflow/|@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common|@tokenlens\\+|@tokenlens/|use-stick-to-bottom|tokenlens|shiki|@shikijs|@streamdown|streamdown|hast-util-|mdast-util-|micromark|unist-util-|vfile|react-markdown|remark-gfm|remark-math|rehype-raw|rehype-sanitize|remark-parse|remark-rehype|rehype-stringify|unified|bail|is-plain-obj|trough|zwitch|ccount|character-entities|comma-separated-tokens|decode-named-character-reference|devlop|extend|html-void-elements|longest-streak|property-information|space-separated-tokens|stringify-entities|web-namespaces|@octokit\\+|@octokit/|universal-user-agent|before-after-hook|deprecation|once|wrappy|btoa-lite|fast-content-type-parse|toad-cache|bottleneck|@types\\+|@types/|@modelcontextprotocol\\+|@modelcontextprotocol/|@xyflow\\+|@xyflow/|chart\\.js|cheerio))",
+    "/node_modules/(?!.*(?:\\.pnpm/ai@|/node_modules/ai/|\\bai/dist/|@agentclientprotocol\\+|@agentclientprotocol/|@ai-sdk\\+|@ai-sdk/|@standard-schema\\+|@standard-schema/|@workflow\\+|@workflow/|@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common|@tokenlens\\+|@tokenlens/|use-stick-to-bottom|tokenlens|shiki|@shikijs|@streamdown|streamdown|hast-util-|mdast-util-|micromark|unist-util-|vfile|react-markdown|remark-gfm|remark-math|rehype-raw|rehype-sanitize|remark-parse|remark-rehype|rehype-stringify|unified|bail|is-plain-obj|trough|zwitch|ccount|character-entities|comma-separated-tokens|decode-named-character-reference|devlop|extend|html-void-elements|longest-streak|property-information|space-separated-tokens|stringify-entities|web-namespaces|@octokit\\+|@octokit/|universal-user-agent|before-after-hook|deprecation|once|wrappy|btoa-lite|fast-content-type-parse|toad-cache|bottleneck|@types\\+|@types/|@modelcontextprotocol\\+|@modelcontextprotocol/|@xyflow\\+|@xyflow/|chart\\.js|cheerio))",
     "\\.pnp\\.[^\\\\]+$",
   ],
 }

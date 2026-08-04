@@ -1,8 +1,3 @@
-/**
- * @jest-environment jsdom
- */
-import "fake-indexeddb/auto"
-
 const mockTrackEvent = jest.fn().mockResolvedValue(true)
 jest.mock("@/lib/telemetry/events/track-event", () => ({
   trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
@@ -16,17 +11,19 @@ import {
   listRunEvents,
 } from "./event-log"
 import { listUsageForSession } from "@/lib/db/session-usage"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { WorkflowRunEventRow } from "@/types/workflow/visual"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().workflowRunEvents.clear()
   mockTrackEvent.mockClear()
 })
+afterAll(dbFixture.dispose)
 
 describe("event-log ts monotonicity", () => {
   // `listRunEvents` orders by the [runId+ts] compound index; for equal ts

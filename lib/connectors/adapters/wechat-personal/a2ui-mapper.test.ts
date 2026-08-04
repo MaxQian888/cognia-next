@@ -1,6 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { A2UIMessageSegment } from "@/types/connectors/segment"
 import {
   __countNumericActionsForTesting,
@@ -10,13 +9,14 @@ import {
 import { buildIlinkA2UISurface, collectNumberedInteractives } from "./a2ui-mapper"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   __resetNumericActionRegistryForTesting()
 })
+afterAll(dbFixture.dispose)
 
 function makeSegment(
   surfaceId: string,

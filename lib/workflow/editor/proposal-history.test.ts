@@ -1,8 +1,6 @@
-/** @jest-environment jsdom */
 // Coverage for workflow-proposal-history CRUD. Uses fake-indexeddb so we
 // exercise the actual Dexie path.
 
-import "fake-indexeddb/auto"
 import {
   PROPOSAL_HISTORY_LIMIT,
   appendProposalHistory,
@@ -10,14 +8,16 @@ import {
   listProposalHistory,
   pruneOldProposalHistory,
 } from "./proposal-history"
-import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 function makeRow(workflowId: string, idx: number, status: "applied" | "discarded" = "applied") {
   return {

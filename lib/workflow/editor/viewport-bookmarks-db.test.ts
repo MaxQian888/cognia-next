@@ -1,9 +1,4 @@
-/**
- * @jest-environment jsdom
- */
-
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import {
   deleteBookmark,
   listBookmarks,
@@ -11,12 +6,13 @@ import {
   saveBookmark,
 } from "./viewport-bookmarks-db"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 const VP = (x = 0, y = 0, zoom = 1) => ({ x, y, zoom })
 

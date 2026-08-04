@@ -1,6 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { EnqueueInput } from "@/lib/db/outbound-jobs"
 import type { VisualWorkflow, WorkflowRunEventRow, WorkflowRunRow } from "@/types/workflow/visual"
 import {
@@ -216,11 +215,11 @@ async function waitFor(
   }
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await Promise.all([
     seedDeliveryTarget("lark", "lark:ops", "lark:lark:ops:oc_ops", "oc_ops"),
     seedDeliveryTarget("wecom", "wecom:audit", "wecom:wecom:audit:audit_room", "audit_room"),
@@ -230,6 +229,7 @@ beforeEach(async () => {
   __resetWorkflowProgressRunnerForTesting()
   mockNotifyConversationOverIM.mockClear()
 })
+afterAll(dbFixture.dispose)
 
 afterEach(() => {
   __resetWorkflowProgressRunnerForTesting()

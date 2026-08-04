@@ -1,8 +1,3 @@
-/**
- * @jest-environment jsdom
- */
-import "fake-indexeddb/auto"
-
 // Mock plugin hook dispatcher (Tier 2 of ADR 0016) so we can verify the
 // orchestrator emits onWorkflowStart / onWorkflowStepComplete /
 // onWorkflowComplete / onWorkflowError without booting the plugin store.
@@ -61,7 +56,8 @@ async function flushFanout(): Promise<void> {
 }
 
 import { runWorkflow } from "./orchestrator"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { listRunEvents } from "./event-log"
 import type { TriggerEvent, VisualWorkflow } from "@/types/workflow/visual"
 
@@ -69,15 +65,16 @@ import type { TriggerEvent, VisualWorkflow } from "@/types/workflow/visual"
 // exceeds Jest's 5 s default on a busy machine (grew again with v95–v98).
 jest.setTimeout(30_000)
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().workflowRuns.clear()
   await getDb().workflowRunEvents.clear()
   jest.clearAllMocks()
 })
+afterAll(dbFixture.dispose)
 
 const trigger: TriggerEvent = {
   workflowId: "wf_x",
@@ -810,6 +807,8 @@ describe("runWorkflow — startStepId (run from here)", () => {
   })
 
   it("fails fast when startStepId is not in the workflow", async () => {
+    const setTimeoutSpy = jest.spyOn(global, "setTimeout")
+    const clearTimeoutSpy = jest.spyOn(global, "clearTimeout")
     const wf = buildWorkflow(
       [
         {
@@ -822,9 +821,20 @@ describe("runWorkflow — startStepId (run from here)", () => {
       ],
       []
     )
-    const result = await runWorkflow({ workflow: wf, trigger, startStepId: "n_missing" })
-    expect(result.status).toBe("failed")
-    expect(result.error?.message).toContain("startStepId n_missing not present")
+    try {
+      const result = await runWorkflow({ workflow: wf, trigger, startStepId: "n_missing" })
+      expect(result.status).toBe("failed")
+      expect(result.error?.message).toContain("startStepId n_missing not present")
+
+      const timeoutCallIndex = setTimeoutSpy.mock.calls.findIndex(([, delay]) => delay === 60_000)
+      expect(timeoutCallIndex).toBeGreaterThanOrEqual(0)
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(
+        setTimeoutSpy.mock.results[timeoutCallIndex]?.value
+      )
+    } finally {
+      clearTimeoutSpy.mockRestore()
+      setTimeoutSpy.mockRestore()
+    }
   })
 
   it("bounds the run to the descendant subgraph (sibling branches are skipped)", async () => {

@@ -1,4 +1,3 @@
-/** @jest-environment jsdom */
 /**
  * Tests for the v49 inbox-connectors MCP handlers.
  *
@@ -9,8 +8,8 @@
  * the projected DTOs correctly.
  */
 
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import {
   connectorsListAdapters,
   connectorsListConversations,
@@ -26,11 +25,11 @@ jest.mock("@/lib/connectors/scheduled-outbound", () => ({
   runConnectorDigestTurn: (...args: unknown[]) => mockRunDigest(...args),
 }))
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   mockRunDigest.mockReset()
 }, 30_000)
 
@@ -91,6 +90,8 @@ async function seedConversation(opts: {
     updatedAt: now,
   })
 }
+
+afterAll(dbFixture.dispose)
 
 describe("connectorsListAdapters", () => {
   it("returns the registered adapters projected to summary shape", async () => {

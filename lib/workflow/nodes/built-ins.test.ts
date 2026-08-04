@@ -1,8 +1,7 @@
-/**
- * @jest-environment jsdom
- */
 import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { markSent } from "@/lib/db/outbound-jobs"
 // Importing built-ins triggers their side-effecting registrations.
 import "./built-ins"
@@ -84,11 +83,11 @@ const trigger: TriggerEvent = {
   originAt: 1_700_000_000,
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   stopTaskScheduler()
   await schedulerDb.clearAll()
   unregisterTaskExecutor("custom")
@@ -101,6 +100,7 @@ beforeEach(async () => {
   mockSubscribeInbound.mockClear()
   inboundObservers.length = 0
 })
+afterAll(dbFixture.dispose)
 
 function makeCtx<T extends Record<string, unknown>>(
   kind: WorkflowNodeKind,

@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import {
   createWorkflow,
   deleteWorkflow,
@@ -14,12 +12,13 @@ import { publishWorkflow, workflowSkillCanonicalId } from "./publish-workflow"
 import { reconcileWorkflowPublications } from "./publication-lifecycle"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 function nodesWithInputSchema(inputSchema: Record<string, unknown>): VisualWorkflow["nodes"] {
   return [

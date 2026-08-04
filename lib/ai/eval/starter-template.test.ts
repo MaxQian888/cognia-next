@@ -1,19 +1,19 @@
-/** @jest-environment jsdom */
-
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { listCases } from "@/lib/db/eval-datasets"
 import { ensureEvalStarterDataset, EVAL_STARTER_DATASET_ID } from "./starter-template"
 
 describe("evaluation starter template", () => {
+  const dbFixture = createDbTestFixture()
+
+  beforeAll(dbFixture.initialize)
   beforeEach(async () => {
-    await getDb().delete()
-    __resetDbForTesting()
-    getDb()
-    await whenSeeded()
+    await dbFixture.restore()
     await getDb().evalDatasets.clear()
     await getDb().evalCases.clear()
   }, 30_000)
+
+  afterAll(dbFixture.dispose)
 
   it("creates thirty reproducible holdout cases once and remains idempotent", async () => {
     const first = await ensureEvalStarterDataset({ name: "Starter", description: "Template" })

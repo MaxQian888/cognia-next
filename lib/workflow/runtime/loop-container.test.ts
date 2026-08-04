@@ -1,13 +1,10 @@
 /**
- * @jest-environment jsdom
- *
  * flow.loop typeVersion 2 — container sub-canvas execution. Covers the
  * consensus semantics: forEach/times/while modes, explicit output mapping
  * into `items[]`, `$item`/`$loop` reset per iteration, staticData
  * accumulation across iterations, break/continue (innermost only),
  * iteration concurrency under the global gate, and abort mid-iteration.
  */
-import "fake-indexeddb/auto"
 import "@/lib/workflow/nodes/built-ins"
 import { registerNodeExecutor } from "@/lib/workflow/nodes/registry"
 import { runLoopContainer } from "./loop-container"
@@ -15,7 +12,7 @@ import { IdempotencyCache, iterationCacheKey } from "./idempotency"
 import { createRunLogger } from "./event-log"
 import { NoopSecretResolver } from "./secret-resolver"
 import { ConcurrencyGate, __setGlobalRunGateForTesting } from "./run-concurrency-gate"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type {
   TriggerEvent,
   VisualWorkflow,
@@ -23,13 +20,14 @@ import type {
   WorkflowNode,
 } from "@/types/workflow/visual"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   __setGlobalRunGateForTesting(null)
 })
+afterAll(dbFixture.dispose)
 
 afterEach(() => __setGlobalRunGateForTesting(null))
 

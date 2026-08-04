@@ -1,10 +1,8 @@
-/** @jest-environment jsdom */
 /**
  * Tests for lib/connectors/session-bindings.ts — IM conversation ↔ ChatSession
  * binding lookups (control-plane multi-session).
  */
 
-import "fake-indexeddb/auto"
 import {
   findSessionByConversationKey,
   listSessionsByConversationKey,
@@ -13,16 +11,18 @@ import {
   refreshPlatformSessionBinding,
   listSiblingConversations,
 } from "./session-bindings"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 const KEY = "telegram:tg-1:42"
 

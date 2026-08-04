@@ -1,11 +1,9 @@
-/** @jest-environment jsdom */
 // Settings → Provider Profile Store dual-write: change detection, version
 // economy (no spurious CAS bumps), and the structural no-loop guarantee.
 
-import "fake-indexeddb/auto"
-
 import { getProfileMeta, listDeploymentProfiles } from "@/lib/db/provider-profiles"
-import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { saveSettings, getSettings } from "@/lib/db/settings"
 
 import {
@@ -14,13 +12,15 @@ import {
   touchesProviderConfiguration,
 } from "./provider-profile-sync"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
+  await dbFixture.restore()
   __resetProviderProfileSync()
-  getDb()
-  await whenSeeded()
 })
+
+afterAll(dbFixture.dispose)
 
 describe("touchesProviderConfiguration", () => {
   it("only fires for provider-shaped patches", () => {

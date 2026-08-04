@@ -1,14 +1,13 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import { handleWorkflowFanoutCallback } from "./workflow-fanout-handler"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
 
 async function seedBindingPair() {
@@ -41,6 +40,8 @@ async function seedBindingPair() {
   })
   return { adapterId, surfaceId, conversationKey }
 }
+
+afterAll(dbFixture.dispose)
 
 describe("handleWorkflowFanoutCallback", () => {
   it("approve path writes the fan-out subscription + drops both bindings + sends confirmation", async () => {

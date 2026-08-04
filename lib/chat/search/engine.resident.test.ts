@@ -1,26 +1,25 @@
-/** @jest-environment jsdom */
 // Covers `engine.ts`'s DEFAULT dependencies — the resident-corpus loader, its
 // cache, and the Dexie-backed session / index-state reads. `engine.test.ts`
 // injects deps for everything so it can stay in the fast node project; these
 // paths are only reachable with a real Dexie behind them, and they are the ones
 // production actually runs.
 
-import "fake-indexeddb/auto"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 import { putChatSearchText, setChatSearchState } from "@/lib/db/chat-search-text"
-import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { invalidateResidentCorpus, peekResidentCorpus, searchChatHistory } from "./engine"
 
 jest.setTimeout(30_000)
 
 const NOW = 1_700_000_000_000
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   invalidateResidentCorpus()
 })
 
@@ -51,6 +50,8 @@ async function seed(): Promise<void> {
     },
   ])
 }
+
+afterAll(dbFixture.dispose)
 
 describe("default dependencies", () => {
   it("loads the resident corpus from Dexie and finds a CJK match", async () => {

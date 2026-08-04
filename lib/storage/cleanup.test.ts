@@ -1,5 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import {
   cleanupCategories,
   clearCategory,
@@ -10,13 +8,14 @@ import {
   __TESTING__,
 } from "./cleanup"
 import { appendBackupHistory } from "@/lib/db/backup-history"
-import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
 
 async function seedHistory(rows: number, baseAt = Date.now()) {
@@ -30,6 +29,8 @@ async function seedHistory(rows: number, baseAt = Date.now()) {
     })
   }
 }
+
+afterAll(dbFixture.dispose)
 
 describe("previewCleanup", () => {
   it("returns zeroes for an empty bucket", async () => {

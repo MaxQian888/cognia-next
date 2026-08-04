@@ -1,8 +1,5 @@
-/**
- * @jest-environment jsdom
- */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { listRunEvents } from "./event-log"
 import {
   __resetResumersForTesting,
@@ -13,15 +10,16 @@ import {
   runLongStep,
 } from "./long-step-runner"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().workflowRuns.clear()
   await getDb().workflowRunEvents.clear()
   __resetResumersForTesting()
 })
+afterAll(dbFixture.dispose)
 
 describe("runLongStep", () => {
   it("writes a checkpoint event to the durable log", async () => {
