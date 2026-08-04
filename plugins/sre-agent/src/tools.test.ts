@@ -30,6 +30,12 @@ describe("createSreTools", () => {
       context()
     )
     await tools[1].execute({ environment: "prod", traceId: FIXTURE_TRACE_ID }, context())
+    await expect(
+      tools[2].execute(
+        { environment: "prod", startTime: FIXTURE_START, endTime: FIXTURE_END },
+        context()
+      )
+    ).resolves.toMatchObject({ ok: true })
 
     expect(logs).toMatchObject({ ok: true, evidenceIds: ["log_004"] })
 

@@ -361,6 +361,10 @@ const globalConfig: Config = {
     // co-located ≥90% coverage contract as host modules.
     "plugins/cognia-work-mode/src/**/*.{ts,tsx}",
     "!plugins/cognia-work-mode/src/**/*.test.{ts,tsx}",
+    // First-party SRE Agent is a browser-bundled plugin with the same
+    // co-located coverage contract as host modules.
+    "plugins/sre-agent/src/**/*.{ts,tsx}",
+    "!plugins/sre-agent/src/**/*.test.{ts,tsx}",
     // The overlay is shipped as a string and loaded by its suites via
     // readFileSync + eval, so V8 cannot attribute any coverage to it and all
     // ~1.8k lines report 0% — diluting the `global` bucket (the

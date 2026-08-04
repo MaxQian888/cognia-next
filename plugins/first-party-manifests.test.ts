@@ -154,7 +154,6 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   // plugin (the manager only materializes `manifest.tools` for WASM).
   screenshot: ["field_missing:tools"],
   "skill-recorder": ["field_missing:tools"],
-  "sre-agent": ["field_missing:tools", "field_missing:subagent"],
   "stagehand-mcp": ["field_missing:mcp-server-preset"],
   "test-lsp-contribution": [],
   "wasm-example-formatter": [],

@@ -38,6 +38,7 @@ import petDailyQuestsManifest from "@/plugins/pet-daily-quests/plugin.json"
 import strixSecurityManifest from "@/plugins/strix-security/plugin.json"
 import contextInspectorManifest from "@/plugins/context-inspector/plugin.json"
 import uiSurfaceReferenceManifest from "@/plugins/ui-surface-reference/plugin.json"
+import sreAgentManifest from "@/plugins/sre-agent/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -74,6 +75,7 @@ import petDailyQuestsModule from "@/plugins/pet-daily-quests/src/index"
 import strixSecurityModule from "@/plugins/strix-security/src/index"
 import contextInspectorModule from "@/plugins/context-inspector/src/index"
 import * as uiSurfaceReferenceModule from "@/plugins/ui-surface-reference/src/index"
+import sreAgentModule from "@/plugins/sre-agent/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -221,6 +223,15 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-work-mode",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(workModeModule),
+  },
+  {
+    // Read-only incident diagnostician. The packaged manifest materializes
+    // both tool contracts and its subagent so discovery, consent, and the
+    // runtime registry all observe the same contribution graph.
+    manifest: builtinManifest(sreAgentManifest, sreAgentModule),
+    path: "builtin://sre-agent",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(sreAgentModule),
   },
   {
     manifest: builtinManifest(zhihuContentPipelineManifest, zhihuContentPipelineModule),

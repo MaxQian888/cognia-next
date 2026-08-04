@@ -11,9 +11,11 @@ import {
 } from "./fixtures"
 import {
   evidenceText,
+  redactSensitiveValue,
   type SreEvidence,
   type SreLogEvidence,
   type SreMetricEvidence,
+  type SreTimeRange,
   type SreTimelineDraft,
   type SreTraceSpanEvidence,
   type SreValidationResult,
@@ -25,10 +27,8 @@ export interface SrePluginContext {
   logger?: FullPluginContext["logger"]
 }
 
-export interface SreQueryLogsInput {
+export interface SreQueryLogsInput extends SreTimeRange {
   environment: string
-  startTime: string
-  endTime: string
   services?: string[]
   traceId?: string
   requestId?: string
@@ -43,10 +43,8 @@ export interface SreQueryTraceInput {
   endTime?: string
 }
 
-export interface SreQueryMetricsInput {
+export interface SreQueryMetricsInput extends SreTimeRange {
   environment: string
-  startTime: string
-  endTime: string
   jobs?: string[]
   metrics?: string[]
   labels?: Record<string, string>
@@ -83,10 +81,34 @@ function assertRange(startTime: string, endTime: string): void {
   if (start > end) throw new Error("startTime must be before endTime")
 }
 
+function optionalRange(
+  startTime: string | undefined,
+  endTime: string | undefined
+): SreTimeRange | undefined {
+  if (startTime === undefined && endTime === undefined) return undefined
+  const range = {
+    startTime: requireNonEmpty(startTime, "startTime"),
+    endTime: requireNonEmpty(endTime, "endTime"),
+  }
+  assertRange(range.startTime, range.endTime)
+  return range
+}
+
 function inRange(time: string | undefined, startTime: string, endTime: string): boolean {
   if (!time) return true
   const ts = Date.parse(time)
   return ts >= Date.parse(startTime) && ts <= Date.parse(endTime)
+}
+
+function rangesOverlap(
+  leftStart: string,
+  leftEnd: string,
+  rightStart: string,
+  rightEnd: string
+): boolean {
+  return (
+    Date.parse(leftStart) <= Date.parse(rightEnd) && Date.parse(leftEnd) >= Date.parse(rightStart)
+  )
 }
 
 function normalizedTraceId(value: string | undefined): string | undefined {
@@ -107,18 +129,21 @@ function labelsMatch(
   return Object.entries(wanted).every(([key, value]) => labels[key] === value)
 }
 
-export function defaultIncidentWindow(): { startTime: string; endTime: string } {
+/** Return the deterministic incident window used by the bundled mock provider. */
+export function defaultIncidentWindow(): SreTimeRange {
   return { startTime: FIXTURE_START, endTime: FIXTURE_END }
 }
 
+/** Create an isolated, read-only evidence runtime for one plugin activation. */
 export function createSreRuntime(_ctx: SrePluginContext): SreRuntime {
   const evidencePool = new Map<string, SreEvidence>()
   const remember = <T extends SreEvidence>(records: T[]): SreQueryResult<T> => {
-    for (const record of records) evidencePool.set(record.id, record)
+    const redacted = records.map((record) => redactSensitiveValue(record) as T)
+    for (const record of redacted) evidencePool.set(record.id, record)
     return {
       ok: true,
-      records,
-      evidenceIds: records.map((record) => record.id),
+      records: redacted,
+      evidenceIds: redacted.map((record) => record.id),
       fixture: "qwen-timeout-fallback",
     }
   }
@@ -146,10 +171,21 @@ export function createSreRuntime(_ctx: SrePluginContext): SreRuntime {
       const traceId = normalizedTraceId(input.traceId)
       const requestId = input.requestId?.trim()
       if (!traceId && !requestId) throw new Error("traceId or requestId is required")
-      const records =
+      const range = optionalRange(input.startTime, input.endTime)
+      let records =
         traceId === normalizedTraceId(FIXTURE_TRACE_ID) || requestId === FIXTURE_REQUEST_ID
           ? TRACE_EVIDENCE
           : []
+      if (range) {
+        records = records.filter((record) =>
+          rangesOverlap(
+            record.startTime,
+            record.endTime ?? record.startTime,
+            range.startTime,
+            range.endTime
+          )
+        )
+      }
       return remember(records)
     },
     queryMetrics: async (input) => {
@@ -160,6 +196,11 @@ export function createSreRuntime(_ctx: SrePluginContext): SreRuntime {
       const jobs = new Set(input.jobs ?? [])
       const metrics = new Set(input.metrics ?? [])
       const records = METRIC_EVIDENCE.filter((record) => {
+        if (
+          !rangesOverlap(record.timeRange[0], record.timeRange[1], input.startTime, input.endTime)
+        ) {
+          return false
+        }
         if (jobs.size > 0 && !jobs.has(record.job)) return false
         if (metrics.size > 0 && !metrics.has(record.metric)) return false
         if (!labelsMatch(record.labels, input.labels)) return false
@@ -168,6 +209,7 @@ export function createSreRuntime(_ctx: SrePluginContext): SreRuntime {
       return remember(records)
     },
     validateTimeline: async (input) => validateTimelineDraft(input, evidencePool.values()),
-    evidenceSnapshot: () => [...evidencePool.values(), ...RUNBOOK_EVIDENCE],
+    evidenceSnapshot: () =>
+      redactSensitiveValue([...evidencePool.values(), ...RUNBOOK_EVIDENCE]) as SreEvidence[],
   }
 }
