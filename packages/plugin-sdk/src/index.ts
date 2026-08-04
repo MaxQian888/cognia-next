@@ -53,6 +53,7 @@ export { defineMcpServerPreset } from "./define/define-mcp-server-preset"
 export { defineNativeAnthropicTool } from "./define/define-native-anthropic-tool"
 export { defineSkill } from "./define/define-skill"
 export { defineSubagent } from "./define/define-subagent"
+export type { PluginSubagentInput, PluginSubagentToolReference } from "./define/define-subagent"
 export { defineAgentTeamTemplate } from "./define/define-agent-team-template"
 export {
   defineCharacterPack,

@@ -18,6 +18,7 @@
  */
 
 export { defineSubagent } from "../define/define-subagent"
+export type { PluginSubagentInput, PluginSubagentToolReference } from "../define/define-subagent"
 
 export {
   registerSubagent,

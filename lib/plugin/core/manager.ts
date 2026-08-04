@@ -181,6 +181,7 @@ import { invalidateConfigComponentForPlugin } from "@/lib/plugin/bridge/config-c
 // other three capabilities via the disable loop.
 import { unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry"
 import { refreshAllPackWarnings } from "@/lib/plugin/registries/character-pack-registry"
+import { assertPluginManifestParity } from "./manifest-parity"
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import { registerExtensionsForPlugin } from "@/lib/plugin/bridge/extension-bridge"
 import { clearCustomThemesForPluginContext } from "@/lib/plugin/api/theme-api"
@@ -2104,6 +2105,9 @@ export class PluginManager {
         },
       })
       recordLoadSuccess(pluginId, Date.now())
+      if (plugin.source !== "builtin") {
+        assertPluginManifestParity(plugin.manifest, definition.manifest)
+      }
       definition.activation = this.parseActivationSpec(plugin.manifest)
 
       // Check if debug mode is enabled for this plugin

@@ -17,8 +17,22 @@
  *   })
  */
 
+import type { PluginToolDef } from "@/types/plugin/plugin"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 
-export function defineSubagent(def: PluginSubagentDef): PluginSubagentDef {
-  return def
+export type PluginSubagentToolReference = string | Pick<PluginToolDef, "name">
+
+export type PluginSubagentInput = Omit<PluginSubagentDef, "tools"> & {
+  /** Tool names or definitions returned by `defineTool()`. */
+  tools?: ReadonlyArray<PluginSubagentToolReference>
+}
+
+export function defineSubagent(def: PluginSubagentInput): PluginSubagentDef {
+  if (!def.tools || def.tools.every((tool) => typeof tool === "string")) {
+    return def as PluginSubagentDef
+  }
+  return {
+    ...def,
+    tools: def.tools.map((tool) => (typeof tool === "string" ? tool : tool.name)),
+  }
 }
