@@ -1,8 +1,14 @@
-//! Per-version host bindings. Picked by `host.rs::version_linker` after the
-//! component's `cognia:api-version` custom section is parsed.
+//! Per-api-version host bindings.
 //!
-//! v0.1.0 is the only version today; adding `since_v0_2.rs` for a future
-//! breaking change is a tracked exercise — the version-router pattern is
-//! already in place so we don't regress to a single-linker design.
+//! One module per supported `cognia:plugin` MAJOR.MINOR. `WasmPluginHost::
+//! version_linker` reads the `cognia:api-version` custom section out of the
+//! component binary and routes to the matching `build_linker`.
+//!
+//! **v0.1 is deliberately absent.** v0.2.0 was a hard cutover: no v0.1 linker is
+//! registered, so a v0.1 plugin fails at load with `UPGRADE_REQUIRED` and is
+//! never compiled. The v0.1 sources live, byte-for-byte and uncompiled, in
+//! `crates/cognia-plugin-runtime/frozen/v0_1/` — see the README there for why
+//! they had to leave the module tree, and `pnpm lint:frozen-wasm-api` for what
+//! keeps them stable.
 
-pub mod since_v0_1;
+pub mod since_v0_2;

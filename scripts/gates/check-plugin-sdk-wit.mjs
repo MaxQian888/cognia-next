@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
- * Verify the plugin-sdk WIT mirror matches the canonical source.
+ * Verify every WIT mirror matches the canonical source.
  *
- * Exits 0 when the two files are byte-identical, 1 with a unified diff
- * otherwise. Designed to run in CI and as a local pre-push check so
+ * Exits 0 when all mirrors are byte-identical to the source, 1 with a unified
+ * diff otherwise. Designed to run in CI and as a local pre-push check so
  * external plugin authors never see a stale contract.
  *
- * Canonical source: `src-tauri/wit/cognia-plugin.wit`
- * Mirror:           `plugin-sdk/wit/cognia-plugin.wit`
+ * The canonical path and the mirror list live in `lib/wit-mirrors.mjs`, shared
+ * with the writer so the two cannot disagree. Two of the mirrors are guest-side
+ * copies named `world.wit` — this compares content, not filenames.
  *
  * Fix drift by running `pnpm sync:plugin-sdk-wit`.
  */
@@ -16,13 +17,12 @@ import { readFile } from "node:fs/promises"
 import { dirname, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { CANONICAL, MIRRORS } from "./lib/wit-mirrors.mjs"
+
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(__dirname, "../..")
-const source = resolve(repoRoot, "src-tauri/wit/cognia-plugin.wit")
-const mirrors = [
-  resolve(repoRoot, "plugin-sdk/wit/cognia-plugin.wit"),
-  resolve(repoRoot, "packages/plugin-sdk/wit/cognia-plugin.wit"),
-]
+const source = resolve(repoRoot, CANONICAL)
+const mirrors = MIRRORS.map((p) => resolve(repoRoot, p))
 
 async function readOrFail(path, label) {
   try {
@@ -51,7 +51,7 @@ async function main() {
   const sourceContent = await readOrFail(source, "canonical WIT source")
   let drifted = false
   for (const mirror of mirrors) {
-    const mirrorContent = await readOrFail(mirror, "plugin-sdk WIT mirror")
+    const mirrorContent = await readOrFail(mirror, "WIT mirror")
     if (sourceContent === mirrorContent) {
       console.log(
         `[check-plugin-sdk-wit] ok: ${relative(repoRoot, mirror)} matches canonical source`

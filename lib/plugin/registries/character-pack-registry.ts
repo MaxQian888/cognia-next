@@ -33,6 +33,7 @@ import {
   validatePackRequires,
   type PluginCharacterPackWarning,
 } from "@/lib/plugin/character-pack/validate-requires"
+import { UNSIGNED_TRUST, type CharacterPackTrust } from "@/lib/plugin/character-pack/pack-trust"
 
 const registry = createValidatingOverlayRegistry<
   PluginCharacterPackDef,
@@ -43,23 +44,95 @@ const registry = createValidatingOverlayRegistry<
 })
 
 /**
+ * Trust state per pack id, kept beside the registry rather than inside it.
+ *
+ * Deliberately NOT the overlay registry's `meta` bag. `registerCharacterPack`
+ * is re-exported from `@cognia/plugin-sdk`, so anything a plugin can pass
+ * through it is attacker-controlled — a `meta.trust = "verified"` write would
+ * let any plugin mint a verified badge for itself. Only
+ * `registerCharacterPackWithTrust`, which is host-only and deliberately not in
+ * the SDK surface, can set anything other than `unsigned`.
+ */
+const trustByPackId = new Map<string, CharacterPackTrust>()
+
+const listeners = new Set<() => void>()
+let version = 0
+
+function notify(): void {
+  version += 1
+  for (const listener of listeners) {
+    try {
+      listener()
+    } catch {
+      // One bad subscriber must not break a registry mutation.
+    }
+  }
+}
+
+/**
  * Register a plugin-contributed character pack and stamp `requires`
  * warnings (ADR-0030 §B.6). Warnings are non-blocking — the pack is
  * registered regardless; consumers (Settings UI) read the warnings via
  * `getPackWarnings(packId)` and surface them as chips on the affected rows.
+ *
+ * Trust is forced to `unsigned`. A plugin re-registering over a pack id that a
+ * verified local file previously held must not inherit its badge.
  */
-export const registerCharacterPack = registry.register
+export const registerCharacterPack: typeof registry.register = (...args) => {
+  const result = registry.register(...args)
+  trustByPackId.set(args[0], UNSIGNED_TRUST)
+  notify()
+  return result
+}
+
+/**
+ * Host-only registration that carries a computed trust state.
+ *
+ * NOT exported from `@cognia/plugin-sdk` — see the note on `trustByPackId`.
+ */
+export function registerCharacterPackWithTrust(
+  id: string,
+  pack: PluginCharacterPackDef,
+  opts: { pluginId?: string; trust: CharacterPackTrust }
+): void {
+  registry.register(id, pack, { pluginId: opts.pluginId })
+  trustByPackId.set(id, opts.trust)
+  notify()
+}
+
+/** Trust state for a pack. Unknown and plugin-contributed packs are `unsigned`. */
+export function getPackTrust(packId: string): CharacterPackTrust {
+  return trustByPackId.get(packId) ?? UNSIGNED_TRUST
+}
+
 /**
  * Re-run `requires` validation for every registered pack. Called when
- * sibling overlay registries (skill / mcp / native-tool) mutate, so a
- * pack that previously had a missing-dep warning clears it once the
- * dependency arrives.
+ * sibling registries (skill / mcp / native-tool / theme-pack / connector /
+ * provider) mutate, so a pack that previously had a missing-dep warning clears
+ * it once the dependency arrives.
  */
-export const refreshAllPackWarnings = registry.refreshAllWarnings
+export const refreshAllPackWarnings = (): void => {
+  registry.refreshAllWarnings()
+  // The warnings map is invisible to React on its own; without this a cleared
+  // warning would keep rendering until some unrelated re-render happened.
+  notify()
+}
 /** Drop a single dynamically-registered pack by id. */
-export const unregisterCharacterPackById = registry.unregisterById
+export const unregisterCharacterPackById: typeof registry.unregisterById = (id) => {
+  const result = registry.unregisterById(id)
+  trustByPackId.delete(id)
+  notify()
+  return result
+}
 /** Drop every pack contributed by `pluginId`. Returns the number removed. */
-export const unregisterCharacterPacksByPlugin = registry.unregisterByPlugin
+export const unregisterCharacterPacksByPlugin: typeof registry.unregisterByPlugin = (pluginId) => {
+  for (const { id, pluginId: owner } of registry.entries()) {
+    if (owner === pluginId) trustByPackId.delete(id)
+  }
+  const removed = registry.unregisterByPlugin(pluginId)
+  notify()
+  return removed
+}
 /** Get a pack by id. Returns undefined when not registered. */
 export const getCharacterPack = registry.get
 /** Get the full registry entry (pack + pluginId tag) for an id. */
@@ -74,8 +147,35 @@ export const listCharacterPackEntries = registry.entries
  * without null checks.
  */
 export const getPackWarnings = registry.getWarnings
-/** Test-only: clear every dynamically registered pack and its warnings. */
-export const __resetCharacterPacksForTesting = registry.__resetForTesting
+/** Test-only: clear every dynamically registered pack, its warnings, and trust. */
+export const __resetCharacterPacksForTesting = (): void => {
+  registry.__resetForTesting()
+  trustByPackId.clear()
+  notify()
+}
+
+/**
+ * Subscribe to registry mutations (register / unregister / warning refresh).
+ *
+ * Needed because two things are invisible to React otherwise: local pack
+ * import/delete/rescan, and `refreshAllPackWarnings` clearing a warning in the
+ * sidecar map.
+ *
+ * Pair with {@link getCharacterPackRegistryVersion} in `useSyncExternalStore`.
+ * Never snapshot `listCharacterPackEntries()` — it allocates a fresh array on
+ * every call, which makes React loop forever.
+ */
+export function subscribeCharacterPackRegistry(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+/** Monotonic counter — the correct `useSyncExternalStore` snapshot. */
+export function getCharacterPackRegistryVersion(): number {
+  return version
+}
 
 /**
  * Return warnings that apply to a specific overlay character within its

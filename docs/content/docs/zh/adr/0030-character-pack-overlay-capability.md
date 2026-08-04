@@ -151,5 +151,111 @@ packVersionAtClone?: string
 
 - 把 `resolveCharacterVoice` 实际接到 TTS dispatch 调用点。
 - `useTauriAssetUrl` hook，用于渲染 `avatarImage.tauriPath`。
-- `.cognia-pack.json` 文件的 Ed25519 签名校验。
-- 新的 `requires` 维度类型（theme-pack / connector / provider）。
+- ~~`.cognia-pack.json` 文件的 Ed25519 签名校验。~~
+  已于 2026-08-03 交付 —— 见下方修订。
+- ~~新的 `requires` 维度类型（theme-pack / connector / provider）。~~
+  已于 2026-08-03 交付 —— 见下方修订。
+
+---
+
+## 修订 — 2026-08-03（信任链 + 三个新 `requires` 维度）
+
+交付上面"不在本轮"的最后两条。
+
+### 新增：角色包信任模型只有两个状态
+
+```ts
+type CharacterPackTrust =
+  | { state: "verified"; algo; publicKey; fingerprint; shortFingerprint; signature }
+  | { state: "unsigned" }
+```
+
+刻意**没有 `"invalid"` 状态**。签名验证不通过的已签名包会在扫描 / 导入
+边界被拒绝，根本进不了 registry，因此这个类型无法表达一个谎言。UI 侧也就
+没有 `invalid` 分支要渲染 —— registry 里不存在这样的包。
+
+`resolvePackTrust` 失败即关闭：`reason: "host-unavailable"` 同样是
+`ok: false`。既然签名存在却无法校验，我们就没有资格假设它没问题。
+
+### 裁定：签名字节不含 `schemaVersion`
+
+签名覆盖的是**仅 `pack` 对象**的 RFC 8785 规范化 JSON。`schemaVersion`
+与 `signature` 属于文件外层包装，在规范化之前被剥离。
+
+正因如此 `CHARACTER_PACK_FILE_SCHEMA_VERSION` 可以停在 `2` 且无需 Dexie
+迁移：导入一个已签名的 v1 文件并按 v2 重写，签名依然有效。如果签的是外层
+包装，那么每一次 schema 升版都会让世上所有已签名的包失效。
+
+### 裁定：插件贡献的包完全不显示信任徽章
+
+它们的真实性已经由插件安装回执（`PluginVerificationReceipt`）锚定。在旁边
+渲染"未签名"等于声称存在一个并不存在的缺口 —— 那是主动误导，而不只是噪音。
+只有来源不定的本地 `.cognia-pack.json` 文件才展示未签名状态。
+
+### 裁定：信任存在旁路 map，而不是 registry 的 `meta` 袋
+
+把 overlay registry 的 `meta` 袋加宽是最直观的存法，也是一个信任伪造漏洞：
+`registerCharacterPack` 由 `@cognia/plugin-sdk` 再导出，任何插件都能写
+`meta.trust = "verified"` 给自己发一枚徽章。信任只由 SDK 不再导出的、
+宿主专用的 `registerCharacterPackWithTrust` 写入。SDK 可见的
+`registerCharacterPack` 现在是一层包装，强制写入 `{ state: "unsigned" }`，
+因此插件用同一个 pack id 覆盖注册也无法继承此前的已验证徽章。
+
+### 新增：三个 `requires` 维度，仅告警
+
+`themePacks`（规范化的 `"<pluginId>.<packId>"` 键）、`connectors`（平台
+kind）、`providers`（规范 provider id）。`missing-theme-pack` /
+`missing-connector` / `missing-provider` 三个 code 加入联合类型。按 §B.6，
+它们全部只是告警 —— 包照常注册、照常出现在 picker 中、其角色照常可解析。
+
+连接器可用性由 `CONNECTOR_METADATA.filter(m => m.status !== "planned")`
+计算，**而非**原始的 `ALL_PLATFORM_KINDS` 联合：`email` / `kook` / `line` /
+`mattermost` 在联合里，但 `buildAdapterFromRow` 中并没有对应分支，把它们当作
+可用会吞掉一个真实的缺失依赖。
+
+`refreshAllPackWarnings()` 是推模型，所以每个新来源都要自己推一次失效。
+主题包从专门的 `warning-refresh-wiring.ts` 推送，由本地包初始化器安装 ——
+**不是**从 `theme-pack-registry.ts` 内部推，那会让 `lib/theme` 反向依赖
+`lib/plugin`。
+
+顺带修掉两个既有缺陷：已声明的 `missing-a2ui-catalog` code 在函数体里没有
+任何分支能发出它；以及角色级 `providerId` 从未被检查。后者可能会让此前
+"干净"的包亮起告警。
+
+### 修复：`exportPack` 静默丢弃签名
+
+它调用 `serializeLocalPackFile(pack)` 时漏了第二个参数，导致无论导入的是
+什么，导出的包一律变成未签名。现在导出已验证的包会逐字回写原始签名块，
+导出的文件仍然可验证。
+
+### 新增：`cognia pack sign` / `cognia pack verify`
+
+只有校验而没有产生签名的手段，等于一个死功能，因此 CLI 一并交付签名器。
+签名**内嵌**写入文件自身的 `signature` 对象，而不是分离的 `.sig` ——
+一个包就是一个自包含文件，可以直接邮件发送或提交，不会出现配套文件走丢。
+
+`pack sign` 在写盘前先自验。宿主校验的是 JavaScript 产出的字节，而 CLI 用
+手工移植的 RFC 8785 实现产出它们；没有这一步自检，格式化 bug 在创作时是
+静默的，最终以"用户机器上随机验签失败"的形式暴露。
+
+`pack verify` 在宿主的两个结论之外报告三种：`verified`、`unsigned`
+（退出 0 —— 这是受支持且会被标注的状态，CI 可用 `--require-signature`
+把它变成错误）、`invalid`（永远非零）。
+
+### 记录：两侧规范化器确实分叉过，是共享 fixture 抓到的
+
+两侧由同一份黄金向量文件驱动：
+`lib/plugin/character-pack/__fixtures__/jcs-vectors.json`，Jest 侧 `import`，
+Rust 侧 `include_str!`。第一次运行就失败了。
+
+TypeScript 侧先对 key 排序，然后经由一个中间对象交给 `JSON.stringify`。
+这会静默地把排序撤销：JS 对象自身的属性顺序会把类整数 key 按**数值**升序
+提到最前，与插入顺序无关，于是 `{"1","10","2"}` 又变回 `1, 2, 10`。
+RFC 8785 §3.2.3 要的是 UTF-16 码元序 —— `"1" < "10" < "2"`。Rust 的
+`BTreeMap` 没有这条规则，两侧正是这样分叉的。
+
+序列化器现在直接拼输出字符串，只把**叶子**交给 `JSON.stringify`，从而在
+保留符合 ES 规范的数字格式化与字符串转义的同时，自己掌控 key 顺序。仓库中
+签入了一个由真实 `cognia pack sign` 二进制签名的包，Jest 用 Node 自带的
+Ed25519 校验它，因此测试证明的是真实产物上的互通，而不只是某人碰巧想到
+要写下来的那些向量。

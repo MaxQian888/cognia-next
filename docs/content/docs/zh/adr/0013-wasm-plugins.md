@@ -245,6 +245,109 @@ v0.x 阶段 **MINOR** 变更视为破坏性变更（遵循
   `since_v0_1.rs` 复制为 `since_v0_2.rs`，并在
   `host::version_linker` 中加分支。
 
+> **已被取代。** 除 Sigstore 外，上述每一条都由下方 2026-08-03 修订交付。
+> Sigstore 仍然刻意未实现。
+
+---
+
+## 修订 — 2026-08-03（宿主 API v0.2.0，硬切换）
+
+交付了 `## 推迟事项` 中除 Sigstore 外的全部五条。**Sigstore 仍未实现，
+也没有为它搭任何后端脚手架** —— 那一条原样保留。
+
+### 反转：多版本链接器是迁移工具，不是兼容承诺
+
+原设计按契约版本各注册一个链接器，让老插件可以一直跑下去。v0.2**只**
+注册 `0.2.0`。加载 v0.1 插件会以 `UPGRADE_REQUIRED` 失败，错误信息里点名
+插件、给出读到的版本，以及重建所需的五个步骤。
+
+为什么是硬切换而不是兼容垫片：`notification.notify` 从"无返回值"改成
+`result<_, string>`，这改变了组件的 import 类型。v0.1 的 guest 二进制根本
+无法与 v0.2 world 链接 —— 所谓"兼容"意味着永久维护第二套宿主实现，而不是
+一层垫片。目前还没有已发布的第三方 WASM 插件，迁移成本就是一次
+`cargo component build`；而这个成本只会越来越高。
+
+版本来自 `cognia:api-version` **wasm 自定义段**，绝不来自 manifest。完全
+没有该段的二进制保持原有的"格式错误"报错，并且明确**不**报
+`UPGRADE_REQUIRED` —— 有测试钉住这一点：如果作者的工具链压根没写入该段，
+却告诉他"请重建到 0.2"，只会把人引向完全错误的方向。
+
+### 反转：冻结 v0.1 需要的是"不编译"，而不只是"不注册"
+
+`since_v0_1.rs` 用完整结构体字面量构造 `HostState`，因此新增 `services`
+字段会强迫我们去改一个刚刚宣布逐字节冻结的文件。源码被移出模块树，放到
+`crates/cognia-plugin-runtime/frozen/v0_1/` —— `rustc`、`clippy`、
+`cargo fmt` 都不会访问那里。校验清单
+（`scripts/gates/frozen-wasm-api.json`，闸门 `pnpm lint:frozen-wasm-api`）
+做三个方向的审计：条目匹配、无未登记文件、无缺失条目；crate 内另有一个
+`include_bytes!` 测试，为从不跑 node 闸门的贡献者兜住这层冻结。
+
+### 新增：capability 优先的有界 IPC 与稳定错误词表
+
+每个 `result<..., string>` 错误现在都带机器可解析的
+`"<CODE>: <message>"` 前缀。`<CODE>` 取自 `CAPABILITY_DENIED`、
+`INVALID_REQUEST`、`PAYLOAD_TOO_LARGE`、`TIMEOUT`、`CANCELLED`、
+`HOST_UNAVAILABLE`、`PROVIDER_ERROR`、`WORKFLOW_REJECTED`。Guest 用
+`split_once(": ")` 分支；在 0.2 契约的生命周期内代码稳定，文案不保证稳定。
+
+**来自**渲染端的代码会经过一层映射重新解析，未知代码降级为
+`PROVIDER_ERROR`，因此被攻陷的渲染端无法伪造 `CAPABILITY_DENIED`（
+`UPGRADE_REQUIRED` 也被显式过滤）。
+
+宿主服务通过 `WasmHostServices` trait 进入沙箱，其访问器是**逐能力的
+`Option`**。正是这一点让"没有剪贴板后端的宿主返回 `HOST_UNAVAILABLE`、
+且不影响其他能力"成为机制上的必然，而不是需要人去记住的约定。进程级
+`OnceLock` 被否决：cargo 在同一进程内以并行线程跑单测，那会让"桌面端提供
+剪贴板"和"headless 返回 `HOST_UNAVAILABLE`"两个测试无法共存于同一个二进制。
+
+每个 host 实现的闸门顺序是固定的：**capability 检查 → 参数校验 → 服务查找
+→ bridge 查找 → 负载大小 → 派发**。在全部通过之前，不分配 pending 状态、
+不发事件、不碰任何原生 API。
+
+### 新增：渲染端桥，以及为什么取消是关键路径
+
+`ai.generate-text` 与 `workflow.emit-event` 由一座桥
+（`wasm/bridge.rs` + `lib/plugin/wasm-bridge/`）应答，结构上与 CLI bridge
+平行，但拥有自己的通道、pending 表、响应命令，以及 CLI bridge 没有的插件
+身份绑定。
+
+`resolve` **在持锁状态下、且在移除条目之前**比对插件身份。先移除再比对会
+让有 bug 的或恶意的渲染端通过猜测 id 取消另一个插件的在途请求 —— 一种跨
+插件的拒绝服务。
+
+取消不是锦上添花。`Store::set_epoch_deadline` 只在 wasm 执行点触发陷阱，
+而一个正在等待渲染端的 host import 并不在执行 wasm，因此 epoch 中断约束不
+到它；同时 `plugin_wasm_call_for_state` 在整个 guest 调用期间持有 per-plugin
+互斥锁。没有 `cancel_plugin`，在一次 30 秒的 AI 调用中途 deactivate 会让
+一个活的 store 泄漏最长 30 秒。所以它在 `WasmPluginHost::deactivate`
+**之前**调用，而不是之后。
+
+渲染端对每个请求恰好回一次响应（取消导致的中止也算），因此宿主必须容忍
+并丢弃一个它已经因自身超时而结算掉的请求的响应。
+
+### 新增：两处 capability 重新设闸
+
+| 能力面 | v0.1 | v0.2 |
+| --- | --- | --- |
+| `ai.generate-text` | `network:fetch` | **`ai:chat`** |
+| `workflow.emit-event` | _（无闸门）_ | **`extension:workflow`** |
+
+`network:fetch` 授予的是裸的出站 HTTP。花掉用户的模型额度、并经过宿主的
+PII 脱敏闸门，是一个独立的授权决定，因此配一个独立的 capability。
+`emit-event` 在只写一行日志时无需设闸；v0.2 它真的会重新进入工作流运行时。
+硬切换正是修这两处的零迁移成本时机。
+
+因此 `WASM_UNIMPLEMENTED_PERMISSIONS` 现在是 `[]`。若不改，安装授权面板会
+把已经可用的剪贴板能力渲染成永久禁用，并且永远不会把它们加进已授权集合
+—— 变成"Rust 里实现了，实际却够不着"。
+
+### 修复：一处自 v0.1 带下来的负载泄漏
+
+`since_v0_1.rs` 以 info 级别记录通知的 `title` 与 `body`。v0.2 两者都不记，
+无论全文还是片段；同一规则现在覆盖剪贴板内容、AI prompt 与补全、以及工作流
+负载（只记长度）。Bridge 诊断信息经由封闭的 key 白名单渲染，并有测试钉住：
+用含哨兵字符串的负载构造诊断，断言哨兵绝不出现。
+
 ---
 
 ## 参考

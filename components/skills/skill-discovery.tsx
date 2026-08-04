@@ -22,6 +22,7 @@ import {
   skillsScanCodex,
   skillsScanDir,
   skillsScanNative,
+  skillsScanOpencode,
   type NativeSkill,
 } from "@/lib/claude/ipc"
 import { pickDirectory } from "@/lib/files/file-bridge"
@@ -130,7 +131,7 @@ export function SkillDiscovery() {
         <h2 className="text-xs font-semibold">{t("title")}</h2>
       </div>
 
-      <div className="grid gap-2 md:grid-cols-3">
+      <div className="grid gap-2 md:grid-cols-4">
         <Button
           variant="outline"
           size="sm"
@@ -148,6 +149,15 @@ export function SkillDiscovery() {
         >
           <BotIcon className="mr-1.5 size-3.5" />
           {t("scanCodex")}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void runScan("OpenCode skills", skillsScanOpencode)}
+          disabled={!desktop || scan.status === "loading"}
+        >
+          <BotIcon className="mr-1.5 size-3.5" />
+          {t("scanOpencode")}
         </Button>
         <Button
           variant="outline"

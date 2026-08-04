@@ -109,6 +109,22 @@ pub async fn plugin_verify_detached_signature(
     signature_base64: String,
     public_key_base64: String,
 ) -> Result<bool> {
+    // Parse BEFORE reading the file, preserving the existing behaviour where a
+    // malformed key or signature errors without touching the filesystem.
+    let (verifying_key, signature) = parse_ed25519_detached(&signature_base64, &public_key_base64)?;
+    let bytes = fs::read(&artifact_path)?;
+    Ok(verifying_key.verify_strict(&bytes, &signature).is_ok())
+}
+
+/// Decode a base64 Ed25519 public key + detached signature.
+///
+/// Split out from verification so callers can validate inputs before doing any
+/// I/O, and so the byte-oriented path below shares exactly one decoder with the
+/// file-oriented command.
+pub fn parse_ed25519_detached(
+    signature_base64: &str,
+    public_key_base64: &str,
+) -> Result<(VerifyingKey, Signature)> {
     use base64::Engine as _;
     let b64 = base64::engine::general_purpose::STANDARD;
     let pk_bytes = b64
@@ -127,9 +143,114 @@ pub async fn plugin_verify_detached_signature(
         .as_slice()
         .try_into()
         .map_err(|_| PluginError::Crypto(format!("signature must be {SIGNATURE_LENGTH} bytes")))?;
-    let signature = Signature::from_bytes(&sig_arr);
-    let bytes = fs::read(&artifact_path)?;
-    Ok(verifying_key.verify_strict(&bytes, &signature).is_ok())
+    Ok((verifying_key, Signature::from_bytes(&sig_arr)))
+}
+
+/// Verify a detached Ed25519 signature over arbitrary bytes.
+///
+/// Pure: no filesystem, no Tauri. Input-shape problems are `Err`; a
+/// cryptographically invalid signature is `Ok(false)`. Uses `verify_strict`,
+/// which rejects small-order public keys.
+pub fn verify_detached_signature_bytes(
+    payload: &[u8],
+    signature_base64: &str,
+    public_key_base64: &str,
+) -> Result<bool> {
+    let (verifying_key, signature) = parse_ed25519_detached(signature_base64, public_key_base64)?;
+    Ok(verifying_key.verify_strict(payload, &signature).is_ok())
+}
+
+/// Host ceiling on a canonical pack payload. A caller-supplied limit may only
+/// LOWER this — never raise it.
+pub const MAX_PACK_PAYLOAD_BYTES: u64 = 8 * 1024 * 1024;
+
+/// The verdict for one Character Pack signature check.
+///
+/// Every recoverable failure comes back as `Ok(verdict { verified: false })`
+/// rather than `Err`, so the TypeScript side has exactly one branch and cannot
+/// confuse a host error with an invalid signature — a distinction that matters
+/// because one of those must never be downgraded to "unsigned".
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackSignatureVerdict {
+    pub request_id: String,
+    pub verified: bool,
+    pub pack_id: String,
+    pub pack_version: String,
+    /// sha256 hex of the raw public-key bytes — same scheme as
+    /// `plugin_public_key_fingerprint`. Empty when the key was unusable.
+    pub fingerprint: String,
+    pub payload_bytes: u64,
+    /// `None` on success. Stable machine codes on failure:
+    /// `payload-too-large` | `bad-public-key` | `bad-signature-encoding` |
+    /// `signature-mismatch`.
+    pub reason: Option<String>,
+}
+
+/// Verify a detached Ed25519 signature over an in-memory canonical payload.
+///
+/// `payload` is the RFC 8785 canonical JSON of the pack object only. The host
+/// canonicalises it (`lib/plugin/character-pack/canonical-json.ts`) so the bytes
+/// verified are the bytes registered — that equality is the whole point of
+/// taking a payload here rather than a file path.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn plugin_verify_pack_signature(
+    request_id: String,
+    pack_id: String,
+    pack_version: String,
+    payload: String,
+    max_payload_bytes: Option<u64>,
+    signature_base64: String,
+    public_key_base64: String,
+) -> Result<PackSignatureVerdict> {
+    let payload_bytes = payload.len() as u64;
+    let mut verdict = PackSignatureVerdict {
+        request_id,
+        verified: false,
+        pack_id,
+        pack_version,
+        fingerprint: String::new(),
+        payload_bytes,
+        reason: None,
+    };
+
+    // The caller may tighten the bound but never loosen it.
+    let limit = max_payload_bytes
+        .unwrap_or(MAX_PACK_PAYLOAD_BYTES)
+        .min(MAX_PACK_PAYLOAD_BYTES);
+    if payload_bytes > limit {
+        verdict.reason = Some("payload-too-large".into());
+        return Ok(verdict);
+    }
+
+    let (verifying_key, signature) =
+        match parse_ed25519_detached(&signature_base64, &public_key_base64) {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                verdict.reason = Some(
+                    if err.to_string().contains("signature") {
+                        "bad-signature-encoding"
+                    } else {
+                        "bad-public-key"
+                    }
+                    .into(),
+                );
+                return Ok(verdict);
+            }
+        };
+
+    verdict.fingerprint = hex::encode(Sha256::digest(verifying_key.to_bytes()));
+
+    if verifying_key
+        .verify_strict(payload.as_bytes(), &signature)
+        .is_ok()
+    {
+        verdict.verified = true;
+    } else {
+        verdict.reason = Some("signature-mismatch".into());
+    }
+    Ok(verdict)
 }
 
 /// Verify an Ed25519 signature over the `<id>:<ver>:<bytes>` digest for an
@@ -182,6 +303,171 @@ pub async fn plugin_verify_signature(
 
 #[cfg(test)]
 mod tests {
+    // ---- Character Pack payload verification (v0.2 trust chain) ----
+
+    fn sign_canonical(payload: &str) -> (String, String) {
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let mut seed = [7u8; 32];
+        seed[0] = 42;
+        let signing_key = SigningKey::from_bytes(&seed);
+        let verifying_key: VerifyingKey = (&signing_key).into();
+        let sig = signing_key.sign(payload.as_bytes());
+        (
+            b64.encode(sig.to_bytes()),
+            b64.encode(verifying_key.to_bytes()),
+        )
+    }
+
+    #[tokio::test]
+    async fn pack_signature_verifies_canonical_bytes() {
+        let payload = r#"{"id":"demo.pack","name":"Demo"}"#;
+        let (sig, pk) = sign_canonical(payload);
+        let v = plugin_verify_pack_signature(
+            "req-1".into(),
+            "demo.pack".into(),
+            "1.0.0".into(),
+            payload.into(),
+            None,
+            sig,
+            pk,
+        )
+        .await
+        .unwrap();
+
+        assert!(v.verified);
+        assert!(v.reason.is_none());
+        assert_eq!(v.request_id, "req-1");
+        assert_eq!(v.payload_bytes, payload.len() as u64);
+        assert_eq!(v.fingerprint.len(), 64, "sha256 hex");
+    }
+
+    #[tokio::test]
+    async fn a_one_byte_payload_mutation_fails_verification() {
+        let payload = r#"{"id":"demo.pack","name":"Demo"}"#;
+        let (sig, pk) = sign_canonical(payload);
+        let tampered = r#"{"id":"demo.pack","name":"demo"}"#;
+        let v = plugin_verify_pack_signature(
+            "req".into(),
+            "demo.pack".into(),
+            "1.0.0".into(),
+            tampered.into(),
+            None,
+            sig,
+            pk,
+        )
+        .await
+        .unwrap();
+
+        assert!(!v.verified);
+        assert_eq!(v.reason.as_deref(), Some("signature-mismatch"));
+        // The fingerprint is still reported: the KEY was fine, the bytes were not.
+        assert_eq!(v.fingerprint.len(), 64);
+    }
+
+    #[tokio::test]
+    async fn oversize_payload_is_rejected_before_any_crypto() {
+        let payload = "x".repeat(64);
+        let (sig, pk) = sign_canonical(&payload);
+        let v = plugin_verify_pack_signature(
+            "req".into(),
+            "p".into(),
+            "1.0.0".into(),
+            payload,
+            Some(10),
+            sig,
+            pk,
+        )
+        .await
+        .unwrap();
+
+        assert!(!v.verified);
+        assert_eq!(v.reason.as_deref(), Some("payload-too-large"));
+        assert!(v.fingerprint.is_empty(), "the key is never parsed");
+    }
+
+    #[tokio::test]
+    async fn a_caller_cannot_raise_the_host_payload_ceiling() {
+        // Passing u64::MAX must clamp to MAX_PACK_PAYLOAD_BYTES, not disable it.
+        let payload = "x".repeat((MAX_PACK_PAYLOAD_BYTES + 1) as usize);
+        let (sig, pk) = sign_canonical("unrelated");
+        let v = plugin_verify_pack_signature(
+            "req".into(),
+            "p".into(),
+            "1.0.0".into(),
+            payload,
+            Some(u64::MAX),
+            sig,
+            pk,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(v.reason.as_deref(), Some("payload-too-large"));
+    }
+
+    #[tokio::test]
+    async fn malformed_key_and_signature_report_distinct_reasons() {
+        let payload = "{}";
+        let (sig, pk) = sign_canonical(payload);
+
+        let bad_key = plugin_verify_pack_signature(
+            "req".into(),
+            "p".into(),
+            "1.0.0".into(),
+            payload.into(),
+            None,
+            sig.clone(),
+            "not-base64!!".into(),
+        )
+        .await
+        .unwrap();
+        assert!(!bad_key.verified);
+        assert_eq!(bad_key.reason.as_deref(), Some("bad-public-key"));
+
+        let bad_sig = plugin_verify_pack_signature(
+            "req".into(),
+            "p".into(),
+            "1.0.0".into(),
+            payload.into(),
+            None,
+            "not-base64!!".into(),
+            pk,
+        )
+        .await
+        .unwrap();
+        assert!(!bad_sig.verified);
+        assert_eq!(bad_sig.reason.as_deref(), Some("bad-signature-encoding"));
+    }
+
+    #[tokio::test]
+    async fn recoverable_failures_are_ok_not_err() {
+        // The TS side must have exactly one branch: a host error and an invalid
+        // signature must never look the same, because only one of them may ever
+        // be downgraded to "unsigned".
+        let v = plugin_verify_pack_signature(
+            "req".into(),
+            "p".into(),
+            "1.0.0".into(),
+            "{}".into(),
+            None,
+            "AAAA".into(),
+            "AAAA".into(),
+        )
+        .await;
+        assert!(v.is_ok(), "shape problems must not surface as Err");
+        assert!(!v.unwrap().verified);
+    }
+
+    #[test]
+    fn verify_detached_signature_bytes_is_pure_and_strict() {
+        let payload = b"canonical bytes";
+        let (sig, pk) = sign_canonical("canonical bytes");
+        assert!(verify_detached_signature_bytes(payload, &sig, &pk).unwrap());
+        assert!(!verify_detached_signature_bytes(b"other bytes", &sig, &pk).unwrap());
+        assert!(verify_detached_signature_bytes(payload, "!!", &pk).is_err());
+    }
+
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;

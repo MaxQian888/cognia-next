@@ -31,6 +31,14 @@ import { nodeCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
 import type { ScheduledTask } from "@/types/scheduler"
+import {
+  __resetCharacterPacksForTesting,
+  getPackWarnings,
+  registerCharacterPack,
+} from "@/lib/plugin/registries/character-pack-registry"
+import { __resetSkillsForTesting } from "@/lib/plugin/registries/skill-registry"
+import { __resetMcpServerPresetsForTesting } from "@/lib/plugin/registries/mcp-server-preset-registry"
+import { __resetNativeAnthropicToolsForTesting } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 
 // Mock Tauri invoke
 jest.mock("@tauri-apps/api/core", () => ({
@@ -248,6 +256,10 @@ function pluginTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
 describe("createPluginContext", () => {
   beforeEach(() => {
     mockIsTauri.mockReturnValue(false)
+    __resetCharacterPacksForTesting()
+    __resetSkillsForTesting()
+    __resetMcpServerPresetsForTesting()
+    __resetNativeAnthropicToolsForTesting()
     // The native fs/clipboard/secrets/network namespaces are now guarded — a
     // call fails closed unless the plugin's permission is registered. Register
     // the superset the suite exercises so the existing call-site assertions
@@ -278,6 +290,52 @@ describe("createPluginContext", () => {
     const context = createPluginContext(plugin, mockManager)
 
     expect(context.pluginId).toBe("test-plugin")
+  })
+
+  it("refreshes character-pack dependency warnings after imperative registrations", () => {
+    const context = createPluginContext(createMockPlugin(), mockManager)
+    registerCharacterPack("waiting", {
+      id: "waiting",
+      name: "Waiting",
+      version: "1.0.0",
+      characters: [],
+      requires: {
+        skills: ["dynamic-skill"],
+        mcpServerPresets: ["dynamic-mcp"],
+        nativeAnthropicTools: ["dynamic-native-tool"],
+      },
+    })
+
+    expect(getPackWarnings("waiting")).toHaveLength(3)
+
+    context.agent.registerSkill({
+      id: "dynamic-skill",
+      name: "Dynamic skill",
+      description: "Registers after the pack.",
+      source: { kind: "inline", markdown: "# Dynamic skill" },
+    })
+    expect(getPackWarnings("waiting").map((warning) => warning.missingId)).toEqual([
+      "dynamic-mcp",
+      "dynamic-native-tool",
+    ])
+
+    context.agent.registerMcpServerPreset({
+      id: "dynamic-mcp",
+      name: "Dynamic MCP",
+      transport: "stdio",
+      config: { command: "echo" },
+    })
+    expect(getPackWarnings("waiting").map((warning) => warning.missingId)).toEqual([
+      "dynamic-native-tool",
+    ])
+
+    context.agent.registerNativeAnthropicTool({
+      id: "dynamic-native-tool",
+      name: "Dynamic native tool",
+      type: "bash_20250124",
+      executeIpc: { invoke: "dynamic_native_tool" },
+    })
+    expect(getPackWarnings("waiting")).toEqual([])
   })
 
   describe("workflow extension API", () => {
@@ -1588,6 +1646,14 @@ describe("agent imperative API", () => {
         },
       })
 
+    const pluginWithNetworkPolicy = (networkAccess: unknown) =>
+      createMockPlugin({
+        manifest: {
+          ...mockManifest,
+          networkAccess: networkAccess as Plugin["manifest"]["networkAccess"],
+        },
+      })
+
     it("allows a fetch to a declared domain (and its subdomains)", async () => {
       const ctx = createPluginContext(pluginWithEgress(["example.com"]), mockManager)
       await expect(ctx.network.get("https://api.example.com/v1")).resolves.toMatchObject({
@@ -1618,6 +1684,58 @@ describe("agent imperative API", () => {
         ok: true,
       })
       expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    it("enforces declarative HTTP method and path rules before egress", async () => {
+      const ctx = createPluginContext(
+        pluginWithNetworkPolicy({
+          allowedDomains: ["api.example.com"],
+          rules: [
+            {
+              domain: "api.example.com",
+              methods: ["GET"],
+              paths: ["/api/logs/*"],
+            },
+          ],
+        }),
+        mockManager
+      )
+
+      await expect(
+        ctx.network.get("https://api.example.com/api/logs/recent")
+      ).resolves.toMatchObject({ ok: true })
+      await expect(ctx.network.delete("https://api.example.com/api/logs/recent")).rejects.toThrow(
+        /network policy/
+      )
+      await expect(ctx.network.get("https://api.example.com/api/admin/users")).rejects.toThrow(
+        /network policy/
+      )
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    it("redacts recognized PII from query parameters and request bodies", async () => {
+      const ctx = createPluginContext(pluginWithEgress(["api.example.com"]), mockManager)
+
+      await ctx.network.post(
+        "https://api.example.com/incidents?owner=alice@example.com",
+        { summary: "Incident owner alice@example.com" },
+        { dataClassification: "operational", piiPolicy: "redact" }
+      )
+
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+      expect(url).not.toContain("alice@example.com")
+      expect(decodeURIComponent(url)).toContain("<EMAIL_001>")
+      expect(String(init.body)).not.toContain("alice@example.com")
+      expect(String(init.body)).toContain("<EMAIL_001>")
+    })
+
+    it("blocks browser downloads to undeclared domains before fetching", async () => {
+      const ctx = createPluginContext(pluginWithEgress(["example.com"]), mockManager)
+
+      await expect(
+        ctx.network.download("https://evil.com/archive.zip", "archive.zip")
+      ).rejects.toThrow(/allowedDomains/)
+      expect(fetchMock).not.toHaveBeenCalled()
     })
   })
 })

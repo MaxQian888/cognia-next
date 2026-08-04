@@ -177,6 +177,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "theme:read": "Read the active theme",
   "theme:write": "Change the active theme",
   "extension:ui": "Contribute trusted UI to host extension surfaces",
+  "extension:workflow": "Contribute workflow nodes, triggers, tasks, and templates",
   "media:image:read": "Read image media assets",
   "media:image:write": "Write image media assets",
   "media:video:read": "Read video media assets",
@@ -313,21 +314,30 @@ export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
 ]
 
 /**
- * WASM host capabilities that are declared in the WIT contract but have no real
- * backend in the current api-version (0.1). Their host stubs return a typed
- * `cognia:not-implemented` error (see `src-tauri/src/plugin_api/wasm/mod.rs`),
- * so granting them buys the plugin nothing today. The install-time grant sheet
- * renders these disabled with a hint and never adds them to the granted set, so
- * a user is not misled into believing a stubbed capability works.
+ * WASM host capabilities declared in the WIT contract but with no real backend
+ * in the current api-version. The install-time grant sheet renders these
+ * disabled with a hint and never adds them to the granted set, so a user is not
+ * misled into believing a stubbed capability works.
  *
- * `ai.generate-text` is intentionally NOT listed: it has no dedicated
- * permission (it rides `network:fetch`, which is a real, enforced capability).
- * `notification` is omitted too: its host impl still emits an audit-log entry.
+ * **Empty as of api-version 0.2.** Every capability the v0.2 contract declares
+ * now has a backend: clipboard and notifications are served in-process by the
+ * Tauri plugins, and `ai.generate-text` / `workflow.emit-event` go through the
+ * renderer bridge (`lib/plugin/wasm-bridge/`). Leaving `clipboard:read` /
+ * `clipboard:write` listed here would be worse than cosmetic — the grant sheet
+ * would render the now-working clipboard permissions permanently disabled and
+ * never grant them, so the host capability would be implemented in Rust and
+ * unreachable in practice.
+ *
+ * Note also that `ai.generate-text` no longer rides `network:fetch`: v0.2 gates
+ * it on the canonical `ai:chat` capability, because spending the user's model
+ * quota is a separate consent decision from raw outbound HTTP. `workflow`
+ * likewise moved from ungated to `extension:workflow`.
+ *
+ * Keep the constant rather than deleting it: a future api-version that adds a
+ * declared-but-unbacked capability needs this list again, and the grant-sheet
+ * wiring is the awkward part to reconstruct.
  */
-export const WASM_UNIMPLEMENTED_PERMISSIONS: PluginPermission[] = [
-  "clipboard:read",
-  "clipboard:write",
-]
+export const WASM_UNIMPLEMENTED_PERMISSIONS: PluginPermission[] = []
 
 // =============================================================================
 // Permission Guard

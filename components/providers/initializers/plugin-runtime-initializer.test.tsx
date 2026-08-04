@@ -1,3 +1,4 @@
+import { StrictMode } from "react"
 import { render, waitFor } from "@testing-library/react"
 
 import { PluginRuntimeInitializer } from "./plugin-runtime-initializer"
@@ -26,6 +27,11 @@ jest.mock("@/lib/plugin/core/manager", () => ({
   initializePluginManager: (...args: unknown[]) => mockInitializeManager(...args),
 }))
 
+const mockInstallPackWarningRefreshWiring = jest.fn()
+jest.mock("@/lib/plugin/character-pack/warning-refresh-wiring", () => ({
+  installPackWarningRefreshWiring: () => mockInstallPackWarningRefreshWiring(),
+}))
+
 jest.mock("@/lib/plugin/messaging/message-bus", () => ({
   SystemEvents: { APP_READY: "system:app:ready", APP_CLOSING: "system:app:closing" },
   emitSystemBusEvent: jest.fn(),
@@ -48,9 +54,12 @@ jest.mock("@tauri-apps/api/path", () => ({
 const mockDetectPlatform = detectPlatform as jest.MockedFunction<typeof detectPlatform>
 
 describe("PluginRuntimeInitializer", () => {
+  const warningRefreshTeardown = jest.fn()
+
   beforeEach(() => {
     jest.clearAllMocks()
     mockInitializeManager.mockResolvedValue(undefined)
+    mockInstallPackWarningRefreshWiring.mockReturnValue(warningRefreshTeardown)
     delete (window as typeof window & { __cogniaPluginRuntimeReady?: boolean })
       .__cogniaPluginRuntimeReady
   })
@@ -79,6 +88,37 @@ describe("PluginRuntimeInitializer", () => {
     // The Tauri path/window APIs must not be touched in web mode.
     expect(mockGetCurrentWindow).not.toHaveBeenCalled()
     expect(mockAppDataDir).not.toHaveBeenCalled()
+  })
+
+  it("installs character-pack warning refresh wiring in the browser", () => {
+    mockDetectPlatform.mockReturnValue("web")
+    mockResolveBootstrap.mockReturnValue({
+      shouldInitialize: true,
+      config: { runtimeProfile: "browser", pluginDirectory: "", enablePython: false },
+    })
+
+    const { unmount } = render(<PluginRuntimeInitializer />)
+
+    expect(mockInstallPackWarningRefreshWiring).toHaveBeenCalledTimes(1)
+    unmount()
+    expect(warningRefreshTeardown).toHaveBeenCalledTimes(1)
+  })
+
+  it("reinstalls character-pack warning refresh wiring after a StrictMode replay", () => {
+    mockDetectPlatform.mockReturnValue("web")
+    mockResolveBootstrap.mockReturnValue({
+      shouldInitialize: true,
+      config: { runtimeProfile: "browser", pluginDirectory: "", enablePython: false },
+    })
+
+    render(
+      <StrictMode>
+        <PluginRuntimeInitializer />
+      </StrictMode>
+    )
+
+    expect(mockInstallPackWarningRefreshWiring).toHaveBeenCalledTimes(2)
+    expect(warningRefreshTeardown).toHaveBeenCalledTimes(1)
   })
 
   it("boots the manager with the mobile profile in the Capacitor shell", async () => {

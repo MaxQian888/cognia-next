@@ -82,6 +82,7 @@ const permissionMapping: Record<string, PluginAPIPermission[]> = {
   "media:video:write": ["media:video:write"],
   "media:video:export": ["media:video:export"],
   "extension:ui": ["extension:ui"],
+  "extension:workflow": ["extension:workflow"],
   "notification:show": ["notification:show"],
   // Inter-plugin IPC. Identity mappings — without these a plugin that
   // declares `ipc:call` / `ipc:expose` in its manifest never has the API

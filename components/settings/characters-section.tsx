@@ -47,12 +47,19 @@ import type { AppSettings, Character, McpServer, Skill } from "@cognia/agent-con
 import { listNativeAnthropicToolEntries } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 // ADR-0030 — Character pack overlay + local-imported pack file support.
 import {
+  getCharacterPackRegistryVersion,
   getPackCharacterWarnings,
+  getPackTrust,
   getPackWarnings,
   isOverlayCharacterId,
   listCharacterPackEntries,
+  subscribeCharacterPackRegistry,
 } from "@/lib/plugin/registries/character-pack-registry"
 import type { PluginCharacterPackWarning } from "@/lib/plugin/character-pack/validate-requires"
+import {
+  formatPackWarnings,
+  PackTrustChip,
+} from "@/components/settings/character/pack-trust-badges"
 import {
   deleteLocalPack,
   importLocalPack,
@@ -61,7 +68,6 @@ import {
 import { usePluginMetadata } from "@/hooks/plugins/use-plugin-metadata"
 import { useSandboxConnections } from "@/hooks/automation/use-sandbox-connections"
 import type { SandboxShellTier } from "@/types/sandbox"
-import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import { isTauri } from "@/lib/tauri"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { TestTtsButton } from "@/components/settings/speech/test-tts-button"
@@ -110,7 +116,14 @@ import {
   UsersRoundIcon,
   XIcon,
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ChangeEvent,
+} from "react"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -797,13 +810,7 @@ function CharacterRow({
   } else if (isCloned && character.sourcePackId) {
     warnings = getPackWarnings(character.sourcePackId)
   }
-  const warningTitle = warnings
-    .map((w) =>
-      w.characterLocalId
-        ? `${w.code} (${w.characterLocalId}): ${w.missingId}`
-        : `${w.code}: ${w.missingId}`
-    )
-    .join("\n")
+  const warningTitle = formatPackWarnings(warnings, t)
 
   return (
     <Card className="p-3">
@@ -997,17 +1004,16 @@ function CharacterRow({
 
 function CharacterPacksSubsection() {
   const t = useTranslations("settings.characters")
-  // Subscribe to plugin state so the subsection re-renders when a plugin
-  // enables/disables (the overlay registry changes synchronously with
-  // the store). We read pack entries inside the render path — the call
-  // is cheap and the registry only mutates on enable/disable, never per
-  // keystroke.
-  const _pluginCount = usePluginStore((s) => Object.keys(s.plugins).length)
-  void _pluginCount
-  // Force re-render on every store change. We don't read the data via
-  // the selector because the registry isn't part of the Zustand state —
-  // it's a separate in-memory Map updated by the plugin manager. The
-  // selector subscription serves purely as a "something changed" tick.
+  // Local imports/deletes and dependency-warning refreshes mutate this
+  // in-memory registry without changing the plugin Zustand store. Subscribe to
+  // the registry itself so every mutation reaches the Settings UI immediately.
+  // The numeric snapshot is stable between mutations; using the entries array
+  // as a snapshot would allocate on every render and make React loop forever.
+  useSyncExternalStore(
+    subscribeCharacterPackRegistry,
+    getCharacterPackRegistryVersion,
+    getCharacterPackRegistryVersion
+  )
   const packs = listCharacterPackEntries()
 
   const handleImport = async () => {
@@ -1147,6 +1153,11 @@ function PackRow({
   // so the user knows at a glance that something inside this pack has a
   // missing dependency. Character-level detail is reached by expanding.
   const packWarnings = getPackWarnings(packId)
+  // ADR-0030 — signature trust, which is a different question from the
+  // dependency warnings above: it attests to who authored the pack, not to
+  // what happens to be installed here. Plugin-contributed packs suppress the
+  // "unsigned" chip; see `PackTrustChipProps.showUnsigned`.
+  const packTrust = getPackTrust(packId)
 
   const handleDelete = async () => {
     const result = await deleteLocalPack(packId)
@@ -1213,17 +1224,12 @@ function PackRow({
             <Badge variant="outline" className="text-[10px]">
               {sourceText}
             </Badge>
+            <PackTrustChip trust={packTrust} showUnsigned={isLocal} />
             {packWarnings.length > 0 && (
               <Badge
                 variant="outline"
                 className="border-yellow-500/40 bg-yellow-500/10 text-[10px] text-yellow-700 dark:text-yellow-300"
-                title={packWarnings
-                  .map((w) =>
-                    w.characterLocalId
-                      ? `${w.code} (${w.characterLocalId}): ${w.missingId}`
-                      : `${w.code}: ${w.missingId}`
-                  )
-                  .join("\n")}
+                title={formatPackWarnings(packWarnings, t)}
               >
                 {t("badge.missingDep", { count: packWarnings.length })}
               </Badge>

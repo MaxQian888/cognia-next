@@ -15,7 +15,7 @@ describe("plugin contract generator", () => {
     assert.equal(catalog.pluginPointSchemaVersion, 1)
     assert.equal(catalog.pluginPoints.length, 275)
     assert.equal(
-      new Set(catalog.pluginPoints.map((point) => `${point.kind}:${point.id}`)).size,
+      new Set(catalog.pluginPoints.map((point) => point.id)).size,
       catalog.pluginPoints.length
     )
     assert.deepEqual(

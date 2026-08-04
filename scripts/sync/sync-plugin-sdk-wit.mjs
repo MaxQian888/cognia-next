@@ -1,26 +1,26 @@
 #!/usr/bin/env node
 /**
- * Sync the canonical WIT contract into the public plugin-sdk mirror.
+ * Sync the canonical WIT contract into every mirror.
  *
- * Source of truth: `src-tauri/wit/cognia-plugin.wit`
- * Mirror:          `plugin-sdk/wit/cognia-plugin.wit`
+ * The canonical path and the mirror list live in
+ * `scripts/gates/lib/wit-mirrors.mjs`, shared with the gate so the two cannot
+ * disagree about what is mirrored.
  *
  * Run after editing the canonical file. Idempotent — exits with code 0 and
  * prints "up to date" when the files already match. Use the companion
- * `scripts/check-plugin-sdk-wit.mjs` from CI to fail builds on drift.
+ * `scripts/gates/check-plugin-sdk-wit.mjs` from CI to fail builds on drift.
  */
 
 import { readFile, writeFile, mkdir } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { CANONICAL, MIRRORS } from "../gates/lib/wit-mirrors.mjs"
+
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(__dirname, "../..")
-const source = resolve(repoRoot, "src-tauri/wit/cognia-plugin.wit")
-const mirrors = [
-  resolve(repoRoot, "plugin-sdk/wit/cognia-plugin.wit"),
-  resolve(repoRoot, "packages/plugin-sdk/wit/cognia-plugin.wit"),
-]
+const source = resolve(repoRoot, CANONICAL)
+const mirrors = MIRRORS.map((p) => resolve(repoRoot, p))
 
 async function readOrNull(path) {
   try {

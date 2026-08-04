@@ -11,6 +11,7 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 
 use wasmtime::{Store, StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::{
@@ -18,6 +19,7 @@ use wasmtime_wasi::{
 };
 
 use super::engine::engine;
+use super::services::WasmHostServices;
 
 /// Default linear-memory cap in MiB. Override via `manifest.wasm.memoryLimitMb`.
 pub const DEFAULT_MEMORY_LIMIT_MB: u32 = 64;
@@ -76,6 +78,12 @@ pub struct HostState {
     /// TS-plugin `shell:execute` gate. Empty ⇒ no program may be spawned.
     pub shell_allowlist: Vec<String>,
     pub call_timeout_ms: u64,
+    /// Host surfaces this instance may reach (clipboard, notifications, the
+    /// renderer bridge). `None` is the headless posture: every cognia
+    /// capability that needs a backend answers `HOST_UNAVAILABLE`, while
+    /// logger / secrets / process / WASI keep working. Installed by
+    /// `build_activation_store` from `WasmPluginState::services`.
+    pub services: Option<Arc<dyn WasmHostServices>>,
     pub limits: StoreLimits,
     pub table: ResourceTable,
     pub wasi: WasiCtx,
@@ -144,6 +152,9 @@ pub fn build_store(
             // declared `shellCommands` in after construction.
             shell_allowlist: Vec::new(),
             call_timeout_ms,
+            // Headless-safe default; `build_activation_store` installs the real
+            // set when the host has one.
+            services: None,
             limits,
             table: ResourceTable::new(),
             wasi: wasi_builder.build(),
@@ -173,9 +184,53 @@ fn sanitize_extra_label(p: &Path) -> String {
         .collect()
 }
 
+/// Build a bare `HostState` for unit tests.
+///
+/// Before v0.2 this struct was rebuilt as a full literal in eight places, so
+/// adding a single field meant editing eight files — which is exactly why the
+/// v0.1 linker could not be frozen while it still lived in the module tree.
+/// Route every test through here instead: the next field addition touches this
+/// file and nothing else.
+#[cfg(test)]
+pub(crate) fn test_host_state(plugin_id: &str, caps: &[&str]) -> HostState {
+    test_host_state_with(plugin_id, caps, None, DEFAULT_CALL_TIMEOUT_MS)
+}
+
+#[cfg(test)]
+pub(crate) fn test_host_state_with(
+    plugin_id: &str,
+    caps: &[&str],
+    services: Option<Arc<dyn WasmHostServices>>,
+    call_timeout_ms: u64,
+) -> HostState {
+    HostState {
+        plugin_id: plugin_id.into(),
+        capabilities: CapabilitySet::from_iter(caps.iter().map(|s| (*s).to_string())),
+        shell_allowlist: Vec::new(),
+        call_timeout_ms,
+        services,
+        limits: StoreLimitsBuilder::new().build(),
+        table: ResourceTable::new(),
+        wasi: WasiCtxBuilder::new().build(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_host_state_defaults_to_the_headless_posture() {
+        let st = test_host_state("demo", &["notification"]);
+        assert_eq!(st.plugin_id, "demo");
+        assert!(st.capabilities.allows("notification"));
+        assert!(st.shell_allowlist.is_empty());
+        assert_eq!(st.call_timeout_ms, DEFAULT_CALL_TIMEOUT_MS);
+        assert!(
+            st.services.is_none(),
+            "a bare test state must not silently gain host surfaces"
+        );
+    }
 
     #[test]
     fn capability_set_membership_round_trips() {
@@ -225,5 +280,8 @@ mod tests {
         assert!(store.data().capabilities.allows("notification"));
         assert_eq!(store.data().plugin_id, plugin_id);
         assert_eq!(store.data().call_timeout_ms, DEFAULT_CALL_TIMEOUT_MS);
+        // `build_store` is the headless-safe constructor: host surfaces are
+        // installed later, by `build_activation_store`, only when one exists.
+        assert!(store.data().services.is_none());
     }
 }

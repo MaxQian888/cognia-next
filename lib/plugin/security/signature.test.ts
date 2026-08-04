@@ -7,6 +7,7 @@ import {
   getPluginSignatureVerifier,
   resetPluginSignatureVerifier,
   isOfficialPublisherKeyConfigured,
+  verifyPackPayloadSignature,
 } from "./signature"
 
 // Mock Tauri invoke
@@ -285,6 +286,79 @@ describe("PluginSignatureVerifier", () => {
         expect.any(Error)
       )
     })
+  })
+})
+
+describe("verifyPackPayloadSignature", () => {
+  const args = {
+    requestId: "pack-request",
+    packId: "demo-pack",
+    packVersion: "1.2.3",
+    payload: '{"id":"demo-pack"}',
+    signatureBase64: "signature",
+    publicKeyBase64: "public-key",
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    isTauriMock.mockReturnValue(false)
+  })
+
+  it("fails closed without invoking Tauri when the host is unavailable", async () => {
+    const result = await verifyPackPayloadSignature(args)
+
+    expect(result).toEqual({
+      requestId: args.requestId,
+      verified: false,
+      packId: args.packId,
+      packVersion: args.packVersion,
+      fingerprint: "",
+      payloadBytes: args.payload.length,
+      reason: "host-unavailable",
+    })
+    expect(invokeMock).not.toHaveBeenCalled()
+  })
+
+  it("forwards the canonical payload and preserves the host verdict", async () => {
+    const verdict = {
+      requestId: args.requestId,
+      verified: true,
+      packId: args.packId,
+      packVersion: args.packVersion,
+      fingerprint: "ab".repeat(32),
+      payloadBytes: args.payload.length,
+    }
+    isTauriMock.mockReturnValue(true)
+    invokeMock.mockResolvedValue(verdict)
+
+    await expect(verifyPackPayloadSignature(args)).resolves.toEqual(verdict)
+    expect(invokeMock).toHaveBeenCalledWith("plugin_verify_pack_signature", {
+      requestId: args.requestId,
+      packId: args.packId,
+      packVersion: args.packVersion,
+      payload: args.payload,
+      maxPayloadBytes: undefined,
+      signatureBase64: args.signatureBase64,
+      publicKeyBase64: args.publicKeyBase64,
+    })
+  })
+
+  it("converts a host failure into a failed verification verdict", async () => {
+    const error = new Error("signature command unavailable")
+    isTauriMock.mockReturnValue(true)
+    invokeMock.mockRejectedValue(error)
+
+    const result = await verifyPackPayloadSignature(args)
+
+    expect(result).toMatchObject({ verified: false, reason: error.message })
+    expect(recordSilentFailureMock).toHaveBeenCalledWith(
+      "",
+      expect.objectContaining({
+        site: "plugin.security.verifyPackPayloadSignature",
+        expected: false,
+      }),
+      error
+    )
   })
 })
 

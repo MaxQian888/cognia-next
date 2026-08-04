@@ -36,6 +36,12 @@ import {
   __resetPluginWallpapersForTesting,
 } from "@/lib/plugin/bridge/wallpaper-bridge"
 import { listThemePacks, __resetThemePackRegistryForTesting } from "@/lib/theme/theme-pack-registry"
+import {
+  __resetCharacterPacksForTesting,
+  getPackWarnings,
+  registerCharacterPack,
+} from "@/lib/plugin/registries/character-pack-registry"
+import { __resetSkillsForTesting, registerSkill } from "@/lib/plugin/registries/skill-registry"
 
 const mockTransportCall = jest.fn()
 const mockTransportSubscribe = jest.fn()
@@ -239,6 +245,8 @@ describe("PluginManager", () => {
     ;(getPluginSignatureVerifier as jest.Mock).mockReturnValue(mockVerifier)
     ;(getPermissionGuard as jest.Mock).mockReturnValue(mockGuard)
     clearPluginExtensions("rollback-plugin")
+    __resetCharacterPacksForTesting()
+    __resetSkillsForTesting()
   })
 
   describe("syncBackendStatus", () => {
@@ -2121,6 +2129,58 @@ describe("PluginManager", () => {
   })
 
   describe("disablePlugin", () => {
+    it("refreshes character-pack warnings after dropping plugin skills", async () => {
+      registerSkill(
+        "owned-skill",
+        {
+          id: "owned-skill",
+          name: "Owned skill",
+          description: "Removed when its plugin is disabled.",
+          source: { kind: "inline", markdown: "# Owned skill" },
+        },
+        { pluginId: "skill-owner" }
+      )
+      registerCharacterPack("dependent-pack", {
+        id: "dependent-pack",
+        name: "Dependent pack",
+        version: "1.0.0",
+        characters: [],
+        requires: { skills: ["owned-skill"] },
+      })
+      expect(getPackWarnings("dependent-pack")).toEqual([])
+
+      const store = {
+        plugins: {
+          "skill-owner": {
+            manifest: createManifest("skill-owner"),
+            status: "enabled",
+            source: "local",
+            path: "/plugins/skill-owner",
+            config: {},
+          },
+        } as Record<string, Plugin>,
+        disablePlugin: jest.fn(async (pluginId: string) => {
+          const plugin = store.plugins[pluginId]
+          store.plugins[pluginId] = { ...plugin, status: "disabled" } as Plugin
+        }),
+        unregisterPluginTool: jest.fn(),
+        unregisterPluginComponent: jest.fn(),
+        unregisterPluginMode: jest.fn(),
+        unregisterPluginCommand: jest.fn(),
+        setPluginError: jest.fn(),
+        setPluginStatus: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockResolvedValue(undefined)
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await manager.disablePlugin("skill-owner")
+
+      expect(getPackWarnings("dependent-pack")).toEqual([
+        { code: "missing-skill", missingId: "owned-skill" },
+      ])
+    })
+
     it("should call plugin deactivate and unregister contributions", async () => {
       const manifest = {
         ...createManifest("to-disable"),

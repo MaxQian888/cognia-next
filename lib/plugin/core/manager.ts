@@ -180,6 +180,7 @@ import { invalidateConfigComponentForPlugin } from "@/lib/plugin/bridge/config-c
 // per-character cleanup hook; the map's bulk unregister fires for the
 // other three capabilities via the disable loop.
 import { unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry"
+import { refreshAllPackWarnings } from "@/lib/plugin/registries/character-pack-registry"
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import { registerExtensionsForPlugin } from "@/lib/plugin/bridge/extension-bridge"
 import { clearCustomThemesForPluginContext } from "@/lib/plugin/api/theme-api"
@@ -4407,6 +4408,7 @@ export class PluginManager {
     // Skill bulk-drop happens after the per-character detach hook so
     // a re-enable starts from a fully clean slate (PR-D ordering).
     unregisterSkillsByPlugin(pluginId)
+    refreshAllPackWarnings()
     // Every overlay capability this plugin contributed is now gone — re-run
     // the agent-team capability audit so any team/teammate that referenced a
     // dropped id surfaces a stale-capability warning. Fire-and-forget: the

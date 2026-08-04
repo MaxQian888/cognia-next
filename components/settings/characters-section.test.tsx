@@ -23,6 +23,7 @@ jest.mock("@/components/settings/speech/test-tts-button", () => ({
 
 jest.mock("@/lib/plugin/registries/native-anthropic-tool-registry", () => ({
   listNativeAnthropicToolEntries: () => [],
+  listNativeAnthropicToolIds: () => [],
 }))
 
 jest.mock("@/lib/subscription/core/transport", () => ({
@@ -56,10 +57,6 @@ jest.mock("@/lib/db/characters", () => ({
 jest.mock("@/lib/db/skills", () => ({ listSkills: () => [] }))
 jest.mock("@/lib/db/mcp-servers", () => ({ listMcpServers: () => [] }))
 jest.mock("@/hooks/plugins/use-plugin-metadata", () => ({ usePluginMetadata: () => undefined }))
-jest.mock("@/stores/plugin-runtime/plugin-store", () => ({
-  usePluginStore: (sel: (s: { plugins: Record<string, unknown> }) => unknown) =>
-    sel({ plugins: {} }),
-}))
 jest.mock("@/stores/ui/ui-store", () => ({
   useUIStore: (
     sel: (s: { pendingCreateRequest: undefined; clearPendingCreate: () => void }) => unknown
@@ -69,10 +66,21 @@ jest.mock("@/lib/files/download", () => ({
   downloadBlob: (...a: unknown[]) => mockDownloadBlob(...a),
 }))
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { CharacterEditor, CharactersSection, type EditorState } from "./characters-section"
 import type { Character } from "@cognia/agent-config-types"
+import {
+  __resetCharacterPacksForTesting,
+  refreshAllPackWarnings,
+  registerCharacterPack,
+} from "@/lib/plugin/registries/character-pack-registry"
+import { __resetSkillsForTesting, registerSkill } from "@/lib/plugin/registries/skill-registry"
+
+afterEach(() => {
+  __resetCharacterPacksForTesting()
+  __resetSkillsForTesting()
+})
 
 // Narrow view of the EditorOutput payload the assertions read.
 type SavePayload = {
@@ -320,5 +328,56 @@ describe("CharactersSection — list, search & bulk (C2/C3)", () => {
     expect(screen.getByRole("button", { name: /bulk\.exportSelected/ })).toBeDisabled()
     fireEvent.click(screen.getAllByRole("checkbox")[0])
     expect(screen.getByRole("button", { name: /bulk\.deleteSelected/ })).toBeEnabled()
+  })
+
+  it("immediately renders packs registered after the settings screen mounted", () => {
+    render(<CharactersSection />)
+    expect(screen.queryByText("Reactive Pack")).not.toBeInTheDocument()
+
+    act(() => {
+      registerCharacterPack(
+        "reactive-pack",
+        {
+          id: "reactive-pack",
+          name: "Reactive Pack",
+          version: "1.0.0",
+          characters: [],
+        },
+        { pluginId: "test-plugin" }
+      )
+    })
+
+    expect(screen.getByText("Reactive Pack")).toBeInTheDocument()
+  })
+
+  it("removes a rendered dependency warning when the registry refreshes", () => {
+    render(<CharactersSection />)
+
+    act(() => {
+      registerCharacterPack(
+        "waiting-pack",
+        {
+          id: "waiting-pack",
+          name: "Waiting Pack",
+          version: "1.0.0",
+          characters: [],
+          requires: { skills: ["later-skill"] },
+        },
+        { pluginId: "test-plugin" }
+      )
+    })
+    expect(screen.getByText("badge.missingDep")).toBeInTheDocument()
+
+    act(() => {
+      registerSkill("later-skill", {
+        id: "later-skill",
+        name: "Later skill",
+        description: "",
+        source: { kind: "inline", markdown: "" },
+      })
+      refreshAllPackWarnings()
+    })
+
+    expect(screen.queryByText("badge.missingDep")).not.toBeInTheDocument()
   })
 })

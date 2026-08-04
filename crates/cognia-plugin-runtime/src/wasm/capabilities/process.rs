@@ -74,24 +74,17 @@ pub fn validate(program: &str, args: &[String]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::store::CapabilitySet;
+    use super::super::super::store::test_host_state;
     use super::*;
-    use wasmtime_wasi::{ResourceTable, WasiCtxBuilder};
 
     fn st(caps: &[&str]) -> HostState {
         st_with_allow(caps, &[])
     }
 
     fn st_with_allow(caps: &[&str], allow: &[&str]) -> HostState {
-        HostState {
-            plugin_id: "demo".into(),
-            capabilities: CapabilitySet::from_iter(caps.iter().map(|s| (*s).to_string())),
-            shell_allowlist: allow.iter().map(|s| (*s).to_string()).collect(),
-            call_timeout_ms: 30_000,
-            limits: wasmtime::StoreLimitsBuilder::new().build(),
-            table: ResourceTable::new(),
-            wasi: WasiCtxBuilder::new().build(),
-        }
+        let mut state = test_host_state("demo", caps);
+        state.shell_allowlist = allow.iter().map(|s| (*s).to_string()).collect();
+        state
     }
 
     #[test]

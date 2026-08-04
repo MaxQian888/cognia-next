@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs"
 test("scaffold acceptance covers generation, install, typecheck, test, build, lint, and package", () => {
   const source = readFileSync(new URL("./test-author-scaffold.mjs", import.meta.url), "utf8")
   for (const expected of [
-    '"plugin:create"',
+    '"scripts", "scaffold", "create-plugin.mjs"',
     "COGNIA_PLUGIN_CLI",
     '"install", "--no-frozen-lockfile", "--prefer-offline"',
     '"types/cognia-plugin-sdk.d.ts"',

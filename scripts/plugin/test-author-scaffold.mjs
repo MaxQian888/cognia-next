@@ -40,11 +40,13 @@ try {
     "debug",
     process.platform === "win32" ? "cognia.exe" : "cognia"
   )
+  // Invoke the compatibility adapter directly. Going through `pnpm plugin:create`
+  // makes pnpm validate (and potentially purge) the repository's shared
+  // node_modules before the isolated scaffold test even starts.
   run(
-    "pnpm",
+    process.execPath,
     [
-      "plugin:create",
-      "--",
+      join(repoRoot, "scripts", "scaffold", "create-plugin.mjs"),
       "sdk-probe",
       "--dir",
       pluginDir,

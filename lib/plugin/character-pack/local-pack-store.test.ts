@@ -9,6 +9,13 @@ jest.mock("@/lib/tauri", () => ({
   isCapacitor: jest.fn(() => false),
 }))
 
+const mockResolvePackTrust = jest.fn()
+
+jest.mock("./pack-trust", () => ({
+  resolvePackTrust: (...args: unknown[]) => mockResolvePackTrust(...args),
+  UNSIGNED_TRUST: { state: "unsigned" },
+}))
+
 import {
   __resetLocalPackStoreForTesting,
   __setLocalPackFsForTesting,
@@ -23,6 +30,7 @@ import {
 import {
   getCharacterPack,
   getCharacterPackEntry,
+  getPackTrust,
   registerCharacterPack,
 } from "@/lib/plugin/registries/character-pack-registry"
 import { serializeLocalPackFile } from "./schema"
@@ -30,6 +38,17 @@ import { isTauri } from "@/lib/tauri"
 import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
 
 const mIsTauri = isTauri as jest.Mock
+const mResolvePackTrust = mockResolvePackTrust
+
+const SIGNATURE = { algo: "ed25519" as const, pubKey: "pub-key", sig: "signature" }
+const VERIFIED_TRUST = {
+  state: "verified" as const,
+  algo: "ed25519" as const,
+  publicKey: SIGNATURE.pubKey,
+  fingerprint: "f".repeat(64),
+  shortFingerprint: "ed25519:ff:ff:ff:ff",
+  signature: SIGNATURE,
+}
 
 function makePack(overrides: Partial<PluginCharacterPackDef> = {}): PluginCharacterPackDef {
   return {
@@ -80,6 +99,7 @@ function makeInMemoryFs(initialFiles: Record<string, string> = {}): {
 beforeEach(() => {
   __resetLocalPackStoreForTesting()
   mIsTauri.mockReturnValue(true)
+  mResolvePackTrust.mockResolvedValue({ ok: true, trust: { state: "unsigned" } })
 })
 
 describe("scanAndRegisterLocalPacks", () => {
@@ -131,7 +151,36 @@ describe("scanAndRegisterLocalPacks", () => {
     }
     __setLocalPackFsForTesting(adapter)
     const result = await scanAndRegisterLocalPacks()
-    expect(result).toEqual({ registered: [], skipped: [] })
+    expect(result).toEqual({ registered: [], skipped: [], signatureSkipped: 0 })
+  })
+
+  it("refuses a tampered signed file while continuing to scan its valid siblings", async () => {
+    const signed = makePack({ id: "signed" })
+    const good = makePack({ id: "good" })
+    const { adapter } = makeInMemoryFs({
+      "/mem/cognia/local-character-packs/signed.cognia-pack.json": serializeLocalPackFile(
+        signed,
+        SIGNATURE
+      ),
+      "/mem/cognia/local-character-packs/good.cognia-pack.json": serializeLocalPackFile(good),
+    })
+    __setLocalPackFsForTesting(adapter)
+    mResolvePackTrust
+      .mockResolvedValueOnce({ ok: false, reason: "signature-mismatch" })
+      .mockResolvedValueOnce({ ok: true, trust: { state: "unsigned" } })
+
+    const result = await scanAndRegisterLocalPacks()
+
+    expect(result.registered).toEqual(["good"])
+    expect(result.signatureSkipped).toBe(1)
+    expect(result.skipped).toEqual([
+      expect.objectContaining({
+        filename: "signed.cognia-pack.json",
+        reason: expect.stringContaining("signature-mismatch"),
+      }),
+    ])
+    expect(getCharacterPack("signed")).toBeUndefined()
+    expect(getCharacterPack("good")).toEqual(good)
   })
 })
 
@@ -177,6 +226,26 @@ describe("importLocalPack", () => {
 
     const result = await importLocalPack({ schemaVersion: 1, pack: { id: "x" } })
     expect(result.ok).toBe(false)
+  })
+
+  it("rejects a signed pack that fails verification before writing or registering it", async () => {
+    const { adapter, files } = makeInMemoryFs()
+    __setLocalPackFsForTesting(adapter)
+    const pack = makePack({ id: "tampered" })
+    mResolvePackTrust.mockResolvedValueOnce({ ok: false, reason: "signature-mismatch" })
+
+    const result = await importLocalPack({
+      schemaVersion: CHARACTER_PACK_FILE_SCHEMA_VERSION,
+      pack,
+      signature: SIGNATURE,
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      error: expect.stringContaining("signature-mismatch"),
+    })
+    expect(files.size).toBe(0)
+    expect(getCharacterPack(pack.id)).toBeUndefined()
   })
 
   it("refuses to overwrite a pack id already owned by a real plugin", async () => {
@@ -287,6 +356,27 @@ describe("exportPack", () => {
       expect(parsed.pack.id).toBe("workplace")
       expect(parsed.signature).toBeUndefined()
     }
+  })
+
+  it("retains the original signature when exporting a verified local pack", async () => {
+    const { adapter } = makeInMemoryFs()
+    __setLocalPackFsForTesting(adapter)
+    const pack = makePack({ id: "signed" })
+    mResolvePackTrust.mockResolvedValueOnce({ ok: true, trust: VERIFIED_TRUST })
+
+    const imported = await importLocalPack({
+      schemaVersion: CHARACTER_PACK_FILE_SCHEMA_VERSION,
+      pack,
+      signature: SIGNATURE,
+    })
+    expect(imported.ok).toBe(true)
+    expect(getPackTrust(pack.id)).toEqual(VERIFIED_TRUST)
+
+    const exported = exportPack(pack.id)
+    expect(exported.ok).toBe(true)
+    if (!exported.ok) throw new Error("expected signed export")
+    expect(JSON.parse(exported.value.body).signature).toEqual(SIGNATURE)
+    expect(exported.value.file.signature).toEqual(SIGNATURE)
   })
 
   it("returns an error for unknown pack ids", () => {

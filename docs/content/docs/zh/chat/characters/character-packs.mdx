@@ -117,6 +117,12 @@ export interface PluginCharacterPackDef {
     mcpServerPresets?: string[]
     nativeAnthropicTools?: string[]
     a2uiCatalogId?: string
+    /** Canonical `"<pluginId>.<packId>"` theme-pack keys. */
+    themePacks?: string[]
+    /** Connector platform kinds, e.g. `"telegram"`. */
+    connectors?: string[]
+    /** Canonical provider ids as keyed by `getAllProviders()`. */
+    providers?: string[]
   }
 
   /** Optional cosmetic. Default for character avatars that omit one. */
@@ -247,10 +253,10 @@ export function isOverlayCharacterId(id: string): boolean {
 
 ## `requires` 校验（警告，不阻断）
 
-`validatePackRequires` 同步检查内存中的同级覆盖层（技能 / MCP 预设 / 原生工具）并发出警告——无论如何角色包都会注册。引用了缺失依赖的角色会通过既有的 `resolveSendOptions` 路径优雅降级（未知技能 id 被静默丢弃）。
+`validatePackRequires` 同步检查内存中的同级覆盖层（技能 / MCP 预设 / 原生工具 / 主题包 / 连接器 / 模型供应商）并发出警告——无论如何角色包都会注册。引用了缺失依赖的角色会通过既有的 `resolveSendOptions` 路径优雅降级（未知技能 id 被静默丢弃）。
 
 ```ts
-// lib/plugin/character-pack/validate-requires.ts:23-35
+// lib/plugin/character-pack/validate-requires.ts
 export interface PluginCharacterPackWarning {
   code:
     | "missing-skill"
@@ -258,10 +264,19 @@ export interface PluginCharacterPackWarning {
     | "missing-mcp-preset"
     | "missing-native-tool"
     | "missing-a2ui-catalog"
+    | "missing-theme-pack"
+    | "missing-connector"
+    | "missing-provider"
   missingId: string
   characterLocalId?: string
 }
 ```
+
+每个 code 通过 `components/settings/character/pack-trust-badges.tsx` 中一个穷尽的 `Record` 映射到本地化文案，因此往这个联合类型里加成员会是**编译错误**，直到有人给它配上文案为止。i18n lint 给不了这个保证 —— 它看不穿模板字符串形式的 `t()` 调用，而这正是早先 `${w.code}: ${w.missingId}` 提示未翻译就上线的原因。
+
+连接器可用性来自 `CONNECTOR_METADATA.filter(m => m.status !== "planned")`，而不是原始的 `ALL_PLATFORM_KINDS` 联合：`email` / `kook` / `line` / `mattermost` 在联合里，但 `buildAdapterFromRow` 中并没有对应分支，把它们当作可用会吞掉一个真实的缺失依赖。
+
+由于 `refreshAllPackWarnings()` 是推模型，每个新来源都要自己推一次失效 —— 主题包走 `lib/plugin/character-pack/warning-refresh-wiring.ts`（由本地包初始化器安装，刻意不放在 `lib/theme` 内部，因为它不能反向依赖 `lib/plugin`），连接器走 `connectors-bridge.ts`，模型供应商走 `ai-provider-api.ts`。
 
 <Status type="warning">
 Dexie 支持的聊天 `skillIds` 在注册时不会被检查——那需要在同步注册循环内做一次异步 DB 调用。改为由 characters-section.tsx 中的 UI 级校验在渲染时捕捉这些遗漏。

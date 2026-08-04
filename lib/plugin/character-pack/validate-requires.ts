@@ -19,6 +19,9 @@ import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pac
 import { listSkillIds } from "@/lib/plugin/registries/skill-registry"
 import { listMcpServerPresetIds } from "@/lib/plugin/registries/mcp-server-preset-registry"
 import { listNativeAnthropicToolIds } from "@/lib/plugin/registries/native-anthropic-tool-registry"
+import { hasThemePackKey } from "@/lib/theme/theme-pack-registry"
+import { isKnownConnectorKind } from "@/lib/connectors/known-kinds"
+import { hasProvider } from "@cognia/provider-types"
 
 export interface PluginCharacterPackWarning {
   /** Stable id used to dedupe warnings on the UI. */
@@ -28,6 +31,9 @@ export interface PluginCharacterPackWarning {
     | "missing-mcp-preset"
     | "missing-native-tool"
     | "missing-a2ui-catalog"
+    | "missing-theme-pack"
+    | "missing-connector"
+    | "missing-provider"
   /** The id we couldn't resolve. */
   missingId: string
   /** Which pack character (if any) references the missing id. */
@@ -82,6 +88,23 @@ export function validatePackRequires(pack: PluginCharacterPackDef): PackRequires
       warnings.push({ code: "missing-native-tool", missingId: id })
     }
   }
+  // Theme packs are addressed by the canonical `"<pluginId>.<packId>"` key —
+  // the same string the theme registry uses internally.
+  for (const key of requires.themePacks ?? []) {
+    if (!hasThemePackKey(key)) {
+      warnings.push({ code: "missing-theme-pack", missingId: key })
+    }
+  }
+  for (const kind of requires.connectors ?? []) {
+    if (!isKnownConnectorKind(kind)) {
+      warnings.push({ code: "missing-connector", missingId: kind })
+    }
+  }
+  for (const providerId of requires.providers ?? []) {
+    if (!hasProvider(providerId)) {
+      warnings.push({ code: "missing-provider", missingId: providerId })
+    }
+  }
 
   // Character-level references. Tracked separately so the UI can call out
   // which character within a pack is broken when only some are. We tolerate
@@ -97,6 +120,16 @@ export function validatePackRequires(pack: PluginCharacterPackDef): PackRequires
           characterLocalId: ch.localId,
         })
       }
+    }
+    // A character pinned to a provider the user has not installed is the real
+    // failure mode for `requires.providers` — the pack-level list is the
+    // author's declaration, this is the actual reference.
+    if (ch.providerId && !hasProvider(ch.providerId)) {
+      warnings.push({
+        code: "missing-provider",
+        missingId: ch.providerId,
+        characterLocalId: ch.localId,
+      })
     }
     // `skillIds` (chat skills) are Dexie-backed; we don't check them at
     // register time — UI-level validation handles that case so we don't

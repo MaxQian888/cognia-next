@@ -1102,6 +1102,43 @@ describe("Plugin Validation", () => {
           )
         ).toBe(true)
       })
+
+      it("accepts least-privilege method/path rules without a duplicate domain list", () => {
+        const result = validatePluginManifest(
+          withNetworkAccess({
+            rules: [
+              {
+                domain: "observability.example.com",
+                methods: ["GET"],
+                paths: ["/api/logs/*", "/api/metrics/*"],
+              },
+            ],
+          })
+        )
+        expect(result.errors).toHaveLength(0)
+      })
+
+      it.each([
+        [{ rules: [] }, "manifest.networkAccess.rules.invalid"],
+        [
+          { rules: [{ domain: "", methods: ["GET"], paths: ["/api/*"] }] },
+          "manifest.networkAccess.rules.domain.invalid",
+        ],
+        [
+          { rules: [{ domain: "example.com", methods: ["TRACE"], paths: ["/api/*"] }] },
+          "manifest.networkAccess.rules.methods.invalid",
+        ],
+        [
+          { rules: [{ domain: "example.com", methods: ["GET"], paths: ["relative/*"] }] },
+          "manifest.networkAccess.rules.paths.invalid",
+        ],
+      ])("rejects malformed network rules %#", (networkAccess, code) => {
+        const result = validatePluginManifest(withNetworkAccess(networkAccess))
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([expect.objectContaining({ severity: "error", code })])
+        )
+      })
     })
 
     describe("requires.binaries", () => {

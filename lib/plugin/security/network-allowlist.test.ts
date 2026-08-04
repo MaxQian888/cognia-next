@@ -1,9 +1,12 @@
 import {
   assertEgressAllowed,
+  assertNetworkRequestAllowed,
   evaluateEgress,
+  evaluateNetworkRequest,
   hostFromUrl,
   matchHost,
   PluginEgressError,
+  PluginNetworkPolicyError,
 } from "./network-allowlist"
 
 describe("matchHost (mirrors Rust network_host_allowed)", () => {
@@ -155,5 +158,48 @@ describe("assertEgressAllowed", () => {
       expect((e as PluginEgressError).host).toBe("http://")
       expect((e as PluginEgressError).reason).toBe("bad-url")
     }
+  })
+})
+
+describe("method and path policy", () => {
+  const policy = {
+    rules: [
+      {
+        domain: "api.example.com",
+        methods: ["GET" as const],
+        paths: ["/api/logs/*", "/api/metrics"],
+      },
+    ],
+  }
+
+  it("derives the domain allowlist from rules", () => {
+    expect(evaluateEgress("https://api.example.com/api/logs/recent", policy)).toEqual({
+      allowed: true,
+      reason: "host-match",
+    })
+  })
+
+  it("matches method and pathname together", () => {
+    expect(
+      evaluateNetworkRequest("https://api.example.com/api/logs/recent?limit=5", "GET", policy)
+        .allowed
+    ).toBe(true)
+    expect(
+      evaluateNetworkRequest("https://api.example.com/api/logs/recent", "DELETE", policy).allowed
+    ).toBe(false)
+    expect(evaluateNetworkRequest("https://api.example.com/api/admin", "GET", policy).allowed).toBe(
+      false
+    )
+  })
+
+  it("throws a policy-specific error after the domain has matched", () => {
+    expect(() =>
+      assertNetworkRequestAllowed(
+        "sre-plugin",
+        "https://api.example.com/api/logs/recent",
+        "POST",
+        policy
+      )
+    ).toThrow(PluginNetworkPolicyError)
   })
 })

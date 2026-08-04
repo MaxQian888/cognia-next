@@ -191,5 +191,132 @@ emit v2.
 
 - Wiring `resolveCharacterVoice` into the actual TTS dispatch site.
 - `useTauriAssetUrl` hook for `avatarImage.tauriPath` rendering.
-- Ed25519 signature verification for `.cognia-pack.json` files.
-- New `requires` dimension types (theme-pack / connector / provider).
+- ~~Ed25519 signature verification for `.cognia-pack.json` files.~~
+  Delivered 2026-08-03 — see the amendment below.
+- ~~New `requires` dimension types (theme-pack / connector / provider).~~
+  Delivered 2026-08-03 — see the amendment below.
+
+---
+
+## Amendment — 2026-08-03 (trust chain + three new `requires` dimensions)
+
+Delivers the last two `Out of scope` bullets above.
+
+### Added: the pack trust model has exactly two states
+
+```ts
+type CharacterPackTrust =
+  | { state: "verified"; algo; publicKey; fingerprint; shortFingerprint; signature }
+  | { state: "unsigned" }
+```
+
+There is deliberately **no `"invalid"` state**. A signed pack whose
+signature does not verify is refused at the scan/import boundary and
+never reaches the registry, so the type cannot represent a lie. UI code
+gets no `invalid` branch to render because no such pack exists in the
+registry to render it for.
+
+`resolvePackTrust` fails closed: `reason: "host-unavailable"` is `ok:
+false` as well. If we cannot check a signature that is present, we do
+not get to assume it was fine.
+
+### Ruling: the signed bytes exclude `schemaVersion`
+
+The signature covers the RFC 8785 canonical JSON of the **`pack` object
+alone**. `schemaVersion` and `signature` live on the file wrapper and
+are stripped before canonicalization.
+
+This is what lets `CHARACTER_PACK_FILE_SCHEMA_VERSION` stay at `2` with
+no Dexie migration: importing a signed v1 file and rewriting it as v2
+leaves the signature valid. Had the wrapper been signed, every schema
+bump would have invalidated every signed pack in existence.
+
+### Ruling: plugin-contributed packs carry no trust chip at all
+
+Their authenticity is already anchored by the plugin install receipt
+(`PluginVerificationReceipt`). Rendering "Unsigned" beside them would
+claim a gap that does not exist — actively misleading, not merely noisy.
+Only local `.cognia-pack.json` files, which arrive from anywhere, show
+the unsigned state.
+
+### Ruling: trust lives in a sidecar map, not the registry `meta` bag
+
+Widening the overlay registry's `meta` bag is the obvious storage and a
+trust-spoofing hole: `registerCharacterPack` is re-exported from
+`@cognia/plugin-sdk`, so any plugin could write `meta.trust =
+"verified"` and mint itself a badge. Trust is written only by a
+host-only `registerCharacterPackWithTrust` that the SDK does not
+re-export. The SDK-visible `registerCharacterPack` is now a wrapper that
+forces `{ state: "unsigned" }`, so a plugin re-registering over a
+previously-verified pack id cannot inherit the badge.
+
+### Added: three `requires` dimensions, warnings only
+
+`themePacks` (canonical `"<pluginId>.<packId>"` keys), `connectors`
+(platform kinds), and `providers` (canonical provider ids). Codes
+`missing-theme-pack` / `missing-connector` / `missing-provider` join the
+union. All are warnings — the pack still registers, still appears in the
+picker, and its characters still resolve, per §B.6.
+
+Connector availability is computed from
+`CONNECTOR_METADATA.filter(m => m.status !== "planned")`, **not** the
+raw `ALL_PLATFORM_KINDS` union: `email` / `kook` / `line` / `mattermost`
+are in the union but have no branch in `buildAdapterFromRow`, so
+treating them as available would swallow a real missing dependency.
+
+`refreshAllPackWarnings()` is a push model, so each new source pushes
+its own invalidation. Theme packs push from a dedicated
+`warning-refresh-wiring.ts` installed by the local-pack initializer —
+**not** from inside `theme-pack-registry.ts`, which would make
+`lib/theme` depend on `lib/plugin`.
+
+Two pre-existing defects were fixed while here: the declared
+`missing-a2ui-catalog` code had no branch that could emit it, and the
+per-character `providerId` was never checked. The latter can light up
+warnings on packs that were previously clean.
+
+### Fixed: `exportPack` silently dropped the signature
+
+It called `serializeLocalPackFile(pack)` with no second argument, so
+every exported pack came out unsigned regardless of what was imported.
+Exporting a verified pack now round-trips the original signature block
+verbatim and the exported file still verifies.
+
+### Added: `cognia pack sign` / `cognia pack verify`
+
+Verification without a way to produce a signature is a dead feature, so
+the CLI ships the signer. The signature is written **in-band** into the
+file's own `signature` object rather than as a detached `.sig` — a pack
+is a single self-contained file that can be mailed or committed without
+a companion file going missing.
+
+`pack sign` self-verifies before writing anything. The host verifies
+bytes produced by JavaScript while the CLI produces them from a
+hand-ported RFC 8785 implementation; without the self-check, a
+formatter bug would be silent at authoring time and surface as a random
+verification failure on a user's machine.
+
+`pack verify` reports three outcomes where the host has two: `verified`,
+`unsigned` (exit 0 — a supported, labelled state; `--require-signature`
+makes it an error in CI), and `invalid` (always non-zero).
+
+### Note: the canonicalizers disagreed, and the shared fixture caught it
+
+Both sides are driven by one golden-vector file,
+`lib/plugin/character-pack/__fixtures__/jcs-vectors.json`, consumed by
+Jest via `import` and by Rust via `include_str!`. On first run it failed.
+
+The TypeScript side sorted keys and then handed the result to
+`JSON.stringify` via an intermediate object. That silently undoes the
+sort: a JS object's own property order hoists integer-like keys to the
+front in ascending **numeric** order regardless of insertion order, so
+`{"1","10","2"}` came back out as `1, 2, 10`. RFC 8785 §3.2.3 wants
+UTF-16 code-unit order — `"1" < "10" < "2"`. Rust's `BTreeMap` has no
+such rule, which is precisely how the two diverged.
+
+The serializer now builds the output string directly and hands only
+*leaves* to `JSON.stringify`, keeping ES-conformant number formatting
+and string escaping while owning key order. A checked-in pack signed by
+the real `cognia pack sign` binary is verified in Jest by Node's own
+Ed25519, so the suite proves interop on a real artifact rather than only
+on vectors somebody remembered to write down.

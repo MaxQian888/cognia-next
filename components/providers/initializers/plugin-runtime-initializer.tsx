@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react"
 
 import { detectPlatform } from "@/lib/platform/detect"
+import { installPackWarningRefreshWiring } from "@/lib/plugin/character-pack/warning-refresh-wiring"
 import { loggers } from "@cognia/logging"
 import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
 
@@ -38,6 +39,11 @@ declare global {
  */
 export function PluginRuntimeInitializer() {
   const hasInitialized = useRef(false)
+
+  // Dependency warnings involving theme packs must stay current in every
+  // runtime profile. Theme packs are contributed by regular plugins, while
+  // local character-pack scanning only runs in the desktop shell.
+  useEffect(() => installPackWarningRefreshWiring(), [])
 
   useEffect(() => {
     if (hasInitialized.current) return

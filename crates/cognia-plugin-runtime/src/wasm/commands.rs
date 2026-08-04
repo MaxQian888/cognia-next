@@ -21,11 +21,12 @@ use serde::Serialize;
 use tauri::State;
 
 use super::super::PluginRuntimeState;
+use super::bridge::{CancelReason, WasmRendererResponse};
 use super::host::{
     ActivateOutcome, ActivatedPlugin, WasmManifestSlice, WasmPluginHost, WasmPluginSnapshot,
 };
 use super::store::{deadline_from_timeout_ms, HostState};
-use super::wit::since_v0_1;
+use super::wit::since_v0_2;
 use super::WasmPluginState;
 
 #[derive(Debug, Serialize)]
@@ -144,8 +145,14 @@ pub async fn plugin_wasm_activate_for_state(
     let perms = granted_permissions(&runtime, &plugin_id);
     let shell_allow = granted_shell_commands(&runtime, &plugin_id);
     let data_dir = runtime.plugin_dir(&plugin_id).join("data");
-    let mut store =
-        WasmPluginHost::build_activation_store(&manifest, &data_dir, &perms, &shell_allow)?;
+    let services = WasmPluginHost::host_services(state);
+    let mut store = WasmPluginHost::build_activation_store(
+        &manifest,
+        &data_dir,
+        &perms,
+        &shell_allow,
+        services,
+    )?;
 
     let bindings = plugin_pre
         .instantiate_async(&mut store)
@@ -197,6 +204,14 @@ pub async fn plugin_wasm_deactivate_for_state(
     state: &WasmPluginState,
     plugin_id: String,
 ) -> Result<bool, String> {
+    // Cancel first, THEN drop. An in-flight bridge round trip holds the
+    // instance's async mutex for up to 30 s; without this the store stays alive
+    // (and the guest stays blocked) long after the user disabled the plugin.
+    // Epoch interruption does not help — a host import awaiting the renderer is
+    // not executing wasm.
+    if let Some(bridge) = WasmPluginHost::renderer_bridge(state) {
+        bridge.cancel_plugin(&plugin_id, CancelReason::Deactivate);
+    }
     // Drop the live instance (frees the Store / guest memory); the compiled
     // component stays loaded so a later activate is cheap. Returns whether the
     // plugin is still loaded (mirrors the prior contract).
@@ -231,7 +246,7 @@ impl DispatchError {
 /// Dispatch one export against a live instance. Shared by the retained-instance
 /// path and the un-activated fallback so the export match lives in one place.
 async fn dispatch_export(
-    bindings: &since_v0_1::CogniaPlugin,
+    bindings: &since_v0_2::CogniaPlugin,
     store: &mut wasmtime::Store<HostState>,
     export_name: &str,
     payload_bytes: &[u8],
@@ -360,8 +375,14 @@ pub async fn plugin_wasm_call_for_state(
     let perms = granted_permissions(&runtime, &plugin_id);
     let shell_allow = granted_shell_commands(&runtime, &plugin_id);
     let data_dir = runtime.plugin_dir(&plugin_id).join("data");
-    let mut store =
-        WasmPluginHost::build_activation_store(&manifest, &data_dir, &perms, &shell_allow)?;
+    let services = WasmPluginHost::host_services(state);
+    let mut store = WasmPluginHost::build_activation_store(
+        &manifest,
+        &data_dir,
+        &perms,
+        &shell_allow,
+        services,
+    )?;
 
     let bindings = plugin_pre
         .instantiate_async(&mut store)
@@ -400,7 +421,37 @@ pub async fn plugin_wasm_unload_for_state(
     state: &WasmPluginState,
     plugin_id: String,
 ) -> Result<bool, String> {
+    // Same ordering rationale as deactivate: end in-flight renderer work before
+    // the store goes away, so the guest unwinds promptly with `CANCELLED`.
+    if let Some(bridge) = WasmPluginHost::renderer_bridge(state) {
+        bridge.cancel_plugin(&plugin_id, CancelReason::Unload);
+    }
     Ok(WasmPluginHost::unload(state, &plugin_id))
+}
+
+#[tauri::command]
+pub async fn plugin_wasm_renderer_response(
+    state: State<'_, WasmPluginState>,
+    response: WasmRendererResponse,
+) -> Result<(), String> {
+    plugin_wasm_renderer_response_for_state(state.inner(), response).await
+}
+
+/// Host-neutral bridge-response entry point.
+///
+/// A host with no renderer bridge installed simply drops the frame: that is the
+/// headless posture, not an error, and returning `Err` would make the renderer
+/// retry something that can never succeed. Unknown, duplicate, late, and
+/// identity-mismatched frames are all handled inside
+/// [`WasmRendererBridge::resolve`].
+pub async fn plugin_wasm_renderer_response_for_state(
+    state: &WasmPluginState,
+    response: WasmRendererResponse,
+) -> Result<(), String> {
+    if let Some(bridge) = WasmPluginHost::renderer_bridge(state) {
+        bridge.resolve(response);
+    }
+    Ok(())
 }
 
 #[tauri::command]

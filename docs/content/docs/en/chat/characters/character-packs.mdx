@@ -117,6 +117,12 @@ export interface PluginCharacterPackDef {
     mcpServerPresets?: string[]
     nativeAnthropicTools?: string[]
     a2uiCatalogId?: string
+    /** Canonical `"<pluginId>.<packId>"` theme-pack keys. */
+    themePacks?: string[]
+    /** Connector platform kinds, e.g. `"telegram"`. */
+    connectors?: string[]
+    /** Canonical provider ids as keyed by `getAllProviders()`. */
+    providers?: string[]
   }
 
   /** Optional cosmetic. Default for character avatars that omit one. */
@@ -247,10 +253,10 @@ The manifest declares `characterPacks` (`types/plugin/plugin.ts:572`) and lists 
 
 ## `requires` validation (warn, don't block)
 
-`validatePackRequires` checks the in-memory sibling overlays (skills / MCP presets / native tools) synchronously and emits warnings — the pack registers regardless. Characters that reference a missing dependency degrade gracefully through the existing `resolveSendOptions` paths (unknown skill ids are silently dropped).
+`validatePackRequires` checks the in-memory sibling overlays (skills / MCP presets / native tools / theme packs / connectors / providers) synchronously and emits warnings — the pack registers regardless. Characters that reference a missing dependency degrade gracefully through the existing `resolveSendOptions` paths (unknown skill ids are silently dropped).
 
 ```ts
-// lib/plugin/character-pack/validate-requires.ts:23-35
+// lib/plugin/character-pack/validate-requires.ts
 export interface PluginCharacterPackWarning {
   code:
     | "missing-skill"
@@ -258,10 +264,19 @@ export interface PluginCharacterPackWarning {
     | "missing-mcp-preset"
     | "missing-native-tool"
     | "missing-a2ui-catalog"
+    | "missing-theme-pack"
+    | "missing-connector"
+    | "missing-provider"
   missingId: string
   characterLocalId?: string
 }
 ```
+
+Each code maps to a localized message through an exhaustive `Record` in `components/settings/character/pack-trust-badges.tsx`, so adding a member to this union is a **compile error** until it is given a message. The i18n lint cannot provide that guarantee — it cannot see through a template-literal `t()` call, which is how the earlier `${w.code}: ${w.missingId}` tooltips shipped untranslated.
+
+Connector availability comes from `CONNECTOR_METADATA.filter(m => m.status !== "planned")`, not the raw `ALL_PLATFORM_KINDS` union: `email` / `kook` / `line` / `mattermost` appear in the union but have no branch in `buildAdapterFromRow`, so treating them as available would swallow a real missing dependency.
+
+Because `refreshAllPackWarnings()` is a push model, each new source pushes its own invalidation — theme packs via `lib/plugin/character-pack/warning-refresh-wiring.ts` (installed by the local-pack initializer, deliberately not from inside `lib/theme`, which must not depend on `lib/plugin`), connectors via `connectors-bridge.ts`, and providers via `ai-provider-api.ts`.
 
 <Status type="warning">
 Dexie-backed chat `skillIds` are NOT checked at register time — that would require an async DB call inside the synchronous register loop. UI-level validation in characters-section.tsx catches those misses at render time instead.

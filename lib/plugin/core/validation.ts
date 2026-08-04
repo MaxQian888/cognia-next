@@ -1289,7 +1289,12 @@ export function validatePluginManifest(
         '"networkAccess" must be an object with an "allowedDomains" array'
       )
     } else {
-      const na = m.networkAccess as { allowedDomains?: unknown; reasoning?: unknown }
+      const na = m.networkAccess as {
+        allowedDomains?: unknown
+        reasoning?: unknown
+        rules?: unknown
+      }
+      let wantsAnyHost = false
       if (na.allowedDomains !== undefined) {
         if (!Array.isArray(na.allowedDomains)) {
           pushError(
@@ -1307,17 +1312,71 @@ export function validatePluginManifest(
                 '(e.g. "api.example.com", "*.example.com", "*", or "none")'
             )
           }
-          const wantsAnyHost = domains.some((d) => typeof d === "string" && d.trim() === "*")
-          if (wantsAnyHost && (typeof na.reasoning !== "string" || na.reasoning.trim() === "")) {
-            pushWarning(
-              "networkAccess.reasoning",
-              "manifest.networkAccess.reasoning.required",
-              'networkAccess.allowedDomains includes "*" (any host) but no "reasoning" is given',
-              'Add a "reasoning" string explaining why the plugin needs unrestricted network ' +
-                "access — it is shown to the user before they enable the plugin."
-            )
-          }
+          wantsAnyHost = domains.some((d) => typeof d === "string" && d.trim() === "*")
         }
+      }
+      if (na.rules !== undefined) {
+        if (!Array.isArray(na.rules) || na.rules.length === 0) {
+          pushError(
+            "networkAccess.rules",
+            "manifest.networkAccess.rules.invalid",
+            '"networkAccess.rules" must be a non-empty array'
+          )
+        } else {
+          const validMethods = new Set(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+          na.rules.forEach((value, index) => {
+            const field = `networkAccess.rules[${index}]`
+            if (!value || typeof value !== "object" || Array.isArray(value)) {
+              pushError(
+                field,
+                "manifest.networkAccess.rules.entry.invalid",
+                `${field} must be an object`
+              )
+              return
+            }
+            const rule = value as Record<string, unknown>
+            if (typeof rule.domain !== "string" || rule.domain.trim() === "") {
+              pushError(
+                `${field}.domain`,
+                "manifest.networkAccess.rules.domain.invalid",
+                `${field}.domain must be a non-empty host pattern`
+              )
+            } else if (rule.domain.trim() === "*") {
+              wantsAnyHost = true
+            }
+            if (
+              !Array.isArray(rule.methods) ||
+              rule.methods.length === 0 ||
+              rule.methods.some((method) => typeof method !== "string" || !validMethods.has(method))
+            ) {
+              pushError(
+                `${field}.methods`,
+                "manifest.networkAccess.rules.methods.invalid",
+                `${field}.methods must contain supported uppercase HTTP methods`
+              )
+            }
+            if (
+              !Array.isArray(rule.paths) ||
+              rule.paths.length === 0 ||
+              rule.paths.some((path) => typeof path !== "string" || !path.startsWith("/"))
+            ) {
+              pushError(
+                `${field}.paths`,
+                "manifest.networkAccess.rules.paths.invalid",
+                `${field}.paths must contain absolute pathname globs`
+              )
+            }
+          })
+        }
+      }
+      if (wantsAnyHost && (typeof na.reasoning !== "string" || na.reasoning.trim() === "")) {
+        pushWarning(
+          "networkAccess.reasoning",
+          "manifest.networkAccess.reasoning.required",
+          'networkAccess requests "*" (any host) but no "reasoning" is given',
+          'Add a "reasoning" string explaining why the plugin needs unrestricted network ' +
+            "access — it is shown to the user before they enable the plugin."
+        )
       }
     }
   }

@@ -11,6 +11,7 @@ jest.mock("@/lib/claude/ipc", () => ({
   skillsScanDir: jest.fn(async () => []),
   skillsScanNative: jest.fn(async () => []),
   skillsScanCodex: jest.fn(async () => []),
+  skillsScanOpencode: jest.fn(async () => []),
 }))
 
 jest.mock("@/lib/files/file-bridge", () => ({
@@ -23,7 +24,7 @@ jest.mock("@/lib/tauri", () => ({
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { SkillDiscovery } from "./skill-discovery"
-import { skillsScanCodex } from "@/lib/claude/ipc"
+import { skillsScanCodex, skillsScanOpencode } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
 
 describe("SkillDiscovery", () => {
@@ -48,6 +49,7 @@ describe("SkillDiscovery", () => {
     render(<SkillDiscovery />)
     expect(screen.getByText("scanHome").closest("button")).toBeDisabled()
     expect(screen.getByText("scanCodex").closest("button")).toBeDisabled()
+    expect(screen.getByText("scanOpencode").closest("button")).toBeDisabled()
     expect(screen.getByText("scanCustom").closest("button")).toBeDisabled()
   })
 
@@ -56,5 +58,12 @@ describe("SkillDiscovery", () => {
     render(<SkillDiscovery />)
     fireEvent.click(screen.getByText("scanCodex").closest("button")!)
     await waitFor(() => expect(skillsScanCodex).toHaveBeenCalledTimes(1))
+  })
+
+  it("scans the resolved global OpenCode skills directory on desktop", async () => {
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    render(<SkillDiscovery />)
+    fireEvent.click(screen.getByText("scanOpencode").closest("button")!)
+    await waitFor(() => expect(skillsScanOpencode).toHaveBeenCalledTimes(1))
   })
 })

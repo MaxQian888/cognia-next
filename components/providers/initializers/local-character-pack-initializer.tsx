@@ -39,13 +39,23 @@ export function LocalCharacterPackInitializer() {
     const initialize = async () => {
       try {
         const result = await scanAndRegisterLocalPacks()
-        if (result.skipped.length > 0) {
+        if (result.signatureSkipped > 0) {
+          // Distinct from the generic malformed-file case, and sterner: a
+          // signed pack that fails verification means the file was altered
+          // after signing, not that someone mistyped some JSON.
+          log.warn("local-pack-store: signed packs failed verification", {
+            count: result.signatureSkipped,
+          })
+          toast.error(t("trust.skippedSignature", { count: result.signatureSkipped }))
+        }
+        const otherSkipped = result.skipped.length - result.signatureSkipped
+        if (otherSkipped > 0) {
           log.warn("local-pack-store: some packs were skipped during boot scan", {
             skipped: result.skipped,
           })
           // Surface a toast so the user notices — local pack files on disk
           // that fail to register are otherwise invisible in the UI.
-          toast.warning(t("packs.skippedToast", { count: result.skipped.length }))
+          toast.warning(t("packs.skippedToast", { count: otherSkipped }))
         }
       } catch (err) {
         log.warn("local-pack-store: boot scan threw", { err })

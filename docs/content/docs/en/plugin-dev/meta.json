@@ -1,0 +1,9 @@
+{
+  "title": "Plugin development",
+  "pages": [
+    "author-sdk",
+    "extension-points-v2",
+    "inter-plugin-communication",
+    "native-anthropic-tools"
+  ]
+}

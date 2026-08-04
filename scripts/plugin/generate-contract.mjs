@@ -22,9 +22,8 @@ export function validatePluginPointCatalog(pointCatalog, permissions) {
   const seen = new Set()
   const validPermissions = new Set(permissions)
   for (const point of pointCatalog.pluginPoints) {
-    const key = `${point.kind}:${point.id}`
-    if (seen.has(key)) throw new Error(`duplicate plugin point ${key}`)
-    seen.add(key)
+    if (seen.has(point.id)) throw new Error(`duplicate plugin point ${point.id}`)
+    seen.add(point.id)
     if (point.kind === "ui-slot" && !point.formFactor) {
       throw new Error(`UI plugin point ${point.id} must declare formFactor`)
     }

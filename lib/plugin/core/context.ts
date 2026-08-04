@@ -8,7 +8,11 @@ import { createPluginSystemLogger, loggers } from "./logger"
 import { usePluginModalStore } from "@/stores/plugin-runtime/plugin-modal-store"
 import { PluginDataDialog } from "@/components/plugins/dialogs/plugin-data-dialog"
 import { getPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
-import { assertEgressAllowed } from "@/lib/plugin/security/network-allowlist"
+import {
+  assertNetworkRequestAllowed,
+  type NetworkHttpMethod,
+} from "@/lib/plugin/security/network-allowlist"
+import { sanitizePluginNetworkEgress } from "@/lib/plugin/api/plugin-pii-gate"
 import { getPluginSecurityPosture } from "@/lib/plugin/security/security-posture"
 import type {
   Plugin,
@@ -82,6 +86,7 @@ import { registerNodeExecutor, unregisterNodeExecutor } from "@/lib/workflow/nod
 import { registerMcpServerPreset } from "@/lib/plugin/registries/mcp-server-preset-registry"
 import { registerNativeAnthropicTool } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 import { registerSkill } from "@/lib/plugin/registries/skill-registry"
+import { refreshAllPackWarnings } from "@/lib/plugin/registries/character-pack-registry"
 import {
   registerGuardrail,
   unregisterGuardrailById,
@@ -839,14 +844,17 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
     // don't have to track ids individually — bulk cleanup is automatic.
     registerMcpServerPreset: (def: PluginMcpServerPresetDef) => {
       registerMcpServerPreset(def.id, def, { pluginId })
+      refreshAllPackWarnings()
     },
 
     registerNativeAnthropicTool: (def: PluginNativeAnthropicToolDef) => {
       registerNativeAnthropicTool(def.id, def, { pluginId })
+      refreshAllPackWarnings()
     },
 
     registerSkill: (def: PluginSkillDef) => {
       registerSkill(def.id, def, { pluginId })
+      refreshAllPackWarnings()
     },
 
     registerExternalAgentPreset: (def: PluginExternalAgentPresetDef) => {
@@ -1128,6 +1136,16 @@ const NETWORK_GUARD_MAP: Partial<Record<keyof PluginNetworkAPI, PluginPermission
   upload: "network:fetch",
 }
 
+const NETWORK_HTTP_METHODS = new Set<NetworkHttpMethod>([
+  "GET",
+  "POST",
+  "PUT",
+  "DELETE",
+  "PATCH",
+  "HEAD",
+  "OPTIONS",
+])
+
 const FS_GUARD_MAP: Partial<Record<keyof PluginFileSystemAPI, PluginPermission>> = {
   readText: "filesystem:read",
   readBinary: "filesystem:read",
@@ -1212,22 +1230,57 @@ function createNetworkAPI(
     options?: NetworkRequestOptions
   ): Promise<NetworkResponse<T>> => {
     rateLimiter.check(pluginId, "network:fetch")
-    // Renderer-side egress allowlist. The Tauri path is also clamped in Rust
-    // (defense-in-depth); this is the SOLE enforcement in web/mobile mode where
-    // there is no Rust host. Mirrors `manifest.networkAccess.allowedDomains`.
-    assertEgressAllowed(pluginId, url, networkAccess, getPluginSecurityPosture())
+    const method = (options?.method ?? "GET").toUpperCase() as NetworkHttpMethod
+    if (!NETWORK_HTTP_METHODS.has(method)) {
+      throw new Error(`network policy denied unsupported HTTP method: ${String(options?.method)}`)
+    }
+    const egress = sanitizePluginNetworkEgress(pluginId, {
+      url,
+      headers: options?.headers,
+      body: options?.body,
+      piiPolicy: options?.piiPolicy,
+    })
+    // Renderer-side egress policy. The Tauri path mirrors this in Rust for
+    // defense-in-depth; this is the enforcement point in web/mobile mode.
+    assertNetworkRequestAllowed(
+      pluginId,
+      egress.url,
+      method,
+      networkAccess,
+      getPluginSecurityPosture()
+    )
+    const requestOptions = {
+      ...options,
+      method,
+      headers: egress.headers,
+      body: egress.body,
+    }
+    delete requestOptions.dataClassification
+    delete requestOptions.piiPolicy
     if (!isPluginGatewayAvailable()) {
-      const response = await fetch(url, {
-        method: options?.method,
-        headers: options?.headers,
-        body: options?.body as BodyInit | null | undefined,
+      const headers = { ...(requestOptions.headers ?? {}) }
+      const body =
+        requestOptions.body === undefined || typeof requestOptions.body === "string"
+          ? requestOptions.body
+          : JSON.stringify(requestOptions.body)
+      if (body !== undefined && typeof requestOptions.body !== "string") {
+        const hasContentType = Object.keys(headers).some(
+          (header) => header.toLowerCase() === "content-type"
+        )
+        if (!hasContentType) headers["content-type"] = "application/json"
+      }
+      const response = await fetch(egress.url, {
+        method,
+        headers,
+        body,
+        signal: requestOptions.signal,
       })
       return parseBrowserResponse<T>(response, options?.responseType)
     }
 
     return invokePluginApi<NetworkResponse<T>>(pluginId, "network:fetch", {
-      url,
-      options: options || {},
+      url: egress.url,
+      options: requestOptions,
     })
   }
 
@@ -1255,12 +1308,24 @@ function createNetworkAPI(
       options?: DownloadOptions
     ): Promise<DownloadResult> => {
       rateLimiter.check(pluginId, "network:download")
+      const egress = sanitizePluginNetworkEgress(pluginId, {
+        url,
+        headers: options?.headers,
+        piiPolicy: options?.piiPolicy,
+      })
+      assertNetworkRequestAllowed(
+        pluginId,
+        egress.url,
+        "GET",
+        networkAccess,
+        getPluginSecurityPosture()
+      )
       if (!isPluginGatewayAvailable()) {
-        const response = await fetch(url)
+        const response = await fetch(egress.url, { headers: egress.headers })
         if (!response.ok) {
           throw new PluginGatewayError({
             code: "NOT_SUPPORTED",
-            message: `Failed to download ${url}: ${response.status} ${response.statusText}`,
+            message: `Failed to download ${egress.url}: ${response.status} ${response.statusText}`,
             requestId: `browser-network-download-${pluginId}`,
             api: "network:download",
             pluginId,
@@ -1285,9 +1350,9 @@ function createNetworkAPI(
       // The host streams the body into the plugin's data sandbox; `onProgress`
       // can't cross the IPC boundary, so only the static request shape is sent.
       return invokePluginApi<DownloadResult>(pluginId, "network:download", {
-        url,
+        url: egress.url,
         destPath,
-        headers: options?.headers,
+        headers: egress.headers,
       })
     },
 
@@ -1297,10 +1362,22 @@ function createNetworkAPI(
       options?: UploadOptions
     ): Promise<NetworkResponse<unknown>> => {
       rateLimiter.check(pluginId, "network:upload")
-      return invokePluginApi<NetworkResponse<unknown>>(pluginId, "network:upload", {
+      const egress = sanitizePluginNetworkEgress(pluginId, {
         url,
-        filePath,
         headers: options?.headers,
+        piiPolicy: options?.piiPolicy,
+      })
+      assertNetworkRequestAllowed(
+        pluginId,
+        egress.url,
+        "POST",
+        networkAccess,
+        getPluginSecurityPosture()
+      )
+      return invokePluginApi<NetworkResponse<unknown>>(pluginId, "network:upload", {
+        url: egress.url,
+        filePath,
+        headers: egress.headers,
         // When set, the host sends multipart/form-data with this field name;
         // otherwise the file bytes are the raw request body.
         fieldName: options?.fieldName,

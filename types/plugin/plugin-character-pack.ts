@@ -155,9 +155,10 @@ export interface PluginCharacterPackDef {
 
   /**
    * Cross-capability dependencies. Validated at register time as warnings
-   * (never blockers): a missing skill / mcp-preset / native-tool emits a
-   * diagnostic and the affected character row in the picker carries a
-   * "missing dependency" chip. See ADR-0030 §B.6.
+   * (never blockers): a missing dependency emits a diagnostic and the affected
+   * character row in the picker carries a "missing dependency" chip. The pack
+   * still registers, still appears in the picker, and its characters still
+   * resolve. See ADR-0030 §B.6.
    */
   requires?: {
     skills?: string[]
@@ -165,6 +166,15 @@ export interface PluginCharacterPackDef {
     mcpServerPresets?: string[]
     nativeAnthropicTools?: string[]
     a2uiCatalogId?: string
+    /**
+     * Canonical `"<pluginId>.<packId>"` keys — the same format the theme-pack
+     * registry uses internally.
+     */
+    themePacks?: string[]
+    /** Connector platform kinds, e.g. `"telegram"`. */
+    connectors?: string[]
+    /** Canonical provider ids as keyed by `getAllProviders()`. */
+    providers?: string[]
   }
 
   /** Optional cosmetic. Used as a default for character avatars that omit one. */

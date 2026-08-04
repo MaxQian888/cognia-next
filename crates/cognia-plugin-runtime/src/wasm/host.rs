@@ -13,11 +13,14 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use wasmtime::component::{Component, Linker};
 
+use super::bridge::WasmRendererBridge;
 use super::engine::{api_version_compatible, engine, parse_plugin_api_version};
+use super::errors::upgrade_required;
+use super::services::WasmHostServices;
 use super::store::{
     build_store, CapabilitySet, HostState, DEFAULT_CALL_TIMEOUT_MS, DEFAULT_MEMORY_LIMIT_MB,
 };
-use super::wit::since_v0_1;
+use super::wit::since_v0_2;
 use super::HOST_API_VERSION;
 
 /// Subset of the TS manifest the host needs at instantiate time. We
@@ -71,7 +74,7 @@ pub struct LoadedPlugin {
 /// deadline can be reset before each reused call.
 pub struct ActivatedPlugin {
     pub store: wasmtime::Store<HostState>,
-    pub bindings: since_v0_1::CogniaPlugin,
+    pub bindings: since_v0_2::CogniaPlugin,
     pub call_timeout_ms: u64,
 }
 
@@ -85,10 +88,22 @@ pub struct WasmPluginState {
     /// instantiates against it. Kept as a sibling map (not a `LoadedPlugin`
     /// field) so the synthetic empty-component test fixtures — which cannot
     /// build a real `CogniaPluginPre` — stay valid.
-    pub pres: Arc<RwLock<HashMap<String, Arc<since_v0_1::CogniaPluginPre<HostState>>>>>,
+    pub pres: Arc<RwLock<HashMap<String, Arc<since_v0_2::CogniaPluginPre<HostState>>>>>,
     /// Live instances by plugin id (present only while activated). Each is
     /// wrapped in an async `Mutex` so calls into the same instance serialise.
+    ///
+    /// Note the consequence for long host calls: `plugin_wasm_call_for_state`
+    /// holds this mutex for the whole guest call, so an in-flight 30 s bridge
+    /// round trip blocks every other export on that plugin. That is unavoidable
+    /// (wasmtime needs `&mut Store`), and it is why teardown cancels pending
+    /// bridge requests *before* dropping the instance — see
+    /// `WasmRendererBridge::cancel_plugin`.
     pub activated: Arc<RwLock<HashMap<String, Arc<tokio::sync::Mutex<ActivatedPlugin>>>>>,
+    /// Host surfaces handed to every activation. `None` until
+    /// [`install_host_services`] runs at Tauri setup — headless builds simply
+    /// never install one, and every capability needing a backend then answers
+    /// `HOST_UNAVAILABLE` while the rest keep working.
+    pub services: Arc<RwLock<Option<Arc<dyn WasmHostServices>>>>,
 }
 
 /// The cognia API surface for WASM plugins. `load` stashes a typed
@@ -136,9 +151,21 @@ impl WasmPluginHost {
         let plugin_api_version =
             parse_plugin_api_version(&bytes).map_err(|e| format!("scan api-version: {e}"))?;
         if !api_version_compatible(&plugin_api_version, HOST_API_VERSION) {
-            return Err(format!(
-                "WASM api-version {plugin_api_version} incompatible with host {HOST_API_VERSION}"
-            ));
+            // A v0.1 plugin gets the actionable rebuild message; anything else
+            // (v0.3, v1.x, a typo) gets the generic one. The distinction
+            // matters: telling an author to "rebuild for 0.2" when they are
+            // actually on a *newer* host than their toolchain expects sends
+            // them down the wrong path entirely.
+            //
+            // This runs BEFORE `Component::from_binary`, so a v0.1 binary is
+            // never compiled.
+            return Err(if major_minor(&plugin_api_version) == Some((0, 1)) {
+                upgrade_required(Some(&manifest.id), &plugin_api_version)
+            } else {
+                format!(
+                    "WASM api-version {plugin_api_version} incompatible with host {HOST_API_VERSION}"
+                )
+            });
         }
         let component = Component::from_binary(engine(), &bytes)
             .map_err(|e| format!("compile component: {e}"))?;
@@ -160,9 +187,16 @@ impl WasmPluginHost {
     }
 
     /// Construct the version-matched linker for a loaded plugin.
+    ///
+    /// v0.1 is deliberately unregistered — v0.2.0 was a hard cutover. Reaching
+    /// the `(0, 1)` arm through [`Self::load`] is impossible (the version check
+    /// there rejects first), but the arm exists anyway: `build_plugin_pre` is
+    /// callable directly, and a future maintainer looking for "where did v0.1
+    /// go" will look at the router before anywhere else.
     pub fn version_linker(plugin_api_version: &str) -> Result<Linker<HostState>, String> {
         match major_minor(plugin_api_version) {
-            Some((0, 1)) => since_v0_1::build_linker().map_err(|e| e.to_string()),
+            Some((0, 2)) => since_v0_2::build_linker().map_err(|e| e.to_string()),
+            Some((0, 1)) => Err(upgrade_required(None, plugin_api_version)),
             Some((m, n)) => Err(format!("no linker registered for v{m}.{n}.x")),
             None => Err(format!("invalid api-version `{plugin_api_version}`")),
         }
@@ -175,12 +209,12 @@ impl WasmPluginHost {
     pub fn build_plugin_pre(
         plugin_api_version: &str,
         component: &Component,
-    ) -> Result<since_v0_1::CogniaPluginPre<HostState>, String> {
+    ) -> Result<since_v0_2::CogniaPluginPre<HostState>, String> {
         let linker = Self::version_linker(plugin_api_version)?;
         let instance_pre = linker
             .instantiate_pre(component)
             .map_err(|e| format!("pre-instantiate linker: {e}"))?;
-        since_v0_1::CogniaPluginPre::new(instance_pre)
+        since_v0_2::CogniaPluginPre::new(instance_pre)
             .map_err(|e| format!("typed pre-instantiation: {e}"))
     }
 
@@ -194,6 +228,7 @@ impl WasmPluginHost {
         plugin_data_dir: &Path,
         granted_permissions: &[String],
         shell_allowlist: &[String],
+        services: Option<Arc<dyn WasmHostServices>>,
     ) -> Result<wasmtime::Store<HostState>, String> {
         let mut caps = CapabilitySet::default();
         for p in granted_permissions {
@@ -227,7 +262,28 @@ impl WasmPluginHost {
         // Mirror the declared shell-command allowlist so `process.exec` can
         // enforce it deny-by-default.
         store.data_mut().shell_allowlist = shell_allowlist.to_vec();
+        // Hand the instance whatever host surfaces this build has. `None` is a
+        // valid, fully-supported posture — see `WasmPluginState::services`.
+        store.data_mut().services = services;
         Ok(store)
+    }
+
+    /// Install the host surfaces every subsequent activation will receive.
+    ///
+    /// Called once from the Tauri `setup()` hook. Headless hosts never call it,
+    /// which is exactly how they end up with `services: None`.
+    pub fn install_host_services(state: &WasmPluginState, services: Arc<dyn WasmHostServices>) {
+        *state.services.write() = Some(services);
+    }
+
+    /// The currently installed host surfaces, if any.
+    pub fn host_services(state: &WasmPluginState) -> Option<Arc<dyn WasmHostServices>> {
+        state.services.read().clone()
+    }
+
+    /// The renderer bridge from the installed services, if this host has one.
+    pub fn renderer_bridge(state: &WasmPluginState) -> Option<Arc<WasmRendererBridge>> {
+        Self::host_services(state).and_then(|s| s.renderer_bridge())
     }
 
     pub fn snapshot(state: &WasmPluginState) -> Vec<WasmPluginSnapshot> {
@@ -271,14 +327,14 @@ fn major_minor(v: &str) -> Option<(u32, u32)> {
 mod tests {
     use super::*;
 
-    fn manifest_v01() -> WasmManifestSlice {
+    fn manifest_v02() -> WasmManifestSlice {
         WasmManifestSlice {
             id: "demo".into(),
             version: "0.0.1".into(),
             permissions: vec!["notification".into()],
             wasm_main: "main.wasm".into(),
             wasm: WasmBlock {
-                api_version: "0.1.0".into(),
+                api_version: "0.2.0".into(),
                 memory_limit_mb: Some(32),
                 call_timeout_ms: Some(15_000),
                 fs: None,
@@ -294,11 +350,100 @@ mod tests {
     }
 
     #[test]
-    fn version_linker_routes_v0_1() {
-        let linker = WasmPluginHost::version_linker("0.1.0").expect("v0.1 supported");
-        let _ = linker;
-        assert!(WasmPluginHost::version_linker("0.2.0").is_err());
+    fn version_linker_routes_v0_2_only() {
+        // v0.2.0 is a hard cutover: exactly one linker is registered.
+        assert!(WasmPluginHost::version_linker("0.2.0").is_ok());
+        assert!(WasmPluginHost::version_linker("0.2.7").is_ok());
         assert!(WasmPluginHost::version_linker("garbage").is_err());
+    }
+
+    #[test]
+    fn version_linker_reports_upgrade_required_for_v0_1() {
+        let Err(err) = WasmPluginHost::version_linker("0.1.0") else {
+            panic!("v0.1 must not resolve to a linker")
+        };
+        assert!(err.starts_with("UPGRADE_REQUIRED: "), "got: {err}");
+        assert!(err.contains("wasm.apiVersion"));
+    }
+
+    #[test]
+    fn version_linker_does_not_claim_newer_versions_are_upgradeable() {
+        // A v0.3 plugin on a v0.2 host is the author being AHEAD of us. Telling
+        // them to "rebuild for 0.2" would send them backwards.
+        let Err(err) = WasmPluginHost::version_linker("0.3.0") else {
+            panic!("v0.3 must not resolve to a linker")
+        };
+        assert!(!err.starts_with("UPGRADE_REQUIRED: "), "got: {err}");
+        assert!(err.contains("no linker registered"));
+    }
+
+    #[test]
+    fn load_rejects_a_v0_1_binary_with_upgrade_required() {
+        // Assemble a component preamble carrying a `cognia:api-version` custom
+        // section of "0.1.0" — the exact shape the v0.1 CLI emitted.
+        let mut bytes: Vec<u8> = vec![0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00];
+        let name = super::super::API_VERSION_SECTION.as_bytes();
+        let value = b"0.1.0";
+        let mut body: Vec<u8> = Vec::new();
+        body.push(name.len() as u8);
+        body.extend_from_slice(name);
+        body.extend_from_slice(value);
+        bytes.push(0x00); // custom section id
+        bytes.push(body.len() as u8);
+        bytes.extend_from_slice(&body);
+
+        let state = WasmPluginState::default();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("main.wasm"), &bytes).unwrap();
+
+        let err =
+            WasmPluginHost::load(&state, manifest_v02(), tmp.path().to_path_buf()).unwrap_err();
+        assert!(err.starts_with("UPGRADE_REQUIRED: "), "got: {err}");
+        assert!(
+            err.contains("demo"),
+            "the message must name the plugin: {err}"
+        );
+        assert!(err.contains("0.1.0"));
+        // Rejected BEFORE compilation — nothing was registered.
+        assert!(state.loaded.read().is_empty());
+        assert!(state.pres.read().is_empty());
+    }
+
+    #[test]
+    fn install_host_services_is_visible_to_later_activations() {
+        use crate::wasm::services::test_support::RecordingWasmHostServices;
+        let state = WasmPluginState::default();
+        assert!(WasmPluginHost::host_services(&state).is_none());
+        assert!(WasmPluginHost::renderer_bridge(&state).is_none());
+
+        WasmPluginHost::install_host_services(&state, Arc::new(RecordingWasmHostServices::full()));
+        assert_eq!(
+            WasmPluginHost::host_services(&state).map(|s| s.kind()),
+            Some("recording")
+        );
+        assert!(WasmPluginHost::renderer_bridge(&state).is_some());
+    }
+
+    #[tokio::test]
+    async fn build_activation_store_carries_services() {
+        use crate::wasm::services::test_support::RecordingWasmHostServices;
+        const EMPTY_COMPONENT: &[u8] = &[0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00];
+        let _ = Component::new(engine(), EMPTY_COMPONENT).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = WasmPluginHost::build_activation_store(
+            &manifest_v02(),
+            &tmp.path().join("data"),
+            &["notification".to_string()],
+            &[],
+            Some(Arc::new(RecordingWasmHostServices::full())),
+        )
+        .expect("store builds");
+
+        assert_eq!(
+            store.data().services.as_ref().map(|s| s.kind()),
+            Some("recording")
+        );
+        assert!(store.data().capabilities.allows("notification"));
     }
 
     #[test]
@@ -311,7 +456,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("main.wasm"), EMPTY_COMPONENT).unwrap();
         let err =
-            WasmPluginHost::load(&state, manifest_v01(), tmp.path().to_path_buf()).unwrap_err();
+            WasmPluginHost::load(&state, manifest_v02(), tmp.path().to_path_buf()).unwrap_err();
         assert!(err.contains("scan api-version"), "unexpected error: {err}");
         assert!(
             err.contains(super::super::API_VERSION_SECTION),
@@ -322,7 +467,7 @@ mod tests {
     #[test]
     fn load_rejects_missing_wasm_file() {
         let state = WasmPluginState::default();
-        let m = manifest_v01();
+        let m = manifest_v02();
         let tmp = tempfile::tempdir().unwrap();
         let err = WasmPluginHost::load(&state, m, tmp.path().to_path_buf()).unwrap_err();
         assert!(err.contains("invalid wasmMain"));
@@ -352,7 +497,7 @@ mod tests {
                         permissions: vec![],
                         wasm_main: "_.wasm".into(),
                         wasm: WasmBlock {
-                            api_version: "0.1.0".into(),
+                            api_version: "0.2.0".into(),
                             memory_limit_mb: None,
                             call_timeout_ms: None,
                             fs: None,
@@ -360,7 +505,7 @@ mod tests {
                     },
                     plugin_path: tmp.clone(),
                     component: component.clone(),
-                    plugin_api_version: "0.1.0".into(),
+                    plugin_api_version: "0.2.0".into(),
                 },
             );
             map.insert(
@@ -372,7 +517,7 @@ mod tests {
                         permissions: vec![],
                         wasm_main: "_.wasm".into(),
                         wasm: WasmBlock {
-                            api_version: "0.1.0".into(),
+                            api_version: "0.2.0".into(),
                             memory_limit_mb: None,
                             call_timeout_ms: None,
                             fs: None,
@@ -380,7 +525,7 @@ mod tests {
                     },
                     plugin_path: tmp,
                     component,
-                    plugin_api_version: "0.1.0".into(),
+                    plugin_api_version: "0.2.0".into(),
                 },
             );
         }
@@ -421,10 +566,10 @@ mod tests {
         let component = Component::new(engine(), EMPTY_COMPONENT).unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let plugin = LoadedPlugin {
-            manifest: manifest_v01(),
+            manifest: manifest_v02(),
             plugin_path: tmp.path().to_path_buf(),
             component,
-            plugin_api_version: "0.1.0".into(),
+            plugin_api_version: "0.2.0".into(),
         };
         let data_dir = tmp.path().join("data");
         let store = WasmPluginHost::build_activation_store(
@@ -432,6 +577,7 @@ mod tests {
             &data_dir,
             &["process:spawn".to_string()],
             &["git".to_string(), "node".to_string()],
+            None,
         )
         .expect("store builds");
         assert_eq!(
@@ -449,7 +595,7 @@ mod tests {
         // at load time (and documenting why the snapshot fixtures can't cache one).
         const EMPTY_COMPONENT: &[u8] = &[0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00];
         let component = Component::new(engine(), EMPTY_COMPONENT).unwrap();
-        assert!(WasmPluginHost::build_plugin_pre("0.1.0", &component).is_err());
+        assert!(WasmPluginHost::build_plugin_pre("0.2.0", &component).is_err());
     }
 
     #[test]

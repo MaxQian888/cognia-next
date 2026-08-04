@@ -27,11 +27,17 @@ impl Guest for Plugin {
             "init",
             &format!("hello from template! config_bytes={}", config.len()),
         );
-        notification::notify(
+        // v0.2: `notify` returns `result<_, string>`. A failure here is not
+        // fatal to activation — a denied or unavailable notification surface
+        // should not stop the plugin booting — so log it and carry on. If your
+        // plugin genuinely needs the notification to land, propagate with `?`.
+        if let Err(error) = notification::notify(
             "cognia-plugin-template",
             "Hello from the template plugin!",
             notification::NotificationKind::Info,
-        );
+        ) {
+            logger::log(logger::LogLevel::Warn, "init", &format!("notify: {error}"));
+        }
         Ok(())
     }
 

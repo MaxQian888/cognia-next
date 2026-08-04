@@ -434,6 +434,7 @@ export type PluginPermission =
   | "theme:read" // Read the active theme
   | "theme:write" // Change the active theme
   | "extension:ui" // Contribute trusted host-rendered UI
+  | "extension:workflow" // Contribute workflow nodes, triggers, tasks, and templates
   | "media:image:read" // Read image media assets
   | "media:image:write" // Write image media assets
   | "media:video:read" // Read video media assets
@@ -794,15 +795,14 @@ export interface PluginManifest {
   shellCommands?: string[]
 
   /**
-   * Declarative network egress allowlist (Figma-style). When present, the host
-   * clamps this plugin's `network:fetch`/`download`/`upload` to the listed
-   * domains; subdomains match (`example.com` matches `api.example.com`). Use
-   * `["*"]` for any host (state `reasoning`) or `["none"]` for no network.
-   * Omitting `networkAccess` leaves egress unrestricted (the `network:fetch`
-   * grant + consent remains the boundary).
+   * Declarative network egress policy. `allowedDomains` preserves the legacy
+   * domain-only form; `rules` additionally constrains HTTP method and path so
+   * read-only plugins can be enforced by the host. Omitting `networkAccess`
+   * denies network egress even when `network:fetch` is granted.
    */
   networkAccess?: {
     allowedDomains?: string[]
+    rules?: PluginNetworkAccessRule[]
     /** Why the plugin needs the declared access — shown in the consent prompt. */
     reasoning?: string
   }
@@ -2624,8 +2624,30 @@ export interface PluginNetworkAPI {
   ) => Promise<NetworkResponse<unknown>>
 }
 
-export interface NetworkRequestOptions {
-  method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS"
+export type PluginNetworkHttpMethod =
+  "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS"
+
+export interface PluginNetworkAccessRule {
+  /** Host suffix (`example.com` includes `api.example.com`) or `*`. */
+  domain: string
+  /** HTTP methods admitted by this rule. */
+  methods: PluginNetworkHttpMethod[]
+  /** URL pathname globs admitted by this rule. */
+  paths: string[]
+}
+
+export type NetworkDataClassification =
+  "public" | "operational" | "internal" | "confidential" | "restricted"
+
+export interface NetworkEgressPolicyOptions {
+  /** Data class recorded for policy/audit consumers. */
+  dataClassification?: NetworkDataClassification
+  /** Redact recognized PII/secrets (default) or block the request. */
+  piiPolicy?: "redact" | "block"
+}
+
+export interface NetworkRequestOptions extends NetworkEgressPolicyOptions {
+  method?: PluginNetworkHttpMethod
   headers?: Record<string, string>
   body?: unknown
   timeout?: number
@@ -2641,7 +2663,7 @@ export interface NetworkResponse<T> {
   data: T
 }
 
-export interface DownloadOptions {
+export interface DownloadOptions extends NetworkEgressPolicyOptions {
   headers?: Record<string, string>
   onProgress?: (progress: DownloadProgress) => void
 }
@@ -2658,7 +2680,7 @@ export interface DownloadResult {
   contentType?: string
 }
 
-export interface UploadOptions {
+export interface UploadOptions extends NetworkEgressPolicyOptions {
   headers?: Record<string, string>
   fieldName?: string
   onProgress?: (progress: DownloadProgress) => void
@@ -4772,6 +4794,7 @@ export type PluginAPIPermission =
   | "media:video:write"
   | "media:video:export"
   | "extension:ui"
+  | "extension:workflow"
   | "notification:show"
   | "ipc:call"
   | "ipc:expose"

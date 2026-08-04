@@ -412,6 +412,7 @@ describe("Permission API", () => {
       "media:video:write",
       "media:video:export",
       "extension:ui",
+      "extension:workflow",
       "notification:show",
       "ipc:call",
       "ipc:expose",

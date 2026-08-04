@@ -128,7 +128,7 @@
     "@types/json-schema": "^7.0.0",
     "@types/node": ">=20.0.0",
     "@types/react": "^19.0.0",
-    "ai": "^6.0.0",
+    "ai": "^7.0.0",
     "dexie": "^4.0.0",
     "lucide-react": "^1.25.0",
     "react": "^19.0.0",
