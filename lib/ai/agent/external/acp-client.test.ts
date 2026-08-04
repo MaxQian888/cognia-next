@@ -70,7 +70,11 @@ import {
   RAPID_EXIT_THRESHOLD_MS,
   MAX_RAPID_EXITS,
 } from "./acp-client"
-import type { ExternalAgentConfig, AcpPermissionResponse } from "@/types/agent/external-agent"
+import type {
+  ExternalAgentConfig,
+  AcpPermissionResponse,
+  ExternalAgentEvent,
+} from "@/types/agent/external-agent"
 import { loggers } from "@cognia/logging"
 import { LOG_VALUE_MAX_CHARS, truncateForLog } from "@cognia/logging/truncate"
 import { agentReadTextFile, agentWriteTextFile } from "./agent-transport"
@@ -165,10 +169,21 @@ function seedSession(
   )._sessions.set(id, { permissionMode, allowedTools })
 }
 
-function callPermission(a: AcpClientAdapter, params: PermissionParams): Promise<PermissionOutcome> {
+function callPermission(
+  a: AcpClientAdapter,
+  params: PermissionParams,
+  signal?: AbortSignal,
+  wireRequestId?: number | string
+): Promise<PermissionOutcome> {
   return (
-    a as unknown as { handlePermissionRequest: (p: PermissionParams) => Promise<PermissionOutcome> }
-  ).handlePermissionRequest(params)
+    a as unknown as {
+      handlePermissionRequest: (
+        p: PermissionParams,
+        signal?: AbortSignal,
+        wireRequestId?: number | string
+      ) => Promise<PermissionOutcome>
+    }
+  ).handlePermissionRequest(params, signal, wireRequestId)
 }
 
 function callTerminalWrite(
@@ -553,6 +568,55 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
     await expect(pending).resolves.toEqual({ outcome: { outcome: "cancelled" } })
   })
 
+  it("rejects a nested permission request with -32800 when its request is cancelled", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "default")
+    const controller = new AbortController()
+    const pending = (
+      a as unknown as {
+        handlePermissionRequest: (
+          params: Record<string, unknown>,
+          signal: AbortSignal
+        ) => Promise<unknown>
+      }
+    ).handlePermissionRequest(
+      {
+        sessionId: "s",
+        requestId: "permission-1",
+        toolCall: { toolCallId: "tc", title: "Shell", kind: "execute" },
+        options: [ALLOW, REJECT],
+      },
+      controller.signal
+    )
+
+    controller.abort()
+
+    await expect(pending).rejects.toMatchObject({ code: -32800 })
+  })
+
+  it("keys concurrent permissions by JSON-RPC id even when tool ids repeat", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "default")
+    const firstController = new AbortController()
+    const secondController = new AbortController()
+    const params = {
+      sessionId: "s",
+      requestId: "agent-reused-id",
+      toolCall: { toolCallId: "same-tool", title: "Shell", kind: "execute" },
+      options: [ALLOW, REJECT],
+    }
+    const first = callPermission(a, params, firstController.signal, 41)
+    const second = callPermission(a, params, secondController.signal, 42)
+    const pending = (a as unknown as { pendingPermissions: Map<string, unknown> })
+      .pendingPermissions
+
+    expect([...pending.keys()]).toEqual(["41", "42"])
+    firstController.abort()
+    secondController.abort()
+    await expect(first).rejects.toMatchObject({ code: -32800 })
+    await expect(second).rejects.toMatchObject({ code: -32800 })
+  })
+
   it("does not cancel a permission belonging to a session with the same id prefix", async () => {
     const a = new AcpClientAdapter()
     seedSession(a, "s", "default")
@@ -574,6 +638,113 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
 
     await a.cancel("s2")
     await expect(pending).resolves.toEqual({ outcome: { outcome: "cancelled" } })
+  })
+})
+
+describe("AcpClientAdapter — ACP v1 feature-gated elicitation", () => {
+  function elicitationInternals(a: AcpClientAdapter) {
+    return a as unknown as {
+      _config?: ExternalAgentConfig
+      handleElicitationRequest: (
+        id: number | string,
+        params: Record<string, unknown>,
+        signal: AbortSignal
+      ) => Promise<unknown>
+      handleNotification: (notification: {
+        jsonrpc: "2.0"
+        method: string
+        params?: Record<string, unknown>
+      }) => void
+      addEventListener: (sessionId: string, listener: (event: ExternalAgentEvent) => void) => void
+      knownUrlElicitations: Map<string, string | undefined>
+    }
+  }
+
+  it("emits a form request and resolves it through respondToElicitation", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const internals = elicitationInternals(a)
+    internals._config = {
+      ...stdioConfig(),
+      metadata: { acpElicitationEnabled: true },
+    }
+    const events: ExternalAgentEvent[] = []
+    internals.addEventListener("s1", (event) => events.push(event))
+
+    const response = internals.handleElicitationRequest(
+      17,
+      {
+        mode: "form",
+        sessionId: "s1",
+        message: "Choose",
+        requestedSchema: {
+          type: "object",
+          properties: { enabled: { type: "boolean" } },
+          required: ["enabled"],
+        },
+      },
+      new AbortController().signal
+    )
+    expect(events.at(-1)).toMatchObject({
+      type: "elicitation_request",
+      request: { id: "17", mode: "form" },
+    })
+
+    await a.respondToElicitation({
+      requestId: "17",
+      action: "accept",
+      content: { enabled: true },
+    })
+    await expect(response).resolves.toEqual({ action: "accept", content: { enabled: true } })
+  })
+
+  it("rejects elicitation when the extension was not explicitly enabled", async () => {
+    const a = new AcpClientAdapter()
+    elicitationInternals(a)._config = stdioConfig()
+    await expect(
+      elicitationInternals(a).handleElicitationRequest(
+        18,
+        {
+          mode: "url",
+          requestId: 1,
+          message: "Sign in",
+          elicitationId: "auth",
+          url: "https://example.com",
+        },
+        new AbortController().signal
+      )
+    ).rejects.toMatchObject({ code: -32601 })
+  })
+
+  it("ignores unknown URL completion ids and emits known completions once", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const internals = elicitationInternals(a)
+    const events: ExternalAgentEvent[] = []
+    internals.addEventListener("s1", (event) => events.push(event))
+
+    internals.handleNotification({
+      jsonrpc: "2.0",
+      method: "elicitation/complete",
+      params: { elicitationId: "unknown" },
+    })
+    expect(events).toHaveLength(0)
+
+    internals.knownUrlElicitations.set("known", "s1")
+    internals.handleNotification({
+      jsonrpc: "2.0",
+      method: "elicitation/complete",
+      params: { elicitationId: "known", _meta: { opaque: true } },
+    })
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "elicitation_complete",
+        sessionId: "s1",
+        elicitationId: "known",
+        _meta: { opaque: true },
+      }),
+    ])
+    expect(internals.knownUrlElicitations.has("known")).toBe(false)
   })
 })
 
@@ -1635,7 +1806,12 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
       size: 200000,
       cost: { amount: 0.04, currency: "USD" },
     })
-    expect(ev).toBeNull()
+    expect(ev).toMatchObject({
+      type: "usage_update",
+      used: 1200,
+      size: 200000,
+      cost: { amount: 0.04, currency: "USD" },
+    })
     // Context occupancy + cost land in metadata, not as a bogus token total.
     expect(sessionMeta(a, "s1")?.usage).toMatchObject({
       used: 1200,
@@ -1667,14 +1843,14 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
     expect(user.messageId).toBe(`${first.messageId}:user`)
   })
 
-  it("applies session_info_update title without emitting an event", () => {
+  it("applies and emits session_info_update title", () => {
     const a = new AcpClientAdapter()
     seedSession(a, "s1", "default")
     const ev = handleUpdate(a, "s1", {
       sessionUpdate: "session_info_update",
       title: "Refactor auth",
     })
-    expect(ev).toBeNull()
+    expect(ev).toMatchObject({ type: "session_info_update", title: "Refactor auth" })
     expect(sessionMeta(a, "s1")?.title).toBe("Refactor auth")
   })
 

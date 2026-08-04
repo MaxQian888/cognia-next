@@ -1,4 +1,7 @@
-import { validateResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
+import {
+  AGENT_CAPABILITY_IDS,
+  validateResolvedAgentExecutionSpec,
+} from "@cognia/agent-config-types/agent-execution"
 
 import type { AgentExecutionFlag } from "./feature-flags"
 import {
@@ -9,12 +12,29 @@ import {
   type AgentExecutionResolveInput,
 } from "./resolve-agent-execution-spec"
 
+/**
+ * Some capability the Claude rail genuinely does not serve, picked from the
+ * table rather than written down. Hardcoding one is how the previous version
+ * of these tests ended up asserting a refusal for `steer` — a capability the
+ * rail had all along.
+ */
+const UNSERVED_BY_CLAUDE = (() => {
+  const served = new Set(RUNTIME_CAPABILITIES["claude-agent-sdk"])
+  const id = AGENT_CAPABILITY_IDS.find((c) => !served.has(c))
+  if (!id) throw new Error("claude-agent-sdk now serves every capability — pick a new probe")
+  return id
+})()
+
 const flagsOff: Record<AgentExecutionFlag, boolean> = {
   agentExecutionResolverV2: false,
   genericAgentHostCommands: false,
   gatewayAgentRouteTickets: false,
   headlessLlmGateway: false,
   experimentalAnthropicDeploymentAgentSdk: false,
+  claudeSdkParityV1: false,
+  claudeSdkSessionStore: false,
+  claudeSdkCheckpoint: false,
+  claudeSdkPrewarm: false,
 }
 
 const desktop = { isTauri: true, isHeadlessHost: false }
@@ -270,11 +290,18 @@ describe("sendSpecFromResolved", () => {
 })
 
 describe("runtime capability tables", () => {
-  it("only claude-agent-sdk offers native subagents; only external offers steer", () => {
+  it("only claude-agent-sdk offers native subagents; ai-sdk never steers", () => {
     expect(RUNTIME_CAPABILITIES["claude-agent-sdk"]).toContain("subagents.native")
     expect(RUNTIME_CAPABILITIES["ai-sdk"]).not.toContain("subagents.native")
+
+    // Steering is served by the claude rail and the external rail, and by
+    // neither ai-sdk nor anything else. `routeSteer()` in the sidecar refuses
+    // every non-anthropic provider outright, so listing it for ai-sdk would
+    // promise a command that always errors — and omitting it from
+    // claude-agent-sdk (as this table used to) rejected one that always works.
+    expect(RUNTIME_CAPABILITIES["claude-agent-sdk"]).toContain("steer")
     expect(RUNTIME_CAPABILITIES["external"]).toContain("steer")
-    expect(RUNTIME_CAPABILITIES["claude-agent-sdk"]).not.toContain("steer")
+    expect(RUNTIME_CAPABILITIES["ai-sdk"]).not.toContain("steer")
   })
 
   it("never claims a capability the runtime has not actually implemented", () => {
@@ -282,18 +309,43 @@ describe("runtime capability tables", () => {
     // runtime table entry is a claim that code exists. Each id joins its
     // adapter's list only when the corresponding stage lands; listing them
     // early is the "built but dormant" failure this repo keeps hitting.
+    //
+    // Shrinking this list is how a stage records that it finished. What is
+    // left is the two callback surfaces the sidecar does not build yet
+    // (`onElicitation` / `onUserDialog`).
     const allTabled = new Set(Object.values(RUNTIME_CAPABILITIES).flat())
-    for (const notYetImplemented of [
-      "session.store",
-      "output.structured",
-      "input.elicitation",
-      "input.dialog",
-      "plugins.native",
-      "startup.prewarm",
-      "sandbox.native",
-      "tasks.background",
-    ]) {
+    for (const notYetImplemented of ["input.elicitation", "input.dialog"]) {
       expect(allTabled.has(notYetImplemented as never)).toBe(false)
+    }
+  })
+
+  it("claims the Stage 3 capabilities on the claude rail only", () => {
+    // The other half of the pin above: a capability that IS implemented must
+    // be claimed, or the fail-closed gate rejects a session that can serve the
+    // call. That was the `steer` bug, and every control added in Stage 3 is a
+    // fresh chance to repeat it.
+    for (const implemented of [
+      "commands.dynamic",
+      "session.manage",
+      "plugins.native",
+      "skills.native",
+      "checkpoint",
+      "mcp.dynamic",
+      "subagents.manage",
+      "tasks.background",
+      "output.structured",
+      "sandbox.native",
+      "hooks.lifecycle",
+      "permissions.update-rules",
+      "observability.child",
+      "session.store",
+      "startup.prewarm",
+    ] as const) {
+      expect(RUNTIME_CAPABILITIES["claude-agent-sdk"]).toContain(implemented)
+      // These are Claude Agent SDK surfaces. The ai-sdk rail has no `Query`
+      // object at all, so claiming any of them there would promise a control
+      // that can only fail.
+      expect(RUNTIME_CAPABILITIES["ai-sdk"]).not.toContain(implemented)
     }
   })
 })
@@ -317,18 +369,17 @@ describe("contract v2 capability verdicts", () => {
           executionKind: "agent",
           runtimePolicy: "claude-agent-sdk",
           routePolicy: "direct",
-          // `steer` is real but only on the external adapter, so asking the
-          // Claude runtime for it must produce a stated refusal rather than
-          // silence.
-          prefers: ["steer"],
+          // Derived, not hardcoded: naming a specific id here means the test
+          // quietly stops testing refusal the day that id becomes supported.
+          prefers: [UNSERVED_BY_CLAUDE],
           fallbackPolicy: "none",
         },
       })
     )
 
-    expect(spec.capabilities.support?.steer).toEqual({
+    expect(spec.capabilities.support?.[UNSERVED_BY_CLAUDE]).toEqual({
       support: "unsupported",
-      reason: 'runtime adapter "claude-agent-sdk" does not implement "steer"',
+      reason: `runtime adapter "claude-agent-sdk" does not implement "${UNSERVED_BY_CLAUDE}"`,
     })
     expect(validateResolvedAgentExecutionSpec(spec).ok).toBe(true)
   })

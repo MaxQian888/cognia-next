@@ -47,6 +47,9 @@ importers:
       '@aws-sdk/credential-providers':
         specifier: ^3.1092.0
         version: 3.1092.0
+      '@cognia/agent-config-types':
+        specifier: link:../packages/agent-config-types
+        version: link:../packages/agent-config-types
       '@cognia/redact':
         specifier: link:../packages/redact
         version: link:../packages/redact

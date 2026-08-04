@@ -15,6 +15,7 @@ jest.mock("@/lib/db/mcp-servers", () => ({
 jest.mock("./ipc", () => ({
   readAgentConfig: jest.fn(),
   writeAgentConfig: jest.fn(),
+  readProjectMcpConfig: jest.fn(),
 }))
 
 jest.mock("./builtin-mcp/runtime-context", () => ({
@@ -24,11 +25,13 @@ jest.mock("./builtin-mcp/runtime-context", () => ({
 import { bulkImportMcpServers, listMcpServers, updateMcpServer } from "@/lib/db/mcp-servers"
 import { isTauri } from "@/lib/tauri"
 
-import { readAgentConfig, writeAgentConfig } from "./ipc"
+import { readAgentConfig, readProjectMcpConfig, writeAgentConfig } from "./ipc"
 import { getBuiltinMcpRuntimeContext } from "./builtin-mcp/runtime-context"
 import {
   importFromAgent,
+  importFromProjectMcp,
   previewAgentImport,
+  previewProjectMcpImport,
   scheduleSync,
   scheduleSyncForAffectedAgents,
   syncAll,
@@ -463,6 +466,89 @@ describe("importFromAgent", () => {
       expect.arrayContaining([expect.objectContaining({ name: "fs" })]),
       "overwrite"
     )
+  })
+})
+
+describe("project-scoped .mcp.json import", () => {
+  const mProject = readProjectMcpConfig as jest.MockedFunction<typeof readProjectMcpConfig>
+
+  const projectCfg = (parsed: unknown, exists = true): AgentReadResult => ({
+    path: "/repo/.mcp.json",
+    exists,
+    writable: false,
+    format: "json",
+    raw: "{}",
+    parsed,
+  })
+
+  it("parses `.mcp.json` with the Claude Code adapter", async () => {
+    mIsTauri.mockReturnValue(true)
+    mProject.mockResolvedValueOnce(
+      projectCfg({ mcpServers: { docs: { type: "stdio", command: "npx", args: ["-y", "docs"] } } })
+    )
+    const preview = await previewProjectMcpImport("/repo")
+    expect(mProject).toHaveBeenCalledWith("/repo")
+    expect(preview.exists).toBe(true)
+    expect(preview.path).toBe("/repo/.mcp.json")
+    expect(preview.drafts).toEqual([expect.objectContaining({ name: "docs", transport: "stdio" })])
+  })
+
+  it("returns an empty preview off-desktop or without a workspace", async () => {
+    mIsTauri.mockReturnValue(false)
+    expect(await previewProjectMcpImport("/repo")).toEqual({ exists: false, drafts: [] })
+    mIsTauri.mockReturnValue(true)
+    expect(await previewProjectMcpImport("   ")).toEqual({ exists: false, drafts: [] })
+    expect(mProject).not.toHaveBeenCalled()
+  })
+
+  it("surfaces a missing file as exists:false rather than an error", async () => {
+    mIsTauri.mockReturnValue(true)
+    mProject.mockResolvedValueOnce(projectCfg(null, false))
+    const preview = await previewProjectMcpImport("/repo")
+    expect(preview.exists).toBe(false)
+    expect(preview.drafts).toEqual([])
+  })
+
+  it("reports an IPC failure instead of throwing", async () => {
+    mIsTauri.mockReturnValue(true)
+    mProject.mockRejectedValueOnce(new Error("permission denied"))
+    const preview = await previewProjectMcpImport("/repo")
+    expect(preview).toEqual({ exists: false, drafts: [], parseError: "permission denied" })
+  })
+
+  it("imports and flips appsEnabled['claude-code'] without writing back", async () => {
+    mIsTauri.mockReturnValue(true)
+    mProject.mockResolvedValueOnce(
+      projectCfg({ mcpServers: { docs: { type: "stdio", command: "npx" } } })
+    )
+    mBulk.mockResolvedValueOnce({ created: 1, skipped: 0, duplicated: 0, overwritten: 0 })
+    mList.mockResolvedValueOnce([
+      makeServer({ name: "docs", appsEnabled: {} }),
+      makeServer({ name: "other", appsEnabled: {} }),
+    ])
+
+    const r = await importFromProjectMcp("/repo", "overwrite")
+    expect(r.previewed).toBe(1)
+    expect(mBulk).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ name: "docs" })]),
+      "overwrite"
+    )
+    expect(mUpdate).toHaveBeenCalledTimes(1)
+    // The committed file is never written back to.
+    expect(mWrite).not.toHaveBeenCalled()
+  })
+
+  it("skips servers already marked as claude-code's", async () => {
+    mIsTauri.mockReturnValue(true)
+    mProject.mockResolvedValueOnce(
+      projectCfg({ mcpServers: { docs: { type: "stdio", command: "npx" } } })
+    )
+    mBulk.mockResolvedValueOnce({ created: 0, skipped: 1, duplicated: 0, overwritten: 0 })
+    mList.mockResolvedValueOnce([
+      makeServer({ name: "docs", appsEnabled: { "claude-code": true } }),
+    ])
+    await importFromProjectMcp("/repo")
+    expect(mUpdate).not.toHaveBeenCalled()
   })
 })
 

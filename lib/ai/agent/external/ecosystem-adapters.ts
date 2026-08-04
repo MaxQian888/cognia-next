@@ -194,10 +194,10 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         envVarHint:
           "Reuses your active Claude subscription (Claude Code sign-in) or ANTHROPIC_API_KEY automatically.",
         setupHint:
-          "Runs Claude Code through the ACP registry adapter (`npx -y @agentclientprotocol/claude-agent-acp`) — no local install needed; it wraps the Claude Agent SDK.",
+          "Requires the official Claude Agent ACP adapter (`npm install -g @agentclientprotocol/claude-agent-acp`); Cognia launches the installed binary without an on-demand network fetch.",
         process: {
-          command: "npx",
-          args: ["-y", "@agentclientprotocol/claude-agent-acp"],
+          command: "claude-agent-acp",
+          args: [],
         },
         icon: "anthropic",
       },

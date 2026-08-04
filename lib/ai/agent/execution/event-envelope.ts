@@ -11,11 +11,14 @@ import type {
   AgentEventEnvelope,
   CanonicalAgentEvent,
 } from "@cognia/agent-config-types/agent-execution"
-import { isAgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
+import {
+  isAgentEventEnvelope,
+  isKnownCanonicalAgentEventKind,
+} from "@cognia/agent-config-types/agent-execution"
 
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 
-export { isAgentEventEnvelope }
+export { isAgentEventEnvelope, isKnownCanonicalAgentEventKind }
 
 export interface EnvelopeContext {
   sessionId: string

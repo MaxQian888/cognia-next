@@ -7,7 +7,13 @@ import {
   canonicalEventFromExternalEvent,
   captureEventFromCanonical,
   createEnvelopeSequencer,
+  isKnownCanonicalAgentEventKind,
 } from "./event-envelope"
+
+it("re-exports the canonical event-kind guard at the execution boundary", () => {
+  expect(isKnownCanonicalAgentEventKind("text-delta")).toBe(true)
+  expect(isKnownCanonicalAgentEventKind("future-event")).toBe(false)
+})
 
 // The cross-language contract: the sidecar emitter and this module must
 // produce identical envelope shapes for the same context.

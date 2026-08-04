@@ -39,6 +39,7 @@ import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Textarea } from "@/components/ui/textarea"
 import { buildAsideContext } from "@/lib/chat/session-aside-context"
+import { SIDECHAT_PANEL_ID } from "@/lib/tasks/spawn-task-core"
 import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import { ResourceWorkbenchChatPanel } from "@/components/context-workbench/resource-workbench-chat-panel"
@@ -384,7 +385,7 @@ export function useSessionSurfacePanels({
         // conversation, not a property of whichever artifact happens to be
         // open. `useResourceWorkbenchSession` ensures the primary aside as soon
         // as this panel activates.
-        id: "session-sidechat",
+        id: SIDECHAT_PANEL_ID,
         activity: "ai",
         labelKey: "contextWorkbench.sessionSidechat",
         icon: MessagesSquareIcon,

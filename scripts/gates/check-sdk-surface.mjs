@@ -32,12 +32,98 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 
-import { extractSurface, diffSurface, SURFACE_KINDS, TRIAGED_KINDS } from "./lib/sdk-surface.mjs"
+import {
+  extractSurface,
+  extractMessageDiscriminants,
+  diffSurface,
+  SURFACE_KINDS,
+  TRIAGED_KINDS,
+} from "./lib/sdk-surface.mjs"
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 const MANIFEST_PATH = join(REPO_ROOT, "protocol", "agent-sdk-surface.json")
 const SDK_DIR = join(REPO_ROOT, "sidecar", "node_modules", "@anthropic-ai", "claude-agent-sdk")
 const DTS_PATH = join(SDK_DIR, "sdk.d.ts")
+const CONTRACT_PATH = join(REPO_ROOT, "packages", "agent-config-types", "src", "agent-execution.ts")
+const CONTRACT_INDEX_PATH = join(REPO_ROOT, "packages", "agent-config-types", "src", "index.ts")
+
+/**
+ * String literals of `const CANONICAL_EVENT_KINDS: readonly string[] = [ … ]`.
+ *
+ * Read out of the TS source rather than imported because this gate runs as
+ * plain `.mjs` under `node --test`, with no TS pipeline available.
+ *
+ * @param {string} source
+ * @returns {Set<string>}
+ */
+export function extractCanonicalEventKinds(source) {
+  const body = source.match(/CANONICAL_EVENT_KINDS: readonly string\[\] = \[([\s\S]*?)\n\]/)?.[1]
+  if (!body) throw new Error("agent-execution.ts: `CANONICAL_EVENT_KINDS` not found")
+  return new Set([...body.matchAll(/"([^"]+)"/g)].map((m) => m[1]))
+}
+
+/**
+ * String literals of an `export const NAME = [ … ] as const` array.
+ *
+ * @param {string} source
+ * @param {string} name
+ * @returns {string[]}
+ */
+export function extractConstStringArray(source, name) {
+  const body = source.match(
+    new RegExp(`export const ${name} = \\[([\\s\\S]*?)\\n\\] as const`)
+  )?.[1]
+  if (!body) throw new Error(`index.ts: \`${name}\` not found`)
+  return [...body.matchAll(/"([^"]+)"/g)].map((m) => m[1])
+}
+
+/**
+ * The contract's discriminant vocabulary must equal the SDK's.
+ *
+ * `SDKMessage` in `@cognia/agent-config-types` is an OPEN union — it ends in a
+ * catch-all so a host one version ahead cannot break the build. That openness
+ * makes `switch` exhaustiveness structurally impossible, which is how 30 of the
+ * 39 union members sat on a default branch for eight SDK releases. Consumers
+ * therefore assert exhaustiveness against `SDK_MESSAGE_TYPES` /
+ * `SDK_SYSTEM_SUBTYPES`, and those lists are only trustworthy if something
+ * proves they still match the installed `sdk.d.ts`. This is that something.
+ *
+ * @param {string} contractSource `packages/agent-config-types/src/index.ts`
+ * @param {Record<string, { type: string, subtypes: string[] }>} discriminants
+ * @returns {string[]}
+ */
+export function verifyDiscriminantVocabulary(contractSource, discriminants) {
+  const members = Object.values(discriminants)
+  const expected = {
+    SDK_MESSAGE_TYPES: [...new Set(members.map((m) => m.type))].sort(),
+    SDK_SYSTEM_SUBTYPES: [
+      ...new Set(members.filter((m) => m.type === "system").flatMap((m) => m.subtypes)),
+    ].sort(),
+    // The turn's five possible endings. Pinned for the same reason as the two
+    // above, and load-bearing for structured output: three of the five are
+    // failures a caller must tell apart, and one of those three arrives
+    // wearing `subtype: "success"`.
+    SDK_RESULT_SUBTYPES: [
+      ...new Set(members.filter((m) => m.type === "result").flatMap((m) => m.subtypes)),
+    ].sort(),
+  }
+
+  const errors = []
+  for (const [name, want] of Object.entries(expected)) {
+    const declared = [...extractConstStringArray(contractSource, name)].sort()
+    const missing = want.filter((v) => !declared.includes(v))
+    const extra = declared.filter((v) => !want.includes(v))
+    if (missing.length) {
+      errors.push(
+        `${name}: missing ${missing.join(", ")} — the SDK emits ${missing.length > 1 ? "these" : "this"}`
+      )
+    }
+    if (extra.length) {
+      errors.push(`${name}: declares ${extra.join(", ")}, which the SDK does not emit`)
+    }
+  }
+  return errors
+}
 
 /**
  * A missing manifest is not an error here: `--write` has to be able to
@@ -48,6 +134,8 @@ const DTS_PATH = join(SDK_DIR, "sdk.d.ts")
 export function loadInputs(read = (p) => readFileSync(p, "utf8")) {
   const source = read(DTS_PATH)
   const installedVersion = JSON.parse(read(join(SDK_DIR, "package.json"))).version
+  const canonicalKinds = extractCanonicalEventKinds(read(CONTRACT_PATH))
+  const contractSource = read(CONTRACT_INDEX_PATH)
 
   let manifest = null
   try {
@@ -56,7 +144,7 @@ export function loadInputs(read = (p) => readFileSync(p, "utf8")) {
     if (err.code !== "ENOENT") throw err
   }
 
-  return { source, installedVersion, manifest }
+  return { source, installedVersion, manifest, canonicalKinds, contractSource }
 }
 
 /**
@@ -69,7 +157,7 @@ export function loadInputs(read = (p) => readFileSync(p, "utf8")) {
  * @param {any} previous
  * @param {string} sdkVersion
  */
-export function buildManifest(surface, previous, sdkVersion) {
+export function buildManifest(surface, previous, sdkVersion, discriminants = {}) {
   const prior = previous?.surface ?? {}
   /** @type {Record<string, unknown>} */
   const next = {}
@@ -82,7 +170,21 @@ export function buildManifest(surface, previous, sdkVersion) {
     }
     const priorEntries = prior[kind] ?? {}
     next[kind] = Object.fromEntries(
-      [...members].sort().map((name) => [name, priorEntries[name] ?? { status: "planned" }])
+      [...members].sort().map((name) => {
+        const entry = { ...(priorEntries[name] ?? { status: "planned" }) }
+        // `wire` is derived from the SDK, not a human verdict — always refresh
+        // it. `canonical` IS a verdict and is preserved; a new member gets an
+        // empty list, which `verify` then rejects for anything claiming
+        // `supported`.
+        if (kind === "messages" && discriminants[name]) {
+          const d = discriminants[name]
+          entry.wire = d.subtypes?.length
+            ? { type: d.type, subtypes: d.subtypes }
+            : { type: d.type }
+          entry.canonical = entry.canonical ?? []
+        }
+        return [name, entry]
+      })
     )
   }
 
@@ -96,10 +198,78 @@ export function buildManifest(surface, previous, sdkVersion) {
 }
 
 /**
- * @param {{ source: string, installedVersion: string, manifest: any }} inputs
+ * The manifest's per-message `wire` / `canonical` triage.
+ *
+ * `wire` is checked against the `.d.ts` because the union has 39 members but
+ * only 11 distinct `type` values — a rename that keeps the interface name and
+ * changes the discriminant would otherwise pass unnoticed while every consumer
+ * silently stopped matching.
+ *
+ * `canonical` is the anti-dormancy half: a message may not be called
+ * `supported` without naming the canonical event kind(s) it becomes. "Handled"
+ * with nothing on the other side is exactly the default-branch swallow this
+ * gate exists to prevent.
+ *
+ * @param {Record<string, any>} entries
+ * @param {Record<string, { type: string, subtypes: string[] }>} discriminants
+ * @param {Set<string>} canonicalKinds
+ * @returns {string[]}
+ */
+export function verifyMessageMapping(entries, discriminants, canonicalKinds) {
+  const errors = []
+
+  for (const [name, entry] of Object.entries(entries)) {
+    const actual = discriminants[name]
+    if (!actual) continue // membership drift is already reported by diffSurface
+
+    const wire = entry?.wire
+    if (!wire || typeof wire.type !== "string") {
+      errors.push(`${name}: missing \`wire.type\``)
+    } else if (wire.type !== actual.type) {
+      errors.push(`${name}: wire.type is "${wire.type}", the SDK says "${actual.type}"`)
+    }
+
+    const declared = [...(wire?.subtypes ?? [])].sort().join(",")
+    const real = [...actual.subtypes].sort().join(",")
+    if (declared !== real) {
+      errors.push(`${name}: wire.subtypes [${declared}] but the SDK has [${real}]`)
+    }
+
+    const canonical = entry?.canonical
+    if (!Array.isArray(canonical)) {
+      errors.push(`${name}: missing \`canonical\` (an array of canonical event kinds)`)
+      continue
+    }
+    if (entry.status === "supported" && canonical.length === 0) {
+      errors.push(`${name}: marked "supported" but maps to no canonical event kind`)
+    }
+    for (const kind of canonical) {
+      if (!canonicalKinds.has(kind)) {
+        errors.push(`${name}: canonical kind "${kind}" is not in CANONICAL_EVENT_KINDS`)
+      }
+    }
+  }
+
+  return errors
+}
+
+/**
+ * @param {{
+ *   source: string,
+ *   installedVersion: string,
+ *   manifest: any,
+ *   canonicalKinds?: Set<string>,
+ *   contractSource?: string,
+ * }} inputs
  * @returns {string[]} human-readable failures, empty when the gate passes
  */
-export function verify({ source, installedVersion, manifest }) {
+export function verify({
+  source,
+  installedVersion,
+  manifest,
+  canonicalKinds = new Set(),
+  contractSource,
+}) {
   const errors = []
 
   if (!manifest) {
@@ -135,6 +305,14 @@ export function verify({ source, installedVersion, manifest }) {
     }
   }
 
+  const discriminants = extractMessageDiscriminants(source)
+  errors.push(
+    ...verifyMessageMapping(manifest.surface?.messages ?? {}, discriminants, canonicalKinds)
+  )
+  if (contractSource) {
+    errors.push(...verifyDiscriminantVocabulary(contractSource, discriminants))
+  }
+
   return errors
 }
 
@@ -161,7 +339,12 @@ export function main(argv = process.argv.slice(2)) {
 
   if (argv.includes("--write")) {
     const surface = extractSurface(inputs.source)
-    const manifest = buildManifest(surface, inputs.manifest, inputs.installedVersion)
+    const manifest = buildManifest(
+      surface,
+      inputs.manifest,
+      inputs.installedVersion,
+      extractMessageDiscriminants(inputs.source)
+    )
     writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2) + "\n")
     const counts = SURFACE_KINDS.map((k) => `${k}=${surface[k].length}`).join(" ")
     console.log(`[sdk-surface] wrote manifest for ${inputs.installedVersion} (${counts})`)

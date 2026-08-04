@@ -8,6 +8,14 @@ test("execFileAsync resolves with stdout for a successful run", async () => {
   assert.equal(String(stdout), "hi")
 })
 
+test("execFileAsync keeps all standard streams connected for tool children", async () => {
+  const { stdout } = await execFileAsync(process.execPath, [
+    "-e",
+    `const fs = require('node:fs'); process.stdout.write([0, 1, 2].map((fd) => { try { fs.fstatSync(fd); return 'open' } catch { return 'closed' } }).join(','))`,
+  ])
+  assert.equal(stdout, "open,open,open")
+})
+
 test("execFileAsync rejects with code attached on non-zero exit", async () => {
   await assert.rejects(
     () => execFileAsync("node", ["-e", "process.exit(3)"]),

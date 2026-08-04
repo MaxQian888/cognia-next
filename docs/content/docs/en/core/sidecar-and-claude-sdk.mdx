@@ -112,6 +112,14 @@ Triggers that affect the sidecar:
 
 The sidecar is killed with SIGTERM on Unix and `TerminateProcess` on Windows. If it's stuck, the parent escalates to SIGKILL after 5s.
 
+## SDK 0.3.220 parity surface
+
+The SDK boundary is versioned and audited rather than forwarded as arbitrary JSON. `protocol/agent-sdk-surface.json` records every public option, export, query control, message, and hook event; `check:sdk-surface` fails when the installed declaration changes. Live controls and module-level session functions are separately allowlisted by `protocol/agent-control-methods.json`.
+
+`SendOptions.claudeAgentSdk` is the serializable version-1 descriptor. Host-only callbacks and the SQLite `SessionStore` are constructed inside the sidecar. The renderer never sends executable functions, store paths, or secrets. File checkpointing and the session store are mutually exclusive, and prewarming is keyed by the complete tenant/workspace/auth/security fingerprint.
+
+Settings → Built-in agent runtime exposes the capability snapshot, guarded rollout flags, and native SDK-session manager. The same session functions are available through `cognia-agent sdk`; the CLI exposes typed operations and never accepts raw SDK option JSON. Conformance suite version `2` covers the complete capability vocabulary.
+
 ## Build options assembly
 
 `lib/claude/build-options.ts` is the single place that converts UI state into a sidecar `send` payload. It composes:

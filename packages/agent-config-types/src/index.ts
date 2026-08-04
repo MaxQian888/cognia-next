@@ -300,6 +300,17 @@ export interface SendOptions {
   allowedTools?: string[]
   disallowedTools?: string[]
   additionalDirectories?: string[]
+  /**
+   * Active workspace roots whose local contents the user explicitly trusted.
+   *
+   * Host-only proof: the sidecar consumes it to authorize SDK-native
+   * `skills`/`plugins`, then strips it before calling the Claude Agent SDK.
+   * Merely naming `cwd` or `additionalDirectories` is never a trust grant.
+   * Workspace Trust is the explicit disclosure decision for these files: their
+   * provider-visible contents are intentionally exempt from prompt PII
+   * redaction because rewriting executable instructions would change them.
+   */
+  trustedWorkspaceRoots?: string[]
   permissionMode?: AgentPermissionMode
   /**
    * The second gate on `claudeAgentSdk.allowDangerouslySkipPermissions`.
@@ -1953,6 +1964,15 @@ export interface ChatSession {
    * Undefined once consumed, and on tail branches that use SDK fork instead.
    */
   branchSeed?: { kind: "transcript" | "summary"; content: string }
+  /**
+   * Durable handoff state for a task dispatched into a resource-workbench
+   * sidechat. The first prompt remains here until that sidechat successfully
+   * submits it, so reloads cannot silently lose the task.
+   */
+  spawnedTask?: {
+    mode: "aside" | "inherit"
+    pendingPrompt?: string
+  }
   /**
    * Imported-session ownership flag (ADR-0062 fidelity upgrade). An
    * `import:*` session is a live mirror of an external agent's on-disk history

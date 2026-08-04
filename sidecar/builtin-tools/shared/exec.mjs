@@ -7,11 +7,48 @@
 // stringified output of a successful run use `runCapped`.
 
 import { execFile } from "node:child_process"
-import { promisify } from "node:util"
+
+/**
+ * Keep every standard stream connected when a tool child is launched.
+ *
+ * Git calls `sanitize_stdfds()` at startup and opens `/dev/null` when one of
+ * fd 0/1/2 is missing. External ACP/MCP hosts can launch the bridge with a
+ * closed descriptor, and a sandboxed macOS process may not be allowed to open
+ * `/dev/null`. Explicit pipes prevent that fallback while preserving the
+ * stdout/stderr capture contract used by every caller.
+ */
+function execFileWithPipedStdio(file, args, options, callback) {
+  if (typeof options === "function") {
+    callback = options
+    options = {}
+  }
+  const normalizedOptions = options ?? {}
+  return execFile(
+    file,
+    args,
+    {
+      ...normalizedOptions,
+      stdio: normalizedOptions.stdio ?? ["pipe", "pipe", "pipe"],
+    },
+    callback
+  )
+}
 
 /** Promisified `execFile`. Rejects with `{ stdout, stderr, code, signal, killed }`
  *  attached on non-zero exit — callers that branch on those keep using this. */
-export const execFileAsync = promisify(execFile)
+export function execFileAsync(file, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    execFileWithPipedStdio(file, args, options, (error, stdout, stderr) => {
+      if (error) {
+        error.stdout = stdout
+        error.stderr = stderr
+        reject(error)
+        return
+      }
+      resolve({ stdout, stderr })
+    })
+  })
+}
 
 /**
  * Run a binary with an argv list (no shell interpolation), capped output and a

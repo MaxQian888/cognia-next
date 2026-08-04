@@ -7,6 +7,8 @@ import {
   extractOptionsFields,
   extractQueryMethods,
   extractMessageTypes,
+  extractMessageDiscriminant,
+  extractMessageDiscriminants,
   extractHookEvents,
   extractExports,
   extractSurface,
@@ -203,4 +205,78 @@ test("exports is drift-only — a plain list, never status-checked", () => {
 
 test("every status the seeded manifest uses is in the allowed set", () => {
   assert.deepEqual(SURFACE_STATUSES, ["supported", "planned", "host-only", "not-applicable"])
+})
+
+// ---- wire discriminants -----------------------------------------------------
+
+const DISCRIMINANT_SOURCE = `
+export declare type SDKMessage = SDKStatusMessage | SDKToolProgressMessage | SDKResultMessage;
+export declare type SDKStatusMessage = {
+    type: 'system';
+    subtype: 'status';
+    status: SDKStatus;
+};
+export declare type SDKToolProgressMessage = {
+    type: 'tool_progress';
+    tool_use_id: string;
+};
+export declare type SDKResultMessage = SDKResultSuccess | SDKResultError;
+export declare type SDKResultSuccess = {
+    type: 'result';
+    subtype: 'success';
+    result: string;
+};
+export declare type SDKResultError = {
+    type: 'result';
+    subtype: 'error_max_turns' | 'error_during_execution';
+    is_error: true;
+};
+`
+
+test("extractMessageDiscriminant reads the type and its subtype", () => {
+  assert.deepEqual(extractMessageDiscriminant(DISCRIMINANT_SOURCE, "SDKStatusMessage"), {
+    type: "system",
+    subtypes: ["status"],
+  })
+})
+
+test("extractMessageDiscriminant returns no subtypes when there are none", () => {
+  assert.deepEqual(extractMessageDiscriminant(DISCRIMINANT_SOURCE, "SDKToolProgressMessage"), {
+    type: "tool_progress",
+    subtypes: [],
+  })
+})
+
+test("extractMessageDiscriminant resolves an alias union instead of guessing", () => {
+  // `SDKResultMessage` is `SDKResultSuccess | SDKResultError`. Scanning to the
+  // next `\n};` would run past the alias into whichever declaration follows and
+  // report that one's discriminant as if it were the union's.
+  assert.deepEqual(extractMessageDiscriminant(DISCRIMINANT_SOURCE, "SDKResultMessage"), {
+    type: "result",
+    subtypes: ["error_during_execution", "error_max_turns", "success"],
+  })
+})
+
+test("extractMessageDiscriminant refuses a union whose members disagree on type", () => {
+  const mixed = DISCRIMINANT_SOURCE.replace(
+    "export declare type SDKResultError = {\n    type: 'result';",
+    "export declare type SDKResultError = {\n    type: 'other';"
+  )
+  assert.throws(
+    () => extractMessageDiscriminant(mixed, "SDKResultMessage"),
+    /mixes wire types \(result, other\)/
+  )
+})
+
+test("extractMessageDiscriminant names the member it could not find", () => {
+  assert.throws(() => extractMessageDiscriminant(DISCRIMINANT_SOURCE, "SDKGhost"), /SDKGhost/)
+})
+
+test("extractMessageDiscriminants covers every union member", () => {
+  const all = extractMessageDiscriminants(DISCRIMINANT_SOURCE)
+  assert.deepEqual(Object.keys(all).sort(), [
+    "SDKResultMessage",
+    "SDKStatusMessage",
+    "SDKToolProgressMessage",
+  ])
 })

@@ -20,11 +20,12 @@ import {
 } from "@/lib/db/mcp-servers"
 import {
   readAgentConfig,
+  readProjectMcpConfig,
   writeAgentConfig,
   type AgentReadResult,
   type AgentWriteResult,
 } from "./ipc"
-import { getAgentAdapter, requireAgentAdapter } from "./agents"
+import { CLAUDE_CODE_AGENT, getAgentAdapter, requireAgentAdapter } from "./agents"
 import { resolveBuiltinMcpConfig } from "./builtin-mcp/resolve"
 import { getBuiltinMcpRuntimeContext } from "./builtin-mcp/runtime-context"
 
@@ -266,6 +267,69 @@ export async function importFromAgent(
     const apps = { ...(server.appsEnabled ?? {}) }
     if (apps[agentId] === true) continue
     apps[agentId] = true
+    await updateMcpServer(server.id, { appsEnabled: apps })
+  }
+
+  return { ...result, previewed: preview.drafts.length }
+}
+
+// ---- Import (project-scoped `.mcp.json` → Cognia) ------------------------
+//
+// `<cwd>/.mcp.json` is Claude Code's committed, team-shared MCP file. The
+// standalone CLI has always loaded it (`cli/src/mcp/load-mcp-config.ts`); the
+// desktop only ever read the user-scope `~/.claude.json`, so a repo's servers
+// were invisible here. Import only — Cognia never writes into a file the
+// user's teammates share.
+
+/** Result of previewing the active workspace's `.mcp.json`. */
+export interface ProjectMcpImportPreview {
+  /** Absolute path probed, for the UI to show. */
+  path?: string
+  exists: boolean
+  parseError?: string
+  drafts: McpImportDraft[]
+}
+
+/**
+ * Read `<cwd>/.mcp.json` and return the drafts it would import. The file uses
+ * the same `{ mcpServers: … }` shape as `~/.claude.json`, so it reuses the
+ * Claude Code adapter's parser rather than duplicating it.
+ */
+export async function previewProjectMcpImport(cwd: string): Promise<ProjectMcpImportPreview> {
+  if (!isTauri() || !cwd.trim()) return { exists: false, drafts: [] }
+  try {
+    const cfg = await readProjectMcpConfig(cwd)
+    return {
+      path: cfg.path ?? undefined,
+      exists: cfg.exists,
+      parseError: cfg.parseError ?? undefined,
+      drafts: cfg.parsed != null ? CLAUDE_CODE_AGENT.parse(cfg.parsed) : [],
+    }
+  } catch (err) {
+    return { exists: false, drafts: [], parseError: errMessage(err) }
+  }
+}
+
+/**
+ * Import the active workspace's `.mcp.json` into Dexie. Unlike
+ * {@link importFromAgent} this flips `appsEnabled["claude-code"]` — the
+ * servers came from Claude Code's convention and belong to that agent — but it
+ * never projects anything back to disk.
+ */
+export async function importFromProjectMcp(
+  cwd: string,
+  strategy: McpImportStrategy = "skip"
+): Promise<McpBulkImportResult & { previewed: number }> {
+  const preview = await previewProjectMcpImport(cwd)
+  const result = await bulkImportMcpServers(preview.drafts, strategy)
+
+  const all = await listMcpServers()
+  const importedNames = new Set(preview.drafts.map((d) => d.name))
+  for (const server of all) {
+    if (!importedNames.has(server.name)) continue
+    const apps = { ...(server.appsEnabled ?? {}) }
+    if (apps["claude-code"] === true) continue
+    apps["claude-code"] = true
     await updateMcpServer(server.id, { appsEnabled: apps })
   }
 

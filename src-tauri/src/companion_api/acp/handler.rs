@@ -33,6 +33,7 @@ use axum::{
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::path::{Component, Path};
 use tokio::time::{interval, Duration, Instant};
 
 use super::super::{
@@ -40,7 +41,8 @@ use super::super::{
     SharedState,
 };
 use super::registry::{
-    lookup_resume_info, record_resume_info, ConnectionSessions, PendingPrompt, ResumeInfo,
+    list_catalog, lookup_catalog, lookup_resume_info, record_resume_info, remove_catalog,
+    update_catalog, upsert_catalog, AcpCatalogEntry, ConnectionSessions, PendingPrompt, ResumeInfo,
     SessionEntry,
 };
 use super::translate::{translate_frame, AcpOutbound};
@@ -66,6 +68,26 @@ fn as_response_id(id: &Value) -> Option<u64> {
         .or_else(|| id.as_str().and_then(|s| s.parse::<u64>().ok()))
 }
 
+fn normalize_workspace_path(path: &str) -> Result<String, &'static str> {
+    let candidate = Path::new(path);
+    if !candidate.is_absolute()
+        || candidate
+            .components()
+            .any(|part| part == Component::ParentDir)
+    {
+        return Err("workspace paths must be absolute and traversal-free");
+    }
+    let normalized = candidate
+        .canonicalize()
+        .unwrap_or_else(|_| candidate.to_path_buf())
+        .to_string_lossy()
+        .into_owned();
+    if !crate::files::is_remote_workspace_path_allowed(&normalized) {
+        return Err("workspace path is outside the registered workspace roots");
+    }
+    Ok(normalized)
+}
+
 /// Axum handler for `GET /ws/v1/acp`. Mounted inside the protected block, so
 /// `require_device_jwt` has already verified the token; the [`DeviceContext`]
 /// is read off the request extensions *before* the upgrade consumes them
@@ -77,7 +99,14 @@ pub async fn acp_handler(
 ) -> Response {
     let ctx = request.extensions().get::<DeviceContext>().cloned();
     let (device_id, account_id, scope) = match ctx {
-        Some(ctx) => (ctx.device_id, Some(ctx.account_id), Some(ctx.scope)),
+        // The JWT `scope` is an authentication kind ("device"/"oidc"), not a
+        // workspace partition. Until the transport carries an explicit
+        // workspace identity, use the stable paired-device identity so one
+        // account's devices cannot see each other's local path catalog.
+        Some(ctx) => {
+            let workspace_scope = format!("device:{}", ctx.device_id);
+            (ctx.device_id, Some(ctx.account_id), Some(workspace_scope))
+        }
         None => (String::new(), None, None),
     };
 
@@ -169,8 +198,7 @@ impl AcpConnection {
         let params = msg.params.clone().unwrap_or(Value::Null);
 
         if msg.is_notification() {
-            self.handle_notification(&method, &params).await;
-            return Vec::new();
+            return self.handle_notification(&method, &params).await;
         }
 
         let id = msg.id.clone().unwrap_or(Value::Null);
@@ -188,11 +216,22 @@ impl AcpConnection {
                 rpc_error_code::INVALID_REQUEST,
                 "initialize must be called first",
             )],
-            "session/new" => self.handle_session_new(id, params),
-            "session/load" => self.handle_session_load(id, params),
-            "session/set_mode" => self.handle_session_set_mode(id, params),
-            "session/set_model" => self.handle_session_set_model(id, params),
+            "session/new" => self.handle_session_new(id, params).await,
+            "session/load" => self.handle_session_load(id, params).await,
+            "session/list" => self.handle_session_list(id, params).await,
+            "session/resume" => self.handle_session_resume(id, params).await,
+            "session/close" => self.handle_session_close(id, params).await,
+            "session/delete" => self.handle_session_delete(id, params).await,
+            "session/set_mode" => self.handle_session_set_mode(id, params).await,
+            "session/set_config_option" => self.handle_session_set_config_option(id, params).await,
+            "session/set_model" => self.handle_session_set_model(id, params).await,
             "session/prompt" => self.handle_session_prompt(id, params).await,
+            "authenticate" => vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                "Cognia ACP uses transport authentication and advertises no protocol auth methods",
+            )],
+            "logout" => vec![types::rpc_response(id, json!({}))],
             _ => vec![types::rpc_error(
                 id,
                 rpc_error_code::METHOD_NOT_FOUND,
@@ -201,7 +240,7 @@ impl AcpConnection {
         }
     }
 
-    fn handle_session_new(&mut self, id: &Value, params: &Value) -> Vec<Value> {
+    async fn handle_session_new(&mut self, id: &Value, params: &Value) -> Vec<Value> {
         let Some(cwd) = params.get("cwd").and_then(Value::as_str) else {
             return vec![types::rpc_error(
                 id,
@@ -209,26 +248,90 @@ impl AcpConnection {
                 "session/new requires `cwd`",
             )];
         };
+        let cwd = match normalize_workspace_path(cwd) {
+            Ok(cwd) => cwd,
+            Err(message) => {
+                return vec![types::rpc_error(
+                    id,
+                    rpc_error_code::INVALID_PARAMS,
+                    message,
+                )]
+            }
+        };
+        let additional_directories = match params.get("additionalDirectories") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(paths)) => {
+                let mut normalized = Vec::with_capacity(paths.len());
+                for path in paths {
+                    let Some(path) = path.as_str() else {
+                        return vec![types::rpc_error(
+                            id,
+                            rpc_error_code::INVALID_PARAMS,
+                            "additionalDirectories must contain only paths",
+                        )];
+                    };
+                    match normalize_workspace_path(path) {
+                        Ok(path) => normalized.push(path),
+                        Err(message) => {
+                            return vec![types::rpc_error(
+                                id,
+                                rpc_error_code::INVALID_PARAMS,
+                                message,
+                            )]
+                        }
+                    }
+                }
+                normalized
+            }
+            Some(_) => {
+                return vec![types::rpc_error(
+                    id,
+                    rpc_error_code::INVALID_PARAMS,
+                    "additionalDirectories must be an array",
+                )]
+            }
+        };
         let session_id = uuid::Uuid::new_v4().to_string();
         let entry = SessionEntry {
-            cwd: Some(cwd.to_string()),
+            cwd: Some(cwd.clone()),
+            additional_directories: additional_directories.clone(),
             ..Default::default()
         };
         self.sessions.insert(&session_id, entry);
         record_resume_info(
             &session_id,
             ResumeInfo {
-                cwd: Some(cwd.to_string()),
+                cwd: Some(cwd.clone()),
                 sdk_session_id: None,
             },
         );
+        let now = chrono::Utc::now().to_rfc3339();
+        if let Err(error) = upsert_catalog(AcpCatalogEntry {
+            session_id: session_id.clone(),
+            sdk_session_id: None,
+            cwd,
+            additional_directories,
+            title: None,
+            created_at: now.clone(),
+            updated_at: now,
+            selected_mode_id: None,
+            selected_model_id: None,
+            lifecycle: "active".to_string(),
+            account_id: self.account_id.clone(),
+            workspace_scope: self.scope.clone(),
+        })
+        .await
+        {
+            self.sessions.remove(&session_id);
+            return vec![types::rpc_error(id, rpc_error_code::INTERNAL_ERROR, &error)];
+        }
         vec![types::rpc_response(
             id,
             types::session_new_result(&session_id),
         )]
     }
 
-    fn handle_session_set_mode(&mut self, id: &Value, params: &Value) -> Vec<Value> {
+    async fn handle_session_set_mode(&mut self, id: &Value, params: &Value) -> Vec<Value> {
         let Some(session_id) = params.get("sessionId").and_then(Value::as_str) else {
             return vec![types::rpc_error(
                 id,
@@ -257,11 +360,89 @@ impl AcpConnection {
                 &format!("unknown session \"{session_id}\""),
             )];
         };
-        entry.selected_mode_id = Some(mode_id.to_string());
+        let mode_id = mode_id.to_string();
+        if let Err(error) = update_catalog(
+            session_id.to_string(),
+            self.account_id.clone(),
+            self.scope.clone(),
+            {
+                let mode_id = mode_id.clone();
+                move |catalog| catalog.selected_mode_id = Some(mode_id)
+            },
+        )
+        .await
+        {
+            return vec![types::rpc_error(id, rpc_error_code::INTERNAL_ERROR, &error)];
+        }
+        entry.selected_mode_id = Some(mode_id);
         vec![types::rpc_response(id, Value::Null)]
     }
 
-    fn handle_session_set_model(&mut self, id: &Value, params: &Value) -> Vec<Value> {
+    async fn handle_session_set_config_option(&mut self, id: &Value, params: &Value) -> Vec<Value> {
+        let Some(session_id) = params.get("sessionId").and_then(Value::as_str) else {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                "session/set_config_option requires `sessionId`",
+            )];
+        };
+        let Some(config_id) = params.get("configId").and_then(Value::as_str) else {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                "session/set_config_option requires `configId`",
+            )];
+        };
+        if config_id != "model" {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                &format!("unknown config option \"{config_id}\""),
+            )];
+        }
+        let Some(model_id) = params.get("value").and_then(Value::as_str) else {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                "model config value must be a string",
+            )];
+        };
+        if !types::is_valid_model(model_id) {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                &format!("unknown model \"{model_id}\""),
+            )];
+        }
+        let Some(entry) = self.sessions.get_mut(session_id) else {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                &format!("unknown session \"{session_id}\""),
+            )];
+        };
+        let model_id = model_id.to_string();
+        if let Err(error) = update_catalog(
+            session_id.to_string(),
+            self.account_id.clone(),
+            self.scope.clone(),
+            {
+                let model_id = model_id.clone();
+                move |catalog| catalog.selected_model_id = Some(model_id)
+            },
+        )
+        .await
+        {
+            return vec![types::rpc_error(id, rpc_error_code::INTERNAL_ERROR, &error)];
+        }
+        entry.selected_model_id = Some(model_id.clone());
+        vec![types::rpc_response(
+            id,
+            json!({ "configOptions": types::session_config_options(&model_id) }),
+        )]
+    }
+
+    async fn handle_session_set_model(&mut self, id: &Value, params: &Value) -> Vec<Value> {
         let Some(session_id) = params.get("sessionId").and_then(Value::as_str) else {
             return vec![types::rpc_error(
                 id,
@@ -290,42 +471,304 @@ impl AcpConnection {
                 &format!("unknown session \"{session_id}\""),
             )];
         };
-        entry.selected_model_id = Some(model_id.to_string());
+        let model_id = model_id.to_string();
+        if let Err(error) = update_catalog(
+            session_id.to_string(),
+            self.account_id.clone(),
+            self.scope.clone(),
+            {
+                let model_id = model_id.clone();
+                move |catalog| catalog.selected_model_id = Some(model_id)
+            },
+        )
+        .await
+        {
+            return vec![types::rpc_error(id, rpc_error_code::INTERNAL_ERROR, &error)];
+        }
+        entry.selected_model_id = Some(model_id);
         vec![types::rpc_response(id, Value::Null)]
     }
 
-    fn handle_session_load(&mut self, id: &Value, params: &Value) -> Vec<Value> {
+    async fn handle_session_list(&self, id: &Value, params: &Value) -> Vec<Value> {
+        let cursor = match params.get("cursor") {
+            None | Some(Value::Null) => 0,
+            Some(Value::String(cursor)) => match cursor.parse::<usize>() {
+                Ok(cursor) => cursor,
+                Err(_) => {
+                    return vec![types::rpc_error(
+                        id,
+                        rpc_error_code::INVALID_PARAMS,
+                        "invalid session cursor",
+                    )]
+                }
+            },
+            Some(_) => {
+                return vec![types::rpc_error(
+                    id,
+                    rpc_error_code::INVALID_PARAMS,
+                    "invalid session cursor",
+                )]
+            }
+        };
+        let cwd = params
+            .get("cwd")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let (sessions, next) = match list_catalog(
+            self.account_id.clone(),
+            self.scope.clone(),
+            cwd,
+            cursor,
+            50,
+        )
+        .await
+        {
+            Ok(page) => page,
+            Err(error) => {
+                return vec![types::rpc_error(id, rpc_error_code::INTERNAL_ERROR, &error)]
+            }
+        };
+        let sessions: Vec<Value> = sessions
+            .into_iter()
+            .map(|entry| {
+                json!({
+                    "sessionId": entry.session_id,
+                    "cwd": entry.cwd,
+                    "additionalDirectories": entry.additional_directories,
+                    "title": entry.title,
+                    "createdAt": entry.created_at,
+                    "updatedAt": entry.updated_at,
+                })
+            })
+            .collect();
+        vec![types::rpc_response(
+            id,
+            json!({
+                "sessions": sessions,
+                "nextCursor": next.map(|next| next.to_string()),
+            }),
+        )]
+    }
+
+    async fn restore_catalog_session(&mut self, id: &Value, params: &Value) -> Vec<Value> {
         let Some(session_id) = params.get("sessionId").and_then(Value::as_str) else {
             return vec![types::rpc_error(
                 id,
                 rpc_error_code::INVALID_PARAMS,
-                "session/load requires `sessionId`",
+                "session lifecycle request requires `sessionId`",
             )];
         };
         if self.sessions.contains(session_id) {
-            // Already live on this connection — nothing to restore.
-            return vec![types::rpc_response(id, Value::Null)];
+            let entry = self.sessions.get_mut(session_id).unwrap();
+            return vec![types::rpc_response(
+                id,
+                types::session_state_result(
+                    entry
+                        .selected_mode_id
+                        .as_deref()
+                        .unwrap_or(types::DEFAULT_MODE_ID),
+                    entry
+                        .selected_model_id
+                        .as_deref()
+                        .unwrap_or(types::DEFAULT_MODEL_ID),
+                ),
+            )];
         }
-        let Some(info) = lookup_resume_info(session_id) else {
+        let legacy_resume = lookup_resume_info(session_id);
+        let catalog = match lookup_catalog(
+            session_id.to_string(),
+            self.account_id.clone(),
+            self.scope.clone(),
+        )
+        .await
+        {
+            Err(error) => {
+                return vec![types::rpc_error(id, rpc_error_code::INTERNAL_ERROR, &error)]
+            }
+            Ok(Some(catalog)) => catalog,
+            // Pre-catalog compatibility is limited to unauthenticated test
+            // connections. Production connections never consult unscoped rows.
+            Ok(None) if self.account_id.is_none() => {
+                let Some(info) = legacy_resume.clone() else {
+                    return vec![types::rpc_error(
+                        id,
+                        rpc_error_code::INVALID_PARAMS,
+                        &format!("unknown session \"{session_id}\""),
+                    )];
+                };
+                let now = chrono::Utc::now().to_rfc3339();
+                AcpCatalogEntry {
+                    session_id: session_id.to_string(),
+                    sdk_session_id: info.sdk_session_id,
+                    cwd: params
+                        .get("cwd")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .or(info.cwd)
+                        .unwrap_or_else(|| "/".to_string()),
+                    additional_directories: Vec::new(),
+                    title: None,
+                    created_at: now.clone(),
+                    updated_at: now,
+                    selected_mode_id: None,
+                    selected_model_id: None,
+                    lifecycle: "active".to_string(),
+                    account_id: None,
+                    workspace_scope: self.scope.clone(),
+                }
+            }
+            Ok(None) => {
+                return vec![types::rpc_error(
+                    id,
+                    rpc_error_code::INVALID_PARAMS,
+                    &format!("unknown session \"{session_id}\""),
+                )]
+            }
+        };
+        let resume = legacy_resume
+            .and_then(|info| info.sdk_session_id)
+            .or_else(|| catalog.sdk_session_id.clone());
+        let selected_model_id = catalog.selected_model_id.clone();
+        let selected_mode_id = catalog.selected_mode_id.clone();
+        self.sessions.insert(
+            session_id,
+            SessionEntry {
+                cwd: Some(catalog.cwd),
+                additional_directories: catalog.additional_directories,
+                sdk_session_id: resume.clone(),
+                resume_session_id: resume,
+                selected_mode_id: selected_mode_id.clone(),
+                selected_model_id: selected_model_id.clone(),
+                ..Default::default()
+            },
+        );
+        if let Err(error) = update_catalog(
+            session_id.to_string(),
+            self.account_id.clone(),
+            self.scope.clone(),
+            |entry| entry.lifecycle = "active".to_string(),
+        )
+        .await
+        {
+            self.sessions.remove(session_id);
+            return vec![types::rpc_error(id, rpc_error_code::INTERNAL_ERROR, &error)];
+        }
+        vec![types::rpc_response(
+            id,
+            types::session_state_result(
+                selected_mode_id
+                    .as_deref()
+                    .unwrap_or(types::DEFAULT_MODE_ID),
+                selected_model_id
+                    .as_deref()
+                    .unwrap_or(types::DEFAULT_MODEL_ID),
+            ),
+        )]
+    }
+
+    async fn handle_session_resume(&mut self, id: &Value, params: &Value) -> Vec<Value> {
+        self.restore_catalog_session(id, params).await
+    }
+
+    async fn handle_session_close(&mut self, id: &Value, params: &Value) -> Vec<Value> {
+        let Some(session_id) = params.get("sessionId").and_then(Value::as_str) else {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                "session/close requires `sessionId`",
+            )];
+        };
+        let Some(entry) = self.sessions.remove(session_id) else {
             return vec![types::rpc_error(
                 id,
                 rpc_error_code::INVALID_PARAMS,
                 &format!("unknown session \"{session_id}\""),
             )];
         };
-        let cwd = params
-            .get("cwd")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .or(info.cwd);
-        let entry = SessionEntry {
-            cwd,
-            resume_session_id: info.sdk_session_id.clone(),
-            sdk_session_id: info.sdk_session_id,
-            ..Default::default()
+        let mut messages = Vec::new();
+        if let Some(pending) = entry.pending_prompt {
+            let _ = self
+                .dispatch("claude_interrupt", json!({ "session_id": session_id }))
+                .await;
+            messages.push(types::rpc_error(
+                &pending.rpc_id,
+                rpc_error_code::REQUEST_CANCELLED,
+                "request cancelled because the session was closed",
+            ));
+        }
+        if let Err(error) = update_catalog(
+            session_id.to_string(),
+            self.account_id.clone(),
+            self.scope.clone(),
+            |catalog| catalog.lifecycle = "closed".to_string(),
+        )
+        .await
+        {
+            messages.push(types::rpc_error(id, rpc_error_code::INTERNAL_ERROR, &error));
+            return messages;
+        }
+        messages.push(types::rpc_response(id, json!({})));
+        messages
+    }
+
+    async fn handle_session_delete(&mut self, id: &Value, params: &Value) -> Vec<Value> {
+        let Some(session_id) = params.get("sessionId").and_then(Value::as_str) else {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                "session/delete requires `sessionId`",
+            )];
         };
-        self.sessions.insert(session_id, entry);
-        vec![types::rpc_response(id, Value::Null)]
+        let catalog = match lookup_catalog(
+            session_id.to_string(),
+            self.account_id.clone(),
+            self.scope.clone(),
+        )
+        .await
+        {
+            Ok(catalog) => catalog,
+            Err(error) => {
+                return vec![types::rpc_error(id, rpc_error_code::INTERNAL_ERROR, &error)]
+            }
+        };
+        if catalog.is_none() {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                &format!("unknown session \"{session_id}\""),
+            )];
+        }
+        let pending = self
+            .sessions
+            .remove(session_id)
+            .and_then(|entry| entry.pending_prompt);
+        let mut messages = Vec::new();
+        if let Some(pending) = pending {
+            messages.push(types::rpc_error(
+                &pending.rpc_id,
+                rpc_error_code::REQUEST_CANCELLED,
+                "request cancelled because the session was deleted",
+            ));
+        }
+        let _ = self
+            .dispatch("claude_close_session", json!({ "session_id": session_id }))
+            .await;
+        if let Err(error) = remove_catalog(
+            session_id.to_string(),
+            self.account_id.clone(),
+            self.scope.clone(),
+        )
+        .await
+        {
+            messages.push(types::rpc_error(id, rpc_error_code::INTERNAL_ERROR, &error));
+            return messages;
+        }
+        messages.push(types::rpc_response(id, json!({})));
+        messages
+    }
+
+    async fn handle_session_load(&mut self, id: &Value, params: &Value) -> Vec<Value> {
+        self.restore_catalog_session(id, params).await
     }
 
     async fn handle_session_prompt(&mut self, id: &Value, params: &Value) -> Vec<Value> {
@@ -350,7 +793,7 @@ impl AcpConnection {
         };
 
         // Validate session + single-turn invariant, and collect send options.
-        let (cwd, resume_session_id, selected_mode_id, selected_model_id) = {
+        let (cwd, additional_directories, resume_session_id, selected_mode_id, selected_model_id) = {
             let Some(entry) = self.sessions.get_mut(&session_id) else {
                 return vec![types::rpc_error(
                     id,
@@ -367,6 +810,7 @@ impl AcpConnection {
             }
             (
                 entry.cwd.clone(),
+                entry.additional_directories.clone(),
                 entry.resume_session_id.take(),
                 entry.selected_mode_id.clone(),
                 entry.selected_model_id.clone(),
@@ -376,6 +820,12 @@ impl AcpConnection {
         let mut options = serde_json::Map::new();
         if let Some(cwd) = cwd {
             options.insert("cwd".to_string(), json!(cwd));
+        }
+        if !additional_directories.is_empty() {
+            options.insert(
+                "additionalDirectories".to_string(),
+                json!(additional_directories),
+            );
         }
         if let Some(resume) = resume_session_id {
             options.insert("resumeSessionId".to_string(), json!(resume));
@@ -422,12 +872,15 @@ impl AcpConnection {
         Vec::new()
     }
 
-    async fn handle_notification(&mut self, method: &str, params: &Value) {
+    async fn handle_notification(&mut self, method: &str, params: &Value) -> Vec<Value> {
+        if method == "$/cancel_request" {
+            return self.handle_request_cancellation(params).await;
+        }
         if method != "session/cancel" {
-            return;
+            return Vec::new();
         }
         let Some(session_id) = params.get("sessionId").and_then(Value::as_str) else {
-            return;
+            return Vec::new();
         };
         let session_id = session_id.to_string();
         if let Some(entry) = self.sessions.get_mut(&session_id) {
@@ -435,7 +888,7 @@ impl AcpConnection {
                 pending.cancelled = true;
             }
         } else {
-            return;
+            return Vec::new();
         }
         if let Err(message) = self
             .dispatch("claude_interrupt", json!({ "session_id": session_id }))
@@ -443,6 +896,63 @@ impl AcpConnection {
         {
             log::warn!("companion-api acp: claude_interrupt failed: {message}");
         }
+        Vec::new()
+    }
+
+    async fn handle_request_cancellation(&mut self, params: &Value) -> Vec<Value> {
+        let Some(request_id) = params.get("requestId") else {
+            return Vec::new();
+        };
+
+        let mut cancelled_prompt = None;
+        for (session_id, entry) in self.sessions.iter_mut() {
+            let matches = entry
+                .pending_prompt
+                .as_ref()
+                .is_some_and(|pending| pending.rpc_id == *request_id);
+            if matches {
+                cancelled_prompt = entry
+                    .pending_prompt
+                    .take()
+                    .map(|pending| (session_id.clone(), pending.rpc_id));
+                break;
+            }
+        }
+        if let Some((session_id, rpc_id)) = cancelled_prompt {
+            if let Err(message) = self
+                .dispatch("claude_interrupt", json!({ "session_id": session_id }))
+                .await
+            {
+                log::warn!("companion-api acp: request cancellation interrupt failed: {message}");
+            }
+            return vec![types::rpc_error(
+                &rpc_id,
+                rpc_error_code::REQUEST_CANCELLED,
+                "Request cancelled",
+            )];
+        }
+
+        let Some(out_id) = as_response_id(request_id) else {
+            return Vec::new();
+        };
+        let Some((session_id, sidecar_request_id)) = self.pending_permissions.remove(&out_id)
+        else {
+            return Vec::new();
+        };
+        if let Err(message) = self
+            .dispatch(
+                "claude_approve",
+                json!({
+                    "session_id": session_id,
+                    "request_id": sidecar_request_id,
+                    "decision": "deny",
+                }),
+            )
+            .await
+        {
+            log::warn!("companion-api acp: cancelled permission denial failed: {message}");
+        }
+        Vec::new()
     }
 
     /// A response to a server→client `session/request_permission` request.
@@ -547,9 +1057,19 @@ impl AcpConnection {
                         &session_id,
                         ResumeInfo {
                             cwd,
-                            sdk_session_id: Some(sdk_id),
+                            sdk_session_id: Some(sdk_id.clone()),
                         },
                     );
+                    if let Err(error) = update_catalog(
+                        session_id.clone(),
+                        self.account_id.clone(),
+                        self.scope.clone(),
+                        move |catalog| catalog.sdk_session_id = Some(sdk_id),
+                    )
+                    .await
+                    {
+                        log::warn!("ACP catalog SDK session update failed: {error}");
+                    }
                 }
             }
         }
@@ -754,6 +1274,15 @@ mod tests {
         )
     }
 
+    fn scoped_test_conn(account_id: &str, workspace: &str) -> AcpConnection {
+        AcpConnection::new(
+            test_state(),
+            format!("device-{account_id}"),
+            Some(account_id.to_string()),
+            Some(workspace.to_string()),
+        )
+    }
+
     async fn initialize(conn: &mut AcpConnection) {
         let out = conn
             .handle_message(r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}"#)
@@ -762,11 +1291,19 @@ mod tests {
     }
 
     async fn new_session(conn: &mut AcpConnection) -> String {
-        let out = conn
-            .handle_message(
-                r#"{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"/repo"}}"#,
-            )
-            .await;
+        let cwd = std::env::current_dir()
+            .expect("current dir")
+            .to_string_lossy()
+            .to_string();
+        crate::files::set_allowed_roots(vec![cwd.clone()]);
+        let message = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": { "cwd": cwd },
+        })
+        .to_string();
+        let out = conn.handle_message(&message).await;
         out[0]["result"]["sessionId"].as_str().unwrap().to_string()
     }
 
@@ -794,13 +1331,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn session_new_mints_id_and_records_resume_info() {
+    async fn session_new_mints_id_and_tracks_cwd() {
         let mut conn = test_conn();
         initialize(&mut conn).await;
         let session_id = new_session(&mut conn).await;
         assert!(conn.sessions.contains(&session_id));
-        let info = lookup_resume_info(&session_id).unwrap();
-        assert_eq!(info.cwd, Some("/repo".to_string()));
+        let cwd = conn.sessions.get_mut(&session_id).unwrap().cwd.clone();
+        assert_eq!(
+            cwd,
+            Some(
+                std::env::current_dir()
+                    .expect("current dir")
+                    .to_string_lossy()
+                    .to_string()
+            )
+        );
     }
 
     #[tokio::test]
@@ -827,9 +1372,20 @@ mod tests {
     async fn session_new_advertises_modes_and_models() {
         let mut conn = test_conn();
         initialize(&mut conn).await;
+        let cwd = std::env::current_dir()
+            .expect("current dir")
+            .to_string_lossy()
+            .to_string();
+        crate::files::set_allowed_roots(vec![cwd.clone()]);
         let out = conn
             .handle_message(
-                r#"{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"/repo"}}"#,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "session/new",
+                    "params": { "cwd": cwd },
+                })
+                .to_string(),
             )
             .await;
         let result = &out[0]["result"];
@@ -911,6 +1467,172 @@ mod tests {
         );
         let out = conn.handle_message(&msg).await;
         assert_eq!(out[0]["error"]["code"], rpc_error_code::INVALID_PARAMS);
+    }
+
+    #[tokio::test]
+    async fn stable_set_config_option_updates_model_and_returns_full_options() {
+        let mut conn = test_conn();
+        initialize(&mut conn).await;
+        let session_id = new_session(&mut conn).await;
+        let msg = format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"session/set_config_option","params":{{"sessionId":"{session_id}","configId":"model","value":"claude-opus-4-8"}}}}"#
+        );
+        let out = conn.handle_message(&msg).await;
+        assert_eq!(
+            out[0]["result"]["configOptions"][0]["currentValue"],
+            "claude-opus-4-8"
+        );
+        assert_eq!(
+            conn.sessions
+                .get_mut(&session_id)
+                .unwrap()
+                .selected_model_id,
+            Some("claude-opus-4-8".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn stable_list_close_resume_and_delete_lifecycle() {
+        super::super::registry::reset_catalog_for_tests();
+        let mut conn = test_conn();
+        initialize(&mut conn).await;
+        let session_id = new_session(&mut conn).await;
+
+        let listed = conn
+            .handle_message(r#"{"jsonrpc":"2.0","id":2,"method":"session/list","params":{}}"#)
+            .await;
+        assert!(listed[0]["result"]["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|session| session["sessionId"] == session_id));
+
+        let close = format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"session/close","params":{{"sessionId":"{session_id}"}}}}"#
+        );
+        let closed = conn.handle_message(&close).await;
+        assert!(closed[0]["result"].is_object());
+        assert!(!conn.sessions.contains(&session_id));
+
+        let resume = format!(
+            r#"{{"jsonrpc":"2.0","id":4,"method":"session/resume","params":{{"sessionId":"{session_id}"}}}}"#
+        );
+        let resumed = conn.handle_message(&resume).await;
+        assert_eq!(
+            resumed[0]["result"]["configOptions"][0]["category"],
+            "model_config"
+        );
+        assert!(conn.sessions.contains(&session_id));
+
+        let delete = format!(
+            r#"{{"jsonrpc":"2.0","id":5,"method":"session/delete","params":{{"sessionId":"{session_id}"}}}}"#
+        );
+        let deleted = conn.handle_message(&delete).await;
+        assert!(deleted[0]["result"].is_object());
+        let listed = conn
+            .handle_message(r#"{"jsonrpc":"2.0","id":6,"method":"session/list","params":{}}"#)
+            .await;
+        assert!(!listed[0]["result"]["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|session| session["sessionId"] == session_id));
+    }
+
+    #[tokio::test]
+    async fn close_settles_the_parked_prompt_as_request_cancelled() {
+        super::super::registry::reset_catalog_for_tests();
+        let mut conn = test_conn();
+        initialize(&mut conn).await;
+        let session_id = new_session(&mut conn).await;
+        conn.sessions.get_mut(&session_id).unwrap().pending_prompt = Some(PendingPrompt {
+            rpc_id: json!(41),
+            cancelled: false,
+        });
+
+        let closed = conn
+            .handle_message(
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 42,
+                    "method": "session/close",
+                    "params": { "sessionId": session_id },
+                })
+                .to_string(),
+            )
+            .await;
+
+        assert_eq!(closed.len(), 2);
+        assert_eq!(closed[0]["id"], 41);
+        assert_eq!(
+            closed[0]["error"]["code"],
+            rpc_error_code::REQUEST_CANCELLED
+        );
+        assert_eq!(closed[1]["id"], 42);
+        assert!(closed[1]["result"].is_object());
+    }
+
+    #[tokio::test]
+    async fn delete_settles_the_parked_prompt_as_request_cancelled() {
+        super::super::registry::reset_catalog_for_tests();
+        let mut conn = test_conn();
+        initialize(&mut conn).await;
+        let session_id = new_session(&mut conn).await;
+        conn.sessions.get_mut(&session_id).unwrap().pending_prompt = Some(PendingPrompt {
+            rpc_id: json!(51),
+            cancelled: false,
+        });
+
+        let deleted = conn
+            .handle_message(
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 52,
+                    "method": "session/delete",
+                    "params": { "sessionId": session_id },
+                })
+                .to_string(),
+            )
+            .await;
+
+        assert_eq!(deleted.len(), 2);
+        assert_eq!(deleted[0]["id"], 51);
+        assert_eq!(
+            deleted[0]["error"]["code"],
+            rpc_error_code::REQUEST_CANCELLED
+        );
+        assert_eq!(deleted[1]["id"], 52);
+        assert!(deleted[1]["result"].is_object());
+    }
+
+    #[tokio::test]
+    async fn session_catalog_never_crosses_account_or_workspace_scope() {
+        let mut owner = scoped_test_conn("account-owner", "workspace-a");
+        initialize(&mut owner).await;
+        let session_id = new_session(&mut owner).await;
+
+        let mut other_account = scoped_test_conn("account-other", "workspace-a");
+        initialize(&mut other_account).await;
+        let listed = other_account
+            .handle_message(
+                r#"{"jsonrpc":"2.0","id":2,"method":"session/list","params":{"cwd":"/repo"}}"#,
+            )
+            .await;
+        assert!(!listed[0]["result"]["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|session| session["sessionId"] == session_id));
+        let resume = format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"session/resume","params":{{"sessionId":"{session_id}"}}}}"#
+        );
+        let denied = other_account.handle_message(&resume).await;
+        assert_eq!(denied[0]["error"]["code"], rpc_error_code::INVALID_PARAMS);
+
+        let mut other_workspace = scoped_test_conn("account-owner", "workspace-b");
+        initialize(&mut other_workspace).await;
+        let denied = other_workspace.handle_message(&resume).await;
+        assert_eq!(denied[0]["error"]["code"], rpc_error_code::INVALID_PARAMS);
     }
 
     #[test]
@@ -1054,6 +1776,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn request_cancellation_interrupts_matching_prompt_and_returns_minus_32800() {
+        let mut conn = test_conn();
+        initialize(&mut conn).await;
+        let session_id = new_session(&mut conn).await;
+        conn.sessions.get_mut(&session_id).unwrap().pending_prompt = Some(PendingPrompt {
+            rpc_id: json!(42),
+            cancelled: false,
+        });
+        let out = conn
+            .handle_message(
+                r#"{"jsonrpc":"2.0","method":"$/cancel_request","params":{"requestId":42}}"#,
+            )
+            .await;
+
+        assert_eq!(out[0]["id"], 42);
+        assert_eq!(out[0]["error"]["code"], rpc_error_code::REQUEST_CANCELLED);
+        assert!(conn
+            .sessions
+            .get_mut(&session_id)
+            .unwrap()
+            .pending_prompt
+            .is_none());
+    }
+
+    #[tokio::test]
     async fn turn_end_resolves_parked_prompt() {
         let mut conn = test_conn();
         initialize(&mut conn).await;
@@ -1184,6 +1931,7 @@ mod tests {
 
     #[tokio::test]
     async fn sdk_session_id_updates_resume_index() {
+        let _guard = super::super::registry::resume_test_lock();
         let mut conn = test_conn();
         initialize(&mut conn).await;
         let session_id = new_session(&mut conn).await;

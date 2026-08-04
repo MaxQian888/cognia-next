@@ -36,17 +36,37 @@ import "./fetch-interceptor.mjs"
 import { initializeTelemetry, shutdownTelemetry } from "./telemetry.mjs"
 
 initializeTelemetry()
-process.once("beforeExit", () => void shutdownTelemetry())
+process.once("beforeExit", () => {
+  void shutdownTelemetry()
+  // Warm subprocesses are real processes with no parent watching them once we
+  // go away — dropping the pool without closing would leave them running.
+  resetWarmPool()
+})
 
 import readline from "node:readline"
 import { createRequire } from "node:module"
 import { pathToFileURL } from "node:url"
 import { dispatch } from "./dispatch/index.mjs"
-import { capabilityError, commandSupported } from "./dispatch/runtime-adapter.mjs"
+import {
+  capabilityError,
+  capabilitySupported,
+  commandSupported,
+} from "./dispatch/runtime-adapter.mjs"
 import { createEnvelopeEmitter } from "./dispatch/event-envelope.mjs"
-import { isControlMethod, controlArgs, buildControlResponse } from "./dispatch/control.mjs"
+import { sendExpectsStructuredOutput } from "./dispatch/claude-sdk-options.mjs"
+import { sessionStoreFromSendOptions } from "./dispatch/session-store.mjs"
+import { handleSessionApi } from "./dispatch/session-api.mjs"
+import { resetWarmPool } from "./dispatch/prewarm.mjs"
+import {
+  isControlMethod,
+  controlArgs,
+  controlMethodCapability,
+  controlParamError,
+  buildControlResponse,
+} from "./dispatch/control.mjs"
 import { createFeatureCallHandler } from "./dispatch/feature-call.mjs"
 import { createHostRpc } from "./host-rpc.mjs"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 // Resolve sidecar + SDK versions for the `ready` payload. createRequire is
 // used so we can read package.json without taking JSON-import dependency on
@@ -179,6 +199,37 @@ export function makeWrappedEmit(emitFn, sessionsMap, sessionId, getOwner, turnRe
   }
 }
 
+/**
+ * Build the `createEnvelopeEmitter` arguments for a send, or `null` when this
+ * session carries no frozen execution spec.
+ *
+ * Split out of {@link startSession} so the mapping from send options to emitter
+ * configuration is reachable by a test. It is pure, and every field it derives
+ * is a defaulting decision that used to be invisible.
+ *
+ * @param {{ sessionId: string, sendOptions: any, turnRef: { id?: string }, emit: (msg: any) => void }} args
+ */
+export function envelopeEmitterParams({ sessionId, sendOptions, turnRef, emit }) {
+  const execution = sendOptions?.execution
+  if (!execution) return null
+  return {
+    sessionId,
+    runId: execution.identity?.runId ?? sessionId,
+    attemptId: execution.identity?.attemptId ?? "a1",
+    parentRunId: execution.identity?.parentRunId,
+    hostRef: execution.hostRef ?? "desktop-sidecar",
+    runtime: execution.runtimeAdapter,
+    turnRef,
+    // Read once per loop, unlike `turnRef` which `handleSend` advances: only
+    // the Claude rail supports `outputFormat`, and that rail restarts the
+    // session on every send (`session_ended` evicts a non-multiTurn session),
+    // so this emitter never outlives the options it was built from. A
+    // multi-turn rail that later gains structured output would need a ref.
+    expectStructuredOutput: sendExpectsStructuredOutput(sendOptions),
+    emit,
+  }
+}
+
 function startSession(sessionId, firstPrompt, sendOptions = {}) {
   // Wired after `dispatch` returns so the wrapped emitter can verify it still
   // owns the map entry before retiring it (defends against a superseded old
@@ -190,19 +241,8 @@ function startSession(sessionId, firstPrompt, sendOptions = {}) {
   // ADR-0090 Phase 3: sessions carrying a frozen execution spec ALSO emit
   // canonical `agent_event` envelopes (additive dual channel); legacy
   // sessions pay nothing.
-  const execution = sendOptions?.execution
-  const baseEmit = execution
-    ? createEnvelopeEmitter({
-        sessionId,
-        runId: execution.identity?.runId ?? sessionId,
-        attemptId: execution.identity?.attemptId ?? "a1",
-        parentRunId: execution.identity?.parentRunId,
-        hostRef: execution.hostRef ?? "desktop-sidecar",
-        runtime: execution.runtimeAdapter,
-        turnRef,
-        emit,
-      })
-    : emit
+  const emitterParams = envelopeEmitterParams({ sessionId, sendOptions, turnRef, emit })
+  const baseEmit = emitterParams ? createEnvelopeEmitter(emitterParams) : emit
   const wrappedEmit = makeWrappedEmit(
     baseEmit,
     sessions,
@@ -221,7 +261,7 @@ function startSession(sessionId, firstPrompt, sendOptions = {}) {
   if (!session) return null
   ownerRef.session = session
   session.turnRef = turnRef
-  session.runtimeAdapterId = execution?.runtimeAdapter
+  session.runtimeAdapterId = emitterParams?.runtime
   sessions.set(sessionId, session)
   return session
 }
@@ -284,6 +324,30 @@ export function restartReason(existing, options) {
   return null
 }
 
+export function providerVisibleSendPayloadIsSafe({ prompt, options }) {
+  const sdk = options?.claudeAgentSdk
+  return hasNoLeakingPiiDeep({
+    prompt,
+    systemPrompt: options?.systemPrompt,
+    appendSystemPrompt: options?.appendSystemPrompt,
+    ...(options?.agents ? { agents: options.agents } : {}),
+    ...(sdk
+      ? {
+          claudeAgentSdk: {
+            outputFormat: sdk.outputFormat,
+            permissionPromptToolName: sdk.permissionPromptToolName,
+            planModeInstructions: sdk.planModeInstructions,
+            plugins: sdk.plugins,
+            skills: sdk.skills,
+            toolAliases: sdk.toolAliases,
+            toolConfig: sdk.toolConfig,
+            tools: sdk.tools,
+          },
+        }
+      : {}),
+  })
+}
+
 function handleSend(msg) {
   const { sessionId, prompt, options } = msg
   if (!sessionId) {
@@ -292,6 +356,18 @@ function handleSend(msg) {
   }
   if (typeof prompt !== "string" && !Array.isArray(prompt)) {
     log("error", "send: prompt must be string or content-block array")
+    return
+  }
+  // This is the final shared boundary before provider execution. Renderer
+  // callers already apply the same gate, but headless/ACP callers do not pass
+  // through the renderer and must fail closed here as well.
+  if (!providerVisibleSendPayloadIsSafe({ prompt, options })) {
+    log("error", "send: provider-visible payload rejected by the PII gate")
+    emit({
+      type: "session_ended",
+      sessionId,
+      error: "provider-visible payload rejected by the PII gate",
+    })
     return
   }
   const existing = sessions.get(sessionId)
@@ -505,17 +581,71 @@ export function routeSteer(sessionsMap, msg) {
   }
 }
 
-// Drive a live session's SDK `Query` control method (getContextUsage,
-// mcpServerStatus, reconnectMcpServer, toggleMcpServer, supportedModels,
-// supportedCommands, setModel) and reply with a `control_response` correlated by
-// `requestId`. These methods are streaming-input-only and Anthropic-path only
-// (the ai-sdk `q` lacks them → `unsupported_provider`). Never throws — a control
-// request must never fault the host (mirrors handleSetMode / handleInterrupt).
+/**
+ * Decide whether a control frame must be refused, without touching the live
+ * session. Returns `{ error, capability? }` or null when the frame is fine.
+ *
+ * Ordered cheapest-and-most-specific first, and deliberately BEFORE the
+ * session lookup: whether an adapter can serve a control is a property of the
+ * resolved spec, so the answer must not depend on whether a loop happens to
+ * still be running. `no_active_session` and `unsupported_provider` are decided
+ * afterwards by the caller, because only they need the live object.
+ *
+ * A session with no frozen adapter id is never capability-gated — ADR-0090
+ * constraint 6 keeps the legacy queue byte-identical, and there a method the
+ * runtime lacks still reports the old `unsupported_provider`.
+ *
+ * @param {string | undefined} adapterId  the session's frozen runtime adapter
+ * @param {unknown} method
+ * @param {any} params
+ * @returns {{ error: string, capability?: string } | null}
+ */
+export function controlPreflight(adapterId, method, params) {
+  if (!isControlMethod(method)) return { error: "unknown_method" }
+  const capability = controlMethodCapability(method)
+  if (adapterId && capability && !capabilitySupported(adapterId, capability)) {
+    return { error: "capability_error", capability }
+  }
+  const paramError = controlParamError(method, params)
+  return paramError ? { error: paramError } : null
+}
+
+/**
+ * Drive a live session's SDK `Query` control method and reply with a
+ * `control_response` correlated by `requestId`. The allowlist and the
+ * param→positional mapping live in `dispatch/control.mjs`, generated from
+ * `protocol/agent-control-methods.json`.
+ *
+ * These methods are streaming-input-only and Anthropic-path only, so the
+ * ai-sdk rail's `q` simply lacks them. Four rejections, in the order they can
+ * be decided — cheapest and most specific first:
+ *
+ *   `unknown_method`     the method is not on the allowlist at all
+ *   `capability_error`   the session's FROZEN adapter cannot serve it
+ *   `no_active_session`  nothing live to call
+ *   `unsupported_provider` the live query object has no such method
+ *
+ * The capability check comes before the session lookup on purpose: the answer
+ * is a property of the resolved spec, not of whether a loop happens to still
+ * be running, so it must not depend on timing. It applies only to sessions
+ * carrying a frozen spec — ADR-0090 constraint 6 keeps the legacy queue
+ * byte-identical, and there a missing method still reports the old
+ * `unsupported_provider`.
+ *
+ * Never throws: a control request must never fault the host (mirrors
+ * handleSetMode / handleInterrupt).
+ */
 async function handleControl(msg) {
   const { sessionId, requestId, method, params } = msg
   const respond = (extra) => emit(buildControlResponse({ sessionId, requestId, method, ...extra }))
-  if (!isControlMethod(method)) {
-    respond({ ok: false, error: "unknown_method" })
+
+  const rejection = controlPreflight(sessions.get(sessionId)?.runtimeAdapterId, method, params)
+  if (rejection) {
+    // A capability miss ALSO gets the typed `capability_error` event, because
+    // that is what the canonical event stream carries; the control_response is
+    // only how this particular request settles.
+    if (rejection.capability) emit(capabilityError(sessionId, rejection.capability, method))
+    respond({ ok: false, error: rejection.error })
     return
   }
   if (method === "steer") {
@@ -553,29 +683,98 @@ async function handleControl(msg) {
  * `Tool permission request failed: ZodError`. When neither an edited input nor
  * a captured original is present, fall back to an empty record `{}` (which the
  * zod schema accepts) so the guarantee lives in THIS function, not solely in
- * the caller. `allow_always` is enforced parent-side (it stops re-asking); for
- * this individual call it is a plain allow.
+ * the caller.
+ *
+ * `allow_always` used to be treated as a plain allow, with the "stop asking"
+ * half enforced only parent-side. That left the user's intent stranded: the SDK
+ * has `updatedPermissions` for exactly this, and without it the CLI's own rule
+ * store never learned the decision — so "always allow" held for the renderer's
+ * session and nowhere else. It now returns the suggestions the SDK offered
+ * alongside the request.
+ *
+ * Suggestions targeting `localSettings` are dropped. Those write to the user's
+ * on-disk settings file, and a click in a chat approval dialog is consent for
+ * this session, not consent to edit their configuration.
+ *
+ * `rich` gates all of it. The legacy `claude_send` queue is still production
+ * (ADR-0090 constraint 6: flag-off paths keep byte-identical behaviour), and
+ * this is the same function on both rails — so the extra fields appear only for
+ * a session carrying a frozen execution spec.
  *
  * @param {"allow"|"allow_always"|"deny"} decision
- * @param {{ updatedInput?: Record<string, unknown>, message?: string, input?: Record<string, unknown> }} opts
- * @returns {{ behavior: "allow", updatedInput?: Record<string, unknown> } | { behavior: "deny", message: string }}
+ * @param {{
+ *   updatedInput?: Record<string, unknown>,
+ *   message?: string,
+ *   input?: Record<string, unknown>,
+ *   suggestions?: Array<Record<string, unknown>>,
+ *   interrupt?: boolean,
+ * }} opts
  */
-export function buildPermissionResult(decision, { updatedInput, message, input } = {}) {
+export function buildPermissionResult(
+  decision,
+  { updatedInput, message, input, suggestions, interrupt, rich = false } = {}
+) {
   if (decision === "deny") {
-    return { behavior: "deny", message: message ?? "denied by user" }
+    return {
+      behavior: "deny",
+      message: message ?? "denied by user",
+      ...(rich && interrupt ? { interrupt: true } : {}),
+      ...(rich ? { decisionClassification: "user_reject" } : {}),
+    }
   }
-  return { behavior: "allow", updatedInput: updatedInput ?? input ?? {} }
+
+  const always = decision === "allow_always"
+  const durable = rich && always ? persistableSuggestions(suggestions) : []
+
+  return {
+    behavior: "allow",
+    updatedInput: updatedInput ?? input ?? {},
+    ...(durable.length > 0 ? { updatedPermissions: durable } : {}),
+    ...(rich ? { decisionClassification: always ? "user_permanent" : "user_temporary" } : {}),
+  }
+}
+
+/**
+ * The suggestions an "always allow" may act on.
+ *
+ * `localSettings` is excluded on purpose — see {@link buildPermissionResult}.
+ * Anything with an unrecognised shape is dropped rather than forwarded: these
+ * become permission RULES, so a malformed entry is the one case where guessing
+ * is worse than doing nothing.
+ */
+export function persistableSuggestions(suggestions) {
+  if (!Array.isArray(suggestions)) return []
+  return suggestions.filter(
+    (s) =>
+      s &&
+      typeof s === "object" &&
+      typeof s.type === "string" &&
+      typeof s.destination === "string" &&
+      s.destination !== "localSettings"
+  )
 }
 
 function handlePermissionResponse(msg) {
-  const { sessionId, requestId, decision, updatedInput, message } = msg
+  const { sessionId, requestId, decision, updatedInput, message, interrupt } = msg
   const s = sessions.get(sessionId)
   if (!s) return
   const pending = s.pendingApprovals.get(requestId)
   if (!pending) return
   s.pendingApprovals.delete(requestId)
 
-  pending.resolve(buildPermissionResult(decision, { updatedInput, message, input: pending.input }))
+  pending.resolve(
+    buildPermissionResult(decision, {
+      updatedInput,
+      message,
+      input: pending.input,
+      // The SDK's own suggestions, captured when the request was raised — not
+      // anything the renderer supplied. A renderer-authored rule set would be
+      // an unreviewed write into the permission store.
+      suggestions: pending.suggestions,
+      interrupt,
+      rich: Boolean(s.sendOptions?.execution),
+    })
+  )
 }
 
 /**
@@ -768,6 +967,15 @@ function startReadLoop() {
         break
       case "control":
         void handleControl(msg)
+        break
+      case "session_api":
+        // Session-level reads and mutations that need no live session (list,
+        // rename, fork, import, …). Separate from `control` because those
+        // resolve a running query by id and these deliberately do not.
+        void handleSessionApi(msg, {
+          emit,
+          store: sessionStoreFromSendOptions(msg?.sendOptions ?? {}, { hostRpc, log }),
+        })
         break
       case "feature_call":
         void featureCalls.call(msg)

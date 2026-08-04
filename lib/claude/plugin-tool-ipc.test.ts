@@ -9,6 +9,7 @@ import {
   __setSkillToolDepsForTesting,
   __setSlashToolDepsForTesting,
   __setVectorToolDepsForTesting,
+  __setSpawnTaskToolDepsForTesting,
   handlePluginToolExec,
   type PluginToolExecRequest,
   type PluginToolResolver,
@@ -84,6 +85,7 @@ describe("handlePluginToolExec", () => {
   afterEach(() => {
     __setPluginToolResolverForTesting(null)
     __setWebToolDepsForTesting(null)
+    __setSpawnTaskToolDepsForTesting(null)
   })
 
   it("resolves web_search before the plugin registry (supersedes the plugin)", async () => {
@@ -115,6 +117,34 @@ describe("handlePluginToolExec", () => {
     // Real fetch may fail in jsdom; either a result or a structured error is
     // fine — the point is it did NOT fall through to "plugin tool not found".
     expect(response.error ?? "").not.toMatch(/not found/)
+  })
+
+  it("routes spawn_task before the plugin registry and preserves the calling session", async () => {
+    const dispatch = jest.fn(async () => ({ ok: true, taskSessionId: "task-1" }))
+    const execute = jest.fn()
+    __setSpawnTaskToolDepsForTesting(() => ({ gate: () => true, dispatch }))
+    __setPluginToolResolverForTesting({
+      getTool: () => ({ pluginId: "duplicate", execute }),
+    })
+
+    const response = await handlePluginToolExec(
+      makeRequest({
+        name: "spawn_task",
+        sessionId: "parent-1",
+        args: {
+          title: "Fix cleanup",
+          tldr: "Handle it separately.",
+          situation: "Cleanup is missing.",
+          code_locations: [],
+          solution: "Add the cleanup.",
+          caveats: [],
+        },
+      })
+    )
+
+    expect(response).toMatchObject({ result: { ok: true, taskSessionId: "task-1" } })
+    expect(dispatch).toHaveBeenCalledWith("parent-1", expect.objectContaining({ mode: "aside" }))
+    expect(execute).not.toHaveBeenCalled()
   })
 
   it("returns a successful response with the execute() result", async () => {

@@ -110,7 +110,9 @@ describe("sessionControl round-trip", () => {
     await flush()
     expect(callSpy).toHaveBeenCalledWith(
       "claude_session_control",
-      expect.objectContaining({ method: "reconnectMcpServer", params: { name: "github" } })
+      // `serverName`, not `name`: the wire params are named after the SDK
+      // signature so one manifest `args` list describes both ends.
+      expect.objectContaining({ method: "reconnectMcpServer", params: { serverName: "github" } })
     )
   })
 

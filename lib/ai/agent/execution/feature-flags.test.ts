@@ -16,6 +16,10 @@ describe("agent execution feature flags", () => {
     "NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS",
     "NEXT_PUBLIC_HEADLESS_LLM_GATEWAY",
     "NEXT_PUBLIC_EXPERIMENTAL_ANTHROPIC_DEPLOYMENT_AGENT_SDK",
+    "NEXT_PUBLIC_CLAUDE_SDK_PARITY_V1",
+    "NEXT_PUBLIC_CLAUDE_SDK_SESSION_STORE",
+    "NEXT_PUBLIC_CLAUDE_SDK_CHECKPOINT",
+    "NEXT_PUBLIC_CLAUDE_SDK_PREWARM",
   ] as const
 
   const savedEnv: Record<string, string | undefined> = {}
@@ -46,11 +50,13 @@ describe("agent execution feature flags", () => {
   it("env vars override defaults ('1'/'true' on, '0'/'false' off, junk ignored)", () => {
     process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
     process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS = "true"
+    process.env.NEXT_PUBLIC_CLAUDE_SDK_PARITY_V1 = "true"
     process.env.NEXT_PUBLIC_HEADLESS_LLM_GATEWAY = "banana"
 
     const flags = getAgentExecutionFlags()
     expect(flags.agentExecutionResolverV2).toBe(true)
     expect(flags.gatewayAgentRouteTickets).toBe(true)
+    expect(flags.claudeSdkParityV1).toBe(true)
     expect(flags.headlessLlmGateway).toBe(false)
     expect(flags.genericAgentHostCommands).toBe(false)
   })

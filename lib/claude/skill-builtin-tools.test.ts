@@ -6,6 +6,7 @@ import {
   runSkillBuiltinTool,
   type SkillToolRunDeps,
 } from "./skill-builtin-tools"
+import { getCatalogSkill } from "@/lib/skills/built-in-catalog"
 
 describe("skill-builtin-tools", () => {
   it("builds a single Skill manifest entry that lists built-in skills", () => {
@@ -18,6 +19,20 @@ describe("skill-builtin-tools", () => {
     // Description embeds the catalog so the model can discover skills.
     expect(e.description).toMatch(/Built-in skills:/)
     expect(e.description).toMatch(/- [a-z-]+:/)
+    expect(e.description).toContain("- plugin-authoring: plugin-authoring")
+  })
+
+  it("loads the canonical plugin authoring workflow through the Skill tool", async () => {
+    const out = await runSkillBuiltinTool(
+      SKILL_TOOL_NAME,
+      { name: "plugin-authoring" },
+      { getCatalogSkill }
+    )
+
+    expect(out).toContain('Skill "plugin-authoring" loaded')
+    expect(out).toContain("cognia plugin contract")
+    expect(out).toContain("--point-kind <kind>")
+    expect(out).toContain("Stop at a build-ready artifact by default")
   })
 
   it("identifies the Skill tool name", () => {

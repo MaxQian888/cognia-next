@@ -162,22 +162,15 @@ export interface ClaudeAgentSdkOptionsV1 {
   // ---- escape hatches -------------------------------------------------------
   betas?: string[]
   /**
-   * Raw CLI flags. Deliberately last and deliberately narrow: it is the one
-   * field that can reach SDK behaviour this contract does not model, so the
-   * validator rejects keys that would re-open a host-only capability.
+   * Raw CLI flags. Deliberately last and deliberately narrow: only explicitly
+   * reviewed, content-free flags are accepted. Every other flag could reach
+   * SDK behaviour this contract does not model.
    */
   extraArgs?: Record<string, string | null>
 }
 
-/** Flags that would smuggle a host-only capability in through `extraArgs`. */
-const FORBIDDEN_EXTRA_ARGS = new Set([
-  "settings",
-  "setting-sources",
-  "mcp-config",
-  "add-dir",
-  "dangerously-skip-permissions",
-  "permission-prompt-tool",
-])
+/** Raw CLI flags reviewed as not loading content or granting capabilities. */
+const ALLOWED_EXTRA_ARGS = new Set(["verbose", "replay-user-messages"])
 
 /** Result of {@link validateClaudeAgentSdkOptions}. */
 export interface ClaudeAgentSdkOptionsValidation {
@@ -404,10 +397,10 @@ export function validateClaudeAgentSdkOptions(
 
   // ---- escape hatch ----------------------------------------------------------
   for (const key of Object.keys(opts.extraArgs ?? {})) {
-    if (FORBIDDEN_EXTRA_ARGS.has(key)) {
+    if (!ALLOWED_EXTRA_ARGS.has(key)) {
       errors.push(
-        `claudeAgentSdk.extraArgs["${key}"] is refused: that flag re-opens a host-only ` +
-          "capability the nested contract deliberately does not expose"
+        `claudeAgentSdk.extraArgs["${key}"] is refused: only reviewed, content-free ` +
+          "CLI flags are allowed"
       )
     }
   }

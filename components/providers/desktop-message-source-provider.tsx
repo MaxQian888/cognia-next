@@ -6,6 +6,7 @@ import { usePlatform } from "@/hooks/use-platform"
 import { installDesktopMessageSource } from "@/lib/companion/desktop-message-source"
 import { installDesktopWriteSource } from "@/lib/companion/desktop-write-source"
 import { installCliRendererRequestSource } from "@/lib/cli-bridge/renderer-request-source"
+import { installWasmRendererRequestSource } from "@/lib/plugin/wasm-bridge"
 
 /**
  * Tauri-only provider that installs the desktop-side bridge for the
@@ -42,6 +43,18 @@ export function DesktopMessageSourceProvider({ children }: { children: React.Rea
     // CLI bridge renderer round-trips (twin context / agent teams) ride the
     // same provider lifecycle — Tauri-only, torn down with the others.
     void installCliRendererRequestSource().then((unsub) => {
+      if (cancelled) {
+        unsub()
+        return
+      }
+      teardowns.push(unsub)
+    })
+    // WASM plugin capability bridge (ADR-0013 api-version 0.2): `ai.generate-
+    // text` and `workflow.emit-event` need the provider chain, the PII gate,
+    // and the trigger registry, all of which live here in the renderer. Same
+    // Tauri-only lifecycle; on web/mobile the host answers HOST_UNAVAILABLE
+    // rather than emulating them.
+    void installWasmRendererRequestSource().then((unsub) => {
       if (cancelled) {
         unsub()
         return

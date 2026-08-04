@@ -135,7 +135,7 @@ import { discoverMarkdownAgentTargets } from "@/lib/claude/agents/markdown-menti
 import { resolveMentions } from "@/lib/chat/mentions/resolve-mentions"
 import { useProjectStore } from "@/stores/project/project-store"
 import { allRootPaths } from "@/lib/workspace/roots"
-import { isWorkspaceRestricted } from "@/lib/workspace/trust-gate"
+import { resolveWorkspaceTrustForSend } from "@/lib/workspace/trust-gate"
 import {
   dispatchChatError as dispatchPluginChatError,
   dispatchUserPromptSubmit as dispatchPluginUserPromptSubmit,
@@ -2194,7 +2194,7 @@ async function buildSendOptions(
   // Workspace Trust gate: an untrusted active workspace runs in Restricted Mode
   // (disk/host tools denied by `resolveSendOptions`). Authoritative at send time
   // — independent of the React banner state. Web + disabled setting bypass.
-  const workspaceRestricted = await isWorkspaceRestricted(activeProject, {
+  const workspaceTrust = await resolveWorkspaceTrustForSend(activeProject, {
     enabled: appSettings?.workspaceTrust?.enabled !== false,
     onWeb: !isTauri(),
   })
@@ -2299,7 +2299,8 @@ async function buildSendOptions(
     session,
     appSettings,
     activeProject,
-    workspaceRestricted,
+    workspaceRestricted: workspaceTrust.restricted,
+    trustedWorkspaceRoots: workspaceTrust.trustedRoots,
     referencedPaths,
     targetAgentId,
     memoryBranch,

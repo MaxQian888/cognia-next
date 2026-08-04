@@ -181,9 +181,11 @@ export function createBashTool({ cwd, bgShells, shell }) {
         }
       }
       for (const pattern of DANGEROUS_PATTERNS) {
-        if (pattern.test(args.command)) {
+        const match = args.command.match(pattern)
+        if (match) {
           return toolError(
-            "command rejected: it chains into a destructive operation (rm/format/shutdown/...). Run the destructive step through the dedicated file/process tools so it gets its own approval."
+            `command rejected: matched destructive shell fragment ${JSON.stringify(match[0])}. ` +
+              "Run the destructive step through the dedicated file/process tools so it gets its own approval."
           )
         }
       }
@@ -226,8 +228,13 @@ export function createBashTool({ cwd, bgShells, shell }) {
           env,
           windowsHide: true,
           windowsVerbatimArguments: isWin,
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: ["pipe", "pipe", "pipe"],
         })
+        // Keep fd 0 connected without relying on /dev/null, which may be
+        // unavailable inside the macOS sandbox. End it immediately so
+        // non-interactive commands that probe stdin observe EOF instead of
+        // waiting for input.
+        child.stdin.end()
         // Keep a bounded head (frozen) + a rolling tail in memory for the
         // preview. The full combined output is spilled to a temp file ONLY when
         // it grows past the inline budget — most commands print far less, so we

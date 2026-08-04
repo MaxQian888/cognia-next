@@ -561,4 +561,68 @@ describe("ChatPane", () => {
       storeState.messages = saved
     })
   })
+
+  describe("history hydration motion", () => {
+    const loadedMessage = { id: "loaded", role: "user", parts: [] }
+    let savedMessages: unknown[]
+    let savedLoading: boolean
+
+    beforeEach(() => {
+      jest.useFakeTimers()
+      savedMessages = storeState.messages
+      savedLoading = storeState.messagesLoading
+      storeState.messages = []
+      storeState.messagesLoading = true
+      ;(MessageList as jest.Mock).mockClear()
+    })
+
+    afterEach(() => {
+      storeState.messages = savedMessages
+      storeState.messagesLoading = savedLoading
+      jest.useRealTimers()
+    })
+
+    it("defers the accessible loader so a fast Dexie read does not flash", () => {
+      render(<ChatPane {...makeProps()} />)
+
+      expect(screen.queryByRole("status")).not.toBeInTheDocument()
+
+      act(() => jest.advanceTimersByTime(179))
+      expect(screen.queryByRole("status")).not.toBeInTheDocument()
+
+      act(() => jest.advanceTimersByTime(1))
+      expect(screen.getByRole("status")).toHaveTextContent("loading")
+    })
+
+    it("finishes the loader beat before revealing history that arrived mid-animation", () => {
+      const props = makeProps()
+      const { rerender } = render(<ChatPane {...props} />)
+
+      act(() => jest.advanceTimersByTime(180))
+      expect(screen.getByRole("status")).toHaveTextContent("loading")
+
+      storeState.messages = [loadedMessage]
+      storeState.messagesLoading = false
+      rerender(<ChatPane {...props} />)
+
+      expect(MessageList).not.toHaveBeenCalled()
+      act(() => jest.advanceTimersByTime(319))
+      expect(MessageList).not.toHaveBeenCalled()
+
+      act(() => jest.advanceTimersByTime(1))
+      expect(MessageList).toHaveBeenCalled()
+    })
+
+    it("reveals fast-loaded history without ever mounting the loader", () => {
+      const props = makeProps()
+      const { rerender } = render(<ChatPane {...props} />)
+
+      storeState.messages = [loadedMessage]
+      storeState.messagesLoading = false
+      rerender(<ChatPane {...props} />)
+
+      expect(screen.queryByRole("status")).not.toBeInTheDocument()
+      expect(MessageList).toHaveBeenCalled()
+    })
+  })
 })

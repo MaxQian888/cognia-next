@@ -1,11 +1,9 @@
-/** @jest-environment jsdom */
 // Wiring-proof integration test for the PR feedback runtime glue: a failing-CI
 // PR observed through the real controller + reaction engine lands a
 // `review_pickup` mailbox message and a persisted `ci_failed` observation row.
 // Uses fake-indexeddb (real Dexie path) + an injected timer harness + a fake
 // octokit.
 
-import "fake-indexeddb/auto"
 import {
   buildTeamPrFeedback,
   type BuildTeamPrFeedbackParams,
@@ -16,15 +14,16 @@ import type { OctokitLike } from "@/lib/github/pr-observe/types"
 import type { TimerHandle } from "./observer"
 import type { RunReview } from "./reviewer"
 import type { WorktreeHandle } from "@/lib/ai/agent/team/workspace/allocator"
-import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 
 jest.setTimeout(30_000)
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
 
 // ── harness ────────────────────────────────────────────────────────────────
@@ -170,6 +169,8 @@ function makeParams(
   }
   return { params, messages, notes, push }
 }
+
+afterAll(dbFixture.dispose)
 
 describe("buildTeamPrFeedback", () => {
   it("routes a review_pickup nudge and persists a ci_failed observation", async () => {

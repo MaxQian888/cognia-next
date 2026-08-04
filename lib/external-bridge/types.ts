@@ -50,6 +50,7 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
   // runtime / teams / plugin tools (Thread D). Default OFF; outward text is
   // PII-gated and plugin tools keep their own consent gate.
   agent_dispatch: "agent:dispatch",
+  spawn_task: "agent:dispatch",
   team_run: "agent:team",
   team_list: "agent:team",
   plugin_tool_invoke: "plugin:tools",

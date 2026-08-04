@@ -17,6 +17,10 @@ const flags: Record<AgentExecutionFlag, boolean> = {
   gatewayAgentRouteTickets: true,
   headlessLlmGateway: false,
   experimentalAnthropicDeploymentAgentSdk: true,
+  claudeSdkParityV1: false,
+  claudeSdkSessionStore: false,
+  claudeSdkCheckpoint: false,
+  claudeSdkPrewarm: false,
 }
 
 describe("fail-closed resolver outputs", () => {

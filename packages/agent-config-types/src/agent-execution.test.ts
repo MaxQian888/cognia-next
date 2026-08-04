@@ -279,6 +279,77 @@ describe("isAgentEventEnvelope", () => {
     }
   })
 
+  it("accepts every structured content-part variant without embedding binary bodies", () => {
+    const events: CanonicalAgentEvent[] = [
+      {
+        kind: "content-part",
+        partId: "sources-1",
+        operation: "upsert",
+        part: {
+          type: "sources",
+          sources: [
+            {
+              id: "s1",
+              title: "Ink",
+              origin: "github.com/vadimdemedes/ink",
+              url: "https://github.com/vadimdemedes/ink",
+              score: 0.98,
+              snippet: "React for CLIs",
+            },
+          ],
+        },
+      },
+      {
+        kind: "content-part",
+        partId: "file-1",
+        operation: "upsert",
+        part: {
+          type: "file",
+          name: "report.txt",
+          uri: "artifact://session-1/report.txt",
+          mediaType: "text/plain",
+          size: 42,
+          preview: "safe text preview",
+        },
+      },
+      {
+        kind: "content-part",
+        partId: "surface-1",
+        operation: "upsert",
+        part: {
+          type: "a2ui",
+          surfaceId: "surface-1",
+          source: "mcp-bridge",
+          payload: { rootId: "root", components: [] },
+        },
+      },
+      {
+        kind: "content-part",
+        partId: "artifact-1",
+        operation: "upsert",
+        part: { type: "artifact-ref", artifactId: "artifact-1", title: "Chart" },
+      },
+      {
+        kind: "content-part",
+        partId: "canvas-1",
+        operation: "upsert",
+        part: { type: "canvas-ref", canvasId: "canvas-1", title: "Architecture" },
+      },
+      {
+        kind: "content-part",
+        partId: "custom-1",
+        operation: "upsert",
+        part: { type: "custom", customType: "plugin.weather", summary: "Weather card" },
+      },
+      { kind: "content-part", partId: "file-1", operation: "remove" },
+    ]
+
+    for (const event of events) {
+      expect(isAgentEventEnvelope({ ...envelope, event })).toBe(true)
+      expect(JSON.stringify(event)).not.toMatch(/base64|data:/i)
+    }
+  })
+
   it("lists every canonical event kind exactly once", () => {
     expect(new Set(CANONICAL_AGENT_EVENT_KINDS).size).toBe(CANONICAL_AGENT_EVENT_KINDS.length)
     for (const kind of CANONICAL_AGENT_EVENT_KINDS) {

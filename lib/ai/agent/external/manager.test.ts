@@ -88,6 +88,12 @@ class MockAdapter {
   extensionSupport?: () => Record<string, unknown>
   logoutImpl?: jest.Mock<Promise<void>, []>
   deleteSessionImpl?: jest.Mock<Promise<void>, [string]>
+  respondToElicitationImpl: jest.Mock<Promise<void>, [unknown]> = jest.fn(
+    async (_response: unknown) => {}
+  )
+  cancelRequestImpl: jest.Mock<Promise<void>, [number | string]> = jest.fn(
+    async (_requestId: number | string) => {}
+  )
 
   get connectionStatus() {
     return this._connectionStatus
@@ -174,6 +180,12 @@ class MockAdapter {
     }
   }
   async respondToPermission(_sid: string, _r: AcpPermissionResponse) {}
+  async respondToElicitation(response: unknown) {
+    return this.respondToElicitationImpl(response)
+  }
+  async cancelRequest(requestId: number | string) {
+    return this.cancelRequestImpl(requestId)
+  }
   async cancel(sid: string) {
     return this.cancelImpl(sid)
   }
@@ -463,6 +475,18 @@ describe("Capability helpers (unsupported / ok / error)", () => {
     expect(m.getConfigOptions("agent-1", "s_1").status).toBe("ok")
     ;(currentMock as unknown as { setConfigOption: undefined }).setConfigOption = undefined
     await expect(m.setConfigOption("agent-1", "s_1", "k", "v")).rejects.toThrow()
+  })
+
+  it("elicitation responses and request cancellation delegate to the active adapter", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    const response = { requestId: "elicit-1", action: "cancel" } as const
+
+    await m.respondToElicitation("agent-1", response)
+    await m.cancelRequest("agent-1", 17)
+
+    expect(currentMock.respondToElicitationImpl).toHaveBeenCalledWith(response)
+    expect(currentMock.cancelRequestImpl).toHaveBeenCalledWith(17)
   })
 
   it("getAuthMethods returns ok by default; isAuthenticationRequired/authenticate error if missing", async () => {

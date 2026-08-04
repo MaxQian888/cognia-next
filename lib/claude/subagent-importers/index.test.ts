@@ -7,9 +7,9 @@ function file(path: string, content = "body"): ImportFile {
 }
 
 describe("SUBAGENT_SOURCE_ADAPTERS", () => {
-  it("contains all five adapters in priority order, generic last", () => {
+  it("contains every adapter in priority order, generic last", () => {
     const ids: SubagentSourceId[] = SUBAGENT_SOURCE_ADAPTERS.map((a) => a.id)
-    expect(ids).toEqual(["claude-code", "codex-cli", "cursor", "cline", "generic-md"])
+    expect(ids).toEqual(["claude-code", "codex-cli", "opencode", "cursor", "cline", "generic-md"])
   })
 
   it("each adapter has stable metadata fields", () => {
@@ -42,6 +42,11 @@ describe("detectSource", () => {
 
   it("picks codex-cli when path matches", () => {
     expect(detectSource({ files: [file(".codex/agents/a.md")] })).toBe("codex-cli")
+  })
+
+  it("picks opencode when path matches", () => {
+    expect(detectSource({ files: [file(".config/opencode/agent/a.md")] })).toBe("opencode")
+    expect(detectSource({ files: [file(".opencode/agent/a.md")] })).toBe("opencode")
   })
 
   it("picks cursor when path matches", () => {

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, type ReactNode, type Ref } from "react"
 import { useTranslations } from "next-intl"
-import { AlertTriangle, Loader2 } from "lucide-react"
+import { AlertTriangle, MessageCircleMore } from "lucide-react"
 import { Composer, type ComposerHandle, type ComposerWorkflowMention } from "./composer"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { ChatHeader } from "./chat-header"
@@ -22,6 +22,7 @@ import { PlanApprovalDock } from "@/components/agent/plan/plan-approval-dock"
 import { PlanTrackerDock } from "@/components/agent/plan/plan-tracker-dock"
 import { PlanComposerDock } from "@/components/agent/plan/plan-composer-dock"
 import { useRunRecordPersistence } from "@/hooks/chat/use-run-record-persistence"
+import { useDeferredLoading } from "@/hooks/ui/use-deferred-loading"
 import { useStableCallback } from "@/hooks/ui/use-stable-callback"
 import { FollowUpSuggestions } from "./follow-up-suggestions"
 import { useStarterSuggestions } from "@/hooks/chat/use-starter-suggestions"
@@ -51,6 +52,7 @@ import { useEffectiveCwd } from "@/hooks/chat/use-effective-cwd"
 import { ComputerUsePictureInPicture } from "./computer-use-picture-in-picture"
 import { consumePendingChatPrompt } from "@/lib/chat/pending-prompt"
 import { hasNoLeakingPii } from "@cognia/redact"
+import { useFlowMotion } from "./motion/motion-reveal"
 
 /**
  * Attach `node` to a (possibly absent) callback or object ref. Defined at
@@ -60,6 +62,82 @@ import { hasNoLeakingPii } from "@cognia/redact"
 function attachRef<T>(ref: Ref<T> | undefined, node: T | null): void {
   if (typeof ref === "function") ref(node)
   else if (ref) (ref as { current: T | null }).current = node
+}
+
+function HistoryLoadingIndicator({ label }: { label: string }) {
+  const { reduce, durationScale } = useFlowMotion()
+
+  return (
+    <motion.div
+      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center"
+      initial={reduce ? false : { opacity: 0, y: 6, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={mobileTransition("fast")}
+      aria-busy="true"
+    >
+      <span role="status" aria-live="polite" className="sr-only">
+        {label}
+      </span>
+      <div className="relative grid size-20 place-items-center" aria-hidden>
+        <motion.div
+          className="absolute inset-1 rounded-full bg-primary/10 blur-xl"
+          animate={
+            reduce
+              ? { opacity: [0.35, 0.65, 0.35] }
+              : { opacity: [0.3, 0.7, 0.3], scale: [0.88, 1.08, 0.88] }
+          }
+          transition={{
+            duration: 1.8 * durationScale,
+            ease: "easeInOut",
+            repeat: Infinity,
+          }}
+        />
+        <div className="absolute inset-3 rounded-full border border-border/70 bg-background/80 shadow-lg shadow-primary/10 backdrop-blur-sm" />
+        <motion.div
+          className="absolute inset-3 rounded-full border border-primary/15 border-r-primary/35 border-t-primary/70"
+          animate={reduce ? { opacity: [0.45, 1, 0.45] } : { rotate: 360 }}
+          transition={{
+            duration: (reduce ? 1.4 : 1.6) * durationScale,
+            ease: reduce ? "easeInOut" : "linear",
+            repeat: Infinity,
+          }}
+        />
+        <motion.div
+          className="relative grid size-9 place-items-center rounded-2xl bg-primary/10 text-primary"
+          animate={reduce ? undefined : { y: [0, -2, 0], scale: [1, 1.04, 1] }}
+          transition={{
+            duration: 1.4 * durationScale,
+            ease: "easeInOut",
+            repeat: Infinity,
+          }}
+        >
+          <MessageCircleMore className="size-4.5" strokeWidth={1.8} />
+        </motion.div>
+      </div>
+      <div className="space-y-2">
+        <p className="text-sm font-medium text-foreground/80" aria-hidden>
+          {label}
+        </p>
+        <div className="flex items-center justify-center gap-1.5" aria-hidden>
+          {[0, 1, 2].map((index) => (
+            <motion.span
+              key={index}
+              className="size-1 rounded-full bg-primary/55"
+              animate={
+                reduce ? { opacity: [0.3, 1, 0.3] } : { opacity: [0.3, 1, 0.3], y: [0, -2, 0] }
+              }
+              transition={{
+                delay: index * 0.12,
+                duration: 0.9 * durationScale,
+                ease: "easeInOut",
+                repeat: Infinity,
+              }}
+            />
+          ))}
+        </div>
+      </div>
+    </motion.div>
+  )
 }
 
 interface ChatPaneProps {
@@ -201,6 +279,9 @@ export function ChatPane({
   const errorDiagnostic = useSessionErrorDiagnostic(boundId)
   const messagesLoading = useSessionMessagesLoading(boundId)
   const messagesLoadError = useSessionMessagesLoadError(boundId)
+  const coldHistoryLoading = !hasMessages && messagesLoading && !messagesLoadError
+  const showHistoryLoader = useDeferredLoading(coldHistoryLoading, { key: boundId })
+  const showHistorySurface = coldHistoryLoading || showHistoryLoader
   const atCapacity = useIsAtStreamCap(boundId)
   const reduce = useReducedMotion()
   const isMobile = useIsMobile()
@@ -416,7 +497,7 @@ export function ChatPane({
       <CharacterMissingBanner characterId={activeSession.characterId} onPickAnother={onCreate} />
       <ExternalAgentSessionPanel />
       <AnimatePresence
-        mode="wait"
+        mode="sync"
         initial={false}
         onExitComplete={() => {
           // After the centered→docked swap completes the new composer is
@@ -428,14 +509,14 @@ export function ChatPane({
           if (hasMessages && !isMobile) internalComposerRef.current?.focus()
         }}
       >
-        {!hasMessages ? (
+        {showHistorySurface || !hasMessages ? (
           <motion.div
             key="empty"
             className="flex min-h-0 flex-1 flex-col"
-            exit={reduce ? undefined : { opacity: 0, y: 16 }}
-            transition={mobileTransition("normal")}
+            exit={reduce ? undefined : { opacity: 0, y: -6, scale: 0.995 }}
+            transition={mobileTransition("fast")}
           >
-            {messagesLoadError ? (
+            {messagesLoadError && !hasMessages ? (
               // History load failed — surface it with a retry instead of the
               // welcome layout, which would read as silently lost history.
               <div
@@ -448,13 +529,12 @@ export function ChatPane({
                   {tHistory("retry")}
                 </Button>
               </div>
-            ) : messagesLoading ? (
-              // Hydration in flight — a quiet loader avoids flashing the empty
-              // welcome state during the session-switch gap.
-              <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2">
-                <Loader2 className="size-6 animate-spin text-muted-foreground" aria-hidden />
-                <span className="sr-only">{tHistory("loading")}</span>
-              </div>
+            ) : showHistoryLoader ? (
+              <HistoryLoadingIndicator label={tHistory("loading")} />
+            ) : coldHistoryLoading ? (
+              // Keep fast Dexie reads visually quiet. If the wait crosses the
+              // anti-flicker threshold, the animated indicator replaces this.
+              <div className="min-h-0 flex-1" aria-busy="true" />
             ) : (
               <EmptyChatState
                 onCreate={onCreate}
@@ -473,15 +553,15 @@ export function ChatPane({
             {errorAndFooter}
             {/* Composer is hidden while history is loading / failed — same as
                 the previous layout, where it only mounted with the welcome. */}
-            {!messagesLoadError && !messagesLoading && composerEl}
+            {!messagesLoadError && !showHistorySurface && composerEl}
           </motion.div>
         ) : (
           <motion.div
             key="chat"
             className="flex min-h-0 flex-1 flex-col"
-            initial={reduce ? false : { opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={mobileTransition("normal")}
+            initial={reduce ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={mobileTransition("fast")}
           >
             <div className="relative flex min-h-0 flex-1 flex-col" data-computer-use-pip-host>
               <ChatMessages

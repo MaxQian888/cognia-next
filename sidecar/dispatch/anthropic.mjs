@@ -45,6 +45,13 @@ import { createHostBgShellRegistry } from "../builtin-tools/core/bash-host-sessi
 import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
 import { createStderrLogSink, buildMcpLogEvent } from "./mcp-log.mjs"
 import { createMcpAutoReconnector } from "./mcp-auto-reconnect.mjs"
+import {
+  applyClaudeAgentSdkOptions,
+  buildSdkInteractionCallbacks,
+  intersectTrustedWorkspaceRoots,
+} from "./claude-sdk-options.mjs"
+import { sessionStoreFromSendOptions } from "./session-store.mjs"
+import { warmPool } from "./prewarm.mjs"
 
 /** Bare name of the `ask_user` elicitation tool (namespaced by the sidecar as
  * `mcp__cognia-plugin-tools__ask_user`). */
@@ -539,7 +546,16 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         // Stash the original tool input so the host can hand it back as
         // `updatedInput` when the user approves the call unmodified — the SDK
         // requires `updatedInput` to be a record on an allow.
-        pendingApprovals.set(requestId, { resolve: settle, input })
+        //
+        // `suggestions` is stashed for the same reason: an "always allow" has
+        // to answer with the SDK's OWN suggested permission updates, and by the
+        // time the renderer replies this context is gone. Taking them from the
+        // reply instead would let the renderer author permission rules.
+        pendingApprovals.set(requestId, {
+          resolve: settle,
+          input,
+          suggestions: ctx.suggestions,
+        })
         if (ctx.signal) {
           onAbort = () => {
             if (pendingApprovals.delete(requestId)) {
@@ -562,13 +578,77 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     },
   }
 
+  // Nested `SendOptions.claudeAgentSdk` — the 29 SDK options the flat allowlist
+  // above never covered. Applied AFTER the allowlist so the documented
+  // precedence (nested > flat > SDK default) holds, and BEFORE the strip pass so
+  // an explicit `undefined` in the block still means "use the SDK default".
+  const sdkOverlay = applyClaudeAgentSdkOptions(options, sendOptions.claudeAgentSdk, {
+    resume: resumeId,
+    forkSession: isFork,
+    permissionMode: sendOptions.permissionMode,
+    bypassConfirmed: sendOptions.bypassPermissionsConfirmed === true,
+    // Local skills/plugins are provider-visible code/instructions. A root must
+    // be both active for this send and explicitly granted by Workspace Trust;
+    // naming cwd/additionalDirectories alone never grants content trust.
+    trustedWorkspaceRoots: intersectTrustedWorkspaceRoots(sendOptions.trustedWorkspaceRoots, [
+      sendOptions.cwd,
+      ...(sendOptions.additionalDirectories ?? []),
+    ]),
+    cwd: sendOptions.cwd,
+    activeWorkspaceRoots: [sendOptions.cwd, ...(sendOptions.additionalDirectories ?? [])],
+  })
+  Object.assign(
+    options,
+    buildSdkInteractionCallbacks(sendOptions.claudeAgentSdk, (toolName, input, ctx) =>
+      options.canUseTool(toolName, input, ctx)
+    )
+  )
+  for (const warning of sdkOverlay.warnings) {
+    // Surfaced, not swallowed: every one of these is a setting that did not take
+    // effect, and the caller cannot tell that from behaviour alone.
+    log("warn", `[claudeAgentSdk] ${warning}`)
+    emit({ type: "sdk_option_warning", sessionId, message: warning })
+  }
+
+  // The session mirror is a LIVE object with methods, so it cannot ride the
+  // JSON wire — the nested block carries a descriptor and the real store is
+  // built here, against the Rust host over `host_rpc`. Assigned after the
+  // overlay because the overlay copies serialisable fields only, and before the
+  // strip pass so a `null` from a host without the channel is removed rather
+  // than handed to the SDK.
+  const sessionStore = sessionStoreFromSendOptions(sendOptions, { hostRpc, log })
+  if (sessionStore) {
+    options.sessionStore = sessionStore
+    // `batched` is the SDK default; only forward an explicit choice.
+    const flush = sendOptions.claudeAgentSdk?.sessionStore?.flush
+    if (flush) options.sessionStoreFlush = flush
+  }
+
   // Strip undefined/null so the SDK uses its defaults instead of choking on
   // `null.type` lookups.
   for (const k of Object.keys(options)) {
     if (options[k] === undefined || options[k] === null) delete options[k]
   }
 
-  const rawQuery = query({ prompt: inputStream.iterable, options })
+  // Prewarm (ADR-0090 Stage 4): a warm subprocess has already spawned and run
+  // its initialize handshake, which is most of the latency before the first
+  // token. Claiming one is safe only when every input the handshake baked in
+  // matches — `warmFingerprint` is what decides that, and it declines rather
+  // than guesses. A miss is an ordinary cold spawn.
+  const pool = warmPool({ log })
+  const prewarmEnabled = sendOptions.claudeAgentSdk?.prewarm?.enabled === true
+  const claimed = prewarmEnabled ? pool.claim(sendOptions) : null
+  const rawQuery = claimed
+    ? claimed.query(inputStream.iterable)
+    : query({ prompt: inputStream.iterable, options })
+  // Warm the NEXT subprocess of this shape. Deliberately after the claim and
+  // fire-and-forget: the options are only fully known at send time, so a pool
+  // entry can only ever be built from a previous send just like this one.
+  if (prewarmEnabled) {
+    void pool.prewarm(sendOptions, options).then((declined) => {
+      if (declined) log("debug", `prewarm skipped: ${declined}`)
+    })
+  }
   const q = traceAsyncIterable(
     "gen_ai.invoke_agent",
     sendOptions.traceparent,

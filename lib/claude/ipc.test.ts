@@ -236,6 +236,34 @@ describe("Claude session commands", () => {
     expect(callSpy).toHaveBeenCalledTimes(1)
   })
 
+  it("gates provider-visible Agent SDK options before transport", async () => {
+    callSpy.mockResolvedValueOnce(undefined)
+    await sendPrompt("sess-1", "hello", {
+      claudeAgentSdk: {
+        version: 1,
+        planModeInstructions: "review carefully",
+        toolAliases: { Read: "Inspect file" },
+      },
+    })
+
+    expect(mockHasNoLeakingPiiDeep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        claudeAgentSdk: expect.objectContaining({
+          planModeInstructions: "review carefully",
+          toolAliases: { Read: "Inspect file" },
+        }),
+      })
+    )
+
+    mockHasNoLeakingPiiDeep.mockReturnValue(false)
+    await expect(
+      sendPrompt("sess-1", "hello", {
+        agents: { reviewer: { description: "private agent", prompt: "secret" } },
+      })
+    ).rejects.toThrow("prompt rejected by the renderer PII gate")
+    expect(callSpy).toHaveBeenCalledTimes(1)
+  })
+
   it("sendPrompt forwards sessionId / prompt / options", async () => {
     callSpy.mockResolvedValueOnce(undefined)
     await sendPrompt("sess-1", "hello", { model: "claude-opus-4-7" })

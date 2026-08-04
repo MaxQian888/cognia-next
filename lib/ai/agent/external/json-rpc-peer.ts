@@ -22,6 +22,8 @@ export interface JsonRpcPeerOptions {
   omitJsonRpcVersion?: boolean
   /** Serialize-and-write a single framed message to the underlying transport. */
   writeRaw: (message: string) => Promise<void> | void
+  /** Validate or observe a decoded envelope before it reaches correlation/handlers. */
+  validateInbound?: (message: unknown) => boolean
   /** Handle an inbound notification (a message with `method` and no `id`). */
   onNotification?: (method: string, params: Record<string, unknown> | undefined) => void
   /**
@@ -33,7 +35,8 @@ export interface JsonRpcPeerOptions {
   onServerRequest?: (
     method: string,
     params: Record<string, unknown> | undefined,
-    id: number | string
+    id: number | string,
+    signal: AbortSignal
   ) => Promise<unknown> | unknown
   /**
    * Process server→client requests concurrently instead of awaiting each one
@@ -78,6 +81,7 @@ export class JsonRpcMethodError extends Error {
 export class JsonRpcPeer {
   private messageId = 0
   private readonly pending = new Map<number | string, PendingRequest>()
+  private readonly inbound = new Map<number | string, AbortController>()
   private readonly buffer: string[] = []
   private processing = false
   private readonly defaultTimeout: number
@@ -102,6 +106,7 @@ export class JsonRpcPeer {
 
     return new Promise<T>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
+        this.sendNotification("$/cancel_request", { requestId: id })
         this.pending.delete(id)
         reject(new Error(`Request timeout: ${method}`))
       }, timeout)
@@ -126,6 +131,23 @@ export class JsonRpcPeer {
     Promise.resolve(this.opts.writeRaw(message)).catch(() => {
       // Notifications are best-effort; a failed write is non-fatal.
     })
+  }
+
+  /** Cancel an outbound request, or an active nested request received from the peer. */
+  cancelRequest(requestId: number | string): boolean {
+    const outbound = this.pending.get(requestId)
+    if (outbound) {
+      clearTimeout(outbound.timeout)
+      this.pending.delete(requestId)
+      this.sendNotification("$/cancel_request", { requestId })
+      outbound.reject(new JsonRpcMethodError(-32800, "Request cancelled"))
+      return true
+    }
+
+    const inbound = this.inbound.get(requestId)
+    if (!inbound) return false
+    inbound.abort()
+    return true
   }
 
   /**
@@ -165,6 +187,7 @@ export class JsonRpcPeer {
           // Skip non-JSON noise (e.g. a stray banner line on stdout).
           continue
         }
+        if (this.opts.validateInbound && !this.opts.validateInbound(parsed)) continue
         const hasId = "id" in parsed && parsed.id !== null && parsed.id !== undefined
         if (hasId && typeof parsed.method === "string") {
           if (this.opts.concurrentServerRequests) {
@@ -176,6 +199,12 @@ export class JsonRpcPeer {
         } else if (hasId) {
           this.handleResponse(parsed)
         } else if (typeof parsed.method === "string") {
+          if (parsed.method === "$/cancel_request") {
+            const requestId = parsed.params?.requestId
+            if (typeof requestId === "number" || typeof requestId === "string") {
+              this.cancelRequest(requestId)
+            }
+          }
           this.opts.onNotification?.(parsed.method, parsed.params)
         }
       }
@@ -204,13 +233,29 @@ export class JsonRpcPeer {
       await this.writeResult(this.errorEnvelope(id, -32601, `Method not found: ${method}`))
       return
     }
+    const controller = new AbortController()
+    this.inbound.set(id, controller)
     try {
-      const result = await this.opts.onServerRequest(method, params, id)
+      const handler = Promise.resolve(
+        this.opts.onServerRequest(method, params, id, controller.signal)
+      )
+      const cancelled = new Promise<never>((_resolve, reject) => {
+        controller.signal.addEventListener(
+          "abort",
+          () => reject(new JsonRpcMethodError(-32800, "Request cancelled")),
+          { once: true }
+        )
+      })
+      const result = await Promise.race([handler, cancelled])
       await this.writeResult(this.envelope({ id, result }))
     } catch (error) {
       const code = error instanceof JsonRpcMethodError ? error.code : -32603
       const message = error instanceof Error ? error.message : String(error)
       await this.writeResult(this.errorEnvelope(id, code, message))
+    } finally {
+      if (this.inbound.get(id) === controller) {
+        this.inbound.delete(id)
+      }
     }
   }
 

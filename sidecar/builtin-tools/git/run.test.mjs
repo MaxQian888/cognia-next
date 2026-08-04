@@ -17,6 +17,24 @@ test("assertRepo validates a repo and caches the result (no re-spawn on repeat)"
   await assertRepo(cwd) // re-validates cleanly after a reset
 })
 
+test("assertRepo reports subprocess health failures instead of mislabeling the directory", async () => {
+  resetRepoCache()
+  const brokenGit = async () => {
+    throw new Error(
+      "fatal: could not open '/dev/null' for reading and writing: Operation not permitted"
+    )
+  }
+  await assert.rejects(
+    () => assertRepo("/workspace", brokenGit),
+    (err) => {
+      assert.match(err.message, /git subprocess health check failed/i)
+      assert.doesNotMatch(err.message, /not a git repository/i)
+      assert.match(err.message, /restart/i)
+      return true
+    }
+  )
+})
+
 test("trimTail leaves short strings alone and truncates long ones", () => {
   const short = "x".repeat(10)
   assert.deepEqual(trimTail(short, 100), { text: short, truncated: false })

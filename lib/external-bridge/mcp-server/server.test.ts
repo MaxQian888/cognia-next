@@ -1,13 +1,11 @@
-/** @jest-environment jsdom */
 /**
  * Coverage for the MCP server skeleton — exercises tool registration +
  * the gate→handler→envelope dispatch using the SDK's in-memory transport.
  */
 
-import "fake-indexeddb/auto"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createWikiArticle } from "@/lib/db/wiki-articles"
 import { createCharacter } from "@/lib/db/characters"
 import { listMcpAuditLog } from "@/lib/db/mcp-audit-log"
@@ -33,12 +31,14 @@ async function makeWiredPair(currentSettings: ExternalBridgeSettings | undefined
   return { server, client }
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 }, 30_000)
+
+afterAll(dbFixture.dispose)
 
 describe("buildMcpServer — tool registration", () => {
   // Note: `client.listTools()` round-trips through zod-to-json-schema which
@@ -119,6 +119,18 @@ describe("buildMcpServer — per-client scope projection", () => {
 describe("buildMcpServer — orchestration tools (Thread D)", () => {
   it.each([
     ["agent_dispatch", { subagentId: "x", prompt: "hi" }],
+    [
+      "spawn_task",
+      {
+        parentSessionId: "s1",
+        title: "Fix cleanup",
+        tldr: "Handle it separately.",
+        situation: "Cleanup is missing.",
+        code_locations: [],
+        solution: "Add cleanup.",
+        caveats: [],
+      },
+    ],
     ["team_run", { teamId: "t1" }],
     ["team_list", {}],
     ["plugin_tool_invoke", { pluginId: "p", toolName: "t" }],
@@ -150,6 +162,24 @@ describe("buildMcpServer — orchestration tools (Thread D)", () => {
     // Gate passed → handler ran. In the jest (non-Tauri) env the handler
     // returns the structured "requires desktop renderer" payload, but the
     // call itself is NOT a gate error.
+    expect(result.isError).not.toBe(true)
+    await client.close()
+  })
+
+  it("allows spawn_task when the agent:dispatch scope is ON", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: ["agent:dispatch"] }))
+    const result = await client.callTool({
+      name: "spawn_task",
+      arguments: {
+        parentSessionId: "s1",
+        title: "Fix cleanup",
+        tldr: "Handle it separately.",
+        situation: "Cleanup is missing.",
+        code_locations: [],
+        solution: "Add cleanup.",
+        caveats: [],
+      },
+    })
     expect(result.isError).not.toBe(true)
     await client.close()
   })

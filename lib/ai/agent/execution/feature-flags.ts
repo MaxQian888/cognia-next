@@ -10,6 +10,10 @@ export type AgentExecutionFlag =
   | "gatewayAgentRouteTickets"
   | "headlessLlmGateway"
   | "experimentalAnthropicDeploymentAgentSdk"
+  | "claudeSdkParityV1"
+  | "claudeSdkSessionStore"
+  | "claudeSdkCheckpoint"
+  | "claudeSdkPrewarm"
 
 const AGENT_EXECUTION_FLAGS_KEY = "cognia-agent-execution-flags-v1"
 
@@ -19,6 +23,10 @@ export const AGENT_EXECUTION_FLAGS: readonly AgentExecutionFlag[] = [
   "gatewayAgentRouteTickets",
   "headlessLlmGateway",
   "experimentalAnthropicDeploymentAgentSdk",
+  "claudeSdkParityV1",
+  "claudeSdkSessionStore",
+  "claudeSdkCheckpoint",
+  "claudeSdkPrewarm",
 ]
 
 const DEFAULT_AGENT_EXECUTION_FLAGS: Record<AgentExecutionFlag, boolean> = {
@@ -27,6 +35,10 @@ const DEFAULT_AGENT_EXECUTION_FLAGS: Record<AgentExecutionFlag, boolean> = {
   gatewayAgentRouteTickets: false,
   headlessLlmGateway: false,
   experimentalAnthropicDeploymentAgentSdk: false,
+  claudeSdkParityV1: false,
+  claudeSdkSessionStore: false,
+  claudeSdkCheckpoint: false,
+  claudeSdkPrewarm: false,
 }
 
 function parseFlagValue(raw: string | undefined): boolean | undefined {
@@ -45,6 +57,10 @@ function readEnvFlags(): Partial<Record<AgentExecutionFlag, boolean>> {
     headlessLlmGateway: process.env.NEXT_PUBLIC_HEADLESS_LLM_GATEWAY,
     experimentalAnthropicDeploymentAgentSdk:
       process.env.NEXT_PUBLIC_EXPERIMENTAL_ANTHROPIC_DEPLOYMENT_AGENT_SDK,
+    claudeSdkParityV1: process.env.NEXT_PUBLIC_CLAUDE_SDK_PARITY_V1,
+    claudeSdkSessionStore: process.env.NEXT_PUBLIC_CLAUDE_SDK_SESSION_STORE,
+    claudeSdkCheckpoint: process.env.NEXT_PUBLIC_CLAUDE_SDK_CHECKPOINT,
+    claudeSdkPrewarm: process.env.NEXT_PUBLIC_CLAUDE_SDK_PREWARM,
   }
   const result: Partial<Record<AgentExecutionFlag, boolean>> = {}
   for (const flag of AGENT_EXECUTION_FLAGS) {

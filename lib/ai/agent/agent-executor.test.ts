@@ -200,7 +200,7 @@ describe("executeAgent", () => {
           { role: "assistant", content: "context" },
           { role: "user", content: "contact alice@example.com" },
         ],
-        system: [{ role: "system", content: "system" }],
+        instructions: [{ role: "system", content: "system" }],
       })
       expect(mockPlanRoute).not.toHaveBeenCalled()
       expect(mockStreamText).not.toHaveBeenCalled()

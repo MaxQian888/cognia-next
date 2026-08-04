@@ -940,6 +940,31 @@ describe("applySdkEvent — result", () => {
     expect(out.turnComplete).toBe(true)
   })
 
+  it("hands back the parsed structured output AND the prose it came with", () => {
+    // The plan's requirement is both halves: callers read `structured_output`,
+    // but the raw text is what a human looks at when the schema turns out to
+    // describe the wrong thing. Dropping either makes a bad parse
+    // undiagnosable.
+    const messages: UIMessage[] = [{ id: "a", role: "assistant", parts: [] } as UIMessage]
+    const out = applySdkEvent(
+      messages,
+      asResult({
+        subtype: "success",
+        is_error: false,
+        result: "Here is the summary you asked for.",
+        structured_output: { title: "t", score: 3 },
+      })
+    )
+    expect(out.result?.structured_output).toEqual({ title: "t", score: 3 })
+    expect(out.result?.result).toBe("Here is the summary you asked for.")
+  })
+
+  it("does not invent a structured output for a turn that requested none", () => {
+    const messages: UIMessage[] = [{ id: "a", role: "assistant", parts: [] } as UIMessage]
+    const out = applySdkEvent(messages, asResult({ subtype: "success", result: "plain answer" }))
+    expect(out.result?.structured_output).toBeUndefined()
+  })
+
   it("treats a numeric total_cost_usd alone as enough to attach metadata", () => {
     const messages: UIMessage[] = [{ id: "a", role: "assistant", parts: [] } as UIMessage]
     const { messages: out } = applySdkEvent(

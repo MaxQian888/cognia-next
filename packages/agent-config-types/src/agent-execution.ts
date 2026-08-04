@@ -326,6 +326,43 @@ export function upgradeResolvedAgentExecutionSpec(
 
 // ---- Canonical events -------------------------------------------------------
 
+export interface CanonicalSourceReference {
+  id: string
+  title?: string
+  origin?: string
+  url?: string
+  score?: number
+  snippet?: string
+}
+
+/**
+ * Structured assistant content that every renderer can preserve without
+ * copying binary bodies into the durable event log.
+ */
+export type CanonicalContentPart =
+  | { type: "sources"; sources: CanonicalSourceReference[] }
+  | {
+      type: "file"
+      name: string
+      /** Local/session artifact URI, or a trusted remote URL. Never a data URI. */
+      uri: string
+      mediaType?: string
+      size?: number
+      digest?: string
+      /** Bounded, already-sanitized local text preview. */
+      preview?: string
+    }
+  | {
+      type: "a2ui"
+      surfaceId: string
+      source: "codeblock" | "tool-result" | "acp-stream" | "mcp-bridge" | "external"
+      /** Validated JSON-compatible surface payload. */
+      payload: Record<string, unknown>
+    }
+  | { type: "artifact-ref"; artifactId: string; title?: string; artifactType?: string }
+  | { type: "canvas-ref"; canvasId: string; title?: string }
+  | { type: "custom"; customType: string; summary: string; data?: unknown }
+
 /**
  * Canonical event kinds, a superset of the capture layer's
  * `CaptureStreamEvent` plus lifecycle / permission / subagent / checkpoint /
@@ -351,6 +388,13 @@ export type CanonicalAgentEvent =
   | { kind: "text-delta"; delta: string }
   | { kind: "thinking-delta"; delta: string }
   | { kind: "commentary-delta"; delta: string; messageId?: string; done?: boolean }
+  | {
+      kind: "content-part"
+      partId: string
+      operation: "upsert" | "remove"
+      /** Required for upsert and omitted for remove. */
+      part?: CanonicalContentPart
+    }
   | {
       kind: "tool-call"
       toolName: string
@@ -1128,6 +1172,7 @@ const CANONICAL_EVENT_KINDS: readonly string[] = [
   "text-delta",
   "thinking-delta",
   "commentary-delta",
+  "content-part",
   "tool-call",
   "tool-result",
   "permission-request",

@@ -5,18 +5,21 @@ import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import {
-  matcherMatches,
-  extractDecision,
-  parseZeroExitOutput,
-  mergeOutcome,
-  runGroups,
-  runCommandHandler,
-  runWebhookHandler,
-  mapDecisionToOutput,
-  hookFireOutcome,
-  buildHookFirePayload,
+  HOOK_PII_BLOCK_REASON,
+  SUPPORTED_EVENTS,
   buildAgentHooks,
+  buildHookFirePayload,
+  extractDecision,
+  hookFireOutcome,
+  hookMatchTarget,
+  mapDecisionToOutput,
+  matcherMatches,
   mergeHookMaps,
+  mergeOutcome,
+  parseZeroExitOutput,
+  runCommandHandler,
+  runGroups,
+  runWebhookHandler,
 } from "./agent-hooks.mjs"
 
 // A cross-platform command string: `node -e "<js>"` runs under both `cmd /C`
@@ -215,6 +218,16 @@ test("runWebhookHandler: 2xx JSON body parsed, non-2xx warns", async () => {
   }
 })
 
+test("runWebhookHandler: refuses a PII-bearing lifecycle payload before fetch", async () => {
+  const out = await runWebhookHandler(
+    "http://127.0.0.1:1/unreachable",
+    undefined,
+    5,
+    JSON.stringify({ prompt: "email alice@example.com" })
+  )
+  assert.deepEqual(out, { block: HOOK_PII_BLOCK_REASON })
+})
+
 // --- runGroups --------------------------------------------------------------
 
 test("runGroups: matcher filters, block short-circuits later handlers", async () => {
@@ -374,6 +387,29 @@ test("buildAgentHooks: callback runs handlers, emits hook_fire, returns mapped o
   assert.equal(emitted[0].event.outcome, "blocked")
 })
 
+test("buildAgentHooks: refuses PII-bearing hook output before it reaches provider context", async () => {
+  const map = buildAgentHooks(
+    {
+      Stop: [
+        {
+          hooks: [
+            {
+              type: "command",
+              command: nodeCmd(
+                "console.log(JSON.stringify({additionalContext:'alice@example.com'}))"
+              ),
+            },
+          ],
+        },
+      ],
+    },
+    { sessionId: "sess", emit() {} }
+  )
+
+  const out = await map.Stop[0].hooks[0]({ hook_event_name: "Stop" }, undefined, {})
+  assert.deepEqual(out, { decision: "block", reason: HOOK_PII_BLOCK_REASON })
+})
+
 test("buildAgentHooks: callback no-ops (no emit) when a non-matching tool", async () => {
   const emitted = []
   const map = buildAgentHooks(
@@ -445,4 +481,61 @@ test("runGroups: handlers run in parallel but merge deterministically in config 
   assert.equal(dec.block, "slow-block")
   // Parallel: total ≈ max(300, fast), well under the serial sum with margin.
   assert.ok(Date.now() - started < 5000)
+})
+
+// ---- full lifecycle coverage (SDK-parity plan §3) ---------------------------
+
+test("every SDK lifecycle event can be configured, not just the three tool ones", async () => {
+  // Before this, `SUPPORTED_EVENTS` was a hand-written list of three. The other
+  // 28 could be written into settings.json and would never run — no error, no
+  // log, just a hook that silently did nothing.
+  assert.equal(SUPPORTED_EVENTS.length, 31)
+
+  const config = Object.fromEntries(
+    SUPPORTED_EVENTS.map((e) => [e, [{ hooks: [{ type: "command", command: "true" }] }]])
+  )
+  const map = buildAgentHooks(config, { sessionId: "s", emit() {} })
+  assert.deepEqual(Object.keys(map).sort(), [...SUPPORTED_EVENTS].sort())
+})
+
+test("the event list comes from the SDK, so it cannot drift", async () => {
+  const sdk = await import("@anthropic-ai/claude-agent-sdk")
+  assert.deepEqual([...SUPPORTED_EVENTS], [...sdk.HOOK_EVENTS])
+})
+
+test("hookMatchTarget reads each event's own discriminator", () => {
+  assert.equal(hookMatchTarget("PreToolUse", { tool_name: "Bash" }), "Bash")
+  assert.equal(hookMatchTarget("SessionStart", { source: "resume" }), "resume")
+  assert.equal(hookMatchTarget("PreCompact", { trigger: "auto" }), "auto")
+  assert.equal(hookMatchTarget("FileChanged", { file_path: "/w/a.ts" }), "/w/a.ts")
+  assert.equal(hookMatchTarget("Notification", { notification_type: "idle" }), "idle")
+  // A tool matcher must not accidentally read a non-tool event's fields.
+  assert.equal(hookMatchTarget("SessionStart", { tool_name: "Bash" }), "")
+})
+
+test("an event with no discriminator only matches an omitted or * matcher", () => {
+  // Returning the tool name for every event would have made `matcher: "Bash"`
+  // on `Stop` fire on every stop of a session that had ever run Bash.
+  assert.equal(hookMatchTarget("Stop", { tool_name: "Bash" }), "")
+  assert.equal(matcherMatches(undefined, ""), true)
+  assert.equal(matcherMatches("*", ""), true)
+  assert.equal(matcherMatches("Bash", ""), false)
+})
+
+test("a lifecycle event blocks and injects context through the generic mapping", () => {
+  for (const event of ["UserPromptSubmit", "SessionStart", "Stop", "TaskCreated"]) {
+    assert.deepEqual(mapDecisionToOutput(event, { block: "no" }), {
+      decision: "block",
+      reason: "no",
+    })
+    assert.deepEqual(mapDecisionToOutput(event, { additionalContext: "ctx" }), {
+      hookSpecificOutput: { hookEventName: event, additionalContext: "ctx" },
+    })
+    assert.deepEqual(mapDecisionToOutput(event, {}), {})
+  }
+})
+
+test("a configured-but-empty group registers nothing", () => {
+  const map = buildAgentHooks({ Stop: [{ hooks: [] }] }, { sessionId: "s", emit() {} })
+  assert.equal(map, undefined)
 })

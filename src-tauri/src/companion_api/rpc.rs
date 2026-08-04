@@ -6533,6 +6533,11 @@ pub(super) async fn dispatch(
             .map_err(RpcError::internal)
             .and_then(to_json)
         }
+        // The renderer half of the WASM capability bridge. A headless host has
+        // no renderer to answer requests, and therefore never dispatches any —
+        // so a response frame arriving here is always a routing mistake, not a
+        // capability gap to paper over.
+        "plugin_wasm_renderer_response" => Err(RpcError::headless_unsupported(name)),
 
         // ── Native log read-back ────────────────────────────────────────────
         // Free functions over the log directory — no Tauri state needed, so

@@ -179,12 +179,16 @@ describe("validateClaudeAgentSdkOptions", () => {
   })
 
   describe("extraArgs", () => {
-    it("refuses flags that re-open a host-only capability", () => {
-      // The whole point of leaving `settings` / `executable` out of the type is
-      // that a renderer cannot reach them; a raw CLI flag would undo that.
-      for (const flag of ["settings", "mcp-config", "add-dir", "dangerously-skip-permissions"]) {
+    it("refuses every raw flag outside the reviewed allowlist", () => {
+      for (const flag of [
+        "settings",
+        "settings=/tmp/evil.json",
+        "plugin-dir",
+        "plugin-dir-no-mcp",
+        "preexisting",
+      ]) {
         expect(errorsOf({ ...base, extraArgs: { [flag]: null } })).toMatch(
-          new RegExp(`extraArgs\\["${flag}"\\] is refused`)
+          new RegExp(`extraArgs\\["${flag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\] is refused`)
         )
       }
     })

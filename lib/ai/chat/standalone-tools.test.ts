@@ -116,6 +116,19 @@ describe("buildStandaloneTools", () => {
     })
   })
 
+  it("projects spawn_task through the same renderer executor", async () => {
+    handlePluginToolExec.mockResolvedValue({ result: { ok: true, taskSessionId: "task-1" } })
+    const result = buildStandaloneTools({ pluginTools: [entry("spawn_task")] }, "parent-1")
+
+    await expect(runTool(result!.tools.spawn_task, { title: "Fix cleanup" })).resolves.toEqual({
+      ok: true,
+      taskSessionId: "task-1",
+    })
+    expect(handlePluginToolExec).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "parent-1", name: "spawn_task" })
+    )
+  })
+
   it("normalises missing args to an empty object", async () => {
     handlePluginToolExec.mockResolvedValue({ result: "ok" })
     const result = buildStandaloneTools({ pluginTools: [entry("web_search")] }, "s1")

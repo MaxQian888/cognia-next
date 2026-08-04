@@ -1,14 +1,16 @@
 // Shared types for the external subagent importer pipeline.
 //
 // The pipeline has four stages:
-//   1. Source adapters (claude-code / codex-cli / cursor / cline / generic-md)
-//      take raw `.md` text + filename and produce normalized `SubagentImportDraft`.
+//   1. Source adapters (claude-code / codex-cli / opencode / cursor / cline /
+//      generic-md) take raw `.md` text + filename and produce a normalized
+//      `SubagentImportDraft`.
 //   2. `convert.ts` maps a draft to either a `SubAgentTemplate` or a Character draft.
 //   3. `apply.ts` applies the conversion to the runtime store / Dexie with a
 //      merge strategy (skip / overwrite / duplicate).
 //   4. `subagent-import-dialog.tsx` is the UI that drives all three.
 
-export type SubagentSourceId = "claude-code" | "codex-cli" | "cursor" | "cline" | "generic-md"
+export type SubagentSourceId =
+  "claude-code" | "codex-cli" | "opencode" | "cursor" | "cline" | "generic-md"
 
 /** A single file's worth of input text, with enough metadata to detect the source. */
 export interface ImportFile {

@@ -50,6 +50,11 @@ import {
   type VectorToolRunDeps,
 } from "./vector-builtin-tools"
 import { getTeamDispatchContext } from "./agents/dispatch-context-registry"
+import {
+  isSpawnTaskBuiltinTool,
+  runSpawnTaskBuiltinTool,
+  type SpawnTaskToolRunDeps,
+} from "./spawn-task-builtin-tools"
 import type { RemoteExecutionContext } from "./remote-execution"
 
 const PLUGIN_TOOL_RESULT_PII_ERROR = "Plugin tool result blocked by the PII redaction gate"
@@ -110,6 +115,21 @@ let resolverOverride: PluginToolResolver | null = null
  * host overrides it from config. Swappable for tests.
  */
 let webToolDepsOverride: (() => Promise<WebToolRunDeps> | WebToolRunDeps) | null = null
+
+let spawnTaskDepsOverride: (() => Promise<SpawnTaskToolRunDeps> | SpawnTaskToolRunDeps) | null =
+  null
+
+export function __setSpawnTaskToolDepsForTesting(
+  fn: (() => Promise<SpawnTaskToolRunDeps> | SpawnTaskToolRunDeps) | null
+): void {
+  spawnTaskDepsOverride = fn
+}
+
+async function resolveSpawnTaskToolDeps(): Promise<SpawnTaskToolRunDeps> {
+  if (spawnTaskDepsOverride) return spawnTaskDepsOverride()
+  const { dispatchSpawnTask } = await import("@/lib/tasks/spawn-task-dispatch")
+  return { gate: hasNoLeakingPiiDeep, dispatch: dispatchSpawnTask }
+}
 
 /** Inject web-tool deps (tests / CLI host). Pass `null` to restore default. */
 export function __setWebToolDepsForTesting(
@@ -432,6 +452,16 @@ export async function handlePluginToolExec(
         request.name,
         request.args,
         await resolveEditorToolDeps(),
+        { sessionId: request.sessionId }
+      )
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
+    }
+    // ── Promoted spawn_task built-in — stage a user-started sidechat ──────
+    if (isSpawnTaskBuiltinTool(request.name)) {
+      const result = await runSpawnTaskBuiltinTool(
+        request.name,
+        request.args,
+        await resolveSpawnTaskToolDeps(),
         { sessionId: request.sessionId }
       )
       return { ...baseResponse, result: assertSafePluginToolResult(result) }

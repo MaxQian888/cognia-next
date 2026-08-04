@@ -14,6 +14,20 @@ function makePeer(opts?: Partial<JsonRpcPeerOptions>) {
 }
 
 describe("JsonRpcPeer", () => {
+  it("drops envelopes rejected by the protocol validator", async () => {
+    const onNotification = jest.fn()
+    const peer = new JsonRpcPeer({
+      writeRaw: jest.fn(),
+      validateInbound: () => false,
+      onNotification,
+    })
+
+    peer.ingest('{"jsonrpc":"2.0","method":"session/update","params":{}}\n')
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(onNotification).not.toHaveBeenCalled()
+  })
   describe("wire shape", () => {
     it("includes jsonrpc:2.0 by default", () => {
       const { peer, writes } = makePeer()
@@ -74,6 +88,23 @@ describe("JsonRpcPeer", () => {
         const assertion = expect(p).rejects.toThrow("Request timeout: slow")
         jest.advanceTimersByTime(1000)
         await assertion
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("notifies the peer before rejecting a timed-out request", async () => {
+      jest.useFakeTimers()
+      try {
+        const { peer, writes } = makePeer()
+        const request = peer.sendRequest("slow", undefined, 1000)
+        const assertion = expect(request).rejects.toThrow("Request timeout: slow")
+        jest.advanceTimersByTime(1000)
+        await assertion
+        expect(JSON.parse(writes.at(-1)!)).toMatchObject({
+          method: "$/cancel_request",
+          params: { requestId: 1 },
+        })
       } finally {
         jest.useRealTimers()
       }
@@ -186,6 +217,37 @@ describe("JsonRpcPeer", () => {
       await Promise.resolve()
       const sent = JSON.parse(writes.at(-1)!)
       expect(sent.error).toMatchObject({ code: -32603, message: "boom" })
+    })
+
+    it("aborts a nested request and answers with -32800", async () => {
+      const writes: string[] = []
+      let receivedSignal: AbortSignal | undefined
+      const peer = new JsonRpcPeer({
+        concurrentServerRequests: true,
+        writeRaw: (message) => {
+          writes.push(message)
+        },
+        onServerRequest: (_method, _params, _id, signal) => {
+          receivedSignal = signal
+          return new Promise(() => {})
+        },
+      })
+
+      peer.ingest(JSON.stringify({ id: "nested-1", method: "elicitation/create" }))
+      await Promise.resolve()
+      peer.ingest(
+        JSON.stringify({
+          method: "$/cancel_request",
+          params: { requestId: "nested-1" },
+        })
+      )
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(receivedSignal?.aborted).toBe(true)
+      expect(JSON.parse(writes.at(-1)!)).toMatchObject({
+        id: "nested-1",
+        error: { code: -32800 },
+      })
     })
 
     it("blocks later notifications behind a pending request by default", async () => {

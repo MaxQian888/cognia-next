@@ -69,7 +69,12 @@ export async function subscribeCaptureFromEnvelopes(
     import("@/lib/ai/agent/execution/event-envelope"),
     import("./ipc"),
   ])
-  if (!isAgentExecutionFlagEnabled("genericAgentHostCommands")) return null
+  if (
+    !isAgentExecutionFlagEnabled("genericAgentHostCommands") &&
+    !isAgentExecutionFlagEnabled("claudeSdkParityV1")
+  ) {
+    return null
+  }
   return ipc.subscribeAgentEvents((envelope) => {
     if (envelope.sessionId !== sessionId) return
     const event = captureEventFromCanonical(envelope.event)
@@ -557,6 +562,8 @@ async function captureAssistantReplyCore(
 
   return new Promise<RunAndCaptureResult>((resolve, reject) => {
     let unlisten: (() => void) | null = null
+    let envelopeUnlisten: (() => void) | null = null
+    let preferEnvelopeEvents = false
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null
     let idleHandle: ReturnType<typeof setTimeout> | null = null
     let settled = false
@@ -599,8 +606,9 @@ async function captureAssistantReplyCore(
     let capturedSdkSessionId = ""
 
     // ── Best-effort typed-event emitter (plugin Agent SDK `runStreamed`). ──
-    const emitEvent = (event: CaptureStreamEvent) => {
+    const emitEvent = (event: CaptureStreamEvent, source: "raw" | "envelope" = "raw") => {
       if (!cap?.onEvent) return
+      if (source === "raw" && preferEnvelopeEvents) return
       try {
         cap.onEvent(event)
       } catch {
@@ -686,6 +694,12 @@ async function captureAssistantReplyCore(
         /* idempotent unlisten — swallow secondary errors */
       }
       unlisten = null
+      try {
+        envelopeUnlisten?.()
+      } catch {
+        /* idempotent unlisten — swallow secondary errors */
+      }
+      envelopeUnlisten = null
       if (timeoutHandle != null) {
         clearTimeout(timeoutHandle)
         timeoutHandle = null
@@ -1103,7 +1117,7 @@ async function captureAssistantReplyCore(
     }
 
     onClaudeMessage(onEvent)
-      .then((un) => {
+      .then(async (un) => {
         if (settled) {
           // Aborted (or timed out) before we got the unlistener back —
           // detach immediately so we don't leak.
@@ -1115,6 +1129,18 @@ async function captureAssistantReplyCore(
           return
         }
         unlisten = un
+        try {
+          envelopeUnlisten = await subscribeCaptureFromEnvelopes(sessionId, (event) =>
+            emitEvent(event, "envelope")
+          )
+          preferEnvelopeEvents = envelopeUnlisten !== null
+        } catch {
+          // Canonical events are the preferred projection, but the raw stream
+          // remains subscribed so a transient channel failure cannot strand
+          // the turn before send.
+          envelopeUnlisten = null
+          preferEnvelopeEvents = false
+        }
         // Now fire the actual send. If it throws synchronously the
         // catch below cleans up; if it rejects async we still clean up
         // via the same path.

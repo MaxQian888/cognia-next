@@ -362,6 +362,7 @@ const hostOperationLoaders: Record<string, () => Promise<HostOperation>> = {
   teamRun: async () => teamRunCore as HostOperation,
   teamList: async () => teamListCore as HostOperation,
   pluginToolInvoke: async () => pluginToolInvokeCore as HostOperation,
+  spawnTask: async () => (await import("./spawn-task")).spawnTaskCore as HostOperation,
   scheduleTask: async () => (await import("./scheduling")).scheduleTaskCore as HostOperation,
   listScheduledTasks: async () =>
     (await import("./scheduling")).listScheduledTasksCore as HostOperation,
@@ -425,6 +426,10 @@ export async function runOrchestrationExec(
   switch (command) {
     case "agent_dispatch":
       return agentDispatchCore(args as unknown as AgentDispatchInput)
+    case "spawn_task":
+      return (await import("./spawn-task")).spawnTaskCore(
+        args as unknown as import("./spawn-task").SpawnTaskInput
+      )
     case "team_run":
       return teamRunCore(args as unknown as TeamRunInput)
     case "team_list":

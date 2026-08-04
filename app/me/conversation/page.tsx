@@ -15,6 +15,7 @@
 import { useTranslations } from "next-intl"
 
 import { BiometricRow } from "@/components/mobile/me/biometric-row"
+import { DEFAULT_EFFORT_SELECTOR_MODE } from "@/components/chat/composer/effort-selector-view"
 import { MeSection } from "@/components/mobile/me/me-section"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 import { Item, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
@@ -128,6 +129,16 @@ export default function MobileConversationPage() {
             checked={composer.persistDrafts !== false}
             onChange={(v) => void setComposer({ persistDrafts: v })}
             testid="composer-persist-drafts"
+          />
+          {/* `composerBehavior` is a `shared` settings field, so this presentation
+              choice follows the user onto the phone — where the same model picker
+              hosts the same thinking-level control. Two modes ⇒ a switch. */}
+          <BiometricRow
+            label={t("effortSelectorMode")}
+            help={t("effortSelectorModeHelp")}
+            checked={(composer.effortSelectorMode ?? DEFAULT_EFFORT_SELECTOR_MODE) === "slider"}
+            onChange={(v) => void setComposer({ effortSelectorMode: v ? "slider" : "list" })}
+            testid="composer-effort-selector-mode"
           />
         </MeSection>
 

@@ -30,6 +30,7 @@ import { BUILTIN_SLASH_COMMANDS } from "@/lib/slash-commands/builtin"
 import { listSlashCommands } from "@/lib/slash-commands/registry"
 import { CliSyncCard } from "@/components/settings/cli-bridge/cli-sync-card"
 import { SdkCapabilitiesCard } from "@/components/settings/agent-runtime/sdk-capabilities-card"
+import { SdkParityCard } from "@/components/settings/agent-runtime/sdk-parity-card"
 
 const POLL_INTERVAL_MS = 3000
 
@@ -221,6 +222,8 @@ export function SidecarTab() {
       </SettingsBlock>
 
       <SdkCapabilitiesCard />
+
+      <SdkParityCard />
 
       <CliSyncCard />
     </SettingsStack>

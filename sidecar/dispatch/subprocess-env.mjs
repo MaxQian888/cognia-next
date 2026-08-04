@@ -86,11 +86,82 @@ export function isStrippedName(name) {
 }
 
 /**
+ * OTel variables propagated to the Claude Code subprocess so its spans land in
+ * the same collector as the sidecar's, under one trace.
+ *
+ * These are NOT in {@link ENV_ALLOWLIST}, and that is the point. `OTEL_*` and
+ * `CLAUDE_*` are both stripped from the ambient parent env, so a developer's
+ * shell exporting `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` cannot silently start
+ * shipping a user's agent traces somewhere. Propagation happens only through
+ * {@link childTelemetryEnv}, and only when THIS process was itself configured
+ * with an endpoint — the same "no endpoint means completely silent" rule
+ * `initializeTelemetry` follows.
+ *
+ * `OTEL_EXPORTER_OTLP_HEADERS` is included because it is how a collector is
+ * authenticated; without it the child exports and is rejected, which looks
+ * exactly like telemetry being off. It travels no further than the subprocess
+ * env — never into the resolved spec, the event log, or a span
+ * (ADR-0090 constraint 4).
+ */
+export const CHILD_TELEMETRY_ENV = [
+  "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+  "OTEL_EXPORTER_OTLP_ENDPOINT",
+  "OTEL_EXPORTER_OTLP_HEADERS",
+  "OTEL_EXPORTER_OTLP_PROTOCOL",
+  "OTEL_RESOURCE_ATTRIBUTES",
+  "OTEL_LOG_USER_PROMPTS",
+]
+
+/**
+ * Build the OTel env for the Claude Code subprocess.
+ *
+ * Returns `{}` unless the sidecar itself has a traces endpoint configured, so
+ * enabling child telemetry is a single decision made in one place rather than
+ * two switches that can disagree.
+ *
+ * `CLAUDE_CODE_ENABLE_TELEMETRY` and `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA` are
+ * what the CLI reads to turn its own emission on. The enhanced flag is opt-in
+ * per send (`sendOptions.telemetry.enhanced`) and NOT derived from the parent,
+ * because it widens what the child records.
+ *
+ * `OTEL_LOG_USER_PROMPTS` is force-set to `0`, never inherited: the sidecar's
+ * own spans are built with `recordInputs: false` / `recordOutputs: false`, and
+ * a child that logged prompt bodies would break that contract from the other
+ * end while looking like the same configuration.
+ *
+ * @param {Record<string, any>} sendOptions
+ * @param {NodeJS.ProcessEnv} parentEnv
+ * @returns {Record<string, string>}
+ */
+export function childTelemetryEnv(sendOptions, parentEnv = process.env) {
+  if (sendOptions?.telemetry?.child === false) return {}
+  if (!parentEnv.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) return {}
+
+  const out = { CLAUDE_CODE_ENABLE_TELEMETRY: "1" }
+  for (const name of CHILD_TELEMETRY_ENV) {
+    const value = parentEnv[name]
+    if (typeof value === "string" && value !== "") out[name] = value
+  }
+  if (sendOptions?.telemetry?.enhanced === true) {
+    out.CLAUDE_CODE_ENHANCED_TELEMETRY_BETA = "1"
+  }
+  // Force-set last so an inherited value cannot re-enable prompt logging.
+  out.OTEL_LOG_USER_PROMPTS = "0"
+  return out
+}
+
+/**
  * Build the subprocess env for a send.
  *
- * With a frozen spec: allowlisted parent vars + `sendOptions.env` overlay
- * (the spec's env is authoritative — proxy vars or credentials come back
- * ONLY if the resolver put them there). Without one: the legacy spread.
+ * With a frozen spec: allowlisted parent vars + child telemetry + the
+ * `sendOptions.env` overlay (the spec's env is authoritative — proxy vars or
+ * credentials come back ONLY if the resolver put them there). Without one: the
+ * legacy spread.
+ *
+ * The telemetry block sits BETWEEN the allowlist and the overlay: it is a host
+ * decision, so it beats whatever leaked through the allowlist, and the
+ * spec-approved overlay still beats it — a resolver that deliberately sets an
+ * OTel variable stays authoritative.
  *
  * @param {Record<string, any>} sendOptions
  * @param {NodeJS.ProcessEnv} [parentEnv]
@@ -98,9 +169,16 @@ export function isStrippedName(name) {
  */
 export function buildSubprocessEnv(sendOptions, parentEnv = process.env) {
   const overlay = sendOptions?.env ?? {}
+  const claudeTempEnv =
+    process.platform === "darwin" && typeof parentEnv.TMPDIR === "string" && parentEnv.TMPDIR !== ""
+      ? { CLAUDE_CODE_TMPDIR: parentEnv.TMPDIR }
+      : {}
   if (!sendOptions?.execution) {
-    // Legacy sessions: today's behavior, byte-for-byte.
-    return { ...parentEnv, ...overlay }
+    // Child telemetry is NOT added here — ADR-0090 constraint 6, and the legacy
+    // spread already passes the parent's OTEL_* through anyway. On macOS,
+    // redirect Claude's hard-coded /tmp base to the app's writable per-user
+    // temp directory; an explicit session overlay remains authoritative.
+    return { ...parentEnv, ...claudeTempEnv, ...overlay }
   }
   const base = {}
   for (const name of Object.keys(parentEnv)) {
@@ -108,7 +186,12 @@ export function buildSubprocessEnv(sendOptions, parentEnv = process.env) {
     const value = parentEnv[name]
     if (typeof value === "string") base[name] = value
   }
-  return { ...base, ...overlay }
+  return {
+    ...base,
+    ...childTelemetryEnv(sendOptions, parentEnv),
+    ...claudeTempEnv,
+    ...overlay,
+  }
 }
 
 /**

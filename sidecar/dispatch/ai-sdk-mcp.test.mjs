@@ -4,7 +4,12 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { PassThrough } from "node:stream"
-import { buildAiSdkMcpTools, toMcpTransport, wrapMcpToolWithGate } from "./ai-sdk-mcp.mjs"
+import {
+  buildAiSdkMcpTools,
+  isRedirectRefusal,
+  toMcpTransport,
+  wrapMcpToolWithGate,
+} from "./ai-sdk-mcp.mjs"
 
 // A no-op stdio transport stand-in so toMcpTransport doesn't construct the real
 // (process-spawning) one in unit tests.
@@ -343,6 +348,45 @@ test("buildAiSdkMcpTools emits a diagnostic mcp_log when a server fails to conne
   assert.ok(d, "connect failure surfaced as a diagnostic mcp_log")
   assert.equal(d.server, "bad")
   assert.equal(d.level, "warn")
+})
+
+test("isRedirectRefusal recognizes a refused redirect, including through a cause chain", () => {
+  assert.equal(isRedirectRefusal(new Error("unexpected redirect")), true)
+  assert.equal(isRedirectRefusal(new Error("Redirect not allowed")), true)
+  assert.equal(
+    isRedirectRefusal(new Error("fetch failed", { cause: new Error("redirect count exceeded") })),
+    true
+  )
+  assert.equal(isRedirectRefusal(new Error("ECONNREFUSED")), false)
+  assert.equal(isRedirectRefusal(undefined), false)
+  // Must not spin on a self-referential cause chain.
+  const loop = new Error("boom")
+  loop.cause = loop
+  assert.equal(isRedirectRefusal(loop), false)
+})
+
+test("a refused redirect fails fast with an actionable diagnostic and no retries", async () => {
+  // @ai-sdk/mcp v2 defaults `redirect` to "error" (SSRF guard). The server will
+  // answer 3xx on every attempt, so retrying is pure latency.
+  const logs = []
+  let attempts = 0
+  const createClient = async () => {
+    attempts += 1
+    throw new Error("fetch failed", { cause: new Error("unexpected redirect response") })
+  }
+  await buildAiSdkMcpTools({
+    mcpServers: { moved: { type: "http", url: "https://moved.example" } },
+    createClient,
+    emitMcpLog: (e) => logs.push(e),
+    maxAttempts: 3,
+    retryDelayMs: 0,
+  })
+
+  assert.equal(attempts, 1, "redirect refusal must not consume the retry budget")
+  const d = logs.find((l) => l.source === "diagnostic" && /failed to connect/.test(l.message))
+  assert.ok(d, "surfaced as a diagnostic mcp_log")
+  assert.match(d.message, /HTTP redirect/)
+  assert.match(d.message, /final URL/)
 })
 
 test("stdio transport has no stderr stream when no emitMcpLog sink is supplied", async () => {

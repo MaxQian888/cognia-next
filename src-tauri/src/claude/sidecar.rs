@@ -721,7 +721,17 @@ async fn answer_host_rpc(state: SidecarState, value: Value) {
     let method = value.get("method").and_then(|v| v.as_str()).unwrap_or("");
     let params = value.get("params").cloned().unwrap_or(Value::Null);
 
-    let reply = match crate::jobs::dispatch_host_rpc(method, &params).await {
+    // Session-store calls are routed FIRST and never reach the jobs dispatcher:
+    // that one opens with `require_supervisor()?`, so on a host without
+    // background jobs every session-store call would fail with a message about
+    // jobs — a confusing way to learn that transcript mirroring is unavailable.
+    let dispatched = if host_rpc_uses_session_store(method) {
+        crate::agent_session_store::dispatch_host_rpc(method, &params).await
+    } else {
+        crate::jobs::dispatch_host_rpc(method, &params).await
+    };
+
+    let reply = match dispatched {
         Ok(result) => serde_json::json!({
             "type": "host_rpc_result",
             "rpcId": rpc_id,
@@ -743,6 +753,10 @@ async fn answer_host_rpc(state: SidecarState, value: Value) {
         // when stdin closes, so there is nothing further to do here.
         log::warn!("could not deliver host_rpc_result for {method}: {e}");
     }
+}
+
+fn host_rpc_uses_session_store(method: &str) -> bool {
+    crate::agent_session_store::is_session_store_method(method)
 }
 
 /// Handle a `permission_request` event from the sidecar. PreToolUse hooks
@@ -996,6 +1010,14 @@ pub async fn kill_sidecar(state: SidecarState) {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn host_rpc_routes_session_store_before_the_jobs_dispatcher() {
+        assert!(host_rpc_uses_session_store("sessionStore.append"));
+        assert!(host_rpc_uses_session_store("sessionStore.listSessions"));
+        assert!(!host_rpc_uses_session_store("jobs.spawn"));
+        assert!(!host_rpc_uses_session_store("jobs.sessionStore"));
+    }
 
     #[test]
     fn parse_node_major_handles_all_forms() {

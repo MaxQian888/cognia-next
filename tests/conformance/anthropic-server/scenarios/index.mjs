@@ -288,7 +288,9 @@ export function stickyFailoverScenario() {
   // without trying the other account.
   return {
     id: "sticky-failover",
-    capabilities: ["prompt-caching"],
+    // Credential affinity/failover is a routing invariant, not prompt caching.
+    // Keep the case in certification without falsely claiming a capability.
+    capabilities: [],
     steps: [
       {
         name: "401 on demand",
@@ -318,6 +320,60 @@ export function stickyFailoverScenario() {
   }
 }
 
+function parityTextScenario(id, capabilities) {
+  return {
+    id,
+    capabilities,
+    steps: [
+      {
+        respond: ({ body, hit }) =>
+          textReplyPlan({
+            body,
+            messageId: `msg_conf_${id.replaceAll("-", "_")}_${hit}`,
+            text: `${id} acknowledged`,
+          }),
+      },
+    ],
+  }
+}
+
+export const sdkStructuredSessionScenario = () =>
+  parityTextScenario("sdk-structured-session", [
+    "prompt-caching",
+    "thinking",
+    "context-management",
+    "images",
+    "beta-features",
+    "checkpoint",
+    "compaction",
+    "steer",
+    "output.structured",
+    "session.store",
+    "session.manage",
+  ])
+
+export const sdkInputExtensionScenario = () =>
+  parityTextScenario("sdk-input-extension", [
+    "permissions.update-rules",
+    "hooks.lifecycle",
+    "input.elicitation",
+    "input.dialog",
+  ])
+
+export const sdkRuntimeManagementScenario = () =>
+  parityTextScenario("sdk-runtime-management", [
+    "plugins.native",
+    "skills.native",
+    "mcp.dynamic",
+    "subagents.manage",
+    "tasks.background",
+    "commands.dynamic",
+    "sandbox.native",
+  ])
+
+export const sdkHostLifecycleScenario = () =>
+  parityTextScenario("sdk-host-lifecycle", ["observability.child", "startup.prewarm"])
+
 /** Every scenario factory, keyed by id. */
 export const SCENARIOS = {
   "text-sse": textSseScenario,
@@ -330,6 +386,10 @@ export const SCENARIOS = {
   "upstream-5xx": upstream5xxScenario,
   "stream-interruption": streamInterruptionScenario,
   "sticky-failover": stickyFailoverScenario,
+  "sdk-structured-session": sdkStructuredSessionScenario,
+  "sdk-input-extension": sdkInputExtensionScenario,
+  "sdk-runtime-management": sdkRuntimeManagementScenario,
+  "sdk-host-lifecycle": sdkHostLifecycleScenario,
 }
 
 /**

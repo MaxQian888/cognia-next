@@ -156,29 +156,9 @@ test("frame() renders spec framing", () => {
 test("every Agent Core capability id has at least one scenario", async () => {
   // Read the capability registry from the contracts package (source export).
   const { AGENT_CAPABILITY_IDS } =
-    await import("../../../packages/agent-config-types/src/agent-execution.ts").catch(() => ({
-      AGENT_CAPABILITY_IDS: null,
-    }))
+    await import("../../../packages/agent-config-types/src/agent-execution.ts")
   const coverage = capabilityCoverage()
-  if (AGENT_CAPABILITY_IDS) {
-    // Session/tool/permission/stream capabilities must all be covered; purely
-    // resolver-side ids (compatibility bookkeeping) are exempted explicitly.
-    const exempt = new Set([
-      "thinking",
-      "context-management",
-      "images",
-      "beta-features",
-      "checkpoint",
-      "compaction",
-      "steer",
-      "session.resume",
-    ])
-    for (const id of AGENT_CAPABILITY_IDS) {
-      if (exempt.has(id)) continue
-      assert.ok(coverage.has(id), `capability ${id} has no conformance scenario`)
-    }
-  } else {
-    // TS import unavailable under plain node — still assert the local map.
-    assert.ok(coverage.get("streaming")?.length >= 1)
+  for (const id of AGENT_CAPABILITY_IDS) {
+    assert.ok(coverage.has(id), `capability ${id} has no conformance scenario`)
   }
 })

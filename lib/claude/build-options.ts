@@ -345,6 +345,13 @@ export interface BuildOptionsContext {
    */
   workspaceRestricted?: boolean
   /**
+   * Workspace roots with an explicit Workspace Trust grant. Native Claude SDK
+   * skills/plugins are local provider-visible content, so the sidecar enables
+   * them only when this proof accompanies the send. That trust grant is the
+   * explicit disclosure boundary; native file contents are not PII-rewritten.
+   */
+  trustedWorkspaceRoots?: string[]
+  /**
    * Per-team-slot override applied on top of the character defaults. Only set
    * by the team chat hook; ignored when undefined. Override fields that are
    * left undefined fall through to the character's value as usual.
@@ -2362,6 +2369,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       loggers.app.warn("failed to append SlashCommand built-in tool", { error: String(err) })
     }
   }
+  // User-started sidechat handoff. Native mobile has no sidechat host, so do
+  // not advertise a tool that could only create an unreachable embedded row.
+  if (appSettings?.selfInvokeTools?.spawnTask === true) {
+    try {
+      const { isNativeMobile } = await import("@/lib/platform/detect")
+      if (!isNativeMobile()) {
+        const { buildSpawnTaskManifestEntries } =
+          await import("@/lib/claude/spawn-task-builtin-tools")
+        opts.pluginTools = [...(opts.pluginTools ?? []), ...buildSpawnTaskManifestEntries()]
+      }
+    } catch (err) {
+      loggers.app.warn("failed to append spawn_task built-in tool", { error: String(err) })
+    }
+  }
   // Project-scoped vector memory (vector_search / vector_add_document /
   // vector_delete_document). Opt-in, and only manifested when the tools can
   // actually run: they need the native sqlite-vec store (desktop) AND a linked
@@ -3382,7 +3403,8 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       await import("@/lib/ai/agent/execution/feature-flags")
     if (
       isAgentExecutionFlagEnabled("agentExecutionResolverV2") ||
-      isAgentExecutionFlagEnabled("gatewayAgentRouteTickets")
+      isAgentExecutionFlagEnabled("gatewayAgentRouteTickets") ||
+      isAgentExecutionFlagEnabled("claudeSdkParityV1")
     ) {
       const { resolveAgentExecutionSpec, sendSpecFromResolved } =
         await import("@/lib/ai/agent/execution/resolve-agent-execution-spec")
@@ -3428,9 +3450,40 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       } else {
         opts.execution = sendSpecFromResolved(spec)
       }
+      if (spec.runtimeAdapter === "claude-agent-sdk") {
+        const { claudeSdkRolloutOptions } = await import("./claude-sdk-rollout")
+        const rollout = claudeSdkRolloutOptions(getAgentExecutionFlags())
+        if (rollout) opts.claudeAgentSdk = { ...opts.claudeAgentSdk, ...rollout }
+      }
     }
   } catch {
     // Never fail the send over spec stamping.
+  }
+
+  // Trust proof is host-owned and stamped after plugin option transforms, so a
+  // plugin cannot mint or widen the authority used to load provider-visible
+  // local SDK skills/plugins.
+  if (ctx.trustedWorkspaceRoots?.length) {
+    opts.trustedWorkspaceRoots = [...new Set(ctx.trustedWorkspaceRoots)]
+  } else {
+    delete opts.trustedWorkspaceRoots
+  }
+
+  if (opts.claudeAgentSdk) {
+    const { validateClaudeAgentSdkOptions } =
+      await import("@cognia/agent-config-types/claude-agent-sdk-options")
+    const validation = validateClaudeAgentSdkOptions(opts.claudeAgentSdk, {
+      resume: opts.resumeSessionId,
+      forkSession: opts.forkFromSessionId !== undefined,
+      permissionMode: opts.permissionMode,
+      bypassConfirmed: opts.bypassPermissionsConfirmed === true,
+    })
+    if (!validation.ok) {
+      throw new Error(`invalid claudeAgentSdk options: ${validation.errors.join("; ")}`)
+    }
+    for (const warning of validation.warnings) {
+      loggers.app.warn("Claude Agent SDK option warning", { warning })
+    }
   }
 
   return opts

@@ -1,6 +1,24 @@
+import { AGENT_CAPABILITY_IDS } from "@cognia/agent-config-types/agent-execution"
+
 import type { AgentExecutionFlag } from "./feature-flags"
 import { decideDelegationMode } from "./delegation-mode"
-import { resolveAgentExecutionSpec } from "./resolve-agent-execution-spec"
+import { RUNTIME_CAPABILITIES, resolveAgentExecutionSpec } from "./resolve-agent-execution-spec"
+
+/**
+ * A capability the claude rail genuinely does not serve, derived from the table
+ * rather than written down.
+ *
+ * Hardcoding one is how this test twice ended up asserting nothing: first with
+ * `steer` (which the rail had all along) and then with `session.store` (which
+ * it gained in Stage 4). Both times the injected "extra" was already in the
+ * parent's set, so the delegation check had nothing to reject.
+ */
+const UNSERVED_BY_PARENT = (() => {
+  const served = new Set(RUNTIME_CAPABILITIES["claude-agent-sdk"])
+  const id = AGENT_CAPABILITY_IDS.find((c) => !served.has(c))
+  if (!id) throw new Error("claude-agent-sdk now serves every capability — pick a new probe")
+  return id
+})()
 
 const flags: Record<AgentExecutionFlag, boolean> = {
   agentExecutionResolverV2: true,
@@ -8,6 +26,10 @@ const flags: Record<AgentExecutionFlag, boolean> = {
   gatewayAgentRouteTickets: false,
   headlessLlmGateway: false,
   experimentalAnthropicDeploymentAgentSdk: false,
+  claudeSdkParityV1: false,
+  claudeSdkSessionStore: false,
+  claudeSdkCheckpoint: false,
+  claudeSdkPrewarm: false,
 }
 
 const desktop = { isTauri: true, isHeadlessHost: false }
@@ -81,20 +103,39 @@ describe("decideDelegationMode", () => {
 
   it("a hard capability the parent cannot serve forces orchestrated", () => {
     const parent = spec()
-    // The external runtime's effective set includes "steer", which the parent
-    // (claude-agent-sdk) does not serve.
-    const child = resolveAgentExecutionSpec({
+    // The child's extra capability is DERIVED (see UNSERVED_BY_PARENT), not
+    // written down: every hardcoded probe here has eventually been added to
+    // the claude rail, at which point the test kept passing while asserting
+    // nothing.
+    const runtimeDiffers = resolveAgentExecutionSpec({
       surface: "team",
       environment: desktop,
       flags,
       legacy: { runtime: "codex", toolsEnabled: true },
       now: "2026-07-23T00:00:00.000Z",
     }).spec
+    const child = {
+      ...runtimeDiffers,
+      capabilities: {
+        ...runtimeDiffers.capabilities,
+        effective: [...runtimeDiffers.capabilities.effective, UNSERVED_BY_PARENT],
+      },
+    }
+
     const decision = decideDelegationMode(parent, child)
     expect(decision.mode).toBe("orchestrated")
     expect(decision.reasons).toEqual(
       expect.arrayContaining(["runtime-differs", "capability-differs"])
     )
+  })
+
+  it("a child whose capabilities are a subset of the parent's stays native on that axis", () => {
+    const parent = spec()
+    const child = {
+      ...parent,
+      capabilities: { ...parent.capabilities, effective: ["streaming" as const] },
+    }
+    expect(decideDelegationMode(parent, child).reasons).not.toContain("capability-differs")
   })
 
   it("identical pinned credentials on both sides stay native", () => {

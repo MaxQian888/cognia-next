@@ -147,7 +147,13 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(() => false),
 }))
 
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isNativeMobile: jest.fn(() => false),
+}))
+
 import { isTauri } from "@/lib/tauri"
+import { isNativeMobile } from "@/lib/platform/detect"
 import { buildAgentModeSessionUpdate } from "@/lib/agent"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import {
@@ -195,6 +201,7 @@ import type {
   Team,
   TeamMember,
 } from "@cognia/agent-config-types"
+import { RESOLVED_SPEC_VERSION } from "@cognia/agent-config-types/agent-execution"
 import type { Project } from "@/types"
 
 const mGetCharacter = resolveCharacterById as jest.Mock
@@ -2449,6 +2456,21 @@ describe("resolveSendOptions — activeProject (workspace)", () => {
 })
 
 describe("resolveSendOptions — workspace Restricted Mode", () => {
+  it("carries only the caller's explicit trusted-root proof", async () => {
+    const opts = await resolveSendOptions({
+      activeProject: makeProject([{ path: "/a", isPrimary: true }]),
+      workspaceRestricted: false,
+      trustedWorkspaceRoots: ["/a", "/a"],
+    })
+    expect(opts.trustedWorkspaceRoots).toEqual(["/a"])
+
+    const withoutProof = await resolveSendOptions({
+      activeProject: makeProject([{ path: "/a", isPrimary: true }]),
+      workspaceRestricted: false,
+    })
+    expect(withoutProof.trustedWorkspaceRoots).toBeUndefined()
+  })
+
   it("unions RESTRICTED_MODE_DENIED_TOOLS into disallowedTools when restricted", async () => {
     const opts = await resolveSendOptions({
       activeProject: makeProject([{ path: "/a", isPrimary: true }]),
@@ -4233,7 +4255,7 @@ describe("native Anthropic web tools (Tier C opt-in)", () => {
   })
 })
 
-describe("agent self-invocation tools (Skill / SlashCommand)", () => {
+describe("agent self-invocation tools (Skill / SlashCommand / spawn_task)", () => {
   it("does not surface Skill / SlashCommand by default (opt-in)", async () => {
     const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
     expect(toolNames(opts)).not.toContain("Skill")
@@ -4254,6 +4276,24 @@ describe("agent self-invocation tools (Skill / SlashCommand)", () => {
       appSettings: { selfInvokeTools: { slashCommand: true } } as AppSettings,
     })
     expect(toolNames(opts)).toContain("SlashCommand")
+  })
+
+  it("appends spawn_task only when opted in and not on native mobile", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { spawnTask: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).toContain("spawn_task")
+
+    const mobile = isNativeMobile as jest.Mock
+    mobile.mockReturnValueOnce(true)
+    const mobileOpts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { spawnTask: true } } as AppSettings,
+    })
+    expect(toolNames(mobileOpts)).not.toContain("spawn_task")
   })
 
   describe("project-scoped vector memory", () => {
@@ -4801,6 +4841,7 @@ describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
   afterEach(() => {
     delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
     delete process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS
+    delete process.env.NEXT_PUBLIC_CLAUDE_SDK_PARITY_V1
   })
 
   it("leaves SendOptions unstamped while both flags are off", async () => {
@@ -4818,17 +4859,39 @@ describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
     expect(opts.execution).toBeTruthy()
   })
 
+  it("applies Claude SDK rollout options to a direct send without a gateway ticket", async () => {
+    process.env.NEXT_PUBLIC_CLAUDE_SDK_PARITY_V1 = "1"
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+
+    expect(opts.execution?.route.kind).toBe("direct")
+    expect(opts.claudeAgentSdk).toEqual({ version: 1 })
+  })
+
   it("stamps the frozen, secret-free execution spec when the flag is on (legacy fields intact)", async () => {
     process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
     const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
 
     const execution = opts.execution as unknown as Record<string, unknown>
     expect(execution).toBeTruthy()
-    expect(execution.specVersion).toBe(1)
+    // Tracked symbolically: the wire spec must advance with the contract, and
+    // hardcoding a literal here is what let the two drift apart silently.
+    expect(execution.specVersion).toBe(RESOLVED_SPEC_VERSION)
     expect(execution.executionKind).toBe("agent")
     expect(execution.runtimeAdapter).toBe("claude-agent-sdk")
     expect((execution.route as { kind: string }).kind).toBe("direct")
     expect(execution.executionFingerprint).toEqual(expect.any(String))
+
+    // v2 carries per-capability verdicts across the wire so the sidecar can
+    // fail closed on its own rather than trusting `effective` alone.
+    const capabilities = execution.capabilities as {
+      effective: string[]
+      support?: Record<string, { support: string }>
+    }
+    expect(capabilities.support).toBeDefined()
+    for (const id of capabilities.effective) {
+      expect(capabilities.support?.[id]?.support).toBe("native")
+    }
+
     // Legacy routing fields survive for rollback; no secret shapes in the spec.
     expect(opts.provider).toBeDefined()
     expect(JSON.stringify(execution)).not.toMatch(/sk-|api[_-]?key|bearer|token/i)

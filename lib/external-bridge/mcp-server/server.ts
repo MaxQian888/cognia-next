@@ -54,6 +54,7 @@ import {
   memoryUpdate,
   memoryForget,
 } from "../handlers/memory"
+import { spawnTask } from "../handlers/spawn-task"
 
 /** Function the caller injects so the server always sees fresh settings. */
 export type SettingsGetter = () => Promise<ExternalBridgeSettings | undefined>
@@ -385,6 +386,38 @@ function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsG
         scope: "agent:dispatch",
         check: checkToolCall(await scopedSettings(settingsGetter, extra), "agent_dispatch"),
         body: () => agentDispatch(args as Parameters<typeof agentDispatch>[0]),
+      })
+  )
+
+  server.registerTool(
+    "spawn_task",
+    {
+      title: "Stage a Cognia sidechat task",
+      description:
+        "Create a named, user-started follow-up task beside an existing Cognia conversation. Denied by default until the agent:dispatch scope is enabled.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        parentSessionId: z.string().min(1),
+        title: z.string().min(1).max(60),
+        tldr: z.string().min(1),
+        situation: z.string().min(1),
+        code_locations: z.array(z.string().min(1)),
+        solution: z.string().min(1),
+        caveats: z.array(z.string().min(1)),
+        mode: z.enum(["aside", "inherit"]).optional(),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "spawn_task",
+        scope: "agent:dispatch",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "spawn_task"),
+        body: () => spawnTask(args),
       })
   )
 

@@ -7,10 +7,17 @@
 
 import os from "node:os"
 import process from "node:process"
+import { constants as fsConstants, fstatSync } from "node:fs"
+import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
+import metadata from "../../lib/settings/builtin-tools-data.json" with { type: "json" }
 import { toolError, toolText } from "./safety.mjs"
+import { runCapped } from "./shared/exec.mjs"
+
+const TOOLS_STARTED_AT = new Date().toISOString()
+const RUNTIME_FINGERPRINT = `${metadata.serverName}@${metadata.serverVersion}:${process.pid}:${TOOLS_STARTED_AT}`
 
 const SECRET_RE = /(key|secret|token|password|credential|passwd|api[_-]?key)/i
 
@@ -111,6 +118,43 @@ export const getEnvTool = tool(
 
 const systemInfoShape = {}
 
+async function runtimeHealth() {
+  const checks = {
+    stdio: { ok: true },
+    tempDirectory: { ok: true, path: os.tmpdir() },
+    git: { ok: true },
+  }
+
+  try {
+    for (const fd of [0, 1, 2]) fstatSync(fd)
+  } catch (err) {
+    checks.stdio = { ok: false, error: String(err?.message ?? err) }
+  }
+  try {
+    await fsp.access(os.tmpdir(), fsConstants.R_OK | fsConstants.W_OK)
+  } catch (err) {
+    checks.tempDirectory = {
+      ok: false,
+      path: os.tmpdir(),
+      error: String(err?.message ?? err),
+    }
+  }
+  try {
+    const { stdout } = await runCapped("git", ["--version"], {
+      timeoutMs: 3000,
+      maxBuffer: 16 * 1024,
+    })
+    checks.git.version = stdout.trim()
+  } catch (err) {
+    checks.git = { ok: false, error: String(err?.message ?? err) }
+  }
+
+  return {
+    status: Object.values(checks).every((check) => check.ok) ? "ok" : "degraded",
+    checks,
+  }
+}
+
 async function execSystemInfo() {
   try {
     return toolText({
@@ -128,6 +172,14 @@ async function execSystemInfo() {
       tmpdir: os.tmpdir(),
       homedir: os.homedir(),
       userInfoUsername: safeUser(),
+      cogniaTools: {
+        serverName: metadata.serverName,
+        serverVersion: metadata.serverVersion,
+        pid: process.pid,
+        startedAt: TOOLS_STARTED_AT,
+        runtimeFingerprint: RUNTIME_FINGERPRINT,
+        health: await runtimeHealth(),
+      },
     })
   } catch (err) {
     return toolError(err, "system_info")
@@ -144,7 +196,7 @@ function safeUser() {
 
 export const systemInfoTool = tool(
   "system_info",
-  "Report platform, architecture, node version, cpu, memory, hostname, uptime, etc.",
+  "Report platform resources plus Cognia Tools runtime identity and stdio/temp/Git health checks. Use the runtime fingerprint to detect a stale sidecar after an update.",
   systemInfoShape,
   execSystemInfo,
   { alwaysLoad: true }
@@ -218,4 +270,5 @@ export const __testExports = {
   isSecretKey,
   redactValue,
   safeUser,
+  runtimeHealth,
 }

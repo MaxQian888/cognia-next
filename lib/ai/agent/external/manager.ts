@@ -32,6 +32,7 @@ import type {
   AcpToolInfo,
   AcpPermissionMode,
   AcpPermissionResponse,
+  AcpElicitationResponse,
   AcpAuthMethod,
   AcpSessionModelState,
   AcpConfigOption,
@@ -469,6 +470,22 @@ export class ExternalAgentManager {
       throw new Error("Agent does not support config options")
     }
     return adapter.setConfigOption(sessionId, configId, value)
+  }
+
+  async respondToElicitation(agentId: string, response: AcpElicitationResponse): Promise<void> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.respondToElicitation) {
+      throw new Error("Agent does not support elicitation")
+    }
+    await adapter.respondToElicitation(response)
+  }
+
+  async cancelRequest(agentId: string, requestId: number | string): Promise<void> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.cancelRequest) {
+      throw new Error("Agent does not support request cancellation")
+    }
+    await adapter.cancelRequest(requestId)
   }
 
   /**

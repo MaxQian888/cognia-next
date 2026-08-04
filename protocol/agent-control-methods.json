@@ -1,24 +1,27 @@
 {
-  "$comment": "Single source for the live session-control surface. See scripts/gates/check-agent-control-methods.mjs.",
+  "$comment": "Single source for the live session-control surface (`methods`) and the session-level SDK functions (`sessionApi`). See scripts/gates/check-agent-control-methods.mjs.",
   "schemaVersion": 1,
   "methods": [
     {
       "name": "accountInfo",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "session.manage"
+      "exposure": "control",
+      "capability": "session.manage",
+      "args": []
     },
     {
       "name": "applyFlagSettings",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "session.manage"
+      "exposure": "control",
+      "capability": "session.manage",
+      "args": ["settings"]
     },
     {
       "name": "backgroundTasks",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "tasks.background"
+      "exposure": "control",
+      "capability": "tasks.background",
+      "args": ["toolUseId"]
     },
     {
       "name": "close",
@@ -37,8 +40,9 @@
     {
       "name": "initializationResult",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "session.manage"
+      "exposure": "control",
+      "capability": "session.manage",
+      "args": []
     },
     {
       "name": "interrupt",
@@ -57,8 +61,9 @@
     {
       "name": "readFile",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "checkpoint"
+      "exposure": "control",
+      "capability": "checkpoint",
+      "args": ["path", "options"]
     },
     {
       "name": "reconnectMcpServer",
@@ -70,50 +75,59 @@
     {
       "name": "reinitialize",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "session.manage"
+      "exposure": "control",
+      "capability": "session.manage",
+      "args": []
     },
     {
       "name": "reloadPlugins",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "plugins.native"
+      "exposure": "control",
+      "capability": "plugins.native",
+      "args": []
     },
     {
       "name": "reloadSkills",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "skills.native"
+      "exposure": "control",
+      "capability": "skills.native",
+      "args": []
     },
     {
       "name": "rewindFiles",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "checkpoint"
+      "exposure": "control",
+      "capability": "checkpoint",
+      "args": ["userMessageId", "options"]
     },
     {
       "name": "seedReadState",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "checkpoint"
+      "exposure": "control",
+      "capability": "checkpoint",
+      "args": ["path", "mtime"]
     },
     {
       "name": "setMaxThinkingTokens",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "thinking"
+      "exposure": "control",
+      "capability": "thinking",
+      "args": ["maxThinkingTokens", "thinkingDisplay"],
+      "note": "deprecated in 0.3.220 in favour of the `thinking` query() option; still the only mid-session lever"
     },
     {
       "name": "setMcpPermissionModeOverride",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "mcp.dynamic"
+      "exposure": "control",
+      "capability": "mcp.dynamic",
+      "args": ["serverName", "mode"]
     },
     {
       "name": "setMcpServers",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "mcp.dynamic"
+      "exposure": "control",
+      "capability": "mcp.dynamic",
+      "args": ["servers"]
     },
     {
       "name": "setModel",
@@ -140,20 +154,23 @@
     {
       "name": "stopTask",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "tasks.background"
+      "exposure": "control",
+      "capability": "tasks.background",
+      "args": ["taskId"]
     },
     {
       "name": "streamInput",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "session.multi-turn"
+      "exposure": "not-exposed",
+      "capability": "session.multi-turn",
+      "reason": "a control frame is JSON and this takes an AsyncIterable. Multi-turn input reaches the same place through `agent_send` -> pushUserMessage, which is the async iterable query() was handed."
     },
     {
       "name": "supportedAgents",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "subagents.manage"
+      "exposure": "control",
+      "capability": "subagents.manage",
+      "args": []
     },
     {
       "name": "supportedCommands",
@@ -179,8 +196,88 @@
     {
       "name": "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET",
       "kind": "sdk",
-      "exposure": "planned",
-      "capability": "observability.child"
+      "exposure": "not-exposed",
+      "capability": "observability.child",
+      "reason": "the SDK marks it EXPERIMENTAL and says the method name itself will change when it stabilises. Exposing it would put that rename on our IPC surface, where it becomes a breaking change for every host."
+    }
+  ],
+  "sessionApi": [
+    {
+      "name": "listSessions",
+      "capability": "session.manage",
+      "mutates": false,
+      "args": [],
+      "store": true
+    },
+    {
+      "name": "getSessionInfo",
+      "capability": "session.manage",
+      "mutates": false,
+      "args": ["sessionId"],
+      "store": true
+    },
+    {
+      "name": "getSessionMessages",
+      "capability": "session.manage",
+      "mutates": false,
+      "args": ["sessionId"],
+      "store": true
+    },
+    {
+      "name": "listSubagents",
+      "capability": "subagents.manage",
+      "mutates": false,
+      "args": ["sessionId"],
+      "store": true
+    },
+    {
+      "name": "getSubagentMessages",
+      "capability": "subagents.manage",
+      "mutates": false,
+      "args": ["sessionId", "agentId"],
+      "store": true
+    },
+    {
+      "name": "renameSession",
+      "capability": "session.manage",
+      "mutates": true,
+      "args": ["sessionId", "title"],
+      "store": true
+    },
+    {
+      "name": "tagSession",
+      "capability": "session.manage",
+      "mutates": true,
+      "args": ["sessionId", "tag"],
+      "store": true
+    },
+    {
+      "name": "deleteSession",
+      "capability": "session.manage",
+      "mutates": true,
+      "args": ["sessionId"],
+      "store": true
+    },
+    {
+      "name": "forkSession",
+      "capability": "session.manage",
+      "mutates": true,
+      "args": ["sessionId"],
+      "store": true
+    },
+    {
+      "name": "importSessionToStore",
+      "capability": "session.store",
+      "mutates": true,
+      "args": ["sessionId"],
+      "store": true
+    },
+    {
+      "name": "resolveSettings",
+      "capability": "session.manage",
+      "mutates": false,
+      "args": [],
+      "store": false
     }
   ]
 }
