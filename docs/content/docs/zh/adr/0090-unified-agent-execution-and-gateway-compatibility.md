@@ -402,8 +402,33 @@ sidecar `legacy_dispatch`（无 spec 发送）、Rust `DeprecatedCommandCounters
 在步骤 1 前置条件满足之前,flag-off legacy 路径就是生产主路径,必须保持
 字节级一致行为（由 Phase 6 的逐调用方 parity 测试钉住）。
 
+## 附录（2026-08-03）— Claude Agent SDK 0.3.220 完整能力
+
+Anthropic runtime 现通过版本化嵌套选项契约、生成并审计的控制与会话函数清单、穷尽式规范事件映射、全部 Hook 事件、结构化输出、动态 MCP/插件/技能、检查点控制、后台任务、子进程遥测、租户隔离的 Rust `SessionStore` 和指纹隔离预热，覆盖完整公共 SDK 能力面。
+
+桌面端、CLI、headless 与 companion 共用一份不含密钥的能力快照。桌面端额外提供受控的高级功能开关与原生 SDK 会话管理；`cognia-agent sdk` 提供类型化会话操作，不开放原始选项逃生口。发布由 `claudeSdkParityV1` 控制，并由 `claudeSdkSessionStore`、`claudeSdkCheckpoint` 与 `claudeSdkPrewarm` 分别控制高风险能力。会话存储与文件检查点以 fail-closed 方式互斥。
+
+Conformance 套件版本 `2` 将认证扩展到完整的 40 项能力词表。SDK 版本、surface manifest、套件版本和 certification bundle 必须作为一个整体回滚。
+
 ### 长期门禁
 
 `check:provider-name-branches`（grep 运行时代码的 provider 名特判）、
 `check:runtime-versions`（stale 判定版本钉）、suite-manifest hash 钉、
 colocated-test 审计,均在 `check:all` 中。
+
+## 附录（2026-08-04）— Gateway 本地路由策略 V2
+
+Gateway 快照现在携带版本化且不含密钥的路由策略。Rust Gateway 在本地按
+`priority`、`weighted` 或 `round-robin` 分配显式 alias；虚拟模型 `auto`
+使用已配置的内置策略。Chat、Responses、embedding 与上游探测不再等待
+renderer 的 `gateway://decide` 往返。旧快照继续按优先级顺序读取；无效 V2
+快照整体拒绝，并继续服务上一份有效策略。
+
+部署选择先于现有的 provider 凭据轮换。轮询 cursor 仅在进程内保存，以候选
+集合为作用域，从第一个成员开始，并在策略变化时安全重置。若凭据池全部处于
+冷却状态则快速失败；可重试故障使用有上限的指数退避，并可遵循上游恢复时间。
+会话亲和与 route ticket 的冻结候选仍优先于逐请求分配，且响应字节提交后绝不
+执行 fallback。
+
+可执行协议边界仍限于 OpenAI-compatible 与 Anthropic；其他 provider 协议不会
+被静默视为兼容协议。

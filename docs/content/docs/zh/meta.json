@@ -17,6 +17,7 @@
     "companion",
     "---开发与发布---",
     "dev",
+    "plugin-dev",
     "---技术参考---",
     "adr",
     "connectors",

@@ -17,6 +17,7 @@
     "companion",
     "---Dev & deploy---",
     "dev",
+    "plugin-dev",
     "---Technical reference---",
     "adr",
     "connectors",

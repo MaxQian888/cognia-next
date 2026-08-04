@@ -119,10 +119,98 @@ through the shared CSS and primitives without an edit, and touching them would
 have dragged 200+ files through the 90% changed-file coverage gate for a
 cosmetic win.
 
-**Determinate progress is still missing** for plugin activation (10–45s), data
-import's `applying` phase, workflow step counts, and Agent Team orchestration.
-The information exists; surfacing it needs changes to those state-reporting
-chains and is out of scope here.
+**Determinate progress is still missing** for ~~plugin activation (10–45s),~~
+data import's `applying` phase, workflow step counts, and Agent Team
+orchestration. The information exists; surfacing it needs changes to those
+state-reporting chains and is out of scope here. (Plugin activation was
+delivered 2026-08-03 — see the amendment below.)
+
+---
+
+## Amendment — 2026-08-03 (determinate plugin activation)
+
+Closes the plugin-activation half of the gap recorded above. The other
+three surfaces still have no determinate progress.
+
+### Added: a seven-phase model where monotonicity is structural
+
+`preflight → dependencies → schema → runtime → contributions → hooks →
+commit`, with `processedForPhase(phase)` returning the phase's **index
+and nothing else**.
+
+That one decision is what makes the two hard properties fall out for
+free rather than needing to be maintained:
+
+- **Monotonic** — `processed` is a function of the phase name, never of
+  work actually completed, so it cannot go backwards.
+- **Skipped optional work still advances** — a plugin with no
+  `manifest.dexie` and no dependencies still *enters* the `schema` and
+  `dependencies` phases and still reports 2/7 and 1/7.
+
+The corresponding rule for `lib/plugin/core/manager.ts`: **no `advance`
+call may sit inside a conditional.** A regression test runs a manifest
+with no Dexie tables and no dependencies and asserts it produces a phase
+sequence identical to a fully-loaded one — that is what catches an
+`advance` that someone later moved inside an `if`.
+
+Dependency sub-activations need no bookkeeping at all: the recursion
+goes through the same wrapper, so each dependency gets its own entry
+running 0/7 → 7/7 while the parent stays frozen at `dependencies` 1/7
+until the loop returns. A property of the call graph, not of state
+management.
+
+### Ruling: rollback ordering, and why there is no `finally`
+
+`enablePluginInner`'s own catch runs the entire rollback —
+unregister contributions, set the plugin error, emit
+`PLUGIN_ENABLE_FAILED_EVENT` — *before* rethrowing to the outer catch
+that records the failure. So during rollback the entry is still
+`running` at the failing phase, which is correct: the work is not
+finished. `fail` then runs strictly after every rollback side effect,
+including the toast.
+
+Using `finally` on the inner try would fire before the rethrow reached
+the outer catch and invert that order. The instrumentation comments say
+so at the edit site, because the shape looks like an oversight.
+
+### Added: `LoadingRegion` gains a determinate variant
+
+`progress?: { processed, total, phaseLabel? } | null`, additive.
+
+- The sr-only `role="status"` text becomes `"<base> — <phase> —
+  <n>/<total>"`, which changes at most seven times per activation —
+  exactly the re-announce cadence this ADR designs for.
+- The visible `<Progress>` renders as a **sibling of, never a child of**
+  the status span, so Radix's implicit `role="progressbar"` sits outside
+  the live region and value updates are not announced.
+- `progress` is **ignored when `total <= 0`**, falling back to
+  indeterminate. A determinate 0% bar is a claim; a spinner is the truth.
+- **No `onCancel`.** `enablePlugin` has no cancellation token, and this
+  ADR says to offer cancel only when it genuinely stops the work.
+
+### Fixed: `Progress` published no `aria-valuenow`
+
+`components/ui/progress.tsx` destructured `value` and used it only for
+the CSS transform, never forwarding it to `ProgressPrimitive.Root`. Every
+progress bar in the app was visually determinate and accessibly
+indeterminate. One line; the determinate-accessibility contract above
+depended on it.
+
+### Fixed: `/plugins` toggles never activated anything
+
+All four toggle sites wrote only the Dexie `enabled` flag, and no
+reconciler subscribes to it — `manager.enablePlugin` was reachable from
+boot restore, the updater, and remote control, but never from the panel.
+They now route through the manager, with the Dexie write as a
+*consequence* of the transition rather than a substitute for it, and
+revert the optimistic toggle on failure.
+
+This also revives the previously-dead `PluginStatusPill` `loading`
+branch: no code path wrote `enabling`/`loading` to the Dexie row, so the
+`isLoading` derivation never fired from the panel. The batch bar's
+`Promise.all` became a sequential loop — parallel activation of plugins
+with interdependencies is not something the manager's lifecycle lock
+makes safe to assume.
 
 **Unverified.** The reduce-motion contract has unit coverage only. jsdom does
 not run animations, so a real-browser check is still owed; a first attempt found

@@ -52,3 +52,14 @@ TUI 的 markdown 渲染、工具卡片与 sidecar 内置工具均可用，但经
 - **窗口化 `read`** —— 文件本就需整读以做二进制检测，且 `decodeText` 的整文件 BOM/EOL 规范化是正确性关键；窗口化重写为边际分配收益冒输出变化之险。
 - **统一 `content_search` / `file_search` 到 ripgrep 引擎** —— 较大且行为敏感，留待专门跟进。
 - **`<Static>` 回滚区逐卡片交互式展开/折叠** —— 与 Ink 追加式模型不兼容（同一约束把上下文折叠限定在实时记录）。
+
+## 2026-08 跟进——renderer model 与结构化 part
+
+渲染现增加纯 `TerminalBlock` 层，包含 styled terminal line、plain-copy text、精确 row count、
+stable id 与 interaction target。实现继续使用 `marked@4`，不把 renderer 工作与 parser major
+升级捆绑。golden test 覆盖窄宽度、CJK/emoji/combining text、hostile terminal control、
+malformed streaming Markdown、table/list/quote，以及 Mermaid/math/A2UI fence fallback。
+
+canonical envelope 新增 additive `content-part` event，覆盖 sources、files、A2UI、
+artifact/canvas 引用与 custom fallback。durable event 不保存 binary/base64 body。URI 与 local
+path policy 会约束 hyperlink/media；只有 trusted builder 可以发出 OSC-8、graphics 或 screen control。

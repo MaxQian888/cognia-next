@@ -62,6 +62,75 @@ description: "按本质性分级动画，修正反转速度偏好，并赋予加
 
 **故意非作用域。** `components/settings/**`（116个文件）和~100个按钮旋转站点未被迁移：它们通过共享CSS和原语继承了正确性修正，无需编辑，触碰它们会拖拽200+文件通过90%更改文件覆盖率的覆盖门禁，以获得美观优势。
 
-**插件激活（10–45秒）、数据导入`applying`阶段、工作流步骤计数和Agent Team编排的确定进度仍然缺失。信息是存在的;披露它需要对州级报告链进行调整，这里正在超出范围。
+**确定性进度仍然缺失**：~~插件激活（10–45 秒）、~~数据导入的 `applying` 阶段、工作流步骤计数、以及 Agent Team 编排。信息是存在的；要把它暴露出来需要改动那几条状态上报链，不在本轮范围内。（插件激活已于 2026-08-03 交付 —— 见下方修订。）
+
+---
+
+## 修订 — 2026-08-03（确定性的插件激活进度）
+
+补上上面记录的缺口中"插件激活"这一半。另外三个面仍然没有确定性进度。
+
+### 新增：七阶段模型，单调性来自结构而非维护
+
+`preflight → dependencies → schema → runtime → contributions → hooks →
+commit`，其中 `processedForPhase(phase)` **只**返回该阶段的下标，别无其他。
+
+正是这一个决定，让两个难点属性自然成立，而不需要有人去持续维护：
+
+- **单调** —— `processed` 是阶段名的函数，永远不是"实际完成了多少工作"
+  的函数，因此不可能回退。
+- **被跳过的可选工作照样推进** —— 一个没有 `manifest.dexie`、也没有依赖的
+  插件，仍然会*进入* `schema` 与 `dependencies` 阶段，仍然上报 2/7 和 1/7。
+
+对应到 `lib/plugin/core/manager.ts` 的规则是：**任何 `advance` 调用都不得
+放在条件分支里。** 有一个回归测试专门跑"无 Dexie 表、无依赖"的 manifest，
+断言它产出的阶段序列与满配置的完全一致 —— 这正是用来抓住"某人后来把
+`advance` 挪进了某个 `if`"的测试。
+
+依赖子激活完全不需要额外记账：递归走的是同一层包装，因此每个依赖有自己的
+条目独立从 0/7 跑到 7/7，而父插件在循环返回之前一直冻结在 `dependencies`
+1/7。这是调用图的性质，不是状态管理的性质。
+
+### 裁定：回滚顺序，以及为什么没有 `finally`
+
+`enablePluginInner` 自己的 catch 会跑完整个回滚 —— 反注册 contributions、
+写入插件错误、发 `PLUGIN_ENABLE_FAILED_EVENT` —— 然后才把异常抛给记录失败
+的外层 catch。因此在回滚期间，条目仍然处于失败阶段的 `running` 状态，这是
+对的：工作确实还没结束。`fail` 严格发生在所有回滚副作用（包括 toast）之后。
+
+如果给内层 try 加 `finally`，它会在异常抵达外层 catch 之前触发，把顺序整个
+颠倒过来。改动点的注释写明了这一条，因为这个写法看上去像是疏忽。
+
+### 新增：`LoadingRegion` 增加确定性变体
+
+`progress?: { processed, total, phaseLabel? } | null`，纯增量。
+
+- 仅供读屏的 `role="status"` 文本变成 `"<base> — <阶段> — <n>/<total>"`，
+  一次激活最多变化七次 —— 恰好是本 ADR 所设计的重播报节奏。
+- 可见的 `<Progress>` 渲染为状态 span 的**兄弟节点，绝不是子节点**，这样
+  Radix 隐含的 `role="progressbar"` 位于 live region 之外，数值更新不会被
+  播报。
+- `total <= 0` 时**忽略** `progress`，回退到不确定态。确定性的 0% 进度条是
+  一个断言；转圈才是事实。
+- **没有 `onCancel`。** `enablePlugin` 没有取消令牌，而本 ADR 规定：只有在
+  取消真的能停止工作时才提供取消。
+
+### 修复：`Progress` 从未输出 `aria-valuenow`
+
+`components/ui/progress.tsx` 解构出 `value` 却只用于 CSS transform，从未把它
+传给 `ProgressPrimitive.Root`。全应用每一个进度条都是"视觉上确定、无障碍上
+不确定"。改动一行；而上面那条确定性无障碍契约正是建立在它之上。
+
+### 修复：`/plugins` 的开关从来没有真正激活任何东西
+
+四个开关调用点都只写 Dexie 的 `enabled` 标志，而没有任何 reconciler 订阅它
+—— `manager.enablePlugin` 能从启动恢复、更新器、远程控制到达，唯独到不了
+面板。现在它们改走 manager，Dexie 写入成为状态迁移的*结果*而不是它的替代品，
+并在失败时回滚乐观开关。
+
+这也让此前形同死代码的 `PluginStatusPill` `loading` 分支复活：既然没有任何
+代码路径往 Dexie 行里写 `enabling`/`loading`，那条 `isLoading` 推导就永远不
+会从面板触发。批量操作条的 `Promise.all` 改成了顺序循环 —— 对存在相互依赖的
+插件做并行激活，并不是 manager 的生命周期锁让人可以放心假定的事。
 
 **未经验证。** 减少动员合同仅涵盖单位保障。jsdom 不运行动画，因此仍需进行真实浏览器检查;第一次尝试发现，应用在Playwright的模拟下报告`prefers-reduced-motion: false`，尽管相同的模拟在`about:blank`上也能工作，这需要单独调查才能信任某个规范。

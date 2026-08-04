@@ -113,6 +113,40 @@ overrides per run. The trade-off (fullscreen gives up native scrollback) and the
 SGR mouse-wheel scrolling that resolves the wheel-vs-history conflict are recorded
 in ADR-0052.
 
+### Virtualized transcript and adaptive terminal budget
+
+`fullscreen` now renders through width-dependent `TerminalBlock` values and a
+prefix-sum block index. Only the visible cells plus two viewport heights of
+overscan are mounted. The viewport is anchored by cell id and intra-cell row, so
+resize correction and streamed appends do not move a reader who has scrolled up;
+`End` or `G` resumes follow-tail. `COGNIA_TUI_RENDERER=legacy` retains the former
+whole-transcript renderer for one compatibility release. `/transcript` opens the
+complete searchable/copyable transcript in either layout.
+
+Terminal chrome is measured in four tiers: full (100+ columns), abbreviated
+(60–99), compact (40–59), and tiny (below 40 columns or 12 rows). Tiny terminals
+drop nonessential banner/mascot rows and give overlays the viewport while keeping
+permission/activity state and the composer path available. In native scrollback,
+`render.terminalResizeReplayMaxRows` limits resize repaint to the newest 10,000
+rendered rows by default; `0` disables the limit without truncating session data.
+
+Canonical `content-part` envelopes carry sources, file metadata, A2UI surfaces,
+artifact/canvas references, and custom fallbacks without durable binary bodies.
+Every known canonical event has an explicit transcript, status, overlay, or audit
+classification; future events render a redacted unsupported-event notice. `/doctor`
+reports renderer, cache/window, timing, and terminal capability degradation without
+prompts, paths, or payloads.
+
+### Terminal smoke matrix
+
+- macOS and Windows: run the native node-pty geometry suite at 20×8, 40×12,
+  80×24, and 160×50; verify wheel input, resize, interrupt, and alternate-screen cleanup.
+- Linux CI: repeat the suite directly, inside tmux, and inside Zellij.
+- SSH: verify resize propagation, `TERM` forwarding, OSC-8 fallback, and clean disconnect.
+- Non-TTY and `TERM=dumb`: verify automatic scrollback output contains no alternate-screen escapes.
+- Proprietary terminals: manually check wheel/select modes, CJK/emoji wrapping,
+  `/transcript` search/copy, A2UI and permission focus, image fallback, and `Ctrl+C` cleanup.
+
 ## Streaming reliability — multi-turn context & idle timeout
 
 Two failure modes specific to non-Anthropic providers (any OpenAI-compatible relay, including

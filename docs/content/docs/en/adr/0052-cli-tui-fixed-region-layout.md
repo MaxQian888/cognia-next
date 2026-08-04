@@ -154,3 +154,16 @@ transparently to the historic scrollback model everywhere else. New pure modules
 `ScrollView` component are fully unit-tested; the reducer gains a `SET_LAYOUT`
 action and the command surface a `/layout` command. No sidecar, Rust, or desktop
 code is touched.
+
+## 2026-08 follow-up — virtualized viewport and measured chrome
+
+The previously deferred per-cell virtualization is now implemented. A pure
+variable-height block index, exact terminal-row counts, two-viewport overscan,
+and block-id/intra-row anchoring replace whole-transcript rendering. Append,
+resize, and height correction preserve the reader's anchor; `End`/`G` restores
+follow-tail. Chrome is budgeted across the 100/60/40-column and 12-row breakpoints.
+`COGNIA_TUI_RENDERER=legacy` is the one-release rollback; virtualized is default.
+
+Native-scrollback resize replay is capped at 10,000 rendered rows by default
+(`render.terminalResizeReplayMaxRows`; `0` means unlimited). This limits terminal
+repaint only: `/transcript`, export, and session storage remain complete.

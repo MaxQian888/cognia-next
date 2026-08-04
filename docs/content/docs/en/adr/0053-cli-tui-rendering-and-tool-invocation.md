@@ -52,3 +52,17 @@ The TUI's markdown renderer, tool-call cards, and the sidecar's built-in tools w
 - **Windowed `read`** — the file must already be read in full for binary detection, and `decodeText`'s whole-file BOM/EOL normalization is correctness-critical; a windowed rewrite risks output changes for a marginal allocation saving.
 - **Unifying `content_search` / `file_search` onto the ripgrep engine** — a larger, behavior-sensitive change left for a focused follow-up.
 - **Per-cell interactive expand/collapse in the `<Static>` scrollback** — incompatible with Ink's append-only model (the same constraint that bounds context folding to the live transcript).
+
+## 2026-08 follow-up — renderer model and structured parts
+
+Rendering now has a pure `TerminalBlock` layer containing styled terminal lines,
+plain-copy text, exact row count, stable id, and interaction target. It continues
+to use `marked@4`; the renderer work deliberately does not bundle a parser major
+upgrade. Golden tests cover narrow widths, CJK/emoji/combining text, hostile
+terminal controls, malformed streaming Markdown, tables/lists/quotes, and
+Mermaid/math/A2UI fence fallbacks.
+
+The canonical envelope gained additive `content-part` events for sources, files,
+A2UI, artifact/canvas references, and custom fallbacks. Binary/base64 bodies are
+excluded from durable events. URI and local-path policy gates hyperlinks and
+media; only trusted builders may emit OSC-8, graphics, or screen controls.

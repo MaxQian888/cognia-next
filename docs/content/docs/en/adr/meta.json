@@ -104,6 +104,7 @@
     "0101-model-evaluation-lab",
     "0102-unified-observability-crash-diagnostics",
     "0104-provider-diagnostics-control-plane",
-    "0106-end-to-end-skill-recorder"
+    "0106-end-to-end-skill-recorder",
+    "0107-coding-agent-migration"
   ]
 }

@@ -85,3 +85,11 @@ The M3 inbound gateway (`src-tauri/src/gateway/`) exposes the configured provide
 - A user's configured sampling settings finally affect non-Anthropic turns.
 - The resolver is the one place that decides protocol + endpoint + params; the sidecar trusts it. Adding a new OpenAI-compatible provider is now a catalog/resolver concern, not a sidecar dispatch-table edit.
 - The `anthropic` vs `ai-sdk` execution fork remains: the main agent loop (MCP, permissions, A2UI, computer-use) still lives only in the Claude Agent SDK path. Phase 2 narrows — but does not erase — that gap. Mature single-path designs (Cherry Studio, LobeChat, LibreChat) avoid the fork by routing every provider through one tool-capable client; Cognia's fork is a deliberate consequence of binding the primary loop to the Claude Agent SDK.
+
+### Phase 9 — Gateway-local policy V2 routing (Accepted, implemented)
+
+Gateway requests now resolve through the Rust `RoutePlanner` from a validated, versioned policy snapshot. Explicit aliases own their `priority`, `weighted`, or `round-robin` distribution; the virtual `auto` model applies the configured built-in strategy after capability, availability, protocol, context, mapping-condition, and cooldown filters. OpenAI and Anthropic remain the only executable wire protocols. Other providers stay visible in configuration but cannot enter an executable walk.
+
+Deployment rotation and credential rotation are separate reservations. Deployment cursors are scoped to the policy revision, route, and eligible-candidate fingerprint; credential cursors are scoped to the deployment and credential-pool fingerprint. Pool changes reset selection safely, duplicate/blank keys are removed, and an all-cooling pool fails with `503` plus `Retry-After`. Authentication errors do not switch credentials or providers unless a verified route ticket explicitly permits auth failover.
+
+Retries remain pre-response-byte only. The candidate walk is bounded by both Gateway retry configuration and policy fallback limits, and its capped exponential waits share one total wait budget while respecting upstream recovery headers. Snapshot compilation remains outside the request path, and invalid V2 snapshots retain the previous valid snapshot rather than falling through to an unfiltered chain.

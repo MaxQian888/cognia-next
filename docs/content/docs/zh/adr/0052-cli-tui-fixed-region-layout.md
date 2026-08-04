@@ -73,3 +73,14 @@ TUI 历来用 Ink 的 `<Static>` 组合屏幕:已提交的 transcript 单元格*
 ## 影响
 
 固定区域布局成为交互式终端上的新默认,并在其他场景透明降级到历史 scrollback 模型。新纯模块(`layout-mode`、`screen`、`scroll-view-state`)与 `useScroll` 钩子 / `ScrollView` 组件均有完整单测;reducer 新增 `SET_LAYOUT` 动作,命令面新增 `/layout` 命令。未触碰 sidecar、Rust 或桌面代码。
+
+## 2026-08 跟进——虚拟化 viewport 与实测 chrome 预算
+
+此前延后的逐 cell 虚拟化现已实现。纯 variable-height block index、精确终端行数、上下各
+两个 viewport 的 overscan，以及 block-id/cell 内行锚点取代整段 transcript 渲染。append、
+resize 和高度校正会保留读者锚点；`End`/`G` 恢复 follow-tail。chrome 按 100/60/40 列与
+12 行断点分配。`COGNIA_TUI_RENDERER=legacy` 是保留一个版本的回滚开关，virtualized 默认启用。
+
+native scrollback resize replay 默认上限为 10,000 个渲染行
+（`render.terminalResizeReplayMaxRows`；`0` 表示不限）。该限制只影响终端重绘；
+`/transcript`、export 与 session storage 仍保持完整。
