@@ -59,6 +59,15 @@ use serde::{Deserialize, Serialize};
 
 pub use error::{PluginError, Result};
 
+/// Least-privilege network rule mirrored from `manifest.networkAccess.rules`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkAccessRule {
+    pub domain: String,
+    pub methods: Vec<String>,
+    pub paths: Vec<String>,
+}
+
 /// Snapshot of one plugin returned by `plugin_runtime_snapshot` and listed by
 /// `plugin_get_all`. Kept minimal on purpose — TS owns rich metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,6 +126,9 @@ pub struct PluginRuntimeState {
     /// allowlist is clamped to it (`["*"]` = any host, `["none"]`/empty = no
     /// network).
     pub network_allowlist: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// Optional method/path rules. No map entry preserves legacy domain-only
+    /// behavior; a present empty list denies every request.
+    pub network_rules: Arc<RwLock<HashMap<String, Vec<NetworkAccessRule>>>>,
     pub plugin_install_dir: PathBuf,
     /// Host-owned metadata stored outside every individual plugin directory.
     /// Plugin filesystem grants are never allowed to overlap this tree.
@@ -186,6 +198,7 @@ impl PluginRuntimeState {
             plugins: Arc::new(RwLock::new(HashMap::new())),
             permissions: Arc::new(RwLock::new(HashMap::new())),
             network_allowlist: Arc::new(RwLock::new(HashMap::new())),
+            network_rules: Arc::new(RwLock::new(HashMap::new())),
             plugin_install_dir: install_dir,
             plugin_state_dir,
             fs_watchers: Arc::new(RwLock::new(HashMap::new())),
@@ -274,6 +287,16 @@ impl PluginRuntimeState {
             .insert(plugin_id.to_string(), domains);
     }
 
+    /// Replace a plugin's HTTP method/path rules from its manifest.
+    pub fn set_network_rules(&self, plugin_id: &str, rules: Vec<NetworkAccessRule>) {
+        let mut policies = self.network_rules.write();
+        if rules.is_empty() {
+            policies.remove(plugin_id);
+        } else {
+            policies.insert(plugin_id.to_string(), rules);
+        }
+    }
+
     /// True when `host` is permitted for `plugin_id`. A plugin that DECLARED no
     /// allowlist (no map entry) is DENIED by default (fail-closed) — a
     /// `network:fetch` grant with no `networkAccess.allowedDomains` no longer
@@ -300,6 +323,63 @@ impl PluginRuntimeState {
                 && (host == entry || host.ends_with(&format!(".{entry}")))
         })
     }
+
+    /// Enforce the domain allowlist and, when declared, HTTP method/path rules.
+    pub fn network_request_allowed(
+        &self,
+        plugin_id: &str,
+        host: &str,
+        method: &str,
+        path: &str,
+    ) -> bool {
+        if !self.network_host_allowed(plugin_id, host) {
+            return false;
+        }
+        let rules = self.network_rules.read();
+        let Some(rules) = rules.get(plugin_id) else {
+            return true;
+        };
+        let method = method.trim().to_ascii_uppercase();
+        rules.iter().any(|rule| {
+            host_matches_rule(host, &rule.domain)
+                && rule
+                    .methods
+                    .iter()
+                    .any(|candidate| candidate.trim().to_ascii_uppercase() == method)
+                && rule.paths.iter().any(|pattern| wildcard_path_matches(path, pattern))
+        })
+    }
+}
+
+fn host_matches_rule(host: &str, domain: &str) -> bool {
+    let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    let domain = domain.trim().trim_start_matches('.').to_ascii_lowercase();
+    !host.is_empty()
+        && (domain == "*"
+            || (!domain.is_empty()
+                && domain != "none"
+                && (host == domain || host.ends_with(&format!(".{domain}")))))
+}
+
+fn wildcard_path_matches(path: &str, pattern: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let mut cursor = 0usize;
+    for (index, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        let Some(offset) = path[cursor..].find(part) else {
+            return false;
+        };
+        if index == 0 && !pattern.starts_with('*') && offset != 0 {
+            return false;
+        }
+        cursor += offset + part.len();
+    }
+    pattern.ends_with('*') || cursor == path.len()
 }
 
 /// A missing expiry is live. Past or malformed timestamps fail closed; grant
@@ -570,6 +650,7 @@ mod tests {
         assert!(state.plugins.read().is_empty());
         assert!(state.permissions.read().is_empty());
         assert!(state.network_allowlist.read().is_empty());
+        assert!(state.network_rules.read().is_empty());
     }
 
     #[test]
@@ -609,6 +690,57 @@ mod tests {
         // A declared-but-empty list denies all too.
         state.set_network_allowlist("empty", vec![]);
         assert!(!state.network_host_allowed("empty", "example.com"));
+    }
+
+    #[test]
+    fn network_request_rules_enforce_method_path_and_domain() {
+        let state = PluginRuntimeState::new(PathBuf::from("/tmp"));
+        state.set_network_allowlist("demo", vec!["observability.example.com".into()]);
+        state.set_network_rules(
+            "demo",
+            vec![NetworkAccessRule {
+                domain: "observability.example.com".into(),
+                methods: vec!["GET".into()],
+                paths: vec!["/api/logs/*".into(), "/api/metrics".into()],
+            }],
+        );
+
+        assert!(state.network_request_allowed(
+            "demo",
+            "observability.example.com",
+            "GET",
+            "/api/logs/recent"
+        ));
+        assert!(!state.network_request_allowed(
+            "demo",
+            "observability.example.com",
+            "DELETE",
+            "/api/logs/recent"
+        ));
+        assert!(!state.network_request_allowed(
+            "demo",
+            "observability.example.com",
+            "GET",
+            "/api/admin"
+        ));
+        assert!(!state.network_request_allowed(
+            "demo",
+            "evil.example",
+            "GET",
+            "/api/logs/recent"
+        ));
+    }
+
+    #[test]
+    fn absent_network_rules_preserve_legacy_domain_only_policy() {
+        let state = PluginRuntimeState::new(PathBuf::from("/tmp"));
+        state.set_network_allowlist("legacy", vec!["api.example.com".into()]);
+        assert!(state.network_request_allowed(
+            "legacy",
+            "api.example.com",
+            "POST",
+            "/any/path"
+        ));
     }
 
     fn make_grant(

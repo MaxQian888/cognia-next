@@ -5766,9 +5766,14 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let domains: Vec<String> = required(&args, "domains")?;
+            let rules: Option<Vec<crate::plugin_api::NetworkAccessRule>> =
+                optional(&args, "rules")?;
             services
                 .plugin_runtime
                 .set_network_allowlist(&plugin_id, domains);
+            if let Some(rules) = rules {
+                services.plugin_runtime.set_network_rules(&plugin_id, rules);
+            }
             Ok(Value::Null)
         }
 

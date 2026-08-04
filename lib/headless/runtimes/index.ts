@@ -46,6 +46,9 @@
  * - `desktop-only-initializers` / `mobile-only-initializers` — shell-specific
  *   by definition; anything inside them that belongs in the brain must be
  *   extracted out and registered individually.
+ * - `wasm-renderer-request-source` — Tauri-only response bridge for WASM host
+ *   calls into renderer-owned provider and workflow registries. A headless host
+ *   has no Tauri event source; unsupported calls fail closed as HOST_UNAVAILABLE.
  * - `pet` — desktop pet window runtime.
  * - `sites-preview` / `sites-operation-recovery` — Sites uses a visible native terminal,
  *   the singleton embedded webview, and the host-local credential keyring. Provider

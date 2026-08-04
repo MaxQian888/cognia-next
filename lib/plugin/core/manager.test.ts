@@ -435,6 +435,28 @@ describe("PluginManager", () => {
       expect(mockInvoke).toHaveBeenCalledWith("plugin_set_network_allowlist", {
         pluginId: "net-plugin",
         domains: ["api.example.com", "*.cdn.test"],
+        rules: [],
+      })
+    })
+
+    it("pushes method/path rules to the host with the domain allowlist", async () => {
+      mockInvoke.mockResolvedValue(undefined)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const rules = [{ domain: "api.example.com", methods: ["GET" as const], paths: ["/logs/*"] }]
+      await (
+        manager as unknown as {
+          syncNetworkAllowlistToHost: (
+            id: string,
+            domains: string[],
+            networkRules: typeof rules
+          ) => Promise<void>
+        }
+      ).syncNetworkAllowlistToHost("net-plugin", ["api.example.com"], rules)
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_set_network_allowlist", {
+        pluginId: "net-plugin",
+        domains: ["api.example.com"],
+        rules,
       })
     })
   })

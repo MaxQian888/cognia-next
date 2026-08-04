@@ -2053,10 +2053,12 @@ export class PluginManager {
       // and races Python/frontend activation against their host gates.
       await this.mirrorDeclaredPermissionsToLedger(pluginId, plugin.manifest.permissions || [])
       await this.syncShellAllowlistToHost(pluginId, plugin.manifest.shellCommands || [])
-      if (plugin.manifest.networkAccess?.allowedDomains) {
+      if (plugin.manifest.networkAccess?.allowedDomains || plugin.manifest.networkAccess?.rules) {
+        const rules = plugin.manifest.networkAccess.rules ?? []
         await this.syncNetworkAllowlistToHost(
           pluginId,
-          plugin.manifest.networkAccess.allowedDomains
+          plugin.manifest.networkAccess.allowedDomains ?? rules.map((rule) => rule.domain),
+          rules
         )
       }
 
@@ -3179,15 +3181,19 @@ export class PluginManager {
    * ENABLE only when the plugin declared an allowlist (otherwise egress stays
    * unrestricted). Best-effort; no-op in web mode.
    */
-  private async syncNetworkAllowlistToHost(pluginId: string, domains: string[]): Promise<void> {
+  private async syncNetworkAllowlistToHost(
+    pluginId: string,
+    domains: string[],
+    rules: NonNullable<PluginManifest["networkAccess"]>["rules"] = []
+  ): Promise<void> {
     if (!canUseTauriInvoke() && !isHeadlessHost()) return
     try {
       if (isHeadlessHost()) {
         const { transport } = await import("@/lib/tauri/transport-instance")
-        await transport.call("plugin_set_network_allowlist", { pluginId, domains })
+        await transport.call("plugin_set_network_allowlist", { pluginId, domains, rules })
       } else {
         const { invoke } = await import("@tauri-apps/api/core")
-        await invoke("plugin_set_network_allowlist", { pluginId, domains })
+        await invoke("plugin_set_network_allowlist", { pluginId, domains, rules })
       }
     } catch (error) {
       recordSilentFailure(

@@ -57,7 +57,7 @@ use tauri::AppHandle;
 use tauri::State;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
-use super::{PluginError, PluginRuntimeState, Result};
+use super::{NetworkAccessRule, PluginError, PluginRuntimeState, Result};
 
 const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MIN_SUPPORTED_SDK: &str = "1.0.0";
@@ -1079,18 +1079,21 @@ async fn handle_window(
 /// declared no allowlist is denied by default; a declared allowlist is
 /// enforced (see `state.network_host_allowed`). Fail-closed on an
 /// unparseable URL / host.
-fn guard_network_host(
+fn guard_network_request(
     state: &PluginRuntimeState,
     plugin_id: &str,
     url: &str,
+    method: &str,
 ) -> std::result::Result<(), PluginApiError> {
-    match url::Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(str::to_string))
-    {
-        Some(h) if state.network_host_allowed(plugin_id, &h) => Ok(()),
-        Some(h) => Err(PluginApiError::permission_denied(format!(
-            "network egress to {h} is not in plugin {plugin_id}'s allowedDomains"
+    match url::Url::parse(url).ok().and_then(|u| {
+        u.host_str()
+            .map(|host| (host.to_string(), u.path().to_string()))
+    }) {
+        Some((host, path)) if state.network_request_allowed(plugin_id, &host, method, &path) => {
+            Ok(())
+        }
+        Some((host, _)) => Err(PluginApiError::permission_denied(format!(
+            "network policy denied {method} egress to {host} for plugin {plugin_id}"
         ))),
         None => Err(PluginApiError::invalid(format!(
             "network: cannot extract host from URL: {url}"
@@ -1123,13 +1126,13 @@ async fn handle_network(
     match op {
         "fetch" => {
             let url = payload_str(payload, "url")?;
-            guard_network_host(state, plugin_id, &url)?;
             let options = payload.get("options").cloned().unwrap_or(Value::Null);
             let method = options
                 .get("method")
                 .and_then(Value::as_str)
                 .unwrap_or("GET")
                 .to_string();
+            guard_network_request(state, plugin_id, &url, &method)?;
             let headers: Option<HashMap<String, String>> = options
                 .get("headers")
                 .and_then(|h| serde_json::from_value(h.clone()).ok());
@@ -1164,7 +1167,7 @@ async fn handle_network(
         "download" => {
             let url = payload_str(payload, "url")?;
             let dest_rel = payload_str(payload, "destPath")?;
-            guard_network_host(state, plugin_id, &url)?;
+            guard_network_request(state, plugin_id, &url, "GET")?;
             resolve_scoped(state, plugin_id, &dest_rel)?;
 
             let client = network_http_client()?;
@@ -1209,7 +1212,7 @@ async fn handle_network(
         "upload" => {
             let url = payload_str(payload, "url")?;
             let file_rel = payload_str(payload, "filePath")?;
-            guard_network_host(state, plugin_id, &url)?;
+            guard_network_request(state, plugin_id, &url, "POST")?;
             let src = resolve_scoped(state, plugin_id, &file_rel)?;
             let bytes = crate::contained_path::read_existing_plugin_file(
                 &state.plugin_dir(plugin_id),
@@ -1764,8 +1767,12 @@ pub async fn plugin_set_network_allowlist(
     state: State<'_, PluginRuntimeState>,
     plugin_id: String,
     domains: Vec<String>,
+    rules: Option<Vec<NetworkAccessRule>>,
 ) -> Result<()> {
     state.set_network_allowlist(&plugin_id, domains);
+    if let Some(rules) = rules {
+        state.set_network_rules(&plugin_id, rules);
+    }
     Ok(())
 }
 
@@ -2096,6 +2103,51 @@ mod tests {
         assert_eq!(
             required_permission("network", "upload"),
             Some("network:fetch")
+        );
+    }
+
+    #[test]
+    fn network_guard_enforces_method_and_path_rules() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        state.set_network_allowlist("demo", vec!["observability.test".into()]);
+        state.set_network_rules(
+            "demo",
+            vec![NetworkAccessRule {
+                domain: "observability.test".into(),
+                methods: vec!["GET".into()],
+                paths: vec!["/api/logs/*".into()],
+            }],
+        );
+
+        assert!(guard_network_request(
+            &state,
+            "demo",
+            "https://observability.test/api/logs/recent?limit=10",
+            "GET"
+        )
+        .is_ok());
+        assert_eq!(
+            guard_network_request(
+                &state,
+                "demo",
+                "https://observability.test/api/logs/recent",
+                "DELETE"
+            )
+            .unwrap_err()
+            .code,
+            "PERMISSION_DENIED"
+        );
+        assert_eq!(
+            guard_network_request(
+                &state,
+                "demo",
+                "https://observability.test/api/admin",
+                "GET"
+            )
+            .unwrap_err()
+            .code,
+            "PERMISSION_DENIED"
         );
     }
 
