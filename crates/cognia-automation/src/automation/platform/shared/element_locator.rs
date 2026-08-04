@@ -193,10 +193,7 @@ pub enum ResolveFailure {
 ///      candidate must still validate against the recorded role/subrole, so an
 ///      ordinal that now points at a different kind of node refuses instead of
 ///      returning a wrong element.
-pub fn resolve_step<N: LocatorNode>(
-    parent: &N,
-    step: &AncestryStep,
-) -> Result<N, ResolveFailure> {
+pub fn resolve_step<N: LocatorNode>(parent: &N, step: &AncestryStep) -> Result<N, ResolveFailure> {
     let children = parent.children();
 
     // (1) Identifier — strongest, and never overridden by a weaker signal.
@@ -231,7 +228,10 @@ pub fn resolve_step<N: LocatorNode>(
             .map(|(i, _)| i)
             .collect();
         if named.len() == 1 {
-            return Ok(shape_matches.into_iter().nth(named[0]).expect("index in range"));
+            return Ok(shape_matches
+                .into_iter()
+                .nth(named[0])
+                .expect("index in range"));
         }
         if named.len() > 1 {
             // Several identically-named siblings — fall through to the ordinal,
@@ -256,10 +256,7 @@ pub fn resolve_step<N: LocatorNode>(
 }
 
 /// Replay a whole path from a window root. An empty path resolves to the root.
-pub fn resolve_path<N: LocatorNode>(
-    root: N,
-    path: &[AncestryStep],
-) -> Result<N, ResolveFailure> {
+pub fn resolve_path<N: LocatorNode>(root: N, path: &[AncestryStep]) -> Result<N, ResolveFailure> {
     let mut current = root;
     for step in path {
         current = resolve_step(&current, step)?;
@@ -626,7 +623,10 @@ mod tests {
     fn rejects_legacy_and_malformed_refs() {
         // The pre-Epic-5 shapes must be refused, not guessed at.
         assert_eq!(ElementLocator::decode("macos|pid=42|title=Untitled"), None);
-        assert_eq!(ElementLocator::decode("macos|role=AXButton|title=Save"), None);
+        assert_eq!(
+            ElementLocator::decode("macos|role=AXButton|title=Save"),
+            None
+        );
         assert_eq!(ElementLocator::decode(""), None);
         assert_eq!(ElementLocator::decode("ael1:"), None);
         assert_eq!(ElementLocator::decode("ael1:!!!not-base64!!!"), None);
@@ -639,7 +639,10 @@ mod tests {
         let mut loc = ElementLocator::new(LocatorBackend::Macos, app());
         loc.version = 99;
         // Same prefix, newer body — decode must refuse.
-        let encoded = format!("ael1:{}", base64_url_encode(&serde_json::to_vec(&loc).unwrap()));
+        let encoded = format!(
+            "ael1:{}",
+            base64_url_encode(&serde_json::to_vec(&loc).unwrap())
+        );
         assert_eq!(ElementLocator::decode(&encoded), None);
     }
 
@@ -648,7 +651,11 @@ mod tests {
         for len in 0..=16usize {
             let bytes: Vec<u8> = (0..len).map(|i| (i * 37 % 256) as u8).collect();
             let encoded = base64_url_encode(&bytes);
-            assert_eq!(base64_url_decode(&encoded).as_deref(), Some(&bytes[..]), "len {len}");
+            assert_eq!(
+                base64_url_decode(&encoded).as_deref(),
+                Some(&bytes[..]),
+                "len {len}"
+            );
         }
     }
 
@@ -688,10 +695,7 @@ mod tests {
             identifier: Some("dupe".into()),
             ..Default::default()
         };
-        assert_eq!(
-            resolve_step(&parent, &step),
-            Err(ResolveFailure::Ambiguous)
-        );
+        assert_eq!(resolve_step(&parent, &step), Err(ResolveFailure::Ambiguous));
     }
 
     #[test]
@@ -1053,7 +1057,10 @@ mod tests {
     #[test]
     fn the_root_gets_an_empty_path() {
         let mut tree = info_tree();
-        assign_locators(&mut tree, &ElementLocator::new(LocatorBackend::Macos, app()));
+        assign_locators(
+            &mut tree,
+            &ElementLocator::new(LocatorBackend::Macos, app()),
+        );
         let decoded = ElementLocator::decode(&tree.element_ref).expect("decodes");
         assert!(decoded.path.is_empty());
         assert_eq!(decoded.app.pid, 4242);
@@ -1062,7 +1069,10 @@ mod tests {
     #[test]
     fn every_stamped_ref_resolves_back_to_its_own_node() {
         let mut tree = info_tree();
-        assign_locators(&mut tree, &ElementLocator::new(LocatorBackend::Macos, app()));
+        assign_locators(
+            &mut tree,
+            &ElementLocator::new(LocatorBackend::Macos, app()),
+        );
         let live = tree.as_live();
 
         for (name, expect_role) in [
@@ -1083,7 +1093,10 @@ mod tests {
     #[test]
     fn identically_named_siblings_get_distinct_resolvable_refs() {
         let mut tree = info_tree();
-        assign_locators(&mut tree, &ElementLocator::new(LocatorBackend::Macos, app()));
+        assign_locators(
+            &mut tree,
+            &ElementLocator::new(LocatorBackend::Macos, app()),
+        );
         let live = tree.as_live();
 
         let deletes = &tree.children[2].children;
@@ -1099,7 +1112,10 @@ mod tests {
     #[test]
     fn ordinals_skip_unrelated_siblings() {
         let mut tree = info_tree();
-        assign_locators(&mut tree, &ElementLocator::new(LocatorBackend::Macos, app()));
+        assign_locators(
+            &mut tree,
+            &ElementLocator::new(LocatorBackend::Macos, app()),
+        );
         // "content" is the 3rd raw child but the 2nd AXGroup — the splitter in
         // between must not shift it.
         let raw = tree.find_ref("content").expect("stamped");
@@ -1110,7 +1126,10 @@ mod tests {
     #[test]
     fn a_stamped_ref_survives_an_unrelated_sibling_being_inserted() {
         let mut tree = info_tree();
-        assign_locators(&mut tree, &ElementLocator::new(LocatorBackend::Macos, app()));
+        assign_locators(
+            &mut tree,
+            &ElementLocator::new(LocatorBackend::Macos, app()),
+        );
         let raw = tree.find_ref("Save").expect("stamped");
         let loc = ElementLocator::decode(raw).expect("decodes");
 
@@ -1127,7 +1146,10 @@ mod tests {
     #[test]
     fn a_leaf_with_no_children_is_still_stamped() {
         let mut leaf = FakeInfo::new("AXButton").name("Solo");
-        assign_locators(&mut leaf, &ElementLocator::new(LocatorBackend::Macos, app()));
+        assign_locators(
+            &mut leaf,
+            &ElementLocator::new(LocatorBackend::Macos, app()),
+        );
         assert!(ElementLocator::decode(&leaf.element_ref).is_some());
     }
 }
