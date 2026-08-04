@@ -14,6 +14,7 @@
 // (single-JSON-blob, closed format union) — see ADR-0062.
 
 import type { ImportedConversation } from "@/lib/data/importers/types"
+import type { VendorRoots } from "@/lib/agent-roots"
 
 /** A single file the user picked (or that a scan materialized). */
 export interface PickedSessionFile {
@@ -44,6 +45,14 @@ export interface SessionScanInput {
   /** OS home dir, no trailing separator (from `resolveHome`). Empty in web mode. */
   home: string
   /**
+   * Resolved per-vendor config/data roots, honouring `$CLAUDE_CONFIG_DIR`,
+   * `$CODEX_HOME` and `$XDG_*` (see `lib/agent-roots/`). Adapters must prefer
+   * these over deriving `<home>/.codex` themselves. Optional so existing
+   * callers (and tests) that only have a home dir keep working — adapters fall
+   * back to the home-relative default when it's absent.
+   */
+  roots?: VendorRoots
+  /**
    * Files the user hand-picked (web / picker fallback). When present, adapters
    * should parse these instead of walking the filesystem. Undefined on a
    * desktop auto-scan.
@@ -72,6 +81,8 @@ export interface SessionSummary {
   messageCount: number
   /** Epoch ms of the last activity (sort key). */
   updatedAt: number
+  /** Optional source-derived content revision for timestamp-preserving updates. */
+  watchRevision?: string
   /** Working directory the session ran in, when the source records it. */
   cwd?: string
 }
@@ -94,10 +105,12 @@ export interface AgentSessionSourceAdapter {
   /** File extensions the picker accepts for this source (".jsonl", ".db"). */
   acceptedExtensions: string[]
   /**
-   * Absolute roots this source scans on a desktop auto-scan, given the resolved
-   * home dir. Empty array = this source has no filesystem scan (picker only).
+   * Absolute roots this source scans on a desktop auto-scan. `roots` carries
+   * the environment-aware per-vendor directories (`lib/agent-roots/`); when it
+   * is absent the adapter falls back to the conventional home-relative path.
+   * Empty array = this source has no filesystem scan (picker only).
    */
-  scanRoots(home: string): string[]
+  scanRoots(home: string, roots?: VendorRoots): string[]
   /**
    * Heuristic used by `detectSourceForFiles` to pick the source for a batch of
    * hand-picked files. Path hints (e.g. ".codex/sessions") are the usual tell.
@@ -147,6 +160,8 @@ export interface ImportOptions {
   signal?: AbortSignal
   /** Called on each parse step and after each persisted chunk. */
   onProgress?: (progress: ImportProgress) => void
+  /** Called only when a ref was parsed without throwing, including empty transcripts. */
+  onRefParsed?: (ref: SessionRef) => void
   /**
    * Parsed conversations are flushed to Dexie every `chunkSize` sessions
    * instead of buffering the whole selection into one giant transaction.

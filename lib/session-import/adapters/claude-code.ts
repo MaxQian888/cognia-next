@@ -547,8 +547,11 @@ export const claudeCodeSessionSource: AgentSessionSourceAdapter = {
   labelKey: "claude-code",
   acceptedExtensions: ACCEPTED,
 
-  scanRoots(home) {
-    return home ? [joinPath(joinPath(home, ".claude"), "projects")] : []
+  // `$CLAUDE_CONFIG_DIR` relocates the whole tree; `roots` carries it (the
+  // renderer can't read env vars — see `lib/agent-roots/`).
+  scanRoots(home, roots) {
+    const base = roots?.claudeConfigDir || (home ? joinPath(home, ".claude") : "")
+    return base ? [joinPath(base, "projects")] : []
   },
 
   detect(files: PickedSessionFile[]) {
@@ -574,7 +577,7 @@ export const claudeCodeSessionSource: AgentSessionSourceAdapter = {
   async listSessions(input: SessionScanInput) {
     return scanFileSummaries(
       input,
-      this.scanRoots(input.home),
+      this.scanRoots(input.home, input.roots),
       (n) => n.toLowerCase().endsWith(".jsonl"),
       summarizeClaudeFile
     )

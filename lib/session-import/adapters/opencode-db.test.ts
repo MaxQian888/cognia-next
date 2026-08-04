@@ -25,6 +25,7 @@ describe("opencodeDataDirs", () => {
   it("returns posix-joined candidate dirs for a posix home", () => {
     expect(opencodeDataDirs("/home/u")).toEqual([
       "/home/u/.local/share/opencode",
+      "/home/u/Library/Application Support/opencode",
       "/home/u/AppData/Roaming/opencode",
     ])
   })

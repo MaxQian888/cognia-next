@@ -157,6 +157,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "realtimeVoice",
     "realtimeModel",
     "realtimeInstructions",
+    "liveVoice",
     "ttsEnabled",
     "ttsRate",
     "ttsPitch",

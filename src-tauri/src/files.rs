@@ -35,6 +35,15 @@ fn allowed_roots_registry() -> &'static RwLock<HashSet<String>> {
     REG.get_or_init(|| RwLock::new(HashSet::new()))
 }
 
+/// Workspace roots explicitly supplied by the active project. Unlike the
+/// general filesystem allow-list, this excludes app data, agent credential
+/// directories, and dialog-selected export targets. Remote ACP session roots
+/// must be confined to this narrower set.
+fn active_workspace_roots_registry() -> &'static RwLock<HashSet<String>> {
+    static REG: OnceLock<RwLock<HashSet<String>>> = OnceLock::new();
+    REG.get_or_init(|| RwLock::new(HashSet::new()))
+}
+
 /// Normalize a root to a stable key: trim, unify separators to `/`, drop a
 /// trailing slash (mirrors `hooks::trust::normalize`).
 fn normalize_root(path: &str) -> String {
@@ -59,8 +68,18 @@ pub fn add_allowed_root(path: String) {
 
 /// Add the active workspace roots the renderer pushes. Additive (see above).
 pub fn set_allowed_roots(paths: Vec<String>) {
-    for p in paths {
-        add_allowed_root(p);
+    if let Ok(mut guard) = active_workspace_roots_registry().write() {
+        #[cfg(not(test))]
+        guard.clear();
+        guard.extend(
+            paths
+                .iter()
+                .map(|path| normalize_root(path))
+                .filter(|path| !path.is_empty()),
+        );
+    }
+    for path in paths {
+        add_allowed_root(path);
     }
 }
 
@@ -92,6 +111,21 @@ fn allowed_roots_snapshot() -> Vec<String> {
 /// Read-only containment check against the live registry.
 fn is_path_allowed(path: &str) -> bool {
     is_path_within_roots(path, &allowed_roots_snapshot())
+}
+
+/// Check a remote ACP workspace root against the same live roots registry used
+/// by companion file operations. This resolves the deepest existing ancestor,
+/// so a symlinked workspace cannot escape containment. The registry's existing
+/// empty-at-startup behavior is preserved for headless/test bootstrap.
+pub(crate) fn is_remote_workspace_path_allowed(path: &str) -> bool {
+    let roots: Vec<String> = active_workspace_roots_registry()
+        .read()
+        .map(|guard| guard.iter().cloned().collect())
+        .unwrap_or_default();
+    roots
+        .iter()
+        .any(|root| Path::new(root).canonicalize().is_ok())
+        && is_path_within_roots(path, &roots)
 }
 
 /// Pure containment check: does `path` resolve inside one of `roots`? Never
@@ -1821,6 +1855,15 @@ mod tests {
         std::fs::write(root.join("f.txt"), "x").unwrap();
         add_allowed_root(root.to_string_lossy().to_string());
         assert!(is_path_allowed(&root.join("f.txt").to_string_lossy()));
+        // General roots (including defaults/dialog paths) are never sufficient
+        // for an ACP workspace. Only the active-project registration enables it.
+        assert!(!is_remote_workspace_path_allowed(
+            &root.join("f.txt").to_string_lossy()
+        ));
+        set_allowed_roots(vec![root.to_string_lossy().to_string()]);
+        assert!(is_remote_workspace_path_allowed(
+            &root.join("f.txt").to_string_lossy()
+        ));
 
         // Separator + trailing-slash normalization key.
         assert_eq!(normalize_root("C:\\a\\b\\"), "C:/a/b");

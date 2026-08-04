@@ -211,8 +211,52 @@ describe("opencodeSessionSource", () => {
   it("advertises the opencode data dirs as scan roots (feeds the fs-watcher)", () => {
     const roots = opencodeSessionSource.scanRoots("/home/u")
     expect(roots).toContain("/home/u/.local/share/opencode")
+    expect(roots).toContain("/home/u/Library/Application Support/opencode")
     expect(roots.some((r) => r.includes("AppData"))).toBe(true)
     expect(opencodeSessionSource.scanRoots("")).toEqual([])
+  })
+
+  it("puts the resolved $XDG_DATA_HOME dir first, without dropping the defaults", () => {
+    const scanned = opencodeSessionSource.scanRoots("/home/u", {
+      claudeConfigDir: "",
+      codexHome: "",
+      opencodeConfigDir: "",
+      opencodeDataDir: "/xdg/data/opencode",
+    })
+    expect(scanned[0]).toBe("/xdg/data/opencode")
+    expect(scanned).toContain("/home/u/.local/share/opencode")
+    // No home at all still yields the override.
+    expect(
+      opencodeSessionSource.scanRoots("", {
+        claudeConfigDir: "",
+        codexHome: "",
+        opencodeConfigDir: "",
+        opencodeDataDir: "/xdg/data/opencode",
+      })
+    ).toEqual(["/xdg/data/opencode"])
+  })
+
+  it("de-dupes a resolved data dir that equals a default", () => {
+    const scanned = opencodeSessionSource.scanRoots("/home/u", {
+      claudeConfigDir: "",
+      codexHome: "",
+      opencodeConfigDir: "",
+      opencodeDataDir: "/home/u/.local/share/opencode",
+    })
+    expect(scanned.filter((r) => r === "/home/u/.local/share/opencode")).toHaveLength(1)
+  })
+
+  it("keeps the platform data fallback alongside an XDG override", () => {
+    const scanned = opencodeSessionSource.scanRoots("C:\\Users\\u", {
+      claudeConfigDir: "",
+      codexHome: "",
+      opencodeConfigDir: "",
+      opencodeDataDir: "D:\\XDG\\opencode",
+      opencodePlatformDataDir: "E:\\Profiles\\u\\Roaming\\opencode",
+    })
+    expect(scanned).toEqual(
+      expect.arrayContaining(["D:\\XDG\\opencode", "E:\\Profiles\\u\\Roaming\\opencode"])
+    )
   })
 
   it("reads the DB once per scan input (parse of N sessions is not N reads)", async () => {
@@ -245,6 +289,67 @@ describe("opencodeSessionSource", () => {
     const conv = await opencodeSessionSource.parseSession(list[0].ref, input)
     expect(conv.nested).toHaveLength(1)
     expect(conv.nested?.[0].session.id).toBe("import:opencode:oc-child")
+  })
+
+  it("imports the full descendant tree and lists only its root", async () => {
+    const child: OpencodeSession = {
+      ...SESSION,
+      id: "oc-child",
+      parentId: "oc-1",
+    }
+    const grandchild: OpencodeSession = {
+      ...SESSION,
+      id: "oc-grandchild",
+      parentId: "oc-child",
+    }
+    __setOpencodeReaderForTesting(async () => [SESSION, child, grandchild])
+    const input: SessionScanInput = { fs, home: "/home/u" }
+
+    const list = await opencodeSessionSource.listSessions(input)
+    const conv = await opencodeSessionSource.parseSession(list[0].ref, input)
+
+    expect(list.map((s) => s.ref.originalSessionId)).toEqual(["oc-1"])
+    expect(conv.nested?.map((nested) => nested.session.id)).toEqual([
+      "import:opencode:oc-child",
+      "import:opencode:oc-grandchild",
+    ])
+  })
+
+  it("uses the newest child timestamp for the parent summary", async () => {
+    const parent = { ...SESSION, updatedAt: 100 }
+    const child: OpencodeSession = {
+      ...SESSION,
+      id: "oc-child",
+      parentId: "oc-1",
+      updatedAt: 200,
+    }
+    __setOpencodeReaderForTesting(async () => [parent, child])
+
+    const list = await opencodeSessionSource.listSessions({ fs, home: "/home/u" })
+
+    expect(list).toHaveLength(1)
+    expect(list[0].updatedAt).toBe(200)
+  })
+
+  it("changes the parent watch revision when child content changes", async () => {
+    let childText = "first"
+    __setOpencodeReaderForTesting(async () => [
+      SESSION,
+      {
+        ...SESSION,
+        id: "oc-child",
+        parentId: "oc-1",
+        messages: [
+          { role: "assistant", createdAt: 10, parts: [{ type: "text", text: childText }] },
+        ],
+      },
+    ])
+    const first = await opencodeSessionSource.listSessions({ fs, home: "/home/u" })
+    childText = "second"
+    const second = await opencodeSessionSource.listSessions({ fs, home: "/home/u" })
+
+    expect(first[0].watchRevision).toBeDefined()
+    expect(second[0].watchRevision).not.toBe(first[0].watchRevision)
   })
 
   it("still lists an orphaned child whose parent is missing from the store", async () => {

@@ -413,6 +413,22 @@ describe("claudeCodeSessionSource", () => {
     expect(claudeCodeSessionSource.scanRoots("")).toEqual([])
   })
 
+  it("prefers the resolved $CLAUDE_CONFIG_DIR root over <home>/.claude", () => {
+    const roots = {
+      claudeConfigDir: "/relocated/claude",
+      codexHome: "",
+      opencodeConfigDir: "",
+      opencodeDataDir: "",
+    }
+    expect(claudeCodeSessionSource.scanRoots("/home/u", roots)).toEqual([
+      "/relocated/claude/projects",
+    ])
+    // A blank override falls back to the home-relative default.
+    expect(claudeCodeSessionSource.scanRoots("/home/u", { ...roots, claudeConfigDir: "" })).toEqual(
+      ["/home/u/.claude/projects"]
+    )
+  })
+
   it("detects by path hint and content sniff", () => {
     expect(
       claudeCodeSessionSource.detect([

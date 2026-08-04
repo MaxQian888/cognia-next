@@ -801,6 +801,19 @@ describe("self-invocation tool toggles", () => {
     })
   })
 
+  it("persists the spawn-task tool flag, preserving other toggles", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ selfInvokeTools: { skill: true } }),
+      loaded: true,
+    })
+    await act(async () => {
+      await useSettingsStore.getState().setSpawnTaskToolEnabled(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      selfInvokeTools: { skill: true, spawnTask: true },
+    })
+  })
+
   it("turns the vector tool flag back off", async () => {
     useSettingsStore.setState({
       settings: baseSettings({ selfInvokeTools: { vector: true } }),

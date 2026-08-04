@@ -16,28 +16,46 @@ use rusqlite::{types::ValueRef, Connection, OpenFlags};
 use serde_json::{json, Map, Value};
 use std::path::PathBuf;
 
-/// Candidate on-disk locations for `opencode.db`, most-specific first.
+/// Candidate on-disk locations for `opencode.db`, most-specific first, with
+/// duplicates removed (the platform data dir often *is* one of the others).
+///
+/// Order: `$XDG_DATA_HOME` → the XDG-style home path OpenCode currently uses
+/// on every OS → the platform data dir (`%APPDATA%` on Windows,
+/// `~/Library/Application Support` on macOS) → the historic Roaming probe.
 fn candidate_db_paths(home: &str) -> Vec<PathBuf> {
-    let mut out = Vec::new();
+    let mut out: Vec<PathBuf> = Vec::new();
+    let mut push = |p: PathBuf| {
+        if !out.contains(&p) {
+            out.push(p);
+        }
+    };
     if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
         if !xdg.is_empty() {
-            out.push(PathBuf::from(xdg).join("opencode").join("opencode.db"));
+            push(PathBuf::from(xdg).join("opencode").join("opencode.db"));
         }
     }
     let home_path = PathBuf::from(home);
-    out.push(
+    // OpenCode currently uses this XDG-style path on every observed platform,
+    // including macOS. Keep it ahead of the generic platform data directory so
+    // a stale fallback database cannot shadow the active store.
+    push(
         home_path
             .join(".local")
             .join("share")
             .join("opencode")
             .join("opencode.db"),
     );
-    // Windows-style location as a fallback. NOTE: unverified guess — the
-    // opencode CLI (Bun) has been observed using the XDG-style
-    // `~/.local/share/opencode/` even on Windows (see
-    // subscription/opencode/discovery.rs); this Roaming probe only exists in
-    // case a future build relocates.
-    out.push(
+    // Platform data dir — this is what makes the Windows probe correct rather
+    // than a guess: `dirs::data_dir()` resolves `%APPDATA%` from the real
+    // environment instead of assuming `<home>\AppData\Roaming`.
+    if let Some(data) = dirs::data_dir() {
+        push(data.join("opencode").join("opencode.db"));
+    }
+    // Historic Roaming probe, kept for hosts where `dirs::data_dir()` is
+    // unavailable. The opencode CLI (Bun) has been observed using the
+    // XDG-style `~/.local/share/opencode/` even on Windows (see
+    // subscription/opencode/discovery.rs).
+    push(
         home_path
             .join("AppData")
             .join("Roaming")
@@ -369,5 +387,43 @@ mod tests {
     fn missing_db_returns_empty_not_error() {
         let out = opencode_sessions_read("/nonexistent-home-xyz".into()).unwrap();
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn candidate_db_paths_prefer_xdg_then_known_store_then_platform_fallback() {
+        let paths = candidate_db_paths("/home/u");
+        assert!(!paths.is_empty());
+        // The XDG-style home path OpenCode actually uses is always a candidate.
+        let known_index = paths
+            .iter()
+            .position(|p| {
+                p.ends_with("opencode/opencode.db") && p.starts_with("/home/u/.local/share")
+            })
+            .expect("known OpenCode store path");
+        // The platform data dir is probed too, so Windows no longer relies on a
+        // hand-assembled Roaming path, but it cannot shadow the known store.
+        if let Some(data) = dirs::data_dir() {
+            let platform_path = data.join("opencode").join("opencode.db");
+            let platform_index = paths
+                .iter()
+                .position(|path| path == &platform_path)
+                .expect("platform data store path");
+            let explicit_xdg = std::env::var("XDG_DATA_HOME")
+                .ok()
+                .filter(|path| !path.is_empty())
+                .map(|path| PathBuf::from(path).join("opencode").join("opencode.db"));
+            if explicit_xdg.as_ref() != Some(&platform_path) {
+                assert!(known_index <= platform_index);
+            }
+        }
+    }
+
+    #[test]
+    fn candidate_db_paths_are_deduped() {
+        let paths = candidate_db_paths("/home/u");
+        let mut seen = std::collections::HashSet::new();
+        for p in &paths {
+            assert!(seen.insert(p.clone()), "duplicate candidate: {:?}", p);
+        }
     }
 }

@@ -150,6 +150,7 @@ interface SettingsState {
   setSlashCommandToolEnabled: (enabled: boolean) => Promise<void>
   setTeamCollaborationToolEnabled: (enabled: boolean) => Promise<void>
   setVectorToolEnabled: (enabled: boolean) => Promise<void>
+  setSpawnTaskToolEnabled: (enabled: boolean) => Promise<void>
   /**
    * Persist the API key to Dexie *and* push it down to the Rust process. If
    * the key changed, also tells the sidecar to restart so the SDK re-reads
@@ -897,6 +898,12 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     setVectorToolEnabled: async (enabled) => {
       const current = get().settings?.selfInvokeTools
       const next = await saveSettings({ selfInvokeTools: { ...current, vector: enabled } })
+      set({ settings: next })
+    },
+
+    setSpawnTaskToolEnabled: async (enabled) => {
+      const current = get().settings?.selfInvokeTools
+      const next = await saveSettings({ selfInvokeTools: { ...current, spawnTask: enabled } })
       set({ settings: next })
     },
 

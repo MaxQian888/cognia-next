@@ -4,6 +4,7 @@
 import { applyImported } from "@/lib/data/import-registry"
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import { resolveHome } from "@/lib/memory/external/home"
+import { resolveVendorRoots } from "@/lib/agent-roots"
 import { realSessionFs } from "./fs"
 import { getSessionSource, getSessionSources } from "./registry"
 import type { ImportOptions, SessionRef, SessionScanInput, SessionSummary } from "./types"
@@ -39,13 +40,18 @@ export type {
   ImportProgress,
 } from "./types"
 
-/** Build the scan input, resolving the real fs + home unless overridden. */
+/**
+ * Build the scan input, resolving the real fs + home + vendor roots unless
+ * overridden. The roots carry `$CLAUDE_CONFIG_DIR` / `$CODEX_HOME` / `$XDG_*`
+ * (see `lib/agent-roots/`), which the renderer cannot read on its own.
+ */
 export async function resolveScanInput(
   partial: Partial<SessionScanInput> = {}
 ): Promise<SessionScanInput> {
   const fs = partial.fs ?? realSessionFs()
   const home = partial.home ?? (await resolveHome()) ?? ""
-  return { fs, home, pickedFiles: partial.pickedFiles }
+  const roots = partial.roots ?? (await resolveVendorRoots())
+  return { fs, home, roots, pickedFiles: partial.pickedFiles }
 }
 
 /** List sessions for one source. Returns [] for an unknown source id. */
@@ -102,9 +108,9 @@ async function parseRefConversations(
   ref: SessionRef,
   input: SessionScanInput,
   projectId?: string
-): Promise<ImportedConversation[]> {
+): Promise<{ conversations: ImportedConversation[]; parsed: boolean }> {
   const source = getSessionSource(ref.sourceId)
-  if (!source) return []
+  if (!source) return { conversations: [], parsed: false }
   try {
     const conv = await source.parseSession(ref, input)
     const nested = conv.nested ?? []
@@ -116,11 +122,14 @@ async function parseRefConversations(
         for (const m of n.messages) m.projectId = projectId
       }
     }
-    if (conv.messages.length === 0) return []
-    return [{ session: conv.session, messages: conv.messages }, ...nested]
+    if (conv.messages.length === 0) return { conversations: [], parsed: true }
+    return {
+      conversations: [{ session: conv.session, messages: conv.messages }, ...nested],
+      parsed: true,
+    }
   } catch {
     // Skip a session that fails to parse.
-    return []
+    return { conversations: [], parsed: false }
   }
 }
 
@@ -135,7 +144,8 @@ export async function parseSessions(
 ): Promise<ImportedConversation[]> {
   const conversations: ImportedConversation[] = []
   for (const ref of refs) {
-    conversations.push(...(await parseRefConversations(ref, input, projectId)))
+    const parsed = await parseRefConversations(ref, input, projectId)
+    conversations.push(...parsed.conversations)
   }
   return conversations
 }
@@ -188,7 +198,7 @@ export async function importSessions(
     import("@cognia/agent-config-types/canonical-session").SessionLossReport
   >
 }> {
-  const { signal, onProgress, chunkSize = DEFAULT_IMPORT_CHUNK } = opts
+  const { signal, onProgress, onRefParsed, chunkSize = DEFAULT_IMPORT_CHUNK } = opts
   const total = refs.length
   const size = Math.max(1, chunkSize)
 
@@ -214,8 +224,10 @@ export async function importSessions(
 
   for (const ref of refs) {
     if (signal?.aborted) break
-    const conversations = await parseRefConversations(ref, input, projectId)
+    const parsedRef = await parseRefConversations(ref, input, projectId)
+    const conversations = parsedRef.conversations
     buffer.push(...conversations)
+    if (parsedRef.parsed) onRefParsed?.(ref)
     // Canonical header projection (top-level conversation only; nested
     // subagent transcripts are the parent's loss entry, not headers).
     const codec = getSessionSource(ref.sourceId)?.codec

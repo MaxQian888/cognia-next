@@ -10,6 +10,7 @@ import { codexSessionSource } from "./adapters/codex"
 import { continueDevSessionSource } from "./adapters/continue-dev"
 import { geminiCliSessionSource } from "./adapters/gemini-cli"
 import { opencodeSessionSource } from "./adapters/opencode"
+import type { VendorRoots } from "@/lib/agent-roots"
 import type { AgentSessionSourceAdapter, PickedSessionFile } from "./types"
 
 /** Static, ordered for auto-detect priority. */
@@ -117,11 +118,12 @@ function normalizeSep(p: string): string {
  */
 export function detectSourceForPath(
   path: string,
-  home: string
+  home: string,
+  roots?: VendorRoots
 ): AgentSessionSourceAdapter | undefined {
   const norm = normalizeSep(path)
   for (const source of getSessionSources()) {
-    for (const root of source.scanRoots(home)) {
+    for (const root of source.scanRoots(home, roots)) {
       const r = normalizeSep(root)
       if (r && (norm === r || norm.startsWith(`${r}/`))) return source
     }

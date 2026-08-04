@@ -49,7 +49,8 @@ async function fileEntry(
 export async function discoverCodex(ctx: DiscoverCtx): Promise<ExternalMemoryFile[]> {
   const { home, roots, cwd, fs } = ctx
   const out: ExternalMemoryFile[] = []
-  const codexDir = joinPath(home, ".codex")
+  // `$CODEX_HOME` relocates the whole tree; `vendorRoots` carries it.
+  const codexDir = ctx.vendorRoots?.codexHome || joinPath(home, ".codex")
 
   // 1. Global — surface AGENTS.md slot even when absent; override only when present.
   const override = await fileEntry(

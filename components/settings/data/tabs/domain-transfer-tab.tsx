@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label"
 import { ChatImportDialog } from "@/components/data/import/chat-import-dialog"
 import { DomainImportDialog } from "@/components/data/import/domain-import-dialog"
 import { SessionImportDialog } from "@/components/session-import/session-import-dialog"
+import { AgentMigrationDialog } from "@/components/agent-migration/agent-migration-dialog"
 import {
   buildDomainExport,
   defaultDomainFileName,
@@ -29,6 +30,7 @@ import {
   DownloadIcon,
   UploadIcon,
   TerminalIcon,
+  ReplaceIcon,
 } from "lucide-react"
 
 const PLATFORMS: Array<{
@@ -44,9 +46,30 @@ export function DomainTransferTab() {
   return (
     <div className="space-y-6">
       <ExternalImportsCard />
+      <AgentMigrationCard />
       <AgentSessionsCard />
       <PerDomainCard />
     </div>
+  )
+}
+
+function AgentMigrationCard() {
+  const t = useTranslations("agentMigration")
+  return (
+    <Card className="space-y-3 p-4">
+      <div className="space-y-1">
+        <Label className="text-sm">{t("cardTitle")}</Label>
+        <p className="text-xs text-muted-foreground">{t("cardBody")}</p>
+      </div>
+      <AgentMigrationDialog
+        trigger={
+          <Button variant="outline" size="sm" className="h-8 text-xs">
+            <ReplaceIcon className="mr-1 size-3.5" />
+            {t("title")}
+          </Button>
+        }
+      />
+    </Card>
   )
 }
 
