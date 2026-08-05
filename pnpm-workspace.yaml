@@ -42,6 +42,22 @@ overrides:
   valibot: "^1.4.2"
   vite-tsconfig-paths: "^6.1.1"
 
+# pnpm 11 blocks lifecycle scripts by default (ERR_PNPM_IGNORED_BUILDS).
+# Explicitly approve packages whose postinstall/install/preinstall scripts are
+# required for correct operation (native addons, platform binaries). Deny
+# packages whose scripts are informational or unnecessary at install time.
+allowBuilds:
+  "@parcel/watcher": true
+  "@swc/core": true
+  core-js: false
+  core-js-pure: false
+  esbuild: true
+  node-pty: true
+  onnxruntime-node: true
+  protobufjs: true
+  tesseract.js: true
+  unrs-resolver: true
+
 minimumReleaseAgeExclude:
   - "@ai-sdk/fireworks@3.0.22"
   - "@ai-sdk/gateway@4.0.37"
