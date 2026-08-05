@@ -14,6 +14,7 @@ VALID_PERMISSIONS = (
     "filesystem:read",
     "filesystem:write",
     "network:fetch",
+    "network:upload",
     "network:websocket",
     "clipboard:read",
     "clipboard:write",

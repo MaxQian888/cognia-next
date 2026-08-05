@@ -2045,7 +2045,7 @@ describe("tuiReducer", () => {
   })
 
   it("SET_CONTEXT_USAGE updates live occupancy without accumulating token totals", () => {
-    const initial = createInitialState(DEFAULT_RESOLVED_CONFIG, "s1")
+    const initial = createInitialState(config, "s1")
     const next = tuiReducer(initial, { type: "SET_CONTEXT_USAGE", used: 42_000, size: 1_000_000 })
     expect(next.usage).toMatchObject({ contextTokens: 42_000, contextWindow: 1_000_000 })
     expect(next.modelMeta).toMatchObject({ contextWindow: 1_000_000, runtime: true })

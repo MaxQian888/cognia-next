@@ -17,6 +17,7 @@
  * object built at runtime from JSON, where TypeScript never looked.
  */
 
+// static-export-exempt: @cognia/agent is a Node-only SDK and requires Node >=26.
 import fs from "node:fs"
 
 import type { AgentStructuredError } from "@cognia/agent-config-types/agent-run-result"

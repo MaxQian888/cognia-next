@@ -197,6 +197,25 @@ describe("PermissionGuard", () => {
       expect(grants.length).toBeGreaterThan(0)
     })
 
+    it("records contextual usage without performing a second permission decision", () => {
+      guard.recordUsage(
+        "plugin-a",
+        "network:fetch",
+        "egress GET https://api.example.com/logs classification=operational pii=redact"
+      )
+
+      expect(guard.getAuditLog({ pluginId: "plugin-a" })).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "check",
+            allowed: true,
+            context:
+              "egress GET https://api.example.com/logs classification=operational pii=redact",
+          }),
+        ])
+      )
+    })
+
     it("should clear audit log", () => {
       guard.check("plugin-a", "network:fetch")
       guard.clearAuditLog()
@@ -521,10 +540,12 @@ describe("Permission Constants", () => {
     expect(PERMISSION_GROUPS.filesystem).toContain("filesystem:read")
     expect(PERMISSION_GROUPS.filesystem).toContain("filesystem:write")
     expect(PERMISSION_GROUPS.network).toContain("network:fetch")
+    expect(PERMISSION_GROUPS.network).toContain("network:upload")
   })
 
   it("should have permission descriptions", () => {
     expect(PERMISSION_DESCRIPTIONS["network:fetch"]).toBeTruthy()
+    expect(PERMISSION_DESCRIPTIONS["network:upload"]).toBeTruthy()
     expect(PERMISSION_DESCRIPTIONS["filesystem:write"]).toBeTruthy()
     expect(PERMISSION_DESCRIPTIONS["extension:workflow"]).toBe(
       "Contribute workflow nodes, triggers, tasks, and templates"
@@ -560,6 +581,7 @@ describe("Permission Constants", () => {
     // (secrets, clipboard, fs). It must prompt for consent rather than being
     // silently granted on enable.
     expect(DANGEROUS_PERMISSIONS).toContain("network:fetch")
+    expect(DANGEROUS_PERMISSIONS).toContain("network:upload")
     expect(DANGEROUS_PERMISSIONS).toContain("network:websocket")
   })
 

@@ -172,11 +172,12 @@ export function sanitizePluginNetworkEgress(
 
   let body = input.body
   if (typeof body === "string") {
+    const rawBody = body
     try {
-      const parsed = JSON.parse(body) as unknown
+      const parsed = JSON.parse(rawBody) as unknown
       body = JSON.stringify(sanitizeValue(pluginId, "ctx.network.body", parsed, policy))
     } catch {
-      body = sanitizeString(pluginId, "ctx.network.body", body, policy)
+      body = sanitizeString(pluginId, "ctx.network.body", rawBody, policy)
     }
   } else if (body !== undefined) {
     body = sanitizeValue(pluginId, "ctx.network.body", body, policy)

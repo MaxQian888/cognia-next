@@ -8,6 +8,7 @@ import {
   resolveInstallPlan,
   runInstall,
   type InstallMethod,
+  type RunInstallDeps,
 } from "./backend-install"
 
 describe("resolveInstallPlan", () => {
@@ -118,7 +119,9 @@ describe("runInstall", () => {
     child.pid = 123
     child.kill = jest.fn(() => true)
     const spawnFn = jest.fn(() => child) as unknown as typeof import("node:child_process").spawn
-    const killProcessTree = jest.fn((target: typeof child) => target.kill("SIGTERM"))
+    const killProcessTree: NonNullable<RunInstallDeps["killProcessTree"]> = jest.fn((target) => {
+      target.kill("SIGTERM")
+    })
     const controller = new AbortController()
     const run = runInstall({ method, spawnFn, signal: controller.signal, killProcessTree })
 

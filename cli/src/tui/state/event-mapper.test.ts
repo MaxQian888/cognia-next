@@ -149,6 +149,16 @@ describe("captureEventToActions", () => {
     ).toEqual([{ type: "SET_USAGE", usage: { inputTokens: 5, totalCostUsd: 0.01 } }])
   })
 
+  it("maps partial context occupancy without accumulating billable usage", () => {
+    expect(
+      captureEventToActions({
+        type: "usage",
+        partial: true,
+        usage: { contextTokens: 24_000, contextWindow: 1_000_000 },
+      })
+    ).toEqual([{ type: "SET_CONTEXT_USAGE", used: 24_000, size: 1_000_000 }])
+  })
+
   it("maps a compact event to COMPACT_BOUNDARY", () => {
     expect(
       captureEventToActions({

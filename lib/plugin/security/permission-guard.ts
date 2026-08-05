@@ -82,7 +82,7 @@ type PermissionRequestHandler = (request: PermissionRequest) => Promise<boolean>
 
 export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
   filesystem: ["filesystem:read", "filesystem:write"],
-  network: ["network:fetch", "network:websocket"],
+  network: ["network:fetch", "network:upload", "network:websocket"],
   clipboard: ["clipboard:read", "clipboard:write"],
   media: [
     "media:image:read",
@@ -139,6 +139,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "filesystem:read": "Read files from the file system",
   "filesystem:write": "Write files to the file system",
   "network:fetch": "Make HTTP/HTTPS requests",
+  "network:upload": "Upload local file contents over HTTP/HTTPS",
   "network:websocket": "Establish WebSocket connections",
   "clipboard:read": "Read from the clipboard",
   "clipboard:write": "Write to the clipboard",
@@ -268,6 +269,7 @@ export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
   // (secrets, clipboard, fs) off-device — an unrecallable exfiltration channel.
   // Gate it behind consent instead of granting it silently on enable.
   "network:fetch",
+  "network:upload",
   "network:websocket",
   // Dispatching an external coding agent spawns an outside process that can
   // read/edit files and run commands — same risk tier as `process:spawn`.
@@ -525,6 +527,11 @@ export class PermissionGuard {
     this.audit(pluginId, permission, "check", allowed, context)
 
     return allowed
+  }
+
+  /** Append an already-authorized, non-decision usage event to the audit log. */
+  recordUsage(pluginId: string, permission: PluginPermission, context?: string): void {
+    this.audit(pluginId, permission, "check", true, context)
   }
 
   checkMultiple(pluginId: string, permissions: PluginPermission[]): boolean {

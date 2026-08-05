@@ -32,9 +32,9 @@
 //!     rejected (mirrors the `files.rs` workspace sandbox).
 //!   * **secret namespacing** — `secrets:*` keys live under the keyring
 //!     namespace `plugin:<plugin_id>`, so one plugin can't read another's.
-//!   * **network domain allowlist** — `network:fetch` URLs are checked against
-//!     `state.network_allowlist` (empty = unrestricted), fail-closed on an
-//!     unparseable URL.
+//!   * **network egress policy** — `network:fetch` URLs are checked against
+//!     `state.network_allowlist` plus optional method/path rules, fail-closed
+//!     on a missing declaration or unparseable URL.
 //!
 //! UI-only operations (`clipboard:*`, `window:*`, `shell:open`, and
 //! `shell:showInFolder`) require a desktop `AppHandle`. The headless gateway
@@ -1075,10 +1075,9 @@ async fn handle_window(
     }
 }
 
-/// Per-plugin egress allowlist gate for the network domain. A plugin that
-/// declared no allowlist is denied by default; a declared allowlist is
-/// enforced (see `state.network_host_allowed`). Fail-closed on an
-/// unparseable URL / host.
+/// Per-plugin egress gate for domain, HTTP method, and pathname. A plugin that
+/// declared no allowlist is denied by default. Fail-closed on an unparseable
+/// URL / host.
 fn guard_network_request(
     state: &PluginRuntimeState,
     plugin_id: &str,
@@ -1213,6 +1212,24 @@ async fn handle_network(
             let url = payload_str(payload, "url")?;
             let file_rel = payload_str(payload, "filePath")?;
             guard_network_request(state, plugin_id, &url, "POST")?;
+            let file_content_policy = payload
+                .get("fileContentPolicy")
+                .and_then(Value::as_str)
+                .unwrap_or("block");
+            if file_content_policy != "allow" {
+                return Err(PluginApiError::permission_denied(
+                    "network:upload file content is blocked; set fileContentPolicy=allow and declare dataClassification",
+                ));
+            }
+            if payload
+                .get("dataClassification")
+                .and_then(Value::as_str)
+                .is_none_or(str::is_empty)
+            {
+                return Err(PluginApiError::permission_denied(
+                    "network:upload requires dataClassification when fileContentPolicy=allow",
+                ));
+            }
             let src = resolve_scoped(state, plugin_id, &file_rel)?;
             let bytes = crate::contained_path::read_existing_plugin_file(
                 &state.plugin_dir(plugin_id),
@@ -1430,7 +1447,8 @@ fn required_permission(domain: &str, op: &str) -> Option<&'static str> {
         ("managedIdeSecrets", "set" | "delete") => Some("secrets:write"),
         ("clipboard", "readText" | "hasText") => Some("clipboard:read"),
         ("clipboard", "writeText" | "clear") => Some("clipboard:write"),
-        ("network", "fetch" | "download" | "upload") => Some("network:fetch"),
+        ("network", "fetch" | "download") => Some("network:fetch"),
+        ("network", "upload") => Some("network:upload"),
         ("db", "query" | "tableExists" | "txQuery") => Some("database:read"),
         (
             "db",
@@ -1711,7 +1729,7 @@ fn capability_table() -> Vec<PluginApiCapability> {
         cap("window:setAlwaysOnTop", true, false, &[]),
         cap("network:fetch", true, false, &["network:fetch"]),
         cap("network:download", true, false, &["network:fetch"]),
-        cap("network:upload", true, true, &["network:fetch"]),
+        cap("network:upload", true, true, &["network:upload"]),
         cap("db:query", true, false, &["database:read"]),
         cap("db:tableExists", true, false, &["database:read"]),
         cap("db:execute", true, true, &["database:write"]),
@@ -2092,6 +2110,9 @@ mod tests {
             .contains(&"network:fetch".to_string()));
         let up = caps.iter().find(|c| c.api == "network:upload").unwrap();
         assert!(up.supported && up.high_risk);
+        assert!(up
+            .required_permissions
+            .contains(&"network:upload".to_string()));
     }
 
     #[test]
@@ -2102,7 +2123,7 @@ mod tests {
         );
         assert_eq!(
             required_permission("network", "upload"),
-            Some("network:fetch")
+            Some("network:upload")
         );
     }
 
@@ -2196,11 +2217,54 @@ mod tests {
             &state,
             "demo",
             "upload",
-            &json!({ "url": "https://files.test/u", "filePath": "nope.bin" }),
+            &json!({
+                "url": "https://files.test/u",
+                "filePath": "nope.bin",
+                "fileContentPolicy": "allow",
+                "dataClassification": "internal"
+            }),
         )
         .await
         .unwrap_err();
         assert_eq!(err.code, "INTERNAL");
+    }
+
+    #[tokio::test]
+    async fn upload_blocks_file_content_by_default() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        state.set_network_allowlist("demo", vec!["files.test".into()]);
+        let err = handle_network(
+            &state,
+            "demo",
+            "upload",
+            &json!({ "url": "https://files.test/u", "filePath": "payload.bin" }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "PERMISSION_DENIED");
+        assert!(err.message.contains("file content is blocked"));
+    }
+
+    #[tokio::test]
+    async fn upload_allow_requires_data_classification() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        state.set_network_allowlist("demo", vec!["files.test".into()]);
+        let err = handle_network(
+            &state,
+            "demo",
+            "upload",
+            &json!({
+                "url": "https://files.test/u",
+                "filePath": "payload.bin",
+                "fileContentPolicy": "allow"
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "PERMISSION_DENIED");
+        assert!(err.message.contains("requires dataClassification"));
     }
 
     #[tokio::test]
@@ -2475,12 +2539,11 @@ mod tests {
 
     #[test]
     fn capability_table_uses_only_canonical_permissions() {
-        // No phantom permission strings (filesystem:delete, network:download/
-        // upload, database:query/execute) outside the PluginPermission union.
+        // No phantom permission strings (filesystem:delete, network:download,
+        // database:query/execute) outside the PluginPermission union.
         let phantom = [
             "filesystem:delete",
             "network:download",
-            "network:upload",
             "database:query",
             "database:execute",
         ];

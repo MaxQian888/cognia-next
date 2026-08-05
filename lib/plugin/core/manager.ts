@@ -3179,12 +3179,7 @@ export class PluginManager {
     }
   }
 
-  /**
-   * Push a plugin's declared `manifest.networkAccess.allowedDomains` to the
-   * Rust host so its `network:*` egress gate clamps to those domains. Called on
-   * ENABLE only when the plugin declared an allowlist (otherwise egress stays
-   * unrestricted). Best-effort; no-op in web mode.
-   */
+  /** Push the manifest's domain/method/path policy into the Rust host. */
   private async syncNetworkAllowlistToHost(
     pluginId: string,
     domains: string[],

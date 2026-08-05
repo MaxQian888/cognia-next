@@ -1,13 +1,13 @@
 {
-  "readAt": "2026-07-26T18:48:44.774Z",
-  "lastGoodReadAt": "2026-07-26T18:48:44.774Z",
+  "readAt": "2026-08-04T07:17:58.777Z",
+  "lastGoodReadAt": "2026-08-04T07:17:58.777Z",
   "errors": [],
   "repo": {
     "stars": 52,
     "license": "AGPL-3.0",
     "description": null
   },
-  "contributors": 2,
+  "contributors": 3,
   "releases": [],
   "changesets": [
     {
@@ -35,10 +35,22 @@
       "date": "2026-07-20T18:09:24+08:00"
     },
     {
+      "id": "account-gate-settles-on-failure",
+      "bump": "patch",
+      "summary": "A local account registry that fails to load no longer leaves the app sitting on \"Loading accounts…\" forever. The boot read marked itself finished only when it succeeded, and the gate shows its loading shell until that flag flips — so any failure reading the account registry presented as an indefinite hang, with the actual reason reaching only a console warning. The gate's own error message sat behind that same check and could never be reached.\n\nThe load now settles whether it succeeds or fails, so you see what went wrong instead of a spinner, and a failed read can still be retried rather than being stuck for the rest of the session.",
+      "date": "2026-07-29T11:19:44+08:00"
+    },
+    {
       "id": "adr-0068-frontend-extraction",
       "bump": "minor",
       "summary": "Faster builds and dev startup (ADR-0068): `next build` no longer duplicates the CI typecheck, CI restores incremental typecheck state, sidecar prebuilds skip when fresh, and heavy boot runtimes (workflow/gateway/connector/scheduler/agent-team) load after first paint on all shells. Five subsystems are extracted to reusable source packages: @cognia/redact, @cognia/web-search, @cognia/tts, @cognia/logging, @cognia/agent-config-types.",
       "date": "2026-07-13T13:38:26+08:00"
+    },
+    {
+      "id": "agent-commentary-and-raw-analysis",
+      "bump": "minor",
+      "summary": "Show what an external agent is thinking while it works. Commentary an agent emits alongside its answer — Codex's `commentary` phase, and the raw chain-of-thought some open models expose — now streams into the conversation as its own part instead of being dropped or folded into the reply, and drives live \"Agent progress\" steps in the run panel and in workflow agent-turn nodes. Reasoning that arrives as raw chain-of-thought is tagged with its provenance, so it can be presented as the unpolished output it is rather than as the model's considered answer. Imported Codex sessions keep their commentary too.",
+      "date": "2026-07-29T15:24:42+08:00"
     },
     {
       "id": "agent-runtime-tool-category-i18n",
@@ -47,10 +59,46 @@
       "date": "2026-07-14T02:17:36+08:00"
     },
     {
+      "id": "agent-scheduler-tools",
+      "bump": "minor",
+      "summary": "Add provenance-scoped scheduler tools that can be enabled per IM conversation, with agent-owned task creation, listing, and cancellation.",
+      "date": "2026-07-30T15:51:57+08:00"
+    },
+    {
+      "id": "agent-team-workspace-rebuild",
+      "bump": "minor",
+      "summary": "Rebuild the Agent Team workspace so a running team is something you can watch and steer rather than something you start and hope about.\n\nRun controls now live on the workspace itself, so starting and stopping a run — and seeing its real state — no longer means leaving for another surface. The task board shows what each teammate is doing and what it produced, the header reports the run's state instead of only the team's name, and the activity stream carries an unread marker so coming back to a long-running team tells you what happened while you were away instead of dropping you at the bottom of a wall of text. Tab navigation keeps its position across a reload.\n\nThe mobile Me screen drops its stale Agent Team row: the workspace is desktop-only and the row led nowhere.",
+      "date": "2026-07-29T08:34:58+08:00"
+    },
+    {
+      "id": "ai-sdk-v7-prompt-partition",
+      "bump": "patch",
+      "summary": "Plugin output-token caps are now enforced. `ctx.ai.chat()` passed the plugin-facing `maxTokens` straight through to the AI SDK, which has expected `maxOutputTokens` since v5 — the key was silently dropped, so every plugin-set cap went unapplied and generations ran to the model's own limit. Also prepares the AI SDK 7 upgrade by moving system prompts out of the `messages` array into the top-level instructions option across the sidecar dispatcher, the standalone (BYOK) chat engine, the agent executor, the team runtime, the plugin AI API, and the VS Code LM shim. Anthropic prompt-cache breakpoints are carried per-segment so cache hit rates are unchanged, and a system message interleaved mid-history keeps its original position rather than being hoisted.",
+      "date": "2026-08-03T01:14:55+08:00"
+    },
+    {
+      "id": "ai-sdk-v7-upgrade",
+      "bump": "minor",
+      "summary": "Upgrade to Vercel AI SDK 7 (`ai` 7.0.48 and the matching `@ai-sdk/*` majors) across the app, the sidecar, the plugin SDK and the plugin scaffold template.\n\nToken accounting changes: multi-step turns are now billed as the sum of every step rather than the final step alone, so reported usage for agentic sessions goes up — the previous figure under-reported real consumption. Cached and reasoning token counts now come from the canonical `inputTokenDetails` / `outputTokenDetails` objects, which v7 makes the only source.\n\nAlso in this release: MCP servers reached over HTTP/SSE no longer follow redirects (an SSRF guard that is now on by default) and report an actionable error instead; OpenTelemetry span collection moved to `@ai-sdk/otel` with the sidecar's no-endpoint-means-silent behaviour and its never-record-prompt-content policy both preserved; images sent to and returned from models use AI SDK 7's single canonical file part; and files a model references inside its reasoning trace arrive as a distinct part type that is deliberately dropped rather than rendered or persisted, matching the existing raw chain-of-thought policy.",
+      "date": "2026-08-03T22:46:25+08:00"
+    },
+    {
+      "id": "animated-action-icons",
+      "bump": "patch",
+      "summary": "Action icons across the app now animate on interaction instead of sitting static. Copy, download, play/pause, bookmark, bell, heart and the other repeated action glyphs are drawn from a shared animated icon set and rendered through one `AnimatedActionIcon` wrapper, so a copy button confirms itself by morphing to a check rather than swapping in a different icon, and play/pause transitions rather than cutting. The surfaces covered are the chat renderers (code, diff, image, audio, video, math, mermaid), message actions and the conversation minimap, the pet action grid, the TTS now-playing bar, share panels, the notification bell, and the mobile chat, goals and command-history screens. Motion is skipped under `prefers-reduced-motion`.",
+      "date": "2026-08-02T16:19:28+08:00"
+    },
+    {
       "id": "anthropic-reuse-skip-keychain-probe",
       "bump": "patch",
       "summary": "Stop probing Claude Code's own keychain login when an Anthropic subscription is already active. The Providers → Anthropic panel no longer reads the external `\"Claude Code-credentials\"` keychain item (a separate macOS keychain prompt) once you are signed in, so opening settings no longer triggers a redundant password prompt whose result was discarded anyway.",
       "date": "2026-07-14T02:17:36+08:00"
+    },
+    {
+      "id": "appearance-typography-knobs-live",
+      "bump": "patch",
+      "summary": "Settings → Appearance now actually changes the page. The line-height and letter-spacing sliders under Fine-tuning, and the line-height half of the Density presets, were written to the document on every change but read by no stylesheet, so moving them did nothing. Line height is now composed from both knobs and applied to every line-height token Tailwind resolves utilities against — plus markdown, which sets its own — and letter spacing is applied where it inherits to the whole document. Defaults are unchanged: at comfortable density and 1x scale the page renders exactly as before.",
+      "date": "2026-07-30T17:13:10+08:00"
     },
     {
       "id": "apple-vision-macos-backend",
@@ -83,6 +131,12 @@
       "date": "2026-07-21T19:47:35+08:00"
     },
     {
+      "id": "background-job-supervisor",
+      "bump": "minor",
+      "summary": "Background commands started by the built-in agent (`bash(run_in_background)`) now run under a Rust-owned job supervisor instead of living in the chat sidecar's memory. Killing a background shell now reaps the whole process group, so `sh -c \"pnpm dev\"` no longer leaves vite/webpack alive holding the port after `kill_shell` reports success. Output is kept in a chunked in-memory ring backed by an on-disk log rather than a 256 KB buffer that was fully re-copied on every chunk, so a chatty build no longer burns CPU on memcpy and its earlier output stays readable — including after an app restart. `bash_output` gains a `from_offset` parameter for looking back through history (reads no longer consume), and combining `filter` with `wait_ms` now genuinely waits until a line matches instead of swallowing the non-matching output it skipped. `bash` gains an opt-in `detach` flag for work that must outlive the chat session; detached jobs are still reaped when the app exits, never left as orphan daemons. `start_process` with `detached: true` no longer produces an unsupervised orphan that discards its output and outlives the app — it now starts a tracked job whose output is readable and whose lifetime ends with the app, and `terminate_process` kills such a job's whole process group rather than signalling a single pid. Running background jobs now appear in the performance panel's Managed Processes view with their owning session or scheduled task, and can be stopped from there.\n\nThe built-in agent also gains `Monitor`, `monitor_list`, and `monitor_cancel`. A monitor can wait for a background job to exit, match a job-output pattern, poll a shell predicate with governed backoff, or wait for an upstream subagent/scheduled task. Short waits answer inline; long waits become durable watches that survive host restarts instead of consuming repeated model turns.",
+      "date": "2026-07-30T15:31:24+08:00"
+    },
+    {
       "id": "bash-tool-output-plain-text",
       "bump": "patch",
       "summary": "Render Bash tool results as preformatted code instead of Markdown, so command output keeps its line breaks, indentation, and `<header.h>` includes. File-dumping commands (`cat`, `head`, `tail`, `bat`, `less`, `type`, `Get-Content`, …) now infer a syntax-highlight language from the file they read — `cat foo.cpp` highlights as C++.",
@@ -99,6 +153,12 @@
       "bump": "minor",
       "summary": "Add an optional blocking review step to Agent Team runs (Settings → Governance → \"Lead reviews each task\"). When enabled, the team lead reviews every task's work — and a diff of what it actually changed on disk, not just the teammate's summary of it — before any dependent task is allowed to start. Work the lead rejects goes straight back to the same teammate, in the same workspace, with the lead's feedback, and is reviewed again; two revision attempts by default. A task that cannot be approved fails the run rather than quietly being built on.\n\nPreviously nothing could stop a team from building on bad work: the GitHub PR reviewer only runs after everything has finished, and the existing result-review setting is a human gate that dependent tasks ignore. That setting still applies and composes with this one — when both are on, an approved task waits for you on the board instead of completing.\n\nOff by default; a team that doesn't enable it behaves exactly as before.",
       "date": "2026-07-15T22:06:26+08:00"
+    },
+    {
+      "id": "brain-incremental-snapshots",
+      "bump": "patch",
+      "summary": "Persist headless brain data as per-table incremental snapshots and warn when long-lived serve processes cross the RSS ceiling.",
+      "date": "2026-07-30T16:04:31+08:00"
     },
     {
       "id": "browser-action-recording",
@@ -119,6 +179,12 @@
       "date": "2026-07-16T11:54:16+08:00"
     },
     {
+      "id": "browser-companion-connection-resilience",
+      "bump": "minor",
+      "summary": "Give the browser the same connection resilience the phone has when it talks to a Cognia server.\n\nOpening Cognia in a browser against a self-hosted or cloud `cognia-server` produced a client that could connect but could not recover well. Everything that keeps a connection alive across a changing network — learning the other addresses the host answers on, re-probing when connectivity returns or the tab comes back to the foreground, failing over to a different channel when the current one dies, provisioning TURN credentials, and the direct peer-to-peer tier — was written once and then gated behind a phone check, so a browser got none of it. All it had was the WebSocket's own reconnect backoff.\n\nNone of that work is actually phone-specific. The one piece that genuinely is — discovering a host on the local network, which needs mDNS and a subnet sweep — is now the only thing still gated; the browser skips discovery and uses the addresses the host reports over the authenticated connection instead, which was the only route available to it anyway. Everything else runs in both.\n\nThe practical difference: a browser session survives a network change, follows the host if it moves between a tunnel and a direct address, and can negotiate a direct connection rather than relaying every message through the server.",
+      "date": "2026-07-30T17:13:10+08:00"
+    },
+    {
       "id": "browser-deterministic-capture",
       "bump": "patch",
       "summary": "Freeze page animations, media, and JavaScript timers around embedded browser screenshots, with guaranteed cleanup and a self-healing watchdog.",
@@ -135,6 +201,12 @@
       "bump": "minor",
       "summary": "Add compact, standard, detailed, and forensic browser annotation output levels.",
       "date": "2026-07-16T11:54:16+08:00"
+    },
+    {
+      "id": "browser-pane-narrow-rail-toolbar",
+      "bump": "patch",
+      "summary": "Embedded browser pane now behaves in a narrow right rail. The toolbar packs\nitself against its measured width instead of wrapping into three or four rows:\nback / forward / reload and the address bar stay inline at every width, while\nthe inspection actions (history, screenshot, select element, find) and the\nset-once page actions (zoom, cookie import, open external) collapse into a \"⋯\"\npopover as room runs out — the trigger carries a dot when something packed away\nis armed. The address bar takes the leftover width and, while it mirrors the\nlive page, paints a host-first form over the field (scheme, `www.` and a bare\ntrailing slash dropped, path dimmed, lock icon for https) so truncation eats the\npath instead of the host; focusing still reveals and copies the real URL. The\nannotation-detail selector moved into the popover, the driver indicator drops to\nits icon when narrow, and the selection/annotation rail stacks under the page\nrather than taking 320px of it.",
+      "date": "2026-07-28T21:22:03+08:00"
     },
     {
       "id": "browser-right-dock-interactions",
@@ -163,7 +235,7 @@
     {
       "id": "builtin-plugin-sdk-conformance",
       "bump": "patch",
-      "summary": "Fix plugin teardown never running, plus four defects found auditing the built-in plugins against the current plugin SDK. Disabling a plugin now actually releases what it holds: the runtime was calling a plugin's `deactivate()` without its context, so every built-in whose cleanup is guarded on that context silently skipped it — most visibly, Clipboard History's clipboard-polling loop kept reading the clipboard after you disabled the plugin and revoked its clipboard permission, and the slash commands of Computer Use, OCR, Screenshot, Web Clone and Clipboard History stayed in the command list after their plugin was turned off. Ripgrep Tools no longer lets a search pattern or path be reinterpreted as a ripgrep option, closing a path from a crafted search argument to command execution. The Backend Refactor roles no longer carry a permission bypass into ordinary chat — picking \"Refactorer\" from the character list now prompts for file and command permissions as usual, while the headless refactor workflow keeps running unattended. That workflow also passes each step's output to the next again, instead of feeding the following agent an empty analysis, plan, or gate output. Deep Research now declares the two search hosts it contacts and drops a secrets-write permission it never used.\n\nSecurity and correctness fixes across the rest of the built-in plugins. GitHub Delivery no longer leaves your repository token inside the cloned worktree's git config, where the AI agent working in that clone could simply read it — the credential is now supplied per-operation instead — and the operations its prompt already forbade (`git push`, `git remote`, the `gh` CLI) are now blocked by the permission gate rather than by asking the agent nicely, which matters because issue text is written by anyone who can open an issue. GitHub Delivery's inbound webhook UI no longer offers to start a public tunnel and hand you a URL to paste into GitHub: nothing was listening on the other end, so those deliveries could only fail silently; repos continue to be tracked by polling. Strix Security no longer reports a scan as \"Done · 0 findings\" when it produced a report it could not read — that now shows as an inconclusive run — and deleting scans (or \"Clear all\") now also removes the scan files on disk, which hold the full proof-of-concept exploits, instead of only clearing the list. Web Clone rejects a relative `-o` output path that would write outside your workspace. Workspace Tools' three agent tools now describe their parameters to the model instead of exposing none, its search skips `node_modules` and similar build directories with depth and file-size limits (and says so when results are truncated), and it drops a filesystem-write permission it never used.\n\nSeveral built-in plugins that could not work at all now do. Deep Research runs: it asks for model access up front instead of failing mid-run with a raw permission error, and its web searches now reach Exa/Tavily on the desktop app, where they were previously blocked before leaving the app. The Python Demo plugin can be enabled — it declared a message hook without the permission that hook requires, which failed the entire plugin load. The WASM example formatter's workflow node appears with a proper label and parameter form and actually runs, instead of failing every invocation. Stagehand Browser points at the MCP server package that still exists (the previous one was removed from npm, so launching it always failed) and asks for the model key it actually uses. In the workflow editor's AI tools, \"cancel run\" can now genuinely cancel a running workflow instead of always reporting nothing was running after asking you to approve it, and \"auto layout\" honours the top-to-bottom/right-to-left direction you ask for instead of silently laying out left-to-right. Claiming a Pet daily-quest reward no longer burns the quest when the reward can't be granted — it stays claimable and can be retried.\n\nMore built-in plugins that silently did nothing now work. `/ocr <path>` and the OCR tool's file-path mode run instead of always erroring, and OCR now honours the provider, languages and format you configured rather than ignoring them; the tool also stops offering the agent an attachment-id source nothing in the app can supply. The Zhihu content pipeline no longer runs green every morning while saving nothing: its ranking step uses your configured model routing instead of falling back to a placeholder echo, its hot-list step runs unattended so the scheduled run isn't left waiting on a confirmation dialog nobody sees, and a step that can't read the previous step's output now fails visibly instead of reporting success with zero rows saved. The two external-agent example plugins actually register their contributions when installed, and the LSP test plugin ships the server binary its manifest points at.\n\nPlugin slash commands now use the name the plugin declares. Typing `/browser`, `/stagehand`, `/sandbox`, `/skill` or `/record-skill` works — previously the declared name was ignored and only an internal id like `/playwright.attach` or `/skill.list` resolved, which nothing told you. Command aliases work at all for the first time (they were registered under a name no one could type). Screenshot, Playwright, Stagehand, E2B Sandbox, Anthropic Skills and Skill Recorder now declare their commands in their manifest, so those commands also appear in the command palette, are listed as contributions on the plugin's detail page, and are cleaned up properly when the plugin is disabled. Workspace Tools now refuses to read outside the folder you have open — `workspace_read_file` could previously be pointed at any file on your machine, including SSH keys.",
+      "summary": "Fix plugin teardown never running, plus four defects found auditing the built-in plugins against the current plugin SDK. Disabling a plugin now actually releases what it holds: the runtime was calling a plugin's `deactivate()` without its context, so every built-in whose cleanup is guarded on that context silently skipped it — most visibly, Clipboard History's clipboard-polling loop kept reading the clipboard after you disabled the plugin and revoked its clipboard permission, and the slash commands of Computer Use, OCR, Screenshot, Web Clone and Clipboard History stayed in the command list after their plugin was turned off. Ripgrep Tools no longer lets a search pattern or path be reinterpreted as a ripgrep option, closing a path from a crafted search argument to command execution. The Backend Refactor roles no longer carry a permission bypass into ordinary chat — picking \"Refactorer\" from the character list now prompts for file and command permissions as usual, while the headless refactor workflow keeps running unattended. That workflow also passes each step's output to the next again, instead of feeding the following agent an empty analysis, plan, or gate output. Deep Research now declares the two search hosts it contacts and drops a secrets-write permission it never used.\n\nSecurity and correctness fixes across the rest of the built-in plugins. The shared git workspace no longer leaves your repository token inside the cloned worktree's git config, where an AI agent working in that clone could simply read it — the credential is now supplied per-operation instead — and the operations an unattended run's prompt already forbade (`git push`, `git remote`, the `gh` CLI) are now blocked by the permission gate rather than by asking the agent nicely, which matters whenever the task text comes from somewhere anyone can write to. Strix Security no longer reports a scan as \"Done · 0 findings\" when it produced a report it could not read — that now shows as an inconclusive run — and deleting scans (or \"Clear all\") now also removes the scan files on disk, which hold the full proof-of-concept exploits, instead of only clearing the list. Web Clone rejects a relative `-o` output path that would write outside your workspace. Workspace Tools' three agent tools now describe their parameters to the model instead of exposing none, its search skips `node_modules` and similar build directories with depth and file-size limits (and says so when results are truncated), and it drops a filesystem-write permission it never used.\n\nSeveral built-in plugins that could not work at all now do. Deep Research runs: it asks for model access up front instead of failing mid-run with a raw permission error, and its web searches now reach Exa/Tavily on the desktop app, where they were previously blocked before leaving the app. The Python Demo plugin can be enabled — it declared a message hook without the permission that hook requires, which failed the entire plugin load. The WASM example formatter's workflow node appears with a proper label and parameter form and actually runs, instead of failing every invocation. Stagehand Browser points at the MCP server package that still exists (the previous one was removed from npm, so launching it always failed) and asks for the model key it actually uses. In the workflow editor's AI tools, \"cancel run\" can now genuinely cancel a running workflow instead of always reporting nothing was running after asking you to approve it, and \"auto layout\" honours the top-to-bottom/right-to-left direction you ask for instead of silently laying out left-to-right. Claiming a Pet daily-quest reward no longer burns the quest when the reward can't be granted — it stays claimable and can be retried.\n\nMore built-in plugins that silently did nothing now work. `/ocr <path>` and the OCR tool's file-path mode run instead of always erroring, and OCR now honours the provider, languages and format you configured rather than ignoring them; the tool also stops offering the agent an attachment-id source nothing in the app can supply. The Zhihu content pipeline no longer runs green every morning while saving nothing: its ranking step uses your configured model routing instead of falling back to a placeholder echo, its hot-list step runs unattended so the scheduled run isn't left waiting on a confirmation dialog nobody sees, and a step that can't read the previous step's output now fails visibly instead of reporting success with zero rows saved. The two external-agent example plugins actually register their contributions when installed, and the LSP test plugin ships the server binary its manifest points at.\n\nPlugin slash commands now use the name the plugin declares. Typing `/browser`, `/stagehand`, `/sandbox`, `/skill` or `/record-skill` works — previously the declared name was ignored and only an internal id like `/playwright.attach` or `/skill.list` resolved, which nothing told you. Command aliases work at all for the first time (they were registered under a name no one could type). Screenshot, Playwright, Stagehand, E2B Sandbox, Anthropic Skills and Skill Recorder now declare their commands in their manifest, so those commands also appear in the command palette, are listed as contributions on the plugin's detail page, and are cleaned up properly when the plugin is disabled. Workspace Tools now refuses to read outside the folder you have open — `workspace_read_file` could previously be pointed at any file on your machine, including SSH keys.",
       "date": "2026-07-21T17:33:09+08:00"
     },
     {
@@ -185,6 +257,12 @@
       "date": "2026-07-14T21:36:15+08:00"
     },
     {
+      "id": "certification-store-webcrypto",
+      "bump": "patch",
+      "summary": "Verify signed compatibility manifests through the Web Crypto API instead of `node:crypto`. The deployment certification store no longer pulls a Node builtin into the static export the desktop and mobile shells load, so signature verification stays available wherever the app runs; verifying a manifest is now asynchronous.",
+      "date": "2026-07-28T22:59:33+08:00"
+    },
+    {
       "id": "chat-compact-codex-mode",
       "bump": "minor",
       "summary": "Chat: refine the \"simplified\" agent-flow display into a Codex-style compact view. Tool calls, sub-agent runs, and their activity groups now render as borderless, recessive single-line rows (expanding nests the full input/output under a left rule instead of a boxed card), so the assistant's prose stands out. Activity groups summarise the run with a natural-language verb phrase (\"Edited files · Ran commands · Read files\") instead of a raw tool tally. The simplified / standard / detailed switch is also now available directly in the chat header, not only in settings.",
@@ -203,6 +281,12 @@
       "date": "2026-07-27T00:47:38+08:00"
     },
     {
+      "id": "chat-dock-on-the-dock-kernel",
+      "bump": "minor",
+      "summary": "Chat's right-hand dock now runs on the unified Dock kernel: panels can be reordered, dragged between groups, split and merged instead of one showing at a time. Your open panel and the width you dragged to are carried over from the old workbench on first open, and the previous layout stays available via `cognia-dock-kernel-surfaces-v1`.",
+      "date": "2026-08-01T21:37:40+08:00"
+    },
+    {
       "id": "chat-flow-mode-standard-detailed-live-switch",
       "bump": "patch",
       "summary": "Chat: fix the agent-flow display switch so standard and detailed are actually distinct. The two modes differ only in the default-open state handed to each tool card's and reasoning block's Collapsible, which is uncontrolled (`defaultOpen`, read once at mount) — so flipping the header/settings switch on an already-rendered transcript changed nothing on screen. The renderer now folds the display mode into the key of just the mode-sensitive parts (tool cards, activity groups, reasoning), so switching modes remounts them and re-applies the per-mode default (detailed expands every completed tool card and thinking block; standard collapses the finished ones). Prose keeps a mode-agnostic key, so a toggle no longer reflows the message text.",
@@ -215,10 +299,22 @@
       "date": "2026-07-15T19:23:29+08:00"
     },
     {
+      "id": "chat-history-search",
+      "bump": "minor",
+      "summary": "Adds full-text search over conversation history, with results that jump straight to the matching message. The separate chat tab strip is folded into the pane group so tabs and panes no longer disagree about which conversation is active, long conversation titles scroll on hover instead of truncating silently, and slow turns are now attributable through per-turn performance records.",
+      "date": "2026-08-01T03:32:20+08:00"
+    },
+    {
       "id": "chat-rate-limit-notice-self-clearing",
       "bump": "patch",
       "summary": "Fix a spurious \"rate limit reached\" notice that stayed in the chat transcript forever. The marker projects a _live_ condition, but `allowed` was handled as a no-op instead of a clear, so a single `allowed_warning` — which the SDK emits at ~90% of a usage window during entirely normal use — pinned a notice into the persisted transcript that no code path ever removed. It survived reloads and still read \"limit reached\" days later, with a reset time in the past. Every `rate_limit_event` now drops any existing rate-limit marker before deciding whether to re-post one, so the notice clears itself as soon as the window resets. This also fixes markers accumulating one per turn: the old de-spam only collapsed a notice that was the _last_ message, which stopped being true the moment an assistant turn followed it.",
       "date": "2026-07-15T19:23:29+08:00"
+    },
+    {
+      "id": "chat-render-budgets-and-screenshot-scaling",
+      "bump": "minor",
+      "summary": "Chat rendering no longer stalls on image- and diagram-heavy conversations. Computer Use screenshot down-scaling is now on by default (it was implemented but never enabled, so agent screenshots entered the transcript at full Retina resolution and inlined as megabytes of base64 each) — click accuracy is unaffected because coordinates were already mapped back to physical pixels, and the setting can still be turned off. Very large code fences and markdown tables render the first 2000 lines / 200 rows with a \"show all\" control instead of laying out every row up front; copying, downloading, searching and exporting are unchanged and still see the whole thing. Diagrams now render one at a time and only once they are near the viewport, a diagram too large to lay out safely offers a render button rather than freezing the tab, and Mermaid output is scrubbed of scripts and event handlers before it is inserted. The virtualized message list also estimates row heights from message content instead of assuming every row is 200px, so scrolling through a conversation full of screenshots no longer lurches under the cursor.",
+      "date": "2026-07-29T17:06:19+08:00"
     },
     {
       "id": "chat-right-rail-linkage",
@@ -275,6 +371,12 @@
       "date": "2026-07-16T16:57:49+08:00"
     },
     {
+      "id": "claude-agent-sdk-parity",
+      "bump": "minor",
+      "summary": "Complete Claude Agent SDK 0.3.220 parity across options, controls, events, hooks, structured output, session storage, checkpointing, prewarming, desktop management, CLI access, and conformance certification.",
+      "date": "2026-08-04T14:45:45+08:00"
+    },
+    {
       "id": "claude-quota-refresh-surfaces-failures",
       "bump": "patch",
       "summary": "Fix the Claude subscription quota panel silently freezing on a stale or blank reading. The free OAuth usage endpoint collapsed every failure — expired bearer, 429 throttle, network error, changed response shape — into an empty meter list, which the limits source then reported as \"no data\": the panel went blank next to a stale number, nothing reached the log, and each poll wasted a paid probe that was bound to fail the same way. Failures are now classified (following cc-switch's `query_claude_quota`) and surfaced inline via `ProviderLimits.error`, so the Overview tab shows why a quota read failed instead of the generic \"No usage data yet\" copy. The token refresh now only fires on a real 401/403 rather than on any empty reading, and usage windows Anthropic adds later are shown with their raw key instead of being silently dropped.",
@@ -291,6 +393,18 @@
       "bump": "patch",
       "summary": "`cognia-agent help` and `cognia-agent version` now print usage / the version to stdout and exit 0, instead of falling through to the unknown-command branch that wrote `unknown command \"help\"` to stderr and exited 2. The non-zero exit made every such invocation surface as `ELIFECYCLE Command failed with exit code 2` when run through a package script (e.g. `pnpm cli:dev help`). Both subcommands mirror the existing `-h`/`--help` and `-v`/`--version` flags; they are dispatched after the `-p` shorthand, so `cognia-agent -p help` still sends \"help\" to the agent as a prompt. A bare invocation with no command and a genuinely unknown command keep their exit-2 usage-error contract.",
       "date": "2026-07-25T15:06:07+08:00"
+    },
+    {
+      "id": "close-review-gaps-truncate-audit-eval-mdns",
+      "bump": "patch",
+      "summary": "Four fixes to cross-device behaviour that had been built but did not hold.\n\n\"Delete from here\" on a phone deleted only the handset's own copy. The paired desktop still held every message, so the next sync pulled them straight back — the one deliberately destructive action in the conversation view silently undid itself. The deletion is now fanned out to the host first, the same way editing and resending a message already did it.\n\nEvaluation defaults set on a phone never reached the desktop. `/me/eval` edits the judge model, run count, gate thresholds and cost guard, but the field was classified as never crossing the wire in either direction — so the phone showed the built-in defaults rather than the host's real configuration, and every change stayed on the handset while the runs those defaults govern executed on the desktop.\n\nA refused attempt to run an agent on a host left no trace. The permission's contract is that every start and every refusal is recorded with the device that asked; the policy checks inside the spawn path were recorded, but the authorization gate an ungranted device actually hits returned its refusal before reaching any of them — so an unauthorized device probing the execution plane was the one denial that went unlogged. Both the HTTPS and WebRTC paths now record it.\n\nThe companion channel table reported mDNS as \"blocked — server stopped\" when mDNS was simply switched off and the server happened to be down. \"Blocked\" means the channel is on but something upstream is breaking it, which points at a fix that would not have helped: starting the server does not make a disabled advertiser advertise.",
+      "date": "2026-07-30T17:13:10+08:00"
+    },
+    {
+      "id": "cloud-session-history-on-demand",
+      "bump": "patch",
+      "summary": "Make the plain-web cloud companion usable on an account with real history. Cold boot used to drain the entire message database over the WAN — the sync handler kept pulling 500-row pages until every historical message had crossed, so the time to a rendered sidebar grew with account age and every fresh browser profile paid it again. Boot now transfers only the newest global tail, and opening a conversation hydrates that conversation's complete transcript on demand through a bounded pager; incremental pulls still drain every row after the durable cursor, so nothing is folded away.\n\nThe session list and the message page behind them stop materializing rows they discard: both read through their indexes and stop one row past the page, and the session list returns a list projection rather than whole session records — a 50-row sidebar no longer ships every session's system prompt. Older companion servers without the history RPC keep working on the synced tail.",
+      "date": "2026-07-29T15:23:10+08:00"
     },
     {
       "id": "codex-app-server-launch-preflight",
@@ -347,10 +461,34 @@
       "date": "2026-07-25T14:38:45+08:00"
     },
     {
+      "id": "companion-channel-matrix",
+      "bump": "minor",
+      "summary": "Settings → Mobile companion now answers \"can my phone reach this machine, and how\" in one table.\n\nThe four routes a paired device can take — the local network, local discovery, a public tunnel, and a direct WebRTC connection — each had their own card that knew only their own switch. Working out whether a phone could actually connect meant reading all four and knowing how they relate: that mDNS advertising a stopped server sends phones to a dead port, that a server bound to loopback is running but unreachable from anything else, that WebRTC switched on without a rendezvous server can never establish. Every one of those reads as \"on\" on its own card.\n\nA Channels table now sits at the top of the section with one row per route: its state, the address a device would use, and the result of the last reachability test. It distinguishes a route that is simply switched off from one that is switched on but cannot work, and says which of those three reasons applies. A single badge in the header answers the summary question.\n\nThe separate \"Connection diagnostics\" card is gone. It ran the same reachability probe but printed a flat list of URLs with no indication of which route each belonged to; the test button now lives in the Channels table and its results are attributed to the route they came from.",
+      "date": "2026-07-30T17:13:10+08:00"
+    },
+    {
+      "id": "companion-host-cursor-namespace",
+      "bump": "patch",
+      "summary": "Key companion sync cursors by the host's cursor namespace (`{accountNamespace}:{hostId}`) instead of the device id it issued at pair time, and decide the mirror wipe from what the active database actually holds. Re-pairing to the same desktop now keeps its watermark instead of forcing a full re-pull of every mirrored table, and switching between hosts that each have their own runtime-target database no longer clears either one's cached sessions, messages or characters. Two hosts sharing a single database still get the wipe, and cursors written by earlier builds are adopted on first run rather than mistaken for another host's.",
+      "date": "2026-08-02T20:35:01+08:00"
+    },
+    {
+      "id": "companion-multi-host-credential-book",
+      "bump": "minor",
+      "summary": "Replace the single-`CompanionConfig` pairing record with a multi-host credential book: public `CompanionHostRecord`s (endpoints, TLS pin, immutable cursor namespace, generation-guarded connection state) are kept apart from `CompanionHostCredential`s, which never leave the browser Vault or the platform keystore. Pairings are addressed by `{hostId, accountNamespace}`, so the same desktop paired from two accounts no longer shares a token, a watermark, or a mirrored row. Existing pairings migrate once, and the legacy record is only removed after both halves are read back and verified.",
+      "date": "2026-08-02T20:35:01+08:00"
+    },
+    {
       "id": "composer-attachment-preview",
       "bump": "minor",
       "summary": "Chat composer attachments: you can now see what the model will actually receive before you send. Clicking an attachment chip opens a preview panel with two views — the file as you read it (PDFs, code and text render inline) and the payload the model gets, showing a document's extracted text with its token cost and any PII the redaction gate substituted. Documents are now parsed the moment they are staged rather than at send time, so chips carry a live token badge and an unreadable file is flagged immediately instead of being silently dropped after the message has gone out.\n\nStaged attachments now survive switching sessions, reloading and restarting: their binary and cached extraction are saved with the draft, under a global 150 MB budget that evicts the oldest session's binaries first (those fall back to the previous \"re-attach these\" reminder). Attachment chips can be dragged to reorder, and the model receives them in the order shown.\n\nSent messages read better too: images keep their filename, and an attached document appears as a collapsed file card instead of dumping its entire extracted text into your own chat bubble.\n\nFixes a batch of composer defects: the attachment size hint never rendered (it only understood `data:` URLs while staged files carry `blob:` URLs), removing the last attachment skipped its exit animation, the context bar popped in and out while neighbouring bands animated, the remove button permanently covered the end of a filename on touch, and an image chip stretched the whole bar to 80px. Image OCR moved into the preview panel with an explicit \"also send OCR text\" opt-in, so it no longer silently sends both the picture and its transcription.",
       "date": "2026-07-24T11:40:11+08:00"
+    },
+    {
+      "id": "composer-image-upload-loading",
+      "bump": "patch",
+      "summary": "Composer image uploads now show a purpose-built scan animation instead of a generic spinner. Dropping or pasting a photo immediately parks a placeholder chip in the context bar while it is decoded and downscaled — that window previously showed nothing but a spinning send button — and the staged chip and preview panel both report the wait as \"Analyzing image…\" while the image is read. Documents keep the plain spinner, and the animation is replaced by a static glyph under `prefers-reduced-motion`.",
+      "date": "2026-08-02T16:37:06+08:00"
     },
     {
       "id": "composer-input-fixes",
@@ -359,10 +497,28 @@
       "date": "2026-07-20T22:20:09+08:00"
     },
     {
+      "id": "composer-multi-command-and-memory-prefix",
+      "bump": "minor",
+      "summary": "Composer command and memory fixes, plus new input-box assistance. Multiple slash commands now work on a single line when the whole line is commands (`/compact /clear`); a line containing any other word still treats the rest as arguments, so `/review src/a.ts` is unchanged. Starting a message with `!` or `#` no longer kills the `/` and `@` popovers for the rest of the message, and those prefixes now claim only their first line (matching what the popover has always previewed) and are decided from the original input, so `/clear` followed by a line beginning with `!` no longer executes a shell command. `/memory` with an unrecognised subcommand now shows usage instead of silently discarding the message. The `#` prefix reaches long-term memory: the picker offers the two ADR-0069 store scopes alongside the two `CLAUDE.md` file scopes (file scopes are marked desktop-only), a bare `#note` repeats the last destination, and writes go through the same PII gate and consolidator as `/remember`. Failed commands in a multi-command batch are now reported instead of swallowed. Adds a command queue bar (numbered, removable pills for a staged batch, with failure state), a persistent argument-hint bar for the command being edited, a shortcut cheatsheet on `?`, and transcript markers for the previously silent `/clear` and `/permission-mode`.",
+      "date": "2026-08-02T16:31:58+08:00"
+    },
+    {
+      "id": "composer-thinking-level-modes",
+      "bump": "minor",
+      "summary": "Complete the composer's thinking-level control.\n\n**Two presentations**, chosen in Settings → Conversation → Composer behaviour (and on mobile under Me → Conversation): a **slider** (Faster → Smarter, the default) mirroring the CLI's effort slider — same keyboard map (←/→/↑/↓, Home/End, digits, `0` for the model default), click-anywhere and drag on the track — and a **list** with a one-line description per level. Both drive the same state, and each adapts to the width it is given rather than a viewport breakpoint, so the control stays usable in a narrow chat sidebar or on a phone.\n\n**The levels now match the provider.** The control used to offer the same fixed set everywhere, and several entries were fictional: OpenAI rejects `max` (it was silently folded to `xhigh`), and an OpenAI-compatible gateway folds both `xhigh` and `max` down to `high` — three controls with one effect. Each provider now offers only the levels its wire surface actually distinguishes, resolved from the very tables that do the folding, so the two can't drift. A level a newly-picked model can't honour is shown as the level that will really be sent, without overwriting your choice. The same fix reaches the model catalog, whose per-model reasoning tiers were a hardcoded placeholder that badged (for example) Sonnet 4.5 with effort levels it rejects.\n\n**The level finally reaches external agents.** On the Codex runtime the composer's thinking level was silently inert — only the per-agent settings panel had any effect. It is now sent per session, taking precedence over the agent default, and folded onto whatever ladder the selected model publishes.\n\nAdds the composite **ultracode** level (maximum-but-one reasoning plus the dynamic workflow `wf_*` tools for the turn) on the providers where it is meaningful; picking it actually exposes those tools, and they survive semantic tool-routing. Chinese level names are translated (轻度 / 中 / 高 / 极高 / 最高 / 超级) instead of showing raw English ids, and the model chip shows the level you picked rather than the raw effort it maps to.",
+      "date": "2026-08-03T23:47:18+08:00"
+    },
+    {
       "id": "computer-use-pip-completion",
       "bump": "minor",
       "summary": "Finish the Computer Use picture-in-picture surface in chat. It now sizes itself to the captured screen's real aspect ratio (no more black bars), shows a relative \"just now / Ns ago\" freshness label so a between-screenshots frame no longer looks live, and reaches an explicit \"Done\" (or error) terminal when the turn ends before auto-collapsing to the pill. A manual hide only affects the current run — the next Computer Use activity re-expands it — and the surface clears itself when you switch sessions.\n\nYou can now drag the window anywhere in the chat pane (it snaps to the nearest corner on release, still avoiding the thread controls) and resize it from the corner grip, click the frame to view the screenshot larger, and close it outright for the current run. Activity is announced through an accessible live region for screen-reader users. Enter/exit, corner-move and frame changes are animated, all respecting reduced-motion, and the reposition control uses a clearer icon with tooltips.",
       "date": "2026-07-20T22:22:42+08:00"
+    },
+    {
+      "id": "computer-use-replayable-element-refs",
+      "bump": "patch",
+      "summary": "Fix macOS Computer Use element references going stale. Picking an element, finding one, or reading the focused window previously handed back a reference that could only be looked at, never acted on — and references from a tree read stopped working as soon as the next tree read happened. References are now re-resolvable recipes that survive both, and refuse with a clear \"stale element\" error when the UI has changed enough that they would otherwise click the wrong control.",
+      "date": "2026-08-02T14:09:16+08:00"
     },
     {
       "id": "connector-hitl-outbound-hardening",
@@ -375,6 +531,12 @@
       "bump": "patch",
       "summary": "A newly configured IM bot now works without restarting the app. The connector runtime read the enabled-adapter list only once at boot, so a bot created or enabled afterward was never registered with the bus — outbound (including the \"send test message\" button) failed with `adapter_not_found`, and inbound never started. The runtime now watches the `adapterInstances` table and reconciles the enabled set live: it registers and starts a newly enabled/created adapter, and stops and unregisters one that was disabled or deleted. The reconcile diffs by id, so unrelated row writes (presence, capability, heartbeat) don't churn a running connection.",
       "date": "2026-07-14T21:36:15+08:00"
+    },
+    {
+      "id": "connector-housekeeping-clock",
+      "bump": "patch",
+      "summary": "Run low-frequency connector retention sweeps through one durable scheduler clock while keeping liveness heartbeats local.",
+      "date": "2026-07-30T16:12:36+08:00"
     },
     {
       "id": "connector-oauth-scope-tracking",
@@ -431,10 +593,28 @@
       "date": "2026-07-23T19:38:05+08:00"
     },
     {
+      "id": "context-workbench-two-way-linkage",
+      "bump": "minor",
+      "summary": "Chat right rail (Context Workbench): close the loop between the conversation and the panels beside it. The assistant is now told what happened to its revision proposals — rejecting one, or keeping 2 of its 5 hunks, rides along silently on your next message instead of vanishing locally, so it no longer re-proposes what you just turned down. Staged chat context is no longer artifact-only: a workspace diff and a review comment can each be handed to the conversation as a chip, and the send's edit target is now the first _artifact_ among them rather than whatever was staged first (a staged file used to silently disarm the whole review round trip). The session surface gains conversation metadata and conversation-level comments, filling two rail slots that stood empty while the artifact and project surfaces offered eight panels each. In split view, a tab whose conversation is holding artifacts (or a proposal awaiting review) now says so with a badge, so work produced by the pane the rail is not bound to is no longer invisible. Deleting a conversation now clears its artifacts, versions and open tabs instead of leaving them in local storage until an eviction cap happened to reach them.",
+      "date": "2026-07-28T21:20:12+08:00"
+    },
+    {
       "id": "converge-chat-dock-workbench",
       "bump": "minor",
       "summary": "Converge the chat right-side dock onto a single workbench shell. The dock no longer swaps between the activity-rail workbench and the legacy top-tab chrome when you close an artifact or open the browser — a new session-scoped resource backs the empty state, the embedded browser and the workspace panels. Panel switches now fade in instead of hard-cutting, focus mode zooms in rather than snapping to full screen, and the workbench's narrow/wide buttons actually resize the dock.",
       "date": "2026-07-21T17:34:02+08:00"
+    },
+    {
+      "id": "conversation-anchors-and-jump",
+      "bump": "minor",
+      "summary": "Make navigating a long conversation work end to end. The scroll-to-latest control now floats above the message list instead of inside it, so it is actually on screen when you have scrolled up — previously it was positioned against the unscrolled container and scrolled away with the messages, exactly when it was needed. It has become one pill with three states: return to where you were, N new messages, and jump to latest.\n\nJumping now lands correctly and says so: virtualized rows carry a message anchor (so a jump could previously resolve to nothing at all), the landing message is briefly marked, a jump that cannot resolve reports why instead of silently doing nothing, and a timeline anchor lands at the top of its turn rather than mid-screen. The collapsed timeline rail no longer sits on top of the scrollbar, is visible at rest, responds to stylus and touch as well as the mouse, and its viewport thumb can be dragged. The expanded panel opens at the turn you are reading, groups rows by date, and jumps to the starred assistant reply rather than the question above it.\n\nAdds message permalinks — copy a link to any message from the message actions, on desktop and mobile — and uses them to give terminal tabs a \"locate in conversation\" that lands on the message that spawned the tab, not just the conversation.",
+      "date": "2026-07-29T15:24:07+08:00"
+    },
+    {
+      "id": "conversation-branching-and-asides",
+      "bump": "minor",
+      "summary": "Branch a conversation without losing the one you are in.\n\nBranching used to mean one thing: fork the whole thread into a new session in the sidebar. That is the right move for a direction you mean to keep, and the wrong one for a question you want to ask on the side and fold back in a minute. The branch dialog now asks where the branch goes — a new conversation, or an **aside** that lives in the dock beside the thread it came from. Asides can be renamed, cleared, deleted, and promoted into a conversation of their own once one turns out to matter.\n\nYou can also choose what a branch carries. Alongside \"copy verbatim\" and \"seed with a summary\", the dialog now lets you pick individual messages, so a branch can start from the three turns that matter instead of the forty that preceded them. Selecting text in a message and choosing \"Ask in an aside\" does the same thing in one step.\n\nBranches are visible from the thread they left: a message that has been branched from shows how many branches hang off it and lets you step between them, and the sidebar and session row show a session's branch count before you delete it.\n\n**Editing a question no longer destroys the answers below it.** \"Edit and resend\" used to truncate the log from that message down — reword a question halfway up a long thread and everything after it was permanently gone. The edited message now joins the original as a sibling branch, and the edit is selected so you see your own version rather than the one that was pinned before. Deleting from a point is still available, but it is now its own explicit action (\"Delete from here\") behind a dialog that says how many messages go and warns that branch variants go with them.\n\nTwo storage fixes underneath. Branch rows and workbench sidechats were built by hand rather than through `createSession`, so both omitted the workspace id — and because the sidebar reads sessions through a compound index, rows missing that field were not mis-filed but absent: branches vanished from the sidebar on the first reload after creation, and sidechats outlived the workspace they belonged to, along with all of their messages. Both are backfilled on upgrade. Workbench sidechats also gain an indexed binding, so opening one is a lookup instead of a scan of every session in the database.",
+      "date": "2026-07-30T17:13:10+08:00"
     },
     {
       "id": "conversation-model-override-select",
@@ -449,6 +629,18 @@
       "date": "2026-07-14T02:17:36+08:00"
     },
     {
+      "id": "conversation-workspace-grouping-and-dock-session-alignment",
+      "bump": "minor",
+      "summary": "The conversation list now groups by workspace by default, and the right rail stops showing the previous conversation's contents.\n\nSidebar: a new grouping selector (workspace / direct-messages-and-team / date / agent / none, in the display menu and in Settings → Conversation) replaces the date-grouping toggle. Grouping by workspace lists conversations from every workspace, with the active one first and the rest folded; picking a conversation from another workspace switches the whole app into that workspace so artifacts, terminals and the workspace panel follow it. The rail's Direct-messages / Team buttons now filter the list only in the \"team\" mode. Collapse choices persist per group.\n\nRight rail: switching conversation now drops the pending panel/workspace reveals it published, so the workspace panel no longer renders the previous conversation's file; opening an artifact from the \"recent\" scope shows it in the conversation you are actually looking at instead of silently re-parking the one it belongs to; the artifact each conversation was parked on survives a restart; and the artifact list's search box and type/runtime filters reset on a conversation switch instead of quietly narrowing every conversation after the one they were typed in.",
+      "date": "2026-07-28T21:20:12+08:00"
+    },
+    {
+      "id": "customizable-window-bars",
+      "bump": "minor",
+      "summary": "The desktop top bar and bottom bar are now customizable, alongside the sidebar. Settings → Shell layout (and the \"Customize layout\" item on every surface's right-click menu) opens one editor with a tab per surface: the nav rail keeps its pin / More / hide buckets, and each bar gets a drag-to-reorder \"In the bar\" list plus a \"Hidden\" list. Every title-bar and status-bar segment is covered, not just the eight that had a checkbox before — including the app icon, back/forward arrows, search pill, command centre, git branch, notifications, attention, running jobs and the run-state readout.\n\nBoth layouts persist to your settings (so they sync with the rest of your setup rather than living in one browser's localStorage), and any segments you had previously turned off in the Views menu carry over. Hidden segments are unmounted rather than just invisible, so hiding the performance monitor stops its native sampling. Segments move within their own region of the bar — start, centre or end — since the window controls and the drag region are fixed; each row shows its region. Right-clicking the title bar now works on macOS too, offering \"Customize layout\".",
+      "date": "2026-07-28T21:21:14+08:00"
+    },
+    {
       "id": "db-blocked-open-renudge",
       "bump": "patch",
       "summary": "Recover from a boot hang where the loading spinner never clears. When a secondary window (desktop pet overlay, fleet island, or a second tab) holds an older IndexedDB schema version open, the main window's schema upgrade blocks; on WebKit the one-shot cross-window yield nudge could be missed, leaving `db.open()` pending forever. The blocked open now re-sends the yield request on an interval (so a late-registering overlay still releases the old version) and gives up loudly after a cap instead of spinning silently.",
@@ -459,6 +651,24 @@
       "bump": "minor",
       "summary": "Self-host deploy suite refresh: cognia-server moves to port 27890 everywhere (compose, k8s, Caddy, Prometheus, smoke — re-pair devices after upgrading; 7890 collides with the Clash proxy default), the T2 split execution plane actually works (workspace volume+subpath mounts, runner image auto-pull on first spawn, locked-down socket proxy without exec), the runner image ships every allowlisted agent CLI (cline added, cursor-agent aligned), k8s gains mandatory publicUrl + per-tenant Logto OIDC wiring, and the tier-2 smoke can run against Kubernetes via COGNIA_SMOKE_EXEC.",
       "date": "2026-07-13T11:55:37+08:00"
+    },
+    {
+      "id": "dexie-write-durability",
+      "bump": "patch",
+      "summary": "Fixes writes that could be silently lost when the local database was reopened underneath them — most visibly when switching runtime targets. Goal, loop, plan and connector job writes now retry and verify durability before reporting success, audit and telemetry pruning no longer holds a long-lived transaction, and two events recorded in the same millisecond keep their order.",
+      "date": "2026-08-01T03:32:20+08:00"
+    },
+    {
+      "id": "diagnostic-vocabulary",
+      "bump": "minor",
+      "summary": "Introduce a shared diagnostic vocabulary so failures stop being untranslated machine identifiers. The External Agent diagnostics panel no longer prints raw reason codes like `ecosystem_prerequisite_missing` at you — it now shows a localized label, and the recovery advice the runtime was already computing (but never rendering) is finally displayed, in both English and Chinese.",
+      "date": "2026-07-28T21:18:14+08:00"
+    },
+    {
+      "id": "disclose-provider-fallback",
+      "bump": "patch",
+      "summary": "When a turn fails and Cognia retries it against a different provider, the disclosure is now honest and localized. It previously announced the swap in English only, and announced it _before_ the retry was issued — so a retry that then failed had already told you it was running somewhere else. The notice now fires once the substitute turn is genuinely in flight, and reads in your own language.",
+      "date": "2026-07-28T21:21:42+08:00"
     },
     {
       "id": "discord-connector-completion",
@@ -473,16 +683,46 @@
       "date": "2026-07-21T19:27:13+08:00"
     },
     {
+      "id": "dock-kernel",
+      "bump": "patch",
+      "summary": "Groundwork for the unified IDE dock: a layout kernel that resolves panels, tracks open instances, and persists arrangements per account, host and context. It reuses the Context Workbench's panel contract unchanged, so existing panels move into a dock tab without being rewritten. Nothing is wired into a visible surface yet — the chat dock is the first host to adopt it.",
+      "date": "2026-08-01T21:37:40+08:00"
+    },
+    {
+      "id": "dock-panel-switch-no-reflow-flash",
+      "bump": "patch",
+      "summary": "Right-side dock: stop layout shake and scrollbar flashes when switching widths or opening Workspace and Prompt Templates. Programmatic resizes now commit one final layout and animate stable panel snapshots instead of reflowing the live conversation on every frame; unsupported engines resize immediately, and the embedded Pro IDE remains on its no-animation path.",
+      "date": "2026-08-02T16:42:06+08:00"
+    },
+    {
+      "id": "dock-presets-responsive-commands",
+      "bump": "patch",
+      "summary": "More dock kernel groundwork: saved layout presets you can name, set as a default, export to a file and import back; a projection that folds a desktop arrangement onto a tablet or phone without losing a panel; and the dock's command surface, with layout undo/redo bound to Ctrl/Cmd+Alt+Z and Ctrl/Cmd+Alt+Shift+Z and the split, float, pop-out and reset actions listed in shortcut settings ready to bind. Still not wired into a visible surface — the chat dock adopts it next.",
+      "date": "2026-08-01T21:37:40+08:00"
+    },
+    {
       "id": "dock-workspace-first-class-and-mobile",
       "bump": "minor",
       "summary": "Make the project workspace a first-class destination in the chat side panel, and give phones the whole panel. The workspace used to hide behind the ℹ️ info icon plus a second tab; it now has its own entry in the activity bar, one click away. On phones and tablets the panel is a single bottom sheet with a horizontal activity bar across the top instead of two competing sheets that closed each other — so the embedded browser, comments, and metadata are reachable on mobile for the first time. The pin and collapse buttons finally say what they do on hover.",
       "date": "2026-07-21T18:49:01+08:00"
     },
     {
+      "id": "durable-terminal-host",
+      "bump": "minor",
+      "summary": "Terminal sessions now survive a window reload and an app restart. The PTY is owned by a separate host process instead of the app window, so reloading the UI reattaches to the running shell — with scrollback replayed — rather than killing it and starting over. Adds a host state banner that says when the host is starting, reconnecting or unavailable, terminal host profiles, and remote terminal access as an explicit per-device grant (existing paired devices start without it, so no previously granted control or agent permission silently authorizes a shell).",
+      "date": "2026-08-01T03:32:20+08:00"
+    },
+    {
       "id": "eighty-donkeys-repeat",
       "bump": "minor",
       "summary": "Render images as images everywhere in chat: reading an image file now shows the picture (with lightbox, zoom and download) instead of a base64 wall, tool results carrying image/audio/resource blocks keep their content in simplified mode and inside sub-agent trees, plugin tools can return real media, and `take_screenshot` now hands the model an image it can actually see.",
       "date": "2026-07-27T00:54:43+08:00"
+    },
+    {
+      "id": "error-page-flat-redesign",
+      "bump": "patch",
+      "summary": "Redesign the route-level error page (error / not-found / global-error). The nested card stack — an outer card wrapping a destructive alert card beside two bordered panels — is replaced by one bounded panel whose detail sections are flush rows split by hairlines, with the icon, title and category chip on a single header line instead of a centred hero. Expanding the stack trace now behaves: the trace scrolls horizontally only (no more nested vertical scrollbar or `break-all` shredding frame paths), grows inside the page's single scroll band, and scrolls itself into view when opened. The trace disclosure is also localized (previously hard-coded English) and the system-diagnostics rows are laid out as a compact matrix.",
+      "date": "2026-08-02T16:41:15+08:00"
     },
     {
       "id": "eval-cost-guard-and-affordances",
@@ -599,6 +839,18 @@
       "date": "2026-07-14T21:36:15+08:00"
     },
     {
+      "id": "gateway-bridge-settings-master-detail",
+      "bump": "minor",
+      "summary": "Rebuild the Gateway and External Bridge settings as master/detail panes, and surface the state they were already computing.\n\nBoth pages were a single ~2000px scroll of stacked cards. They are now grouped panels behind a secondary nav (Gateway: overview, listener, API keys, reliability, upstream protection, model exposure, request log, route tickets; External Bridge: server & token, permission scopes, wiki maintenance, client setup, audit log), deep-linkable via `?gatewayPanel=` / `?bridgePanel=`, and animated with the app's existing motion system — so they honour the Reduce motion preference.\n\nNewly visible, all of it previously computed or implemented with nothing rendering it:\n\n- Gateway overview shows requests served, last request time, and the routing snapshot's provider/alias counts and age.\n- An upstream self-check runs the real routing path and reports each candidate's status and latency.\n- Parked upstream keys show why they were parked and count down to recovery instead of showing a static timestamp behind a manual refresh.\n- The request log gains a cost estimate, and per-request route, client IP, streaming flag and error detail.\n- A route-tickets panel lists and revokes session-scoped tickets, with an explicit switch for the experimental capability that issues them.\n- The audit log gains tool and denied-only filters and an adjustable row count, and shows each denial's reason.\n- The External Bridge's 19 permission scopes are grouped by namespace, and the two deferred `user-repo` scopes now say why they cannot be granted.\n- The bearer token shows when it was last rotated, and the HTTP port is configurable.\n\nFixes:\n\n- The stdio setup snippet printed a `/path/to/cognia-mcp.js` placeholder instead of the real sidecar path.\n- The bridge's HTTP port defaulted to 0 when starting the server but 3001 when generating the setup snippet, so a snippet copied before the first successful start pointed at the wrong port.\n- Toggle rows built with the shared settings components had no accessible name.\n- The bridge server status poll no longer runs while the window is hidden.\n- Asking to delete an API key replaced the small icon trigger with a wide destructive button, re-flowing the row and shifting every neighbouring control out from under the cursor. The trigger now stays put and the confirmation opens beneath the row, with an explicit cancel.\n- The API-key create and edit forms split into two columns at a viewport width, not their own, so they went two-up while the pane they sit in was still narrow.\n\nThe gateway's streaming idle timeout is now configurable (`streamIdleTimeoutSecs`, default 300s) rather than a hard-coded constant.",
+      "date": "2026-07-29T15:27:15+08:00"
+    },
+    {
+      "id": "gateway-probe-redial",
+      "bump": "patch",
+      "summary": "Probe idle gateway transports and requeue failed connections so Discord, Slack, DingTalk, and QQ adapters recover without a restart.",
+      "date": "2026-07-30T16:16:34+08:00"
+    },
+    {
       "id": "gateway-silent-noop-fixes",
       "bump": "patch",
       "summary": "Gateway: fix four protections that were configurable but never took effect.\nConcurrency caps (`Max concurrent / gateway key` and `/ upstream account`) now\napply to `/v1/embeddings` and `/v1/responses`, not just chat — the cap you set\nis one budget shared across every endpoint. Embeddings and failed Responses\ncalls now report their outcome, so a provider that fails them trains the same\nhealth / circuit-breaker / cost telemetry chat already did (previously it\nfailed invisibly and never tripped its breaker). The `least-busy` routing\nstrategy can now see the load the gateway itself is generating, so a burst of\nconcurrent inbound requests spreads across deployments instead of piling onto\none. And `/v1/models` no longer advertises models on protocols the gateway\ncannot execute, which used to 404 on the very next call.\n\nA streamed gateway response now gives up after five minutes of complete\nsilence from the upstream and reports the stall as a failure. Previously such a\nstream was held open forever, pinning its concurrency slots — and with the\nrouting change above it would also have steered traffic away from that provider\npermanently, with nothing in the UI to explain it.\n\nGateway settings: number fields and tag inputs now commit on blur or Enter\ninstead of on every keystroke. The port field was effectively unusable — typing\n`8080` snapped to `1024` on the first digit — and fields could not be cleared\nand retyped. Tag inputs also gained an add button and no longer discard text\nthat was typed but not confirmed with Enter.",
@@ -629,6 +881,12 @@
       "date": "2026-07-18T13:47:41+08:00"
     },
     {
+      "id": "goal-history-refreshes-after-delete",
+      "bump": "patch",
+      "summary": "Fix the goal history table not updating after you delete a goal. The list is a live query, but the delete happened outside anything it was watching, so the row stayed on screen — and deleting the last goal left the table showing a goal that no longer existed instead of the empty state. Deleting now re-reads the list, so the row disappears when you delete it and the empty state appears when the last one is gone.",
+      "date": "2026-07-29T08:34:58+08:00"
+    },
+    {
       "id": "goal-panel-ux-fixes",
       "bump": "patch",
       "summary": "Goal panel polish. The judge model/provider are now chosen from a provider-model picker in Settings → Goals → Defaults (reusing the shared model catalog) instead of two free-text fields — a typo can no longer silently downgrade the judge to the default provider, and a stored model that no configured provider offers is flagged inline. The Settings → Goals → Tracker card's \"customise this agent\" hint is now a working button that deep-links to Settings → Characters (previously a dead end). And when subgoal generation has no model with a usable API key, it shows the accurate non-retryable \"needs a model with an API key\" notice instead of the generic retryable error.",
@@ -641,10 +899,34 @@
       "date": "2026-07-21T17:28:04+08:00"
     },
     {
+      "id": "headless-boot-reports-failures",
+      "bump": "patch",
+      "summary": "`cognia-server` now reports why it could not start instead of aborting. Building the headless service container panicked outright on four ordinary environment problems — an unwritable data directory, a workflow database that would not open, a missing async runtime, and a provider profile store that failed even in memory. A permissions mistake or a full disk took the process down with a raw panic and a backtrace rather than the one-line \"headless services: …\" the rest of the boot sequence prints, which is the difference between fixing a deployment in a minute and reading a stack trace to find out which directory was at fault.\n\nThe last of those sat inside a path that already existed to _degrade_ gracefully: the profile store is a re-derivable projection, so an open failure is meant to fall back to an in-memory store and carry on. It aborted instead when the fallback itself failed.\n\nDesktop is unaffected — it never constructed this container.",
+      "date": "2026-07-29T01:10:59+08:00"
+    },
+    {
+      "id": "headless-durability-journal-sqlite",
+      "bump": "minor",
+      "summary": "Headless brain durability ladder: add the `journal-v4` (checkpoint + checksummed transaction journal) and `sqlite-v5` (Node built-in SQLite, WAL) backends behind a `HeadlessDurabilityBackend` port, plus `cognia-agent durability verify|migrate|recover|rollback|finalize` for inspection, parity-gated backend switches, and lossless recovery. Committed Dexie transactions are now `fsync`ed before they resolve, closing the crash window the debounced snapshot left open.",
+      "date": "2026-08-02T21:06:32+08:00"
+    },
+    {
       "id": "headless-external-agent-rehydrate",
       "bump": "patch",
       "summary": "Headless (cognia-server) brains now rehydrate their persisted external agents on boot. The external-agent rehydration logic is shared with the desktop initializer (ADR-0059 T-A10), so a server restart brings ACP / OpenCode / plugin-contributed agents back into the manager and reconnects the ones set to auto-connect — previously only the desktop did this, and a headless restart left them dormant. The manager (and its health-check interval) is only instantiated when there is actually an agent to rehydrate.",
       "date": "2026-07-20T19:51:58+08:00"
+    },
+    {
+      "id": "headless-scheduler-persistence",
+      "bump": "patch",
+      "summary": "Scheduled tasks now survive a restart on a headless host. The brain's snapshot only covered `CogniaDB`, so the scheduler's separate `CogniaSchedulerDB` was never persisted — a restarted `cognia serve` came back with an empty schedule while still reporting the scheduler as running. Execution history is deliberately still not persisted there (failures remain durable in the connector audit trail and the Notification Center).",
+      "date": "2026-07-30T13:16:50+08:00"
+    },
+    {
+      "id": "heavy-eels-repeat",
+      "bump": "patch",
+      "summary": "Skill recorder: make window and application capture scope real. The setup screen now enumerates open windows (`record_list_capture_targets`) and builds the scope from the chosen target, so a scoped recording carries the identity fields the native side requires instead of failing to deserialize; a scoped choice with no target can no longer start, and the preflight retry re-checks permissions instead of quietly starting a whole-desktop recording. Unanswered variable suggestions now block generation, so recorded input values are never sent to the model or hard-coded into the skill. The controlled trial loads the skill it was opened to exercise. On Windows, overlay windows that fail to become non-activating now report the failure instead of leaving a focus-stealing strip on screen.",
+      "date": "2026-08-01T21:38:28+08:00"
     },
     {
       "id": "i18n-icu-escape-literal-braces",
@@ -665,6 +947,30 @@
       "date": "2026-07-15T19:23:29+08:00"
     },
     {
+      "id": "im-scheduler-commands",
+      "bump": "minor",
+      "summary": "Add allowlist-protected `/schedule` and `/tasks` commands for creating, listing, and removing conversation-bound IM schedules.",
+      "date": "2026-07-30T15:39:22+08:00"
+    },
+    {
+      "id": "inbound-review-queue-and-distiller",
+      "bump": "minor",
+      "summary": "Contributions from outside Cognia now have a review screen and a single, consistent path in. Settings → External Bridge gains an Inbound review panel listing every lesson, skill draft, and note submitted by an external coding agent, showing the submitted text in full, clearly marked as coming from outside and never rendered as though Cognia wrote it. You can edit the content before accepting, and both accepting and rejecting are final and say so before you commit. An accepted lesson becomes a long-term memory, an accepted note is filed as a knowledge note, and an accepted skill is created **disabled** — approving a contribution is not the same as letting it run, so enabling it stays a separate decision of yours. If the follow-up work fails, the row says why and offers a retry rather than quietly reversing the decision you already made. Repeat submissions of the same content are folded into the existing entry instead of filling the queue, personal information is stripped out before anything is stored or sent to a model, and submissions are never sent to a model unless that is separately permitted.",
+      "date": "2026-08-02T20:33:18+08:00"
+    },
+    {
+      "id": "inbox-de-crowding",
+      "bump": "minor",
+      "summary": "Inbox: stop opening a conversation behind a wall of chrome. Five independent banners — a degraded adapter, a saturated outbound queue, a stalled inbound job, a pending draft, the activity log — each used to mount itself as a full-bleed coloured band from two different places, so a busy conversation began six horizontal seams down the pane. They now share one notice area: one seam, one palette, a severity rail instead of four bespoke colour schemes, and a collapsed summary once there is more than one. Severity is stated to assistive tech rather than carried by colour alone, and only an actual problem interrupts a screen reader — ambient activity is announced politely. The conversation header folds its secondary actions into an overflow menu, the conversation list gains a real filter menu and a last-inbound chip, and adapter-level notices stay hidden on a phone where the per-conversation badges already carry the signal — while the draft notice, the only route to the draft editor on a phone, stays put.",
+      "date": "2026-07-28T21:20:42+08:00"
+    },
+    {
+      "id": "ios-push-entitlement",
+      "bump": "patch",
+      "summary": "Fixed iOS push notifications: `pnpm mobile:sync:ios` now writes the `aps-environment` entitlement and links it into both build configurations. Previously this was a manual Xcode step, so a freshly synced iOS build could never register with APNs.",
+      "date": "2026-07-30T17:13:10+08:00"
+    },
+    {
       "id": "island-fullscreen-placement",
       "bump": "patch",
       "summary": "Fix the Agent Fleet island's placement on macOS full-screen Spaces, and withdraw it entirely while a full-screen app owns the display.",
@@ -675,6 +981,18 @@
       "bump": "patch",
       "summary": "Rework the Agent Fleet island's open/close animation so height, width, and the OS window resize move together, stop the collapsing island from swallowing clicks behind it, and compact its rows once the fleet outgrows the list.",
       "date": "2026-07-23T17:28:06+08:00"
+    },
+    {
+      "id": "island-over-fullscreen-and-rail-back-left",
+      "bump": "patch",
+      "summary": "Keep the agent island visible over other apps' full-screen windows, and put the navigation rail back on the left edge.\n\nThe island used to withdraw completely — nothing painted, window shrunk to a click-through sliver — whenever a full-screen app owned its display, which made it look like it only worked on Cognia's own desktop. Its overlay panel is configured to float over every Space, so now it does: the island stays where you put it, on any Space, and the yield-the-top-strip behaviour moved behind a new \"Hide under full-screen apps\" switch in Settings → Agent fleet monitor that ships off. Turn it on if you want the top strip left alone while watching video or presenting; even then, a session that needs a permission or an answer still brings the island back. (macOS only — no other platform has the full-screen Space model this reads, and while the switch is off the window sweep behind it no longer runs at all.)\n\nThe navigation rail defaults to the left edge again. Right stays available in Settings → Sidebar and in the rail's right-click \"Customize layout\"; it is simply no longer where the rail lands out of the box.",
+      "date": "2026-07-30T17:13:10+08:00"
+    },
+    {
+      "id": "island-top-edge-and-settings-reopen-retry",
+      "bump": "patch",
+      "summary": "Fix the fleet island (Dynamic Island) hanging a notch's height below the top of the screen on MacBooks with a camera housing — it looked stuck to the bottom of the menu bar instead of growing out of the notch. The card's body now runs to the true top edge and merges with the housing (squaring its top corners while it does), while only its content stays padded below the safe-area inset, so nothing is ever hidden behind the notch; the auto-tuck now retracts the whole card, leaving the same thin sliver at the very top instead of a notch-height black band beside the housing. Displays without a notch are unchanged.\n\nAlso fix settings silently reverting to their defaults for a whole session (\"settings.load failed DatabaseClosedError\"). Registering plugin database tables at boot closes and reopens the shared connection, which cancelled whatever read was in flight — regularly the settings read every window makes on startup. Cancelled settings reads and writes are now re-issued once the connection is back, so a boot that races the plugin bump keeps your persisted settings instead of falling back to defaults.",
+      "date": "2026-07-28T21:21:14+08:00"
     },
     {
       "id": "k8s-exec-backend",
@@ -743,6 +1061,12 @@
       "date": "2026-07-25T14:23:13+08:00"
     },
     {
+      "id": "local-model-catalog",
+      "bump": "minor",
+      "summary": "Provider and model metadata now resolves offline: the models.dev catalog and provider brand icons ship with the app instead of being fetched at runtime, so provider pickers, cost estimates and capability checks work with no network. Routing gains a shared attempt controller, difficulty-based presets and deployment filters, and routing test runs are saved so a calibration can be compared against a later one.",
+      "date": "2026-08-01T03:32:20+08:00"
+    },
+    {
       "id": "local-provider-management-transport",
       "bump": "minor",
       "summary": "Make local model provider management work in the desktop app\n\nScanning, model listing, pull, delete, stop and Ollama embeddings were dead in the packaged desktop build: they called Tauri commands that had never been implemented, and the HTTP fallback was blocked by the renderer's content-security policy. Chat was unaffected, which is why the breakage went unnoticed. Management calls now reach local servers through the Rust HTTP proxy, model pull reports real streaming progress with an honest indeterminate state while the server sends no byte counts, and installed models show capability badges (vision, tools, embedding, reasoning) and context length probed from the server rather than guessed from the model name. Embeddings are batched into a single request per batch. The provider list no longer shows an \"installed\" count it cannot actually determine, a moved server port is now probed where it actually lives, and stopping a pull says plainly that the download continues in the background — Ollama's server cannot cancel one.",
@@ -755,16 +1079,46 @@
       "date": "2026-07-14T21:36:15+08:00"
     },
     {
+      "id": "localize-external-agent-recommended-actions",
+      "bump": "patch",
+      "summary": "An external agent's \"recommended actions\" now appear in your language. The readiness panel told you what to do about a missing CLI — install this, set an absolute path, prefer WSL2 on Windows — and said it in English regardless of the language the rest of the panel was in, because those sentences were assembled in code rather than looked up in the message catalogue.\n\nThe advice this app generates is now a message reference, resolved at render time like the recovery hints beside it. Advice that arrives some other way is left alone: a line saved by an older build, or supplied by a third-party agent preset, is shown exactly as it was written, because there is no translation to look it up by and dropping it would throw away the only guidance such a preset offers.\n\nNothing needs migrating and no configuration changes. Existing saved agents keep whatever they had; new advice generated from this release forward is translated.",
+      "date": "2026-07-29T10:52:26+08:00"
+    },
+    {
+      "id": "lucky-donkeys-repeat",
+      "bump": "patch",
+      "summary": "Fix review findings across the recorder, provider diagnostics, editor and diagnostic service: the Windows password probe no longer reads a UI Automation error as \"not a password\"; provider diagnostics enforce the 50-request / USD 0.25 spend ceiling as a hard cap callers cannot raise; a preview tab evicted while its file was still loading no longer reappears; crash capabilities report Safe Mode as degraded instead of supported while its runtime is unwired; and the diagnostic service gains an intake kill switch, a migration switch so serving pods need no DDL grant, working SMTP alert egress, a Compose bring-up that seeds after migrating, and CI that builds, tests, publishes and smoke-tests it.",
+      "date": "2026-08-01T21:32:05+08:00"
+    },
+    {
       "id": "lucky-mirrors-observe",
       "bump": "minor",
       "summary": "Website: the homepage now shows the product instead of describing it. Every large product visual was\nan empty frame holding a sentence of alt text, because the screenshot matrix is still blocked on a\nproduct-side seed seam — so the hero's near-full-width stage was a blank box about a screen tall.\nThe stage now falls back to a DOM reconstruction of the workbench (activity rail, task thread, and\nthe change open in the workspace dock), permanently labelled as a reconstruction rather than passed\noff as a screenshot, and a real capture still wins whenever one exists.\n\nThe signature task section gained the six interfaces the design asks for and previously only talked\nabout: repository context, the proposed plan, the change as an actual unified diff, the permission\ncheckpoint with its action, target and scope, the failing check's output, and the launch-notes\nartifact. The desktop section gained its macro crop — command palette over the integrated terminal,\nwith the notification a waiting task sends. The workbench bento's regions now carry fragments of the\nsame task instead of a paragraph each, the connection receipts read as numbered records, and the\ntwelve-column rhythm lines behind the hero are drawn at last.\n\nAlso fixes the hero's product visual being invisible until you scrolled: it was gated on an in-view\ntrigger it could never satisfy, since its top sits at the fold.",
       "date": "2026-07-27T00:33:13+08:00"
     },
     {
+      "id": "lucky-pandas-repeat",
+      "bump": "minor",
+      "summary": "Loading indicators now survive \"reduce motion\" instead of freezing. The global reduce-motion guard collapsed every animation to a single 1ms iteration, which turned all ~220 spinners into static, broken-looking glyphs and every skeleton into an inert grey block — reduced-motion users lost all evidence the app was still working. Motion is now tiered: decoration is still suppressed, status feedback (spinners, skeleton pulses) keeps running at the user's chosen speed, and the movement-heavy classes degrade to a fade instead of translating or scaling.\n\nScreen-reader support for loading states was reworked at the same time. Skeletons are decorative and no longer silent-but-present, spinners stopped firing a redundant untranslated \"Loading\" announcement from inside already-labelled buttons, and a new `LoadingRegion` emits exactly one polite announcement per loading area — re-announcing only when a long wait escalates, or when the device turns out to be offline.\n\nNew loading areas also stop flickering: an indicator no longer appears at all for the sub-frame local reads that make up most of the app, and once shown it can no longer strobe away.",
+      "date": "2026-07-29T16:49:48+08:00"
+    },
+    {
       "id": "lucky-pianos-shave",
       "bump": "patch",
       "summary": "Fix the right-rail workbench focus (full-screen) mode, which had degraded to a clipped 100vw block, and extend the plugin context-panel API with badges, workbench state, and layout control.",
       "date": "2026-07-23T17:31:08+08:00"
+    },
+    {
+      "id": "managed-ide-brokerage",
+      "bump": "minor",
+      "summary": "The Pro IDE is no longer a VS Code window that happens to sit next to Cognia — the two now share a runtime. A pinned bridge extension inside code-server exposes Cognia's services to anything running in the editor: an agent can read and write through managed content handles rather than guessing at paths, provider calls made from the editor route through the same credentials and model routing the rest of the app uses, and a generated proxy extension lets an existing VS Code extension reach those services without being rewritten.\n\nThe broker answers from every surface that already talks to the desktop app, not just the embedded pane — the Tauri window, a paired companion device, a headless deployment, and the sidecar all resolve the same services, so work started from your phone behaves the way it does in the pane. Managed extension storage keeps per-workspace state on the Cognia side instead of inside a code-server install that gets replaced on version bumps.\n\nThe managed and native profiles are separate trust domains with separate extension directories: broker credentials are issued to managed only, and switching profiles retires the other one first so two extension hosts never share a workspace. A kill switch (`COGNIA_MANAGED_IDE_KILL_SWITCH`) disables the whole platform without a downgrade.\n\nStill macOS and Linux only, still downloaded on first use and SHA-256-verified against a pinned version, still served loopback-only. Monaco remains the default editor; the web and mobile shells have no code-server at all and are unaffected.",
+      "date": "2026-07-29T08:34:58+08:00"
+    },
+    {
+      "id": "managed-ide-preferences-seed-once",
+      "bump": "patch",
+      "summary": "The Pro IDE stops discarding your editor settings on every launch. Starting the managed profile re-copied a small allowlist of preferences across from the native profile and did it by replacing whole files, so anything you had changed from inside VS Code — and every setting outside that eleven-key list — was gone the next time you opened the pane. Custom keybindings were worse: that copy is their only writer, so they were deleted outright rather than merely overwritten.\n\nThe copy is now a one-time seed, which is what the operations guide always described, and it merges instead of replacing. Afterwards the managed profile belongs to you and to Cognia's own appearance sync; the native profile is no longer given the last word on the eight keys the two lists share, which is what produced the theme flicker on startup.\n\nSettings Cognia owns — theme, typography, accessibility — repair themselves the next time the pane opens, because that sync already read-merge-writes. Anything else you had set from inside VS Code before this release, and any keybinding you authored there, was already lost and cannot be recovered; there was no backup. On upgrade the seed runs once more, now merging, and then never again.",
+      "date": "2026-07-29T01:48:22+08:00"
     },
     {
       "id": "managed-process-registry-coverage",
@@ -777,6 +1131,24 @@
       "bump": "minor",
       "summary": "Manage cognia-spawned processes from the performance panel. A new **Managed Processes** tab lists every child process cognia starts — external agents, the chat sidecar, ACP + integrated terminals, and the MCP server — grouped by subsystem, with live CPU/memory (joined by PID) and one-click kill (plus restart for external agents). A unified process-registry aggregator also closes the graceful-shutdown gap for the chat sidecar, integrated terminals, and MCP server, and the external-agent manager now reconciles a dead process back to `disconnected` instead of showing it as connected until the next health check.",
       "date": "2026-07-17T17:43:37+08:00"
+    },
+    {
+      "id": "marketing-site-craft-pass",
+      "bump": "minor",
+      "summary": "Marketing site: a craft pass over the public pages. The hero gains a task ticket that shows what the product actually does rather than describing it, section headers get a progress rail that tracks where the reader is, and stat figures count up as they arrive instead of appearing pre-finished. The theme toggle is rebuilt as a real three-way control, download gains a platform hint that names the reader's OS — and now correctly declines to call an iPad a Mac — and copy buttons, hairlines and iconography are unified behind shared primitives so the pages read as one system. Entrance motion is single-sourced across the stylesheet and the motion components, and every surface still renders in full under `prefers-reduced-motion`.",
+      "date": "2026-07-28T21:23:53+08:00"
+    },
+    {
+      "id": "marketplace-integrations",
+      "bump": "minor",
+      "summary": "Integrations are now something you manage, at a new `/integrations` page. Previously a plugin that talked to an outside service owned its own accounts, its own event subscriptions, its own inbound deliveries and its own retry behaviour — so \"which services am I connected to, under which account, and what are they allowed to do\" had no single answer and nowhere to look it up. The hub answers it: connected accounts per integration, the events each is subscribed to, the actions it can run, the risk each action carries, and a disconnect that actually revokes rather than hiding a card.\n\nUnderneath it is a host-owned control plane instead of per-plugin plumbing. Accounts and subscriptions persist in the app database (schema v127), inbound events arrive through one ingress client that dedupes and acknowledges them, and outbound actions run through one runner with shared error and retry semantics — so a failing integration tells you which step failed instead of going quiet. Plugins bind to it declaratively; the host owns the credentials and the lifecycle, and every authenticated request passes the same outbound PII gate the rest of the app uses.\n\nExisting plugin-owned integration state is migrated on first run. Nothing you had connected needs reconnecting.",
+      "date": "2026-07-29T08:34:58+08:00"
+    },
+    {
+      "id": "marketplace-source-preview-and-health",
+      "bump": "minor",
+      "summary": "Adding a plugin marketplace source now previews the repository's catalog before it is saved: the marketplace name, its owner, how many plugins it lists, and the plugins themselves — data the app already fetched to validate the repository and then discarded. A pasted `github.com` URL is echoed back as the canonical `owner/repo@ref` it resolves to before any request is spent, and confirming reuses the fetched catalog rather than downloading it a second time.\n\nSaved sources gained a health line: plugin count, last sync time, and — for the first time — the sync failures the app was already collecting and never showing, so a repository that was renamed, rate-limited, or shipped broken JSON now says so on its own row and offers a retry instead of silently contributing zero plugins to the browse grid. Each source can be refreshed on its own or opened on GitHub, and removing one is confirmed with the consequence spelled out: plugins already installed from it stay installed.",
+      "date": "2026-07-29T15:25:13+08:00"
     },
     {
       "id": "mcp-registry-and-agent-sync",
@@ -797,6 +1169,12 @@
       "date": "2026-07-14T02:17:35+08:00"
     },
     {
+      "id": "memory-settings-workspace",
+      "bump": "minor",
+      "summary": "Rebuild the Memory settings section as a full workspace, so long-term memory can describe its own state instead of offering a handful of switches over a black box.\n\n- **Overview** reports memory health as numbers rather than adjectives: how much is stored, how it splits across sources and provenance, and what the lifecycle jobs last did.\n- **Learning** shows what is being written and under which policy, so \"why did it remember that\" has an answer that is not a guess.\n- **Retrieval** states which mode is actually in effect — and says so out loud when your configuration means something other than what the toggles imply, which is where the old panel quietly misled. A recall preview runs a real query against your own memories, so you can see what a configuration returns before committing to it.\n- **Maintenance and privacy** gather the destructive controls in one place, behind a confirmation that names what is about to be deleted.\n\nEvery panel edits a draft and saves once, with an unsaved-changes bar and a discard. The layout matches the other heavy settings sections, and both panels and controls are fully localized.",
+      "date": "2026-07-29T08:34:58+08:00"
+    },
+    {
       "id": "memory-transparency-round",
       "bump": "minor",
       "summary": "Memory transparency round: in-chat \"learned/recalled\" memory chips with undo and deep links, a guided conflict-resolution card and pending-conflicts preset in the /memory console, mutation error toasts, virtualized memory lists (desktop + mobile), detail-panel crossfade, and an activated vector-reconcile maintenance job.",
@@ -809,10 +1187,64 @@
       "date": "2026-07-17T03:49:50+08:00"
     },
     {
+      "id": "mobile-byok-tool-loop",
+      "bump": "minor",
+      "summary": "Standalone (BYOK) chat on mobile now runs a real tool loop: a phone with no paired desktop can search the web, fetch pages and call plugin tools instead of being a plain completion. Reuses the same renderer tool catalog, executor, and PII gate as the paired path — including when the Anthropic native-web-tools preference is on, which previously left a standalone turn with no web tools at all, because it swaps them for natives that only exist on the paired Agent-SDK path. Letting the model load skills mid-turn is the separate `Skill` self-invocation preference, off by default; standalone honours it like the paired path does.",
+      "date": "2026-07-30T17:13:10+08:00"
+    },
+    {
+      "id": "mobile-cloud-account-sign-in",
+      "bump": "minor",
+      "summary": "Sign in to a cloud Cognia account from the phone.\n\nA multi-user cloud or self-hosted deployment authenticates through Logto, and the sign-in card lived only in the desktop's companion settings — where it also told you cloud sign-in was desktop-only. It never actually was: opening the authorize page already routes through the phone's in-app browser, the exchange is a plain PKCE flow, and the session store already had a non-desktop path. A phone connecting straight to a cloud server — the setup Logto exists for — simply had nowhere to do it.\n\nThere is now a Cloud account entry under Me. The card is the same one the desktop uses, so the two stay in step by construction.\n\nOne thing genuinely was broken underneath. Off the desktop the session is kept in an encrypted vault rather than the operating system keyring, and that vault refuses to store anything until it has been given its encryption key. Nothing ever gave it one for sign-in sessions, so a sign-in on a phone or in a browser would have completed the whole browser round-trip and then failed at the moment of saving the token. It now provisions that key the same way the plugin secret store does, and the card says plainly where your token ends up on each kind of device.",
+      "date": "2026-07-30T17:13:10+08:00"
+    },
+    {
+      "id": "mobile-ios-platform",
+      "bump": "minor",
+      "summary": "Add the committed Capacitor 8 iOS platform with CocoaPods plugin wiring, an\niOS 16 deployment target, localized permissions, deep links, Bonjour\ndiscovery, background modes, and Cognia launch assets.",
+      "date": "2026-07-28T21:23:39+08:00"
+    },
+    {
+      "id": "mobile-me-eval-page",
+      "bump": "minor",
+      "summary": "Added `/me/eval` so the Agent evaluation defaults (judge model, run k, gate thresholds, cost guard) are reachable from the phone. Shortcuts, the desktop pet and the external bridge are the sections still without a mobile entry.",
+      "date": "2026-07-30T17:13:10+08:00"
+    },
+    {
+      "id": "model-evaluation-lab",
+      "bump": "minor",
+      "summary": "Adds the Model Evaluation Lab: define an evaluation project once, run it against several models or chat configurations, and get a recommendation backed by statistics rather than a single sample. Runs are durable and recover after a restart, adaptive sampling stops early once a difference is decided, judging supports blind review so scores are not anchored by the model name, artifacts are stored encrypted, and a finished run exports as a portable replay bundle. Also available headlessly via `cognia eval`.",
+      "date": "2026-08-01T03:32:20+08:00"
+    },
+    {
+      "id": "multi-conversation-share",
+      "bump": "minor",
+      "summary": "Several conversations can now be published under a single share link instead of one link each.",
+      "date": "2026-08-01T03:32:20+08:00"
+    },
+    {
+      "id": "multi-provider-live-voice",
+      "bump": "minor",
+      "summary": "Live voice now runs on a unified multi-provider layer instead of the OpenAI-only WebRTC session. OpenAI, Gemini and Grok are selectable per deployment under a new Speech setting, each with its own region (CN / Global, never crossed automatically) and its own rollout switch. Sessions are minted through the AI SDK's realtime adapters, so provider quirks — endpoints, session config, socket URLs, event shapes — stay with the SDK rather than being reimplemented. On desktop the provider API key is injected by the native host and never enters the renderer; on web your own key is used directly. A failed start now says which of \"live voice is off\", \"no provider configured\", \"none available here\" or \"no provider would start a session\" actually happened, and retries pick the next configured provider before the microphone ever opens.",
+      "date": "2026-08-03T22:27:47+08:00"
+    },
+    {
       "id": "native-otel-pipeline",
       "bump": "minor",
       "summary": "Route desktop telemetry through Rust, migrate credentials to secure storage, propagate trace context through the sidecar, and add feature-gated native OpenTelemetry export.",
       "date": "2026-07-16T17:06:07+08:00"
+    },
+    {
+      "id": "native-video-processing",
+      "bump": "minor",
+      "summary": "Plugins can process local video natively. A new Rust crate owns FFmpeg/FFprobe discovery, metadata probing, frame extraction, focused analysis, near-duplicate frame removal and trimming, exposed to plugins through the media API — so a plugin asking for a video's duration, a frame at a timestamp, or a trimmed clip no longer gets a runtime rejection. Missing FFmpeg is reported as a named dependency error rather than a generic failure, and every step is bounded by its own timeout.",
+      "date": "2026-07-29T15:22:33+08:00"
+    },
+    {
+      "id": "navigation-rail-side-and-workbench-reach",
+      "bump": "minor",
+      "summary": "Move the navigation rail to whichever window edge you want, and make the right-hand workbench reachable without the mouse.\n\nThe rail now defaults to the right edge, with a Left/Right toggle in Settings → Sidebar (or its right-click \"Customize layout\"). It stays part of the app shell, so every route keeps its navigation — moving it does not turn it into a chat-only panel. Tooltips and the \"More\" popover open inward from whichever edge it takes, and on the right it gains a border, because the rail and the workbench beside it share a wallpaper scope and tone alone left no seam between them. The mobile drawer is unaffected.\n\nThe command palette gained the navigation it never had: every top-level destination — including ones you hid from the rail — plus Direct Messages, Canvas, and the panels of whichever workbench is in front. That last group is also what `Ctrl+1`…`Ctrl+7` now reach, one chord per activity (preview/run, review, AI, comments, inspect, workspace, templates). A chord whose activity the current surface does not offer does nothing rather than landing on a neighbouring panel.\n\nThe workbench's activity rail is customizable at last: drag to reorder, hide the activities you never use, restore defaults — on a new \"Workbench\" tab beside the existing sidebar and window-bar editors. Hiding removes only the icon; the panel stays reachable from the palette and its shortcut.\n\nSelection now moves instead of blinking. The rail, the workbench activities and the artifact tabs share one highlight that springs from the old item to the new one, and the dock's width transition, its divider fade and the collapsible agent-flow bodies all run on the shared motion tokens rather than three separately hand-tuned curves. Everything collapses to an instant swap under reduced motion.",
+      "date": "2026-07-29T15:27:46+08:00"
     },
     {
       "id": "notification-center-triage-and-archive",
@@ -875,6 +1307,12 @@
       "date": "2026-07-20T19:24:38+08:00"
     },
     {
+      "id": "opencode-v2-external-agent",
+      "bump": "minor",
+      "summary": "Add OpenCode V2 as an external agent backend. Point Cognia at a locally running `opencode2` service and it appears alongside the other external agents — usable in chat, bindable as an Agent Team teammate, and driven through the same permission modes (`default`, `acceptEdits`, `bypassPermissions`, `plan`) as every other backend, so approvals behave the way you already expect.\n\nConnection is discovery-based rather than a command line you have to get right: Cognia finds the local service and checks its version, and an incompatible service says so by version instead of failing as a generic connection error. Session listing, forking and resuming report as available only once a connection proves the service supports them, rather than being advertised up front and failing when used.\n\nDesktop only. The service is discovered over a local endpoint that the web and mobile shells cannot reach, so those shells report it as unavailable and tell you to connect from the desktop app rather than offering a control that could not work.",
+      "date": "2026-07-29T08:34:58+08:00"
+    },
+    {
       "id": "openvsx-marketplace-vscode-section",
       "bump": "minor",
       "summary": "Install VS Code extensions from Open VSX, in-app. The plugin marketplace gains a \"VS Code\" section that searches the Open VSX registry, resolves the right build for your machine, and installs through the normal consent flow — conflicts, permissions, bundled binaries, and configuration — with permissions inferred from the extension's real code rather than from anything the extension declares about itself. Dependencies (`extensionDependencies`) install as one all-or-nothing set; extension packs are offered separately instead of being installed behind your back. \"Check for updates\" now routes VS Code extensions to Open VSX instead of sending their ids to cognia's plugin registry, which previously leaked what you had installed and could never return a result.\n\nWhat we verify, and what we don't — the UI says the same thing:\n\n- **Downloads are checked against a SHA-256 checksum only.** That proves the file wasn't corrupted in transit, and nothing more: the checksum comes from the same server as the extension, so it cannot detect a compromised registry, a registry insider, or a publisher who simply ships something malicious. No PKCS#7 signature verification is performed and `.sigzip` is not validated, so extensions are never labelled \"signature verified\".\n- **Open VSX's \"verified publisher\" flag is shown attributed to Open VSX**, because it is Open VSX's claim that a publisher owns a namespace — not our claim, and not a statement that the extension is safe.\n- **Extensions run with real filesystem, network, and process access**, like any program you install. The install dialog says so next to the permission list.\n- **Extensions using APIs cognia doesn't implement** (`vscode.debug`, `notebooks`, `scm`, `comments`, `tests`) are flagged at install and on the extension card, rather than blocked. The detection reads the extension's bundle and is best-effort: a minified extension can hide its API use, so it is a hint, not a guarantee. A mismatched `engines.vscode` range warns but never blocks — the range says nothing about which APIs an extension actually calls.\n- **Microsoft's marketplace is out of scope.** Its terms of use limit it to Microsoft products, which is why VS Codium and code-server also use Open VSX.\n- **Desktop only.** Installing requires the Cognia desktop app, since the download runs in the Rust backend to honour your proxy settings and verify checksums.",
@@ -885,6 +1323,12 @@
       "bump": "minor",
       "summary": "Performance panel: add a System tab (host OS, kernel, CPU model and core count, installed memory, app/Tauri version, build profile and enabled features), keep the chosen sampling cadence across visits, stop the rolling graphs from silently mixing sampling rates after a cadence change or a pause, make every sortable column header keyboard-operable, and remove the per-frame O(n²) recomputation behind the process table's trend sparklines.",
       "date": "2026-07-23T17:27:24+08:00"
+    },
+    {
+      "id": "persistent-workbench-rail",
+      "bump": "minor",
+      "summary": "The right-hand workbench now leaves its icon rail on screen when you close it (ADR-0098). Collapsing shrinks the column to the activity icons instead of hiding it entirely, dragging that rail's edge reopens it at the width you left it at, and releasing the divider snaps to the nearest width preset or back to the rail. Applies to the chat dock, Canvas, the workflow editor and the project editor; a new \"Keep the icon rail on screen\" switch in the workbench customizer restores the old collapse-to-nothing behaviour. Also fixes a toggle that needed two presses after dragging the dock shut, and plugin panels that reported themselves visible while the whole column was closed.",
+      "date": "2026-07-30T17:13:10+08:00"
     },
     {
       "id": "pet-reacts-to-four-more-subsystems",
@@ -903,6 +1347,12 @@
       "bump": "patch",
       "summary": "Fix a runtime crash (`undefined is not an object (evaluating 'listeners[eventId].handlerId')`) thrown when the desktop pet, the A2UI dispatch bridge, or the plugin devtools unsubscribe from their Tauri event channels. Under React StrictMode's mount→unmount→mount cycle the raw Tauri unlisten can reject before its registration eval has run, and because each call site invoked it as a floating promise the rejection escaped the surrounding `.catch`/`try` and surfaced as an unhandled rejection that spammed the error log and could crash the React tree. All four teardowns — `lib/tauri/pet-window.ts` (covering every `pet://` subscription: state-changed, suspend, resume, work-area-changed, and popup hidden), the `A2UIDispatchProvider`, the plugin hot-reloader, and the plugin dev server — now route through `safeUnlisten`, so the harmless already-gone case is swallowed.",
       "date": "2026-07-16T11:54:16+08:00"
+    },
+    {
+      "id": "plan-subsystem-wiring",
+      "bump": "minor",
+      "summary": "Plan subsystem: connect the built-but-unreachable half of the unified plan hub. Adds a `/plan` command family that makes every plan source usable from chat — `/plan <objective>` decomposes with the planner model, `/plan new <title> | <step> | …` hand-authors one, `/plan from-goal` and `/plan from-team` project an existing goal or team task list, plus `/plan status` and `/plan cancel`. Adds a \"write a plan\" composer above the input while planning with no plan open. Approved plans that were not proposed by the model in-transcript now run step by step as visible chat turns (in-session execution), with the plan's checklist and current step injected into each turn; the tracker dock's pause / resume / cancel drive it. The plan PII gate is now enforced before any plan text reaches a model, including PII hidden in a tool step's parameters. Fixes `/permissions` and `/permission-mode` cycling into `bypassPermissions`: the cycle now covers only the safe modes (default → acceptEdits → plan), matching the composer chip, while `/permission-mode <mode>` can still select any mode explicitly — and now reaches `auto` and `dontAsk`, which it previously could not.",
+      "date": "2026-08-02T16:40:06+08:00"
     },
     {
       "id": "plugin-approval-integrity",
@@ -989,6 +1439,18 @@
       "date": "2026-07-17T10:25:52+08:00"
     },
     {
+      "id": "plugin-icon-kebab-compat",
+      "bump": "patch",
+      "summary": "Third-party plugins that name their icons the way the documentation told them to will keep installing. The plugin contract published a kebab-case allowlist — `file-text`, `panel-right`, `message-square` and eight more — and when that constant was replaced by a direct lookup against `lucide-react`, whose keys are PascalCase, every one of those names became a fatal manifest error. A plugin you already had installed would start failing to load, and a new one written against the published list would refuse to install, with nothing to explain that only the spelling had changed.\n\nThe old spelling is now accepted with a warning that names its replacement, and the same normalization runs where icons are rendered, so a plugin pinned to `file-text` shows its icon instead of a blank space. Exact matches are always tried first, so no name that already worked changes meaning, and a name that resolves neither way is still rejected — quoted exactly as the author wrote it.\n\nFirst-party plugins were already on the new spelling and are unaffected.",
+      "date": "2026-07-29T01:18:39+08:00"
+    },
+    {
+      "id": "plugin-lucide-icon-contract",
+      "bump": "minor",
+      "summary": "Standardize native plugin icons on exported lucide-react names and reject unknown icon names during manifest validation.",
+      "date": "2026-07-28T21:19:03+08:00"
+    },
+    {
       "id": "plugin-manifest-highlight-batchbar-update-check",
       "bump": "patch",
       "summary": "Improve the plugin detail viewer and fix two plugin-panel defects. The \"raw manifest\" viewer now renders the manifest as syntax-highlighted JSON (with copy / download / line numbers) instead of a flat monochrome block, both for installed plugins and — newly — in the marketplace detail sheet before installing. The floating batch-actions bar no longer collapses into a broken vertical stack — it stays a horizontal toolbar that only wraps when genuinely too narrow. And \"Check for updates\" no longer repeatedly re-hits an unreachable registry and floods the console: failed marketplace lookups are briefly negative-cached and logged quietly, and the update dialog / batch \"Update\" action now actually install (they previously threw on a missing method and displayed \"v undefined → v undefined\").",
@@ -1005,6 +1467,30 @@
       "bump": "minor",
       "summary": "Publish the canonical plugin contract, secure path validation, complete public context types, and independently consumable ESM, CJS, and declaration builds.",
       "date": "2026-07-18T22:03:26+08:00"
+    },
+    {
+      "id": "plugin-surface-boundary",
+      "bump": "patch",
+      "summary": "Route every plugin UI host through the shared surface boundary so scoped styles, diagnostics, width hints, and cleanup semantics remain consistent.",
+      "date": "2026-07-28T21:19:03+08:00"
+    },
+    {
+      "id": "plugin-surface-failure-semantics",
+      "bump": "minor",
+      "summary": "Apply form-factor-aware plugin render failures: compact contributions disappear safely, while block and panel surfaces show a localized retryable diagnostic.",
+      "date": "2026-07-28T21:19:03+08:00"
+    },
+    {
+      "id": "plugin-surface-i18n",
+      "bump": "minor",
+      "summary": "Unify plugin manifest and runtime translations, add localized manifest label keys, and update live host labels when the locale changes.",
+      "date": "2026-07-28T21:19:03+08:00"
+    },
+    {
+      "id": "plugin-surface-query-container",
+      "bump": "patch",
+      "summary": "Fix `@container` rules silently never matching inside a plugin surface that declares no width hint. The shared surface boundary is documented to plugin authors as a query container — \"Slot wrappers are query containers (`container-type: inline-size`), so use `@container` rather than measuring\" — but it only became one when the contribution happened to declare a `minWidth` or `maxWidth`. Everything else was wrapped in a `display: contents` box, which generates no principal box at all, and `container-type` is inert without one. A plugin that styled itself responsively looked correct in a hinted slot and quietly lost every breakpoint everywhere else.\n\nHosts that genuinely need the surrounding layout left alone still get it: Context Workbench panels opt out with `container={false}`, because containment re-anchors absolutely positioned descendants. That opt-out is now load-bearing rather than decorative — previously it was only consulted on the hinted path, so the one call site using it was passing a flag that could not change the outcome.",
+      "date": "2026-07-29T00:31:28+08:00"
     },
     {
       "id": "plugin-suspend-resume-hardening",
@@ -1029,6 +1515,12 @@
       "bump": "minor",
       "summary": "Third-party plugins can now ship React UI. Installed plugins previously could not: their bundles were built with `--external:react` while the loader's `require` threw for every specifier, so any plugin component crashed on its first hook. The loader now resolves a closed whitelist (`react`, its jsx runtimes, `@cognia/plugin-sdk`, and the new `@cognia/plugin-ui` component kit) from the host's own module graph, so plugins share one React and one set of components. `react-dom` is deliberately withheld, keeping contributions inside the slot they were mounted into.\n\n`manifest.styles` also works for the first time — it was declared, packaged by the CLI, watched by `plugin dev`, and then silently dropped at runtime. Stylesheets are now injected wrapped in `@scope`, bounded to the contributing plugin's own subtree, with name-defining at-rules (`@keyframes`, `@font-face`, `@property`, `@counter-style`) hoisted back out since `@scope` cannot hold them.\n\nPlugin UI gains the host's design system as a documented contract: `ThemeState` now reports applied motion, density, typography and radius, so JavaScript-driven animation can honour the user's reduce-motion preference (previously visible only to CSS, meaning plugin animations kept running after the user asked them to stop). Webviews get the same tokens injected, having previously inherited nothing. Each of the 57 UI extension points now declares a form factor, delivered to contributions as a prop, and slot wrappers are query containers so plugin CSS can use `@container`.\n\nAlso corrects the plugin authoring docs, which described a `surfaces[]` manifest field and a `ctx.api.extension.mount()` API that have never existed, and claimed the host loads plugins via dynamic `import()`.",
       "date": "2026-07-27T00:50:38+08:00"
+    },
+    {
+      "id": "pointer-customization-and-anime-themes",
+      "bump": "minor",
+      "summary": "外观新增「鼠标指针」面板：11 套内置指针包（经典 / 趣味 / 二次元三组，含 Sakura、Mahou、Neko、Mecha、Katana），可调大小、可跟随主题强调色或自定义配色，并按箭头 / 可点击 / 文本 / 拖拽 / 禁用 / 忙碌 / 十字准星等状态分别绘制（指针包未绘制的状态会保留系统光标并在界面上说明）。同时新增 10 种指针特效（拖尾、彩带、光晕、波纹、闪烁、气泡、落雪、火焰、樱花、星屑），可调强度、粒子大小与配色，支持点击迸发；特效层在「减少动效」开启或触屏设备上会自动停用，且永不拦截点击。\n\n另新增 4 套二次元主题（Sakura / Mahou / Neon Idol / Yozora，均含亮暗两套完整调色板并通过 WCAG AA 对比度校验）与 4 张配套渐变壁纸。",
+      "date": "2026-08-01T21:37:26+08:00"
     },
     {
       "id": "pro-ide-agent-bidirectional",
@@ -1067,6 +1559,18 @@
       "date": "2026-07-23T17:26:58+08:00"
     },
     {
+      "id": "project-editor-model-lifetime-and-preview-tabs",
+      "bump": "minor",
+      "summary": "The project editor no longer throws your undo history away when you switch tabs. Every tab switch used to tear down the Monaco editor and destroy the file's model with it, so undo/redo, folding, the cursor position and the scroll offset were all gone the moment you came back to a file. One editor now serves every tab and swaps models instead, and a new model registry disposes a file's buffer only when the file is actually closed.\n\nTabs also gain VS Code's preview behaviour: clicking a file in the tree opens it in a single reusable italic tab, so browsing no longer leaves twenty tabs behind. Double-click the file, double-click its tab, use the new pin button, or just start typing, and the tab becomes permanent. Anything that deliberately opens a file — search results, terminal path links, session restore, the agent bridge, creating a new file — still opens a permanent tab as before.",
+      "date": "2026-08-01T21:38:42+08:00"
+    },
+    {
+      "id": "project-overview-and-resource-evidence",
+      "bump": "minor",
+      "summary": "The workspace dock gains a project overview panel, and the task resources panel now shows the evidence a run actually produced — which files and tools a task touched — projected from durable events rather than reconstructed from the transcript. Deleting a project now purges its scoped resources instead of leaving them behind.",
+      "date": "2026-08-01T03:32:20+08:00"
+    },
+    {
       "id": "provider-plugin-markdown-fixes",
       "bump": "patch",
       "summary": "Fix built-in provider catalog merging so inline provider definitions no longer hide discoverable model line-ups.\n\nExpose the live project editor contract from the public plugin SDK, add editor read/write permission descriptions, and keep plugin editor context PII-gated.\n\nImprove streamed Markdown rendering for links and headings so partial chat output converges to the same structure as completed messages.",
@@ -1097,6 +1601,12 @@
       "date": "2026-07-15T19:23:29+08:00"
     },
     {
+      "id": "remote-agent-control-grant",
+      "bump": "minor",
+      "summary": "Let a paired device run agents on another machine — and make elevated permissions grantable on a server at all.\n\nDriving a remote Cognia host could open a terminal, read and write files and use git, but never start an agent there. Those commands accepted only the token the server's own brain uses internally, and pairing gives a device a different kind of credential — so there was no combination of settings that could reach them. There is now a per-device \"Run agents\" permission, separate from \"Remote control\": remote control steers work the machine already decided to run, while this starts new processes, and folding them into one switch would mean enabling the first quietly handed out the second. Both ask for biometric confirmation when you turn them on.\n\nWhat a granted device may start does not widen: the host still only runs a fixed list of agent programs, only inside a workspace folder, and only with an allowlisted environment. Every start and every refusal is written to the host's audit log with the device that asked.\n\nUnderneath that, a bug that made the existing permissions unreachable on a server. Elevated permissions are stored per device and loaded into the running server at startup — but the only thing that ever loaded them was the desktop app's own window. A `cognia-server` has no window, so its permission list was always empty and every elevated command was refused no matter what the operator intended. File writes, commits and pushes against a cloud host could not be granted from anywhere. `cognia-server devices grant`, `revoke` and `grants` are the missing half; grants are stored beside the server's other credentials and take effect at its next start, which the command tells you.",
+      "date": "2026-07-30T17:13:10+08:00"
+    },
+    {
       "id": "remote-computer-use-supervision",
       "bump": "minor",
       "summary": "Make remote supervision of desktop Computer Use actually work when your phone is asleep. Previously a per-call consent prompt only reached devices with an open WebSocket, so a backgrounded phone never saw it and the request fail-closed after a hard-coded 30 seconds — remote computer-use effectively could not be approved away from the desk. Consent prompts are now a push trigger, so a locked phone gets a notification naming the action and the app it targets (never the window title or the command detail, which stay on the encrypted channel). Each prompt now carries a downscaled screenshot of the host screen so you can see what you are approving instead of deciding from a bare set of coordinates; if the desktop is focused on a password or credential prompt the frame is blanked and labelled as such, regardless of the global screenshot-redaction setting. The consent wait is now configurable (Settings → Automation → Model behavior) and defaults to 90 seconds, bounded so an answer can never arrive after the underlying tool call has already given up. Finally, \"always allow this session\" is replaced by a time-boxed grant — 15, 30, or 60 minutes — that is scoped to the conversation it was granted in, so an agent can work through a task uninterrupted without leaving a standing authorization behind.",
@@ -1109,10 +1619,34 @@
       "date": "2026-07-17T17:44:53+08:00"
     },
     {
+      "id": "remote-host-capabilities",
+      "bump": "minor",
+      "summary": "Ask a remote host what it can do, instead of assuming it is like this machine.\n\nWhen you connect to another Cognia host, the app had no way to find out what that machine is capable of. The only capability list it kept was for devices that had paired _into_ this machine — phones, tablets — and connecting to a host runs the other way round, so the host you are driving was never in it. Everything was therefore judged by the local machine's own abilities: a workflow that needed something only a server can offer, like staying awake without a window open, was refused before it started even when the server you were connected to could have run it perfectly well.\n\nHosts now answer for themselves. On connecting, the app asks and remembers, and Settings → Remote hosts lists what came back — or says plainly that it has not asked yet. A host too old to answer, or briefly unreachable, keeps whatever it last reported rather than being blanked, because a slightly stale answer is still better than falling back to guessing.\n\nThe host answers through its own application layer rather than its network front door, so a desktop and a headless server both report themselves using the same definition of what a capability is.\n\nThis makes the cloud host visible and stops it being misjudged. It does not yet move work there: a scheduled task still runs wherever it was scheduled, and nothing hands it to a server when your desktop is off.",
+      "date": "2026-07-30T17:13:10+08:00"
+    },
+    {
+      "id": "remote-scheduler-data-plane",
+      "bump": "patch",
+      "summary": "Route scheduler CRUD, history, statistics, imports, and backfills to the active remote host while suspending the desktop scheduler to prevent duplicate execution.",
+      "date": "2026-07-30T17:13:10+08:00"
+    },
+    {
+      "id": "remove-builtin-github-delivery",
+      "bump": "minor",
+      "summary": "The built-in GitHub Delivery stack is removed. The Settings section, the `/github-delivery` board, the `/me/github-delivery` page, the thirteen `action.github.*` workflow nodes, the `trigger.github.webhook` trigger, and the bundled plugin that provided all of them are gone. A workflow that used those nodes will report the node kind as removed rather than running it, and the repository configuration, work orders, delivery events and policy audit rows the plugin kept in its own tables are no longer read by anything in the app.\n\nThe reason is that it was never really one feature. It was a GitHub client, a policy engine, a webhook receiver, an approval bridge, an AI worktree driver and a workflow node pack, all shipped as a built-in and all maintained on the assumption that \"delivery\" is something the app owns. It is not: it is one integration among many, and the Marketplace Integration runtime is where an integration belongs. Keeping it built in meant every plugin-runtime change had to keep one privileged tenant working, and that privileged tenant is what stopped the runtime from being general.\n\nIf you were using it, a one-major-version compatibility installer ships at `packages/plugin-sdk/contract/compat/github-delivery-2.0.0.zip`; verify it with `cognia plugin verify` and install it to keep the same delivery flows running on the Integration runtime. Its README carries the publisher fingerprint and the bundle checksum.\n\nThe generic pieces stay, because they were never delivery-specific: pull-request observation still feeds Agent Team's PR feedback loop, and the git workspace abstraction is still the backend registry a plugin implements to run work in a cloned repository, locally or in an E2B sandbox. Installing a plugin from a GitHub repository is a separate feature and is untouched.",
+      "date": "2026-07-29T02:18:02+08:00"
+    },
+    {
       "id": "remove-dead-otel-transport",
       "bump": "minor",
       "summary": "Remove the non-functional duplicate OpenTelemetry logging transport and keep one operational OTLP configuration surface.",
       "date": "2026-07-16T17:06:07+08:00"
+    },
+    {
+      "id": "review-fixes-toolbar-gateway-jump",
+      "bump": "patch",
+      "summary": "Fix the defects a two-axis review of the selection-toolbar, conversation-anchor and Gateway/Bridge work turned up.\n\nThe system-wide selection toolbar could not appear at all. `selection_toolbar_resize`, `_set_keep_alive` and `_finish` were granted only by the generated all-commands permission, which is attached to a capability scoped to the main window — so every call from the overlay window was rejected, the first measurement never landed, and the reveal it gates never ran. The overlay's own permission file now lists them, a test asserts it lists every command the overlay invokes, and a failed resize reveals the window anyway rather than leaving it invisible.\n\n`⌥⇧1`–`⌥⇧6` cancelled themselves: the input tap is listen-only and reports no modifiers, so the chord's own digit read as \"the user moved on\" and cleared the candidate before the shortcut handler could use it. A key press now waits for a chord to claim it, and a bare modifier never dismisses. Escape had the same shape of bug on macOS — it was compared against a raw key code the tap never emits, so it never matched.\n\nThe Gateway's config writer read the current config out of a `setState` updater, which React defers whenever another update is pending — and the status and cooldown polls keep one pending. A single toggle therefore shipped `port`, `allowlist`, `exposedModels` and `disableKeywords` back to their defaults.\n\nRoute tickets had no issuer: a gateway-routed execution spec silently degraded to a direct route, so the panel that lists and revokes them could never show anything. Turns now mint a ticket and stamp its endpoint and one-shot secret into the agent subprocess env.\n\nThe External Bridge's stdio sidecar was never built or shipped for the desktop app — both the spawn path and the \"paste this into Claude Desktop\" snippet pointed at a `~/.cognia/cognia-mcp.js` that nothing installs. It is now bundled with the app, resolved by one Rust resolver both paths share, and the setup panel says so when it is missing instead of printing a path that is not there. Editing the bridge's HTTP port also restarts the listener rather than leaving it on the old port in silence.\n\nJumps that cannot resolve now say so everywhere rather than only from the artifact dock — including the timeline's starred-reply rows and message permalinks, which previously consumed the link before jumping, so a failed jump left nothing to retry. \"Locate in conversation\" works more than once per terminal tab. Date headers in the expanded timeline stick again past 40 turns. Memories captured from the selection toolbar keep their `selection` provenance through a backup round-trip.\n\nAlso: the request log's cost, both latency columns and the toolbar's playback percentage are locale-formatted instead of hard-coded en-US; the Gateway nav's `!` badge has an accessible name; and the streaming stall message quotes the configured idle timeout rather than always 300s.",
+      "date": "2026-07-29T15:27:15+08:00"
     },
     {
       "id": "rich-cli-handoff-transcript",
@@ -1145,6 +1679,30 @@
       "date": "2026-07-15T20:53:18+08:00"
     },
     {
+      "id": "runtime-targets",
+      "bump": "minor",
+      "summary": "Adds explicit runtime targets — local desktop, a paired companion, or standalone web — with a target picker in the account menu. Each target keeps its own database, outbound queue, paired devices and scheduled tasks, so work started on one target no longer leaks into another, and surfaces that an inactive target cannot serve now say so instead of failing silently. Queue entries created before targets existed are preserved and quarantined for diagnostics rather than being attributed to whichever target is now active.",
+      "date": "2026-08-01T03:32:20+08:00"
+    },
+    {
+      "id": "sandbox-binding-and-provider-split",
+      "bump": "minor",
+      "summary": "Unify the sandbox execution model. A session's shell/file tier and its Computer Use target now resolve into a single binding, so a `cua-desktop` character can no longer drive a remote desktop while `Bash` quietly runs on the host machine. A binding that names a tier but no connection is refused and reported rather than silently downgraded to unsandboxed execution.\n\nSandbox connections gain a provider (`docker` / `cua-cloud` / `lume`) × driver (`computer-server` / `cua-driver`) split with a normalized lifecycle state and a per-connection capability matrix, so unsupported operations fail with a typed error instead of falling back to the host. Existing Docker connections migrate automatically and keep their old fields for one release, so a downgrade still works.",
+      "date": "2026-08-02T13:05:23+08:00"
+    },
+    {
+      "id": "scheduler-catchup-tiers",
+      "bump": "patch",
+      "summary": "A scheduled task missed while the host was offline is now handled according to what the task does, instead of always being dropped. Presence refreshes still skip (the next tick is authoritative), chat/agent/digest tasks deliver once if they are still within a 15-minute grace window, and backup/wiki/radar/twin tasks replay the slots they missed. Deliveries that fired from a missed slot are labelled as delayed in chat, naming the time they were scheduled for, so a late digest is not mistaken for a current one. An explicit per-task config still overrides all of this.",
+      "date": "2026-07-30T13:40:14+08:00"
+    },
+    {
+      "id": "scheduler-im-notification-channel",
+      "bump": "minor",
+      "summary": "Scheduled tasks can now send their notifications to an IM conversation. Pick the new **IM** channel on a task and name the conversation, or leave it blank to use a global ops channel configured once in settings. Previously a task result could only reach chat by hand-authoring a separate connector task, even though the notification center already had an IM delivery channel — the scheduler just never offered it. The per-conversation proactive-push opt-in still applies, so a conversation that has not enabled it receives nothing.",
+      "date": "2026-07-30T14:33:06+08:00"
+    },
+    {
       "id": "scheduler-macos-cron-validation",
       "bump": "patch",
       "summary": "Reject macOS system-task cron expressions that launchd cannot represent, preserve fixed month fields, and keep plist trigger round-trips truthful.",
@@ -1155,6 +1713,12 @@
       "bump": "patch",
       "summary": "Fix a scheduler startup storm: when the app had been closed for longer than a recurring task's period, the timing driver replayed every missed slot back-to-back — flooding the log with `execution skipped due to overlap-skipped` warnings, writing one skipped execution record per missed slot, and re-firing recurring work (most visibly the IM usage-status refresh, which pushed repeated presence updates). An overdue window now goes through the missed-run policy once (`runMissedOnStartup` / `maxMissedRuns` / `catchupWindowMs`) and re-arms on the next future slot.",
       "date": "2026-07-27T00:38:41+08:00"
+    },
+    {
+      "id": "scheduler-overview-redesign",
+      "bump": "minor",
+      "summary": "Rebuild the scheduler overview as a flat, hairline-separated page instead of a stack of cards: one summary band with proportional task-composition and success-rate meters, a kind rail, and flattened monitor / chart / upcoming / recent sections. The calendar day panel and the timeline now share one list that collapses a task's repeated runs into a single row with its fire times, and long execution errors expand into a bounded, scrollable block (with stack traces behind a disclosure in the run sheet) rather than stretching the layout. Also adds the missing `scheduler` translations that made task detail throw `MISSING_MESSAGE` (six task types plus `timeout`, `tags`, `systemDefault`).",
+      "date": "2026-08-02T16:45:56+08:00"
     },
     {
       "id": "scheduler-run-budget-and-lifecycle",
@@ -1187,6 +1751,30 @@
       "date": "2026-07-17T23:56:36+08:00"
     },
     {
+      "id": "selection-toolbar-content-hugging",
+      "bump": "minor",
+      "summary": "Rebuild the system-wide selection toolbar: the overlay window is now sized from its own content instead of a hard-coded 360×44 box, which restores the capsule's drop shadow, removes the transparent dead zone beside it, and stops the language menu teleporting the toolbar up the screen. Adds icon-first buttons that expand on hover, enter/exit animation anchored to the selection, hover-to-keep-open, two new actions (add to memory, read aloud), `⌥⇧1`–`⌥⇧6` shortcuts, a keyboard-navigable language list where Escape closes the list before the toolbar, and a default translation language setting.",
+      "date": "2026-07-29T15:26:17+08:00"
+    },
+    {
+      "id": "selection-toolbar-perception-and-focus",
+      "bump": "minor",
+      "summary": "Stop the system-wide selection toolbar monopolising focus and the input stream, and give it real perception.\n\nOpening the language list called `WebviewWindow::set_focus`, which routes through tao and activates the whole application — so the document you had just selected text in deactivated, its highlight greyed out, and your keystrokes stopped reaching it. The window was already reclassed to a non-activating `NSPanel`, so the fix is to take the keyboard through the panel (`show_and_make_key`) and hand it back on the way out. That conversion is also now awaited rather than fire-and-forget: it could previously lose a race against the first reveal and briefly put an ordinary, activating `NSWindow` on screen, and a failure only logged a warning, leaving the toolbar stealing focus for the rest of the session. It now fails `start` instead. The toolbar also gets its own panel role, because the reveal-generation bookkeeping is keyed by role and sharing the pet's would have let closing the pet cancel a toolbar reveal.\n\nEvery left-button release anywhere on the desktop used to spawn a task that slept 60ms, read the accessibility selection, and on failure slept another 120ms and read again — plus, on macOS, an `osascript` fork for the focused window. A plain click cannot have produced a selection, so it now costs nothing: releases are classified as drag, multi-click or neither, and the app-blocklist check moved ahead of the read so password managers and disabled apps pay nothing at all.\n\nSelections are now observed rather than polled. macOS gains a real `AXObserver` (`subscribe_events` was a stub there), so `AXSelectedTextChanged` and `AXFocusedUIElementChanged` drive the toolbar directly; Windows gets the matching UIA `TextSelectionChanged` wiring behind a new opt-in `text-selection-changed` event kind. Keyboard selection therefore raises the toolbar for the first time — after a 350ms settle so it does not strobe under a moving caret, with an upper bound so ⌘A over a document does not trigger it, and dismissing the moment the selection empties. Apps that post nothing keep working through the click path.\n\nWhen accessibility exposes no text at all — images, PDF viewers, Java apps, remote desktops — the drag region is captured and read with OCR. Three gates must all pass first, and a missing Screen Recording permission skips the fallback silently: macOS answers that with a picture of the desktop minus every window's contents, so OCR would otherwise have returned your wallpaper as \"the selection\". Region capture also converts global logical points into monitor-local pixels, which it previously did not — the crop was doubly wrong on Retina and wrongly positioned on any secondary display.\n\n`pick_at_point` on macOS is a true `AXUIElementCopyElementAtPosition` hit-test instead of returning the focused window's metadata regardless of the point.\n\nFour contextual actions join the six stable ones: open link, email, search and convert. They appear only when the selection matches, are capped so the capsule still shows six buttons, and evict from the tail so the generic buttons never shift. `⌥⇧1`–`⌥⇧6` stay bound to the original six whatever is on screen. Payloads from the overlay are treated as untrusted: Rust re-parses the URL and refuses any scheme but http(s), builds the `mailto:` itself, and encodes the search query against its own engine table. Link and email actions are withheld from OCR text, where a misread domain is a real risk, and every action is withheld from a secure text field. The capsule now springs out of the selection rather than fading in.",
+      "date": "2026-07-29T15:26:17+08:00"
+    },
+    {
+      "id": "settings-card-free-layouts",
+      "bump": "minor",
+      "summary": "Rebuild the Account, Agent modes, Built-in agent runtime, Eval and Memory settings pages without card wrappers — Agent modes, the agent runtime and Memory become provider-style master/detail surfaces that fill the settings frame and scroll inside the detail pane instead of scrolling the page, the rest are flat stacks with collapsible advanced groups, and every layout now sizes off its own container so it adapts inside a narrow detail pane",
+      "date": "2026-08-02T18:38:28+08:00"
+    },
+    {
+      "id": "settings-edits-reach-the-desktop",
+      "bump": "minor",
+      "summary": "Settings you change on the phone now actually reach the paired desktop, and stop snapping back to the old value.\n\nTwo things were wrong at once. Mobile pages that embed a desktop settings section — `/me/appearance` renders the desktop appearance panel whole — wrote only to the phone's own database. The step that hands the change to the desktop lived in a helper that nine other `/me` pages called and this one structurally could not, so themes, custom themes, wallpapers, accent colour, custom CSS and imported VSCode themes changed on the phone stayed on the phone forever. The server had thirteen fields allowlisted specifically so those tabs would work, and not one of them was ever sent. That step now happens once, where settings are persisted, so every screen gets it — including whichever desktop section is reused next.\n\nThe other was a visible flicker: change settings on a phone with no connection, and the moment it reconnected the first sync overwrote your edits with the desktop's older values, so the UI snapped back to the old setting and then changed again a second later once the queued writes drained. Fields with a write still waiting in the queue are now left alone until it lands. Writes that failed permanently are deliberately not protected — the desktop's value wins, because otherwise the two devices would never agree again.\n\nThree settings deliberately stop travelling, because sending them was wrong rather than useful: biometric requirements belong to each device's own authenticator, the workflow editor's performance tier is chosen for one device's graphics, and the selected microphone is an identifier that means nothing elsewhere. Each still works normally on the device you set it on.\n\n`/me → Network` gains a read-only \"Direct connection\" panel showing the signaling server this device will actually dial, how many STUN and TURN servers it received, and whether those came from the host or are the built-in defaults. This was previously impossible to see and quietly wrong: a self-hosted signaling server or TURN relay configured on the desktop never reached the phone, and the only symptom was a direct connection failing on strict networks.",
+      "date": "2026-07-30T17:13:10+08:00"
+    },
+    {
       "id": "settings-finder-background-tasks-label",
       "bump": "patch",
       "summary": "Fix a crash in the settings command palette (⌘/Ctrl+K finder). The \"Background tasks\" control was registered in the finder but had no translation, so opening the settings page threw `MISSING_MESSAGE: settings.finder.controls.backgroundTasks`. The missing label is now added in both locales, and a registry test now asserts every finder control resolves to a real translation in both `en` and `zh-CN` so this can't regress.",
@@ -1197,6 +1785,18 @@
       "bump": "patch",
       "summary": "Settings master/detail panels (Subscription, Appearance) now crossfade when you switch sub-panels instead of swapping instantly, and dialog/sheet open/close durations follow your motion-speed preference. The mobile Computer Use master toggle shows a pending spinner while the change saves. Reduce-motion handling in the global stylesheet was consolidated so every path collapses motion consistently.",
       "date": "2026-07-20T17:54:04+08:00"
+    },
+    {
+      "id": "settings-sidebar-icon-rail-alignment",
+      "bump": "patch",
+      "summary": "Fix the settings sidebar icons being clipped and misaligned when the rail is collapsed to icon mode",
+      "date": "2026-08-02T16:46:30+08:00"
+    },
+    {
+      "id": "settings-sync-one-classification-table",
+      "bump": "minor",
+      "summary": "Make settings actually agree across your devices, and stop shipping desktop credentials to every paired phone.\n\nWhich settings travel between a phone and the desktop (or a cloud server) it is paired with used to be described by two separate hand-written lists — one in Rust for what the phone may write up, one in TypeScript for what the host mirrors back down. Nothing checked them against each other, and they had drifted a long way apart. Around fifty preferences could be pushed up but never came back down, so your appearance, text-to-speech, notification and web-search settings on the phone quietly diverged from the desktop's forever and no amount of syncing would reconcile them. One entry named a field that does not exist on the settings row at all. And the WebRTC fields were classified backwards: the phone reads the signaling address, STUN list and TURN relays from its own copy, but only ever received the built-in defaults — so if you pointed the desktop at a self-hosted signaling server or your own TURN relay, the phone never heard about it and simply failed to connect behind a strict NAT.\n\nThere is now one table that classifies every settings field as shared, server-authoritative, device-local, or desktop-only, and both lists are generated from it. Adding a settings field without classifying it fails the type check, and a gate fails the build if the generated Rust and OpenAPI copies drift from the table. Fields that deliberately do not travel now carry a written reason next to them.\n\nThree settings stop being written from the phone to the desktop, because doing so was wrong rather than useful: biometric gating is a property of each device's own authenticator (pushing a phone's policy onto a laptop with no Touch ID could lock it out), the workflow editor's performance tier is chosen for one device's GPU, and the microphone selection is an identifier that means nothing on another machine. Each of these still works normally on the device you set it on. In the other direction, the remote-browser switch and the WebRTC endpoints now flow down from the host, which is what makes the cloud shared browser reachable from a phone or browser at all — it was gated on a value those clients could never receive.\n\nSeparately, and more seriously: the host used to put the entire settings row on the wire on every sync. The client only applied the portable subset, which made this look harmless, but the whole row had already been sent — including the host's API keys, provider and search-provider credentials, subscription tokens, WebDAV password, proxy authentication and working-directory path. Every paired device received all of it. The host now narrows the row to the mirrored fields before it leaves, because a client cannot un-receive a secret.",
+      "date": "2026-07-30T17:13:10+08:00"
     },
     {
       "id": "share-link-renew",
@@ -1217,6 +1817,12 @@
       "date": "2026-07-27T00:46:16+08:00"
     },
     {
+      "id": "simplified-flow-tool-detail-parity",
+      "bump": "patch",
+      "summary": "Chat 精简模式：工具调用折叠与详情渲染补齐。展开一次工具调用现在在精简模式下与标准模式完全一致（终端视图、A2UI 交互面板、解析后的错误堆栈、工作台审阅入口）；折叠分组内的工具重新获得插件动作栏；导入会话 / CLI 交接产生的 `dynamic-tool` 读取调用现在会正确合并为一条摘要行；分组的「全部展开」在子智能体工具列表和 Bash 卡片上不再失效。",
+      "date": "2026-08-01T21:38:58+08:00"
+    },
+    {
       "id": "simplified-mode-tui-folding",
       "bump": "minor",
       "summary": "Chat \"simplified\" display mode now folds tool calls the way the TUI does. Bursts of context-gathering reads (Read/Grep/Glob/ls and web fetches) collapse into one glanceable \"3 reads · 2 searches\" activity group, while the real actions — edits, writes and commands — and any running or failed tool stay as their own prominent rows instead of being buried. A folded group stays open while a tool is still running or has errored (so live progress and failures are never hidden) and auto-collapses once everything settles. Collapsed rows now show a unified output-size hint (lines/matches/files) for every tool, a running tool streams a live \"N lines…\" chip, and a group with failures shows an \"N failed\" badge. Expanding/collapsing no longer clips its last rows, and the view no longer drifts off the bottom when a streamed turn finishes. Standard and detailed modes are unchanged.",
@@ -1235,10 +1841,34 @@
       "date": "2026-07-25T02:40:10+08:00"
     },
     {
+      "id": "spawn-task-sidechat-handoff",
+      "bump": "minor",
+      "summary": "Add an opt-in `spawn_task` handoff tool for Claude, standalone AI SDK turns, and External Bridge agents, with staged named sidechats, context inheritance, PII gating, and an interactive task card.",
+      "date": "2026-08-04T14:45:45+08:00"
+    },
+    {
+      "id": "spotty-donkeys-shave",
+      "bump": "minor",
+      "summary": "Rework the AI provider settings panel: the provider rail's category tabs and rows now fit the rail instead of being clipped by its right edge, the Models tab pins its toolbar so only the model list scrolls, and Diagnostics and Advanced are laid out as flat sections with collapsible detail rather than nested cards and tabs.",
+      "date": "2026-08-02T16:50:52+08:00"
+    },
+    {
       "id": "ssh-terminal-support",
       "bump": "minor",
       "summary": "Add saved SSH hosts to Terminal settings and allow desktop terminal sessions to connect through SSH with key, password, or agent authentication. Host profiles and credentials remain local, connection failures are surfaced in the terminal UI, and the native terminal commands enforce the same session lifecycle as local shells.",
       "date": "2026-07-25T14:29:28+08:00"
+    },
+    {
+      "id": "steer-live-delivery-and-sidechat",
+      "bump": "minor",
+      "summary": "Mid-run follow-ups (\"BTW\") now actually reach the running agent. Typing while a turn is in flight hands the message straight into the live Anthropic sidecar stream instead of only queueing it for after the turn — the same path Lark/IM conversations already used. When no live lane exists (any non-Anthropic provider, a team turn, or a query whose input has already closed) it falls back to the existing queue-and-replay, now labelled honestly as \"Queued\" rather than claiming delivery.\n\nFollow-ups also appear in the conversation the moment you type them, in your own words, with a delivery state (Queued → Delivered) and hover controls to edit or remove them before they send; the internal \"By the way (steering): \" framing is no longer shown back to you, and multiple follow-ups are no longer merged into one bubble. One that never made it — because the run errored or the app restarted — is kept and marked \"Not delivered\" with put-back / discard, instead of vanishing. The composer now stays writable while a tool awaits approval, which is exactly when redirecting matters most, and the run panel's \"Send now\" is renamed \"Interrupt & send\" with a first-use confirmation, since it cancels in-flight tool calls.\n\nBranching a conversation now opens the branch **beside** its parent in a split pane rather than navigating away, so the original stays visible and can keep running (mobile, which has no split view, still switches). A branch's header shows which conversation it came from and jumps back to the exact branch point.\n\nAdds a **side chat** to the right-hand workbench: an aside bound to the current conversation, seeded with its recent turns, for checking something without adding noise to — or spending turns in — the main thread. Any of its replies can be quoted back into the main composer.\n\nAlso fixes a pre-existing bug where quoting a message appended it to _every_ open composer instead of the one it was addressed to.",
+      "date": "2026-07-29T13:14:16+08:00"
+    },
+    {
+      "id": "steer-the-session-not-the-composer",
+      "bump": "patch",
+      "summary": "Fix mid-run follow-ups being delivered to the wrong agent, or dropped. The steer path asked the composer's global runtime selector which agent to steer, but that answers \"what the next turn I start will use\" — in split view a follow-up typed into a background pane consulted the focused pane's choice, steering the wrong agent or missing the live lane entirely. Each turn now records the lane it actually dispatched on and clears it when it settles.\n\nA follow-up typed while a turn is paused on a tool approval is now delivered live rather than queued — the composer stays writable there precisely because redirecting matters most at that moment. An attachment-only follow-up goes live on the built-in path instead of queueing. And the optimistic bubble is written to the database as it appears, so a follow-up killed by a restart before delivery survives as \"Not delivered\" instead of vanishing.",
+      "date": "2026-07-29T15:23:23+08:00"
     },
     {
       "id": "storage-backup-provider-completion",
@@ -1253,16 +1883,64 @@
       "date": "2026-07-21T17:34:18+08:00"
     },
     {
+      "id": "streaming-heading-size-parity",
+      "bump": "patch",
+      "summary": "Markdown headings in a streaming assistant turn now render at their final size straight away. They were styled only on the finalised branch, so every `#`/`##` heading rendered as plain body text for the whole stream and then jumped to its real size the instant the turn ended.",
+      "date": "2026-07-30T17:13:10+08:00"
+    },
+    {
+      "id": "streaming-tool-call-rows",
+      "bump": "minor",
+      "summary": "Chat now shows tool calls while they are still being generated. The Claude Agent SDK's partial-message stream carries a tool call's `content_block_start` (id + name) well before the block closes, but the renderer was dropping those frames and waiting for the complete assistant message — so a long `Write`, `Edit`, or `TodoWrite` argument list left the transcript blank for seconds. The tool row is now painted in `input-streaming` the moment the model names the tool, its `input_json_delta` fragments are accumulated off-message (no duplicate payload written to IndexedDB mid-call), and the parsed input lands at `content_block_stop`. Also fixes text streamed after a tool call being welded onto the text part from before it.",
+      "date": "2026-08-03T01:14:36+08:00"
+    },
+    {
+      "id": "structured-chat-errors",
+      "bump": "minor",
+      "summary": "Chat and Agent Team failures now carry structure instead of a bare string, so the error card can say what actually went wrong and what to do about it. A rate limit shows the provider's real Retry-After as a countdown rather than discarding it; an auth failure offers \"Open settings\" because the failure _is_ an auth failure, not because its English text happened to contain \"api key\" — that check silently never fired for providers answering in another language. Agent Team errors (\"team no longer exists\", \"no supervisor configured\", a failed member run) are localized rather than hard-coded English, and a member's name no longer gets glued onto the front of the error text where it stopped the parsers recognising the underlying failure.",
+      "date": "2026-07-28T21:18:14+08:00"
+    },
+    {
+      "id": "subagent-settings-master-detail",
+      "bump": "minor",
+      "summary": "Rebuild the Sub-agents settings section as a master/detail layout and close the gaps that left it unable to describe its own data model.\n\n- **Tool access is now editable.** `config.tools` has always been read by the dispatch projector but had no writer. A tri-state control (inherit / custom list / disable all) plus a searchable picker over the real tool catalog now expresses all three meanings the field carries — including the difference between \"inherit\" and \"no tools at all\", which a plain multi-select cannot show.\n- **Sub-agents can be turned off without deleting them.** The `disabled` and `hidden` flags are enforced by every resolver; both now have switches, and the availability each produces is stated on the panel.\n- **Running sub-agents can be cancelled**, and nested runs render as the parent→child tree the records already described. Finished runs can be cleared. A cancel that cannot reach its run says so instead of claiming success.\n- **Silent overrides are surfaced**: a system prompt retiring the task template, a pinned provider or external runtime taking a template out of ordinary chat, and task-template placeholders that are undeclared (or declared and unused).\n- **One save per panel**, with an unsaved-changes bar and a discard. The policy cards previously re-read the settings store on every change, so an unrelated save elsewhere in the app silently discarded whatever was being typed.\n- Layout matches the other heavy settings sections (grouped nav + detail pane, full height), with motion throughout that collapses under reduced-motion. The category filter is now keyboard-reachable.\n- Mobile's read-only list mirrors the new disabled/hidden state so the two surfaces agree.",
+      "date": "2026-07-28T21:21:42+08:00"
+    },
+    {
       "id": "subscription-quota-throttle-and-codex-reuse-expiry",
       "bump": "patch",
       "summary": "Subscription: stop the Claude quota `429 Too Many Requests` storm, and make a reused Codex ChatGPT login actually work\n\n- **Fix \"限额查询失败：429 Too Many Requests\"**: the unified-limits surfaces (the\n  status-bar usage chip, the tray usage feed, and the Subscription\n  overview/usage tabs + per-provider quota panels) each fired `refresh()` on\n  mount and on every `subscription-changed` event with no coordination, and\n  Anthropic's free `/api/oauth/usage` endpoint serves an aggressively\n  rate-limited bucket — so those uncoordinated bursts piled up into a 429 that\n  rendered as a broken quota panel. Per-account queries now funnel through a\n  shared coalescer (`lib/subscription/limits/coalesce.ts`): concurrent callers\n  share ONE in-flight request, and real network queries are throttled to at most\n  one per account per 60s. An explicit user \"Refresh\" click passes `force` to\n  bypass the throttle (but still coalesces, so a double-click can't double the\n  load).\n- **Fix \"复用 codex-cli 登录无法复用 ChatGPT 订阅\"**: adopting an existing codex-cli\n  ChatGPT login stamped the credential with `expiresAtMs: 0`, which\n  `isCodexCredentialFresh` reads as \"never expires\" — so the short-lived bearer\n  was never refreshed and 401'd on both the chat and external-agent spawn paths\n  the moment it aged out, and the account was also misclassified as api-key-only\n  (hiding its quota panel). The adopted credential now derives its real expiry\n  from the access-token JWT's `exp` claim (falling back to \"expired now\" so the\n  first use refreshes via the long-lived refresh_token), restoring the\n  \"a ChatGPT login always carries a real expiry\" invariant the rest of the Codex\n  subscription code already assumed.\n- **Keep reused CLI logins authoritative**: Claude/Codex refresh tokens may\n  rotate and are not safe to refresh from two independent copies. Accounts\n  adopted from a CLI file/keyring now re-read that local login instead of\n  exchanging Cognia's copied refresh token, so checking quota cannot log the\n  original CLI out. On macOS, Claude discovery also follows CCSwitch's\n  Keychain-first order so a stale `.credentials.json` cannot shadow the active\n  Claude Code login.",
       "date": "2026-07-17T17:45:34+08:00"
     },
     {
+      "id": "surface-silent-boot-failures",
+      "bump": "patch",
+      "summary": "Surface two boot failures that were previously invisible. When Cognia can't read your saved settings it now shows a persistent banner explaining that the session is running on defaults, with a retry — instead of silently behaving like a fresh install with no provider, no API key and a reset theme. When a database schema upgrade stays blocked because another window (desktop pet, fleet island, a second tab) is holding the old version open, a dialog now names the problem and offers a reload, instead of leaving the app frozen on the loading spinner with only a console message.",
+      "date": "2026-07-28T21:18:14+08:00"
+    },
+    {
+      "id": "surface-silent-runtime-failures",
+      "bump": "patch",
+      "summary": "Two more silent failures now reach the notification center instead of only the console. When Cognia loses its event channel to the desktop backend, the surfaces fed by it used to just stop updating — no error, no log line, no hint that a reload would fix it; it now says so, once, however many subscriptions died. When the built-in skills, characters and teams fail to seed, that used to read as \"those features don't exist here\" rather than as a failure. Repeats of the same condition coalesce into one counted row rather than a wall of notices.",
+      "date": "2026-07-28T21:18:14+08:00"
+    },
+    {
       "id": "sync-codex-api-key-to-cli",
       "bump": "patch",
       "summary": "Sync portable Codex API-key vault credentials to the Cognia CLI while keeping ChatGPT-login credentials confined to the desktop vault.",
       "date": "2026-07-17T00:15:51+08:00"
+    },
+    {
+      "id": "sync-cursors-per-host",
+      "bump": "patch",
+      "summary": "Stop two machines' data blending together after re-pairing a phone somewhere else.\n\nSync remembered how far it had got by table name alone, with nothing recording which machine a given position came from and nothing clearing it when a device paired to a different one. Re-pair a phone to another desktop — or to a server — and it resumed from the previous machine's position, asking the new one for \"everything since a moment that means nothing here\". The two machines' sessions, messages and characters then piled up in the same local store, silently and permanently.\n\nPositions are now recorded per host, and the mirrored tables are cleared when a client starts talking to a different one. Those tables are a cache of a host's data rather than the device's own, so re-pulling them costs a little time and loses nothing. Device-local preferences are deliberately left alone.\n\nExisting saved positions are discarded on upgrade: a position with no host recorded cannot be attributed to one after the fact, so the honest outcome is a single full re-sync rather than a watermark that might belong anywhere.",
+      "date": "2026-07-30T17:13:10+08:00"
+    },
+    {
+      "id": "system-selection-toolbar",
+      "bump": "minor",
+      "summary": "Select text anywhere on the desktop and a small Cognia toolbar appears beside it, offering to copy it, explain it, translate it, or ask about it. It is a real system-level overlay rather than an in-app feature: it works in your browser, your editor, a PDF, a chat client — anywhere the OS reports a selection — and hands the text to Cognia without a copy, an app switch, and a paste.\n\nThe toolbar lives in its own borderless window that never takes focus, so the selection you just made is still a selection when you click an action. It dismisses itself when the selection clears or you click away, and it restores itself after a restart, so enabling it once is enough. Settings → Desktop gains its own controls: the on/off switch, and a per-application block list for the apps you would rather it never read.\n\nDesktop only, and off until you turn it on. Reading a selection screen-wide needs the OS accessibility permission, so the panel says so and points at the system prompt instead of failing silently without it; the app never asks for that permission on your behalf. Nine credential managers — 1Password, Bitwarden, LastPass, Dashlane, KeePass, Authy, Microsoft Authenticator, Keychain Access, and Cognia itself — are refused before the block list is even consulted, so the toolbar cannot be turned on for them. The web and mobile shells are unaffected.",
+      "date": "2026-07-29T08:34:58+08:00"
     },
     {
       "id": "tauri-app-command-acl-grant",
@@ -1307,6 +1985,12 @@
       "date": "2026-07-20T22:21:03+08:00"
     },
     {
+      "id": "terminal-dock-usability",
+      "bump": "minor",
+      "summary": "Integrated terminal: real flow control, restored PATH injection, and a dock that can live on either edge.\n\nFixes: the `cognia` CLI and `~/.cargo/bin` are woven into dock shells again (the PATH injection was lost when the terminal moved to an out-of-process host, and the host cannot derive the app's managed-CLI registry on its own — it now arrives over the hello frame and is re-pushed when the in-app CLI download registers a new directory). A flood like `yes` now parks the PTY's reader at the source instead of overrunning the host's per-client queue and killing the tab outright. A desktop driving a remote Cognia host can create, split and clear terminals again — those affordances were gated on the local PTY transport. Right-clicking a tab opens that tab's menu, so rename / restart / close-others work on tabs other than the active one. The terminal panel's \"Release control\" is reachable for the first time. `terminal.sessionState.replayGap` used the wrong placeholder and rendered its raw key.\n\nAdds: the dock can be docked at the bottom **or** on the right, dragged between the two by a grip on its tab strip (or switched from the dock toolbar), with an orientation-aware resize separator, keyboard resize, snap sizes and double-click-to-maximize. Tab strips gain drag-to-reorder, overflow fades and an overflow menu. The permanent badge stack across the top of every terminal is now one auto-collapsing status chip whose popover lists every state and hosts both halves of the control lease. An opt-in \"Terminal (N)\" status-bar segment shows session count and running state. The title bar's Terminal → New actually opens a terminal instead of only revealing the panel.",
+      "date": "2026-08-01T21:38:02+08:00"
+    },
+    {
       "id": "terminal-font-settings-take-effect",
       "bump": "patch",
       "summary": "Fix terminal font settings being swallowed while typing, and show a live font preview\n\nNumeric terminal settings clamped on every keystroke, so a typed value could never pass through an out-of-range prefix — typing `20` into font size landed on `8`, and `20000` into scrollback landed on `100000`. They now clamp on commit (blur / Enter) and revert when left blank. The font-family and custom-shell boxes commit on blur instead of persisting every half-typed character. Settings → Terminal gains a live specimen of the configured typography that names the font actually being used and warns when the requested family isn't installed, plus a reset-to-default button. The mobile terminal now honors the configured font size and scrollback instead of hard-pinning phone defaults.",
@@ -1319,16 +2003,40 @@
       "date": "2026-07-14T21:36:15+08:00"
     },
     {
+      "id": "thick-jars-attend",
+      "bump": "minor",
+      "summary": "Skill recorder: record a workflow on macOS or Windows and turn it into a skill — preflight with actionable blockers, window/application/desktop scope, pause, undo, a floating always-on-top controller excluded from its own capture, a structured review pass, a preview of exactly what is sent to the model (screenshots never are), atomic save as a **disabled** skill, and a controlled trial before enabling. Recordings stay on the device and are listed as source versions on the skill.",
+      "date": "2026-08-01T21:38:28+08:00"
+    },
+    {
       "id": "tidy-moons-shave",
       "bump": "patch",
       "summary": "Fix \"download as PNG\" failing on every card/image export. Tailwind v4 emits its theme tokens as modern CSS colour functions (`oklch()`, transpiled to `lab()`), which html2canvas 1.4.1 cannot parse — it threw `Attempting to parse an unsupported color function` on the first element it walked. Swapped to the maintained `html2canvas-pro` fork, which supports them. Restores the message quote card, usage share card, chat PNG export, A2UI thumbnails, and workflow graph image export.",
       "date": "2026-07-15T19:23:29+08:00"
     },
     {
+      "id": "tidy-moons-smoke",
+      "bump": "patch",
+      "summary": "Fix the inverted animation-speed preference. Settings → Appearance → A11y labels its options \"Fast (1.5×)\" and \"Slow (0.5×)\", but the value was written straight into `--motion-duration-scale`, which animations multiply by their base duration — so picking \"Fast\" made every dialog, sheet, panel and dock transition 50% _slower_, and \"Slow\" made them faster. Speed and duration are now correctly treated as reciprocals at the single point that converts them.",
+      "date": "2026-07-29T16:26:05+08:00"
+    },
+    {
       "id": "tidy-pandas-repeat",
       "bump": "patch",
       "summary": "Stop a truncated `db.json` from silently wiping the CLI database. The snapshot is\nnow written atomically (temp + fsync + rename, with one `.bak` generation), and a\ncorrupt or schema-incompatible snapshot is preserved aside instead of being\noverwritten — the CLI reports where it went rather than starting empty in silence.",
       "date": "2026-07-15T20:55:23+08:00"
+    },
+    {
+      "id": "tray-items-are-real-commands",
+      "bump": "patch",
+      "summary": "A tray item contributed by a plugin now actually runs when you pick it. Registering one put a row in the menu but never registered a command behind it, so the row resolved to a command id nothing owned and clicking it did nothing at all. Tray items now register a real command carrying the plugin's own `when` condition, dispatch through whichever of a handler, a plugin command, or a slash command the item declares, and are unregistered when the item goes away — so a disabled plugin's rows stop being clickable instead of lingering as no-ops.",
+      "date": "2026-07-29T08:34:58+08:00"
+    },
+    {
+      "id": "tray-quick-panel",
+      "bump": "minor",
+      "summary": "Clicking the tray icon now opens a quick panel for delegating a task or firing a shortcut, without bringing the main window forward. The panel is fully customizable: every entry defines its own input fields, what it does (delegate a prompt, run a slash or plugin command, open a page, or fire a tray action), and when it fires (on click, as the primary Enter action, on a keyboard chord, or when the panel opens). Open-triggered actions are limited to page navigation and plugin commands so merely viewing the panel cannot start a billed turn or mutate native state. Fields feed the action through `{{placeholder}}` references, so an input can even choose the destination conversation. Configure it under Settings › Desktop, where the tray-click behaviour can also be set back to showing the main window.",
+      "date": "2026-08-03T01:13:27+08:00"
     },
     {
       "id": "tts-cache-key-sha256",
@@ -1499,6 +2207,12 @@
       "date": "2026-07-16T17:06:07+08:00"
     },
     {
+      "id": "typeset-chat-typography",
+      "bump": "minor",
+      "summary": "Markdown typography now runs on shadcn/typeset. Chat turns, plugin READMEs, skill docs and every other `MarkdownRenderer` surface share one rhythm that scales with its container instead of the fixed pixel sizes each element carried before — headings, lists, quotes and inline code all track the surrounding text size, and the whole scale steps up on narrow viewports. Tables gain typeset's wide-block scroller. Cognia's own accents are unchanged: the primary-tinted italic blockquote, the bordered table grid with its filled header, and sentence-case `h6`.",
+      "date": "2026-07-30T17:13:10+08:00"
+    },
+    {
       "id": "unified-agent-execution-phases-1-4",
       "bump": "minor",
       "summary": "Unified agent execution (ADR-0090) phases 1–4: provider settings gain a\npolicy-validated custom-headers editor and a derived deployment-profile card;\ncustom Anthropic-protocol providers can explicitly opt into the experimental\n\"Claude Agent SDK via built-in Gateway\" execution path (flag-gated, policy\nonly); the LLM gateway adds route tickets, snapshot version authority,\nsame-protocol header/error parity, and a headless (`cognia-server`) mode with\n`profiles` / `gateway` admin subcommands.",
@@ -1511,16 +2225,46 @@
       "date": "2026-07-24T00:30:44+08:00"
     },
     {
+      "id": "unified-agent-migration",
+      "bump": "minor",
+      "summary": "Add a unified migration wizard for Claude Code, Codex, and OpenCode settings, sessions, skills, subagents, MCP servers, commands, and memory, including environment-aware discovery and explicit conversion warnings.",
+      "date": "2026-08-04T14:46:20+08:00"
+    },
+    {
       "id": "unified-keyboard-shortcuts",
       "bump": "minor",
       "summary": "Unify keyboard-shortcut settings into a single **Settings › Keyboard shortcuts** page that groups all three scopes — global system hotkeys, in-app shortcuts, and Canvas editor keybindings — in one place with search and conflict detection. Every previously-hardcoded in-app shortcut (terminal toggle, zoom, focus-search, the Skills panel keys, the artifacts/Canvas rail toggles, the observability dashboard keys, and the A2UI workspace editor) is now rebindable through a single keydown dispatcher, and overrides persist across restarts. The recorder warns when a chord collides with another in-app shortcut (blocking) or with a per-platform system-reserved shortcut such as Spotlight or Alt+Tab (non-blocking). The desktop-pet toggle-hotkey link and the old scattered entry points now lead to this unified page.",
       "date": "2026-07-14T02:14:36+08:00"
     },
     {
+      "id": "unified-template-platform",
+      "bump": "minor",
+      "summary": "Templates are now one system instead of twelve (ADR-0100). Agent teams, workflows, subagents, custom modes, characters and skills — plus Mini Apps, goals, scheduled tasks, prompt presets, subscription presets and documents — are searchable together in the new Template Studio at `/templates`, filterable by kind, status and how much the source is trusted.\n\nTemplates now have versions and a content hash, so a template can be published as an immutable release, forked, deprecated, and shared as a `.cognia-template` package that is size-bounded, checksummed and Ed25519-verified on import. Applying one shows a plan first — what it will create, what it needs to bind to, and what is blocking it — and the resulting resources remember which template and version they came from, so you can later see what drifted, update to a newer release, or detach them for good.\n\nPlugins can contribute templates through a dedicated API with its own four permissions, and instantiating one asks you first; a plugin never sees the ids of the resources its template binds to, and cannot apply a plan it did not have checked.\n\nYour existing built-in and saved templates are converted on first launch. The conversion is journaled per device, so it is safe to re-run and can be rolled back per kind, and shipped built-ins keep tracking the app version rather than freezing at whatever shipped when you first launched.",
+      "date": "2026-07-30T17:13:10+08:00"
+    },
+    {
       "id": "unify-conversation-creation-entry-points",
       "bump": "patch",
       "summary": "Fix dead quick-start cards on the welcome page and unify every \"new chat\" entry point\n\n- The welcome page's starter cards did nothing: they sent into a session that did not exist yet, so the send guard dropped the prompt (with a toast only on the first click). They now start a conversation — respecting the selected guild — and send the prompt into it.\n- `Cmd+N` / File → New Chat / the tray / `--new-chat` now start a real conversation instead of clearing the workspace, which had closed every open pane and created nothing.\n- Removed a duplicate `menu://new-chat` listener that fired the handler twice per menu click, and scoped the menu/tray \"new chat\" handlers to the main window — they are broadcast to every window, so with the pet overlay open they would otherwise start one conversation per window.\n- Fixed the workflow editor's chat starters, which threw on a malformed payload and surfaced an opaque error toast.\n- \"No session selected\" is now translated instead of hard-coded English.",
       "date": "2026-07-15T19:23:29+08:00"
+    },
+    {
+      "id": "usage-cost-calendar-heatmap",
+      "bump": "minor",
+      "summary": "Settings → Subscription → Usage: \"Cost over time\" now draws a GitHub-style calendar heatmap by default, with a toggle back to the original bar chart. Every day in the selected range gets a cell — including days with no spend — and each cell carries a localized date, its USD cost and request count as both an aria-label and a tooltip that opens on hover _and_ on keyboard focus. Daily usage is now bucketed by your local calendar day instead of UTC, so a late-night turn lands on the day you remember spending it. The time-range toggle replaces the misleading \"All time\" option with \"Last 90 days\", which matches how long usage rows are actually retained.",
+      "date": "2026-08-02T16:52:27+08:00"
+    },
+    {
+      "id": "vector-agent-memory-tools",
+      "bump": "minor",
+      "summary": "Add project-scoped vector memory tools for the agent (`vector_search`, `vector_add_document`, `vector_delete_document`), opt-in from Settings → Tools. Collections are scoped to the session's linked project — the agent can neither name nor reach another project's memory — and every call passes the PII redaction gate before anything is embedded or stored. Desktop only: they run against the local native vector store, never a configured cloud vector provider.",
+      "date": "2026-08-02T11:55:07+08:00"
+    },
+    {
+      "id": "wasm-plugin-v0-2-and-pack-trust-chain",
+      "bump": "major",
+      "summary": "WASM plugin host API v0.2.0 (breaking) plus the Character Pack trust chain and determinate plugin-activation progress.\n\n**Breaking — every existing WASM plugin must be rebuilt.** The host now registers only the `cognia:plugin@0.2.0` linker; loading a v0.1 plugin fails with `UPGRADE_REQUIRED` naming the plugin and the steps to fix it. `notification.notify` returns `result<_, string>`, which changes the component's import types, so a v0.1 binary cannot be linked at all — authors must bump `wasm.apiVersion` to `0.2.0`, replace `wit/world.wit` from the SDK, handle `notify`'s new `Result`, swap the `network:fetch` grant for `ai:chat`, and run `cognia plugin build`.\n\n- Clipboard, notification, AI, and workflow capabilities are backed by real host services instead of returning `cognia:not-implemented`. Errors carry a stable `\"<CODE>: <message>\"` prefix (`CAPABILITY_DENIED`, `INVALID_REQUEST`, `PAYLOAD_TOO_LARGE`, `TIMEOUT`, `CANCELLED`, `HOST_UNAVAILABLE`, `PROVIDER_ERROR`, `WORKFLOW_REJECTED`).\n- `ai.generate-text` now requires `ai:chat` rather than `network:fetch`, and `workflow.emit-event` now requires `extension:workflow`.\n- Signed `.cognia-pack.json` files are verified with Ed25519 over the RFC 8785 canonical JSON of the pack. Unsigned packs are still accepted and are now visibly labelled; a signed pack that fails verification is refused. New `cognia pack sign` / `cognia pack verify` CLI commands.\n- Character packs can declare `requires.themePacks` / `connectors` / `providers`; missing entries warn and never block.\n- Enabling a plugin shows determinate seven-phase progress, and the `/plugins` toggles now actually activate through the plugin manager instead of only writing the database flag.\n- Fixed: exporting a signed pack silently dropped its signature; notification titles and bodies were written to the log; and `Progress` never published `aria-valuenow`, leaving every progress bar in the app accessibly indeterminate.",
+      "date": "2026-08-04T14:44:24+08:00"
     },
     {
       "id": "webrtc-turn-reconnect-fixes",
@@ -1541,10 +2285,34 @@
       "date": "2026-07-14T21:36:15+08:00"
     },
     {
+      "id": "welcome-cardless-hero",
+      "bump": "patch",
+      "summary": "Redesign the chat welcome page as a card-less layout — the hero, starter prompts and recent sessions now sit directly on the page with hairline section rules and quiet hover surfaces, and the horizontal padding scales with the pane width.",
+      "date": "2026-08-02T16:37:55+08:00"
+    },
+    {
+      "id": "welcome-usage-dashboard",
+      "bump": "minor",
+      "summary": "Add a customizable usage dashboard to the chat welcome page — stat tiles (sessions, turns, tokens, cost, active days, streaks, peak hour, top model), a calendar heatmap, and a per-model breakdown over a 7/30/90-day window. Every figure is derived from the same `sessionUsage` aggregation the Subscription → Usage tab uses, and both surfaces now draw the same heatmap component. Tiles, the heatmap, the window and the active view are persisted per user; the ✕ hides the panel and Settings → Appearance → Personalization restores it.",
+      "date": "2026-08-03T01:13:52+08:00"
+    },
+    {
+      "id": "wiki-corpora-and-terminal-inbound-review",
+      "bump": "minor",
+      "summary": "Knowledge storage now separates one indexed repository from another, and the inbound review queue gains a decision that sticks. Generated wiki articles are keyed by corpus rather than by slug alone, so two repositories that both contain a `lib/utils` no longer collide — every wiki and RAG lookup must now name the repository it is asking about, and none of them silently fall back to answering from a different one. Rebuilds write to a staging area and swap in only after they succeed, so a rebuild that fails or is cancelled leaves the previous articles exactly where they were instead of having emptied them to make room; a rebuild can also be paused and cancelled, and resumes from where it stopped rather than restarting the corpus. Reviewing an externally contributed lesson, skill draft, or note is now a final decision — accept or reject, with no third spelling of \"no\" left over from earlier builds — and accepting a draft records the follow-up work in the same write that records the decision, so an accepted item can no longer be quietly dropped without a trace to retry from.",
+      "date": "2026-08-02T20:34:19+08:00"
+    },
+    {
       "id": "wild-moons-smile",
       "bump": "minor",
       "summary": "Collapse the chat composer's attachment controls into one paperclip menu (upload files, add folder, capture screenshot) and drop the separate \"add link\" button — typed or pasted URLs are already recognised and chipped automatically. Dropping a folder onto the composer now attaches the files inside it instead of staging an empty attachment, and the chip row says when a draft has more links than will actually be read.",
       "date": "2026-07-23T17:29:03+08:00"
+    },
+    {
+      "id": "wild-planes-shiver",
+      "bump": "minor",
+      "summary": "Wire diagnostics-first safe mode: the desktop app now persists recovery state across restarts, enters a diagnostics shell after a second unhealthy start of the same build within ten minutes, and bounds renderer reloads and subsystem restarts instead of retrying forever.",
+      "date": "2026-08-02T21:32:07+08:00"
     },
     {
       "id": "window-reveal-above-account-gate",
@@ -1565,6 +2333,18 @@
       "date": "2026-07-17T17:43:00+08:00"
     },
     {
+      "id": "workflow-node-groups",
+      "bump": "minor",
+      "summary": "Workflow subgraphs can be grouped and inserted as one reusable unit instead of being rebuilt node by node, and the workflow library gains search across name, description and the node kinds a workflow contains.",
+      "date": "2026-08-01T03:32:20+08:00"
+    },
+    {
+      "id": "workflow-retired-node-kinds",
+      "bump": "patch",
+      "summary": "A workflow holding a node this app no longer provides now says so, in the editor, before you run it.\n\nTwo things were wrong. The editor never checked node availability at all: the check exists, but it only runs when the caller passes a predicate for it, and the editor — its only caller — never did. And when such a workflow ran anyway, the step failed with \"install the plugin that provides it\", which for a node that was removed from the product is advice you cannot act on; no plugin will ever provide it.\n\nThe editor now reports a removed node as an error naming the version that removed it, which also stops the run from starting rather than letting it fail partway through with some steps already done. Nodes whose plugin is merely uninstalled keep their existing warning, because installing the plugin really does fix those. Runs that never touch the editor — scheduled, triggered through the API, or a workflow whose provider disappears mid-run — get the corrected message too.\n\nThe removed kinds this applies to today are the fourteen from the GitHub Delivery removal. If you install the compatibility plugin, it re-registers those same kinds and your workflows are reported as fine, because they are.",
+      "date": "2026-07-29T09:08:10+08:00"
+    },
+    {
       "id": "workflow-run-history-snapshot-crash",
       "bump": "patch",
       "summary": "Fix the workflow run-history page crashing with an application error (\"Cannot read properties of undefined (reading 'name')\") when a run row has no embedded workflow snapshot — run rows written by older schema versions or imported histories now fall back to the workflow id in the header instead of taking down the whole route.",
@@ -1579,7 +2359,7 @@
     {
       "id": "workspace-symlink-and-push-gate",
       "bump": "patch",
-      "summary": "Close two ways a built-in plugin could be talked past its own boundary, both reachable from text an attacker controls.\n\nWorkspace Tools confined paths by string comparison alone, so it never saw a symlink. Git tracks symlinks, which means simply cloning a hostile repository into your open folder was enough to plant a link such as `docs/notes -> ~/.ssh`; `workspace_read_file` and `workspace_list_files` followed it straight out of the workspace, and a prompt-injected agent could ask for it by name. Every path component below the workspace root is now checked with `lstat`, which does not follow links, and `workspace_search` no longer descends into symlinked entries. A workspace you opened through a symlink yourself still works.\n\nGitHub Delivery's Issue → PR loop blocks `git push`, `git remote` and the `gh` CLI at the permission gate rather than trusting the prompt — the issue body is written by anyone who can open an issue. Those rules only matched the literal spelling, so `git -C <path> push`, `git -c k=v push`, `git --git-dir=… push`, an extra space, or `env gh …` all slipped through to a prompt the unattended run could not answer. The gate now covers git's pre-subcommand options and the common exec wrappers, while still leaving `git commit -m \"fix the push flow\"` alone.\n\nThe same gate had a wider hole underneath it. The sidecar splits a shell command into segments before matching rules against it, and that splitter was a plain regex: it ignored quotes and never looked inside `$(…)`, backticks or subshells. So `echo $(git push)` produced one segment that matched no rule, resolved to \"ask\", and fell out of the hard gate into an approval prompt — which an unattended run cannot answer. The splitter is now quote- and substitution-aware, so a denied command stays denied however it is wrapped, while `git commit -m \"a; b\"` is no longer split into nonsense at the quoted semicolon. The sidecar ships as its own Node project and cannot import the app's parser, so this is a second implementation of the same rules rather than a shared one — `lib/claude/permissions/ruleset.sidecar-parity.test.ts` pins the two against each other so they cannot drift apart unnoticed.\n\nAlso stops `workspace_search` reading a file into memory before checking its size, so a multi-gigabyte file in the tree is skipped instead of exhausting memory.",
+      "summary": "Close two ways a built-in plugin could be talked past its own boundary, both reachable from text an attacker controls.\n\nWorkspace Tools confined paths by string comparison alone, so it never saw a symlink. Git tracks symlinks, which means simply cloning a hostile repository into your open folder was enough to plant a link such as `docs/notes -> ~/.ssh`; `workspace_read_file` and `workspace_list_files` followed it straight out of the workspace, and a prompt-injected agent could ask for it by name. Every path component below the workspace root is now checked with `lstat`, which does not follow links, and `workspace_search` no longer descends into symlinked entries. A workspace you opened through a symlink yourself still works.\n\nAn unattended agent run in a cloned repository blocks `git push`, `git remote` and the `gh` CLI at the permission gate rather than trusting the prompt — when the task text comes from an issue or a ticket, it is written by anyone who can open one. Those rules only matched the literal spelling, so `git -C <path> push`, `git -c k=v push`, `git --git-dir=… push`, an extra space, or `env gh …` all slipped through to a prompt the unattended run could not answer. The gate now covers git's pre-subcommand options and the common exec wrappers, while still leaving `git commit -m \"fix the push flow\"` alone.\n\nThe same gate had a wider hole underneath it. The sidecar splits a shell command into segments before matching rules against it, and that splitter was a plain regex: it ignored quotes and never looked inside `$(…)`, backticks or subshells. So `echo $(git push)` produced one segment that matched no rule, resolved to \"ask\", and fell out of the hard gate into an approval prompt — which an unattended run cannot answer. The splitter is now quote- and substitution-aware, so a denied command stays denied however it is wrapped, while `git commit -m \"a; b\"` is no longer split into nonsense at the quoted semicolon. The sidecar ships as its own Node project and cannot import the app's parser, so this is a second implementation of the same rules rather than a shared one — `lib/claude/permissions/ruleset.sidecar-parity.test.ts` pins the two against each other so they cannot drift apart unnoticed.\n\nAlso stops `workspace_search` reading a file into memory before checking its size, so a multi-gigabyte file in the tree is skipped instead of exhausting memory.",
       "date": "2026-07-22T11:47:19+08:00"
     }
   ]

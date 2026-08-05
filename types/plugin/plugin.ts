@@ -397,6 +397,7 @@ export type PluginPermission =
   | "filesystem:read" // Read files
   | "filesystem:write" // Write files
   | "network:fetch" // Make HTTP requests
+  | "network:upload" // Upload local file contents
   | "network:websocket" // WebSocket connections
   | "clipboard:read" // Read clipboard
   | "clipboard:write" // Write clipboard
@@ -2683,6 +2684,12 @@ export interface DownloadResult {
 export interface UploadOptions extends NetworkEgressPolicyOptions {
   headers?: Record<string, string>
   fieldName?: string
+  /**
+   * Policy for the file bytes themselves. Defaults to `block` because the
+   * host cannot safely redact arbitrary binary formats. `allow` requires an
+   * explicit `dataClassification` and is enforced again by the native host.
+   */
+  fileContentPolicy?: "block" | "allow"
   onProgress?: (progress: DownloadProgress) => void
 }
 

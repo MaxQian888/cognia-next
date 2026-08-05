@@ -115,16 +115,10 @@ pub enum NodePluginProcessState {
 pub struct PluginRuntimeState {
     pub plugins: Arc<RwLock<HashMap<String, PluginRecord>>>,
     pub permissions: Arc<RwLock<HashMap<String, Vec<PermissionGrant>>>>,
-    /// Host-resident network domain allowlist for `network:fetch`. Each entry
-    /// is a host suffix (`example.com` matches `api.example.com`). Empty means
-    /// "no host restriction" — a plugin holding the `network:fetch` grant may
-    /// reach any host. An operator populates this to clamp plugin egress.
     /// Per-plugin network egress allowlist for `network:fetch`/`download`/
     /// `upload`, declared in `manifest.networkAccess.allowedDomains`. A plugin
-    /// with NO entry is unrestricted (the `network:fetch` grant + consent is the
-    /// boundary, preserving prior behaviour); a plugin that declared an
-    /// allowlist is clamped to it (`["*"]` = any host, `["none"]`/empty = no
-    /// network).
+    /// with no entry is denied; `["*"]` is the explicit unrestricted-host
+    /// declaration and `["none"]`/empty denies all network.
     pub network_allowlist: Arc<RwLock<HashMap<String, Vec<String>>>>,
     /// Optional method/path rules. No map entry preserves legacy domain-only
     /// behavior; a present empty list denies every request.
@@ -346,7 +340,10 @@ impl PluginRuntimeState {
                     .methods
                     .iter()
                     .any(|candidate| candidate.trim().to_ascii_uppercase() == method)
-                && rule.paths.iter().any(|pattern| wildcard_path_matches(path, pattern))
+                && rule
+                    .paths
+                    .iter()
+                    .any(|pattern| wildcard_path_matches(path, pattern))
         })
     }
 }
@@ -723,24 +720,14 @@ mod tests {
             "GET",
             "/api/admin"
         ));
-        assert!(!state.network_request_allowed(
-            "demo",
-            "evil.example",
-            "GET",
-            "/api/logs/recent"
-        ));
+        assert!(!state.network_request_allowed("demo", "evil.example", "GET", "/api/logs/recent"));
     }
 
     #[test]
     fn absent_network_rules_preserve_legacy_domain_only_policy() {
         let state = PluginRuntimeState::new(PathBuf::from("/tmp"));
         state.set_network_allowlist("legacy", vec!["api.example.com".into()]);
-        assert!(state.network_request_allowed(
-            "legacy",
-            "api.example.com",
-            "POST",
-            "/any/path"
-        ));
+        assert!(state.network_request_allowed("legacy", "api.example.com", "POST", "/any/path"));
     }
 
     fn make_grant(

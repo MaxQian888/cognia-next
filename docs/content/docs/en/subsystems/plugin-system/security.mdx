@@ -179,6 +179,33 @@ The canonical type is the `PluginPermission` union at `types/plugin/plugin.ts:26
 
 Note: `companion:goal-control` is **not** dangerous — it is a subset of `goal:write` (`:218-219`).
 
+## 10. Least-privilege network egress
+
+`network:fetch` is the consent capability, while `manifest.networkAccess` is
+the resource policy. Legacy `allowedDomains` entries restrict hosts. New
+`rules` entries additionally require the HTTP method and URL pathname to match:
+
+```json
+{
+  "networkAccess": {
+    "rules": [
+      {
+        "domain": "observability.example.com",
+        "methods": ["GET"],
+        "paths": ["/api/logs/*", "/api/metrics/*"]
+      }
+    ]
+  }
+}
+```
+
+The renderer enforces the policy in web/mobile runtimes and mirrors it into the
+Rust host for desktop/headless defense-in-depth. `get`, `fetch`, `download`, and
+`upload` all pass through the same policy. Outbound URLs, non-credential
+headers, and bodies also pass through the host PII gate. Recognized PII is
+redacted by default; set `piiPolicy: "block"` for fail-closed behavior and use
+`dataClassification` to label the audit entry.
+
 ### Rust parity
 
 The `cognia plugin lint` CLI at `crates/cognia-cli/src/cmd_lint.rs` hard-codes `VALID_PERMISSIONS` / `VALID_CAPABILITIES` / `VALID_PLUGIN_TYPES`. The contract test `lib/plugin/contracts/rust-capability-parity.test.ts:52` reads both the Rust and TS `validation.ts` lists and asserts they match.

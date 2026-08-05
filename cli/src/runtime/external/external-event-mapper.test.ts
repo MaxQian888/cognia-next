@@ -469,7 +469,7 @@ describe("externalAgentEventToActions", () => {
     expect(canonical).toEqual({
       kind: "usage",
       partial: true,
-      usage: { used: 24_000, size: 1_000_000 },
+      usage: { contextTokens: 24_000, contextWindow: 1_000_000 },
     })
   })
 

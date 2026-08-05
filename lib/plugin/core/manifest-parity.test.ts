@@ -9,7 +9,9 @@ const base = (): PluginManifest => ({
   id: "example",
   name: "Example",
   version: "1.0.0",
+  description: "Example plugin",
   type: "frontend",
+  capabilities: [],
   main: "index.js",
 })
 

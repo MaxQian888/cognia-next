@@ -131,7 +131,6 @@ describe("BottomRegion", () => {
           severity: "warn",
           message: 'MCP server "context7" failed to load',
           hint: "Open /mcp to see the error.",
-          createdAt: Date.now(),
         },
       ],
     })

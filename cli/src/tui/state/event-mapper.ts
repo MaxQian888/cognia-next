@@ -123,8 +123,8 @@ export function captureEventToActions(event: CaptureStreamEvent): TuiAction[] {
     }
     case "usage":
       if (event.partial) {
-        const used = Number(event.usage.used)
-        const size = Number(event.usage.size)
+        const used = Number(event.usage.contextTokens)
+        const size = Number(event.usage.contextWindow)
         return Number.isFinite(used) && Number.isFinite(size) && size > 0
           ? [{ type: "SET_CONTEXT_USAGE", used, size }]
           : []

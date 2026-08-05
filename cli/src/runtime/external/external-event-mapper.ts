@@ -113,7 +113,11 @@ export function externalAgentEventToCanonicalFallback(
       return {
         kind: "usage",
         partial: true,
-        usage: { used: event.used, size: event.size, ...(event.cost ? { cost: event.cost } : {}) },
+        usage: {
+          contextTokens: event.used,
+          contextWindow: event.size,
+          ...(event.cost ? { cost: event.cost } : {}),
+        },
       }
     case "session_info_update":
       return {

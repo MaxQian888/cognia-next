@@ -207,7 +207,7 @@ const mockManifest: PluginManifest = {
   capabilities: ["tools"],
   author: { name: "Test" },
   main: "index.ts",
-  permissions: ["network:fetch"],
+  permissions: ["network:fetch", "network:upload"],
 }
 
 const createMockPlugin = (overrides?: Partial<Plugin>): Plugin => ({
@@ -1271,6 +1271,74 @@ describe("createPluginContext", () => {
         expect.objectContaining({ pluginId: "test-plugin", permission: "network:fetch" })
       )
     })
+
+    it("passes an explicit upload file-content policy to the native gateway", async () => {
+      resetPermissionGuard()
+      getPermissionGuard().registerPlugin("test-plugin", ["network:upload"])
+      mockIsTauri.mockReturnValue(true)
+      const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
+      mockInvoke.mockResolvedValue(okEnvelope({ ok: true, status: 200, data: {} }))
+      const context = createPluginContext(
+        createMockPlugin({
+          manifest: { ...mockManifest, networkAccess: { allowedDomains: ["example.com"] } },
+        }),
+        mockManager
+      )
+
+      await context.network.upload("https://files.example.com/upload", "report.txt", {
+        fileContentPolicy: "allow",
+        dataClassification: "internal",
+      })
+
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "plugin_api_invoke",
+        expect.objectContaining({
+          request: expect.objectContaining({
+            api: "network:upload",
+            payload: expect.objectContaining({
+              fileContentPolicy: "allow",
+              dataClassification: "internal",
+            }),
+          }),
+        })
+      )
+    })
+
+    it("rejects an allowed upload without an explicit data classification", async () => {
+      resetPermissionGuard()
+      getPermissionGuard().registerPlugin("test-plugin", ["network:upload"])
+      mockIsTauri.mockReturnValue(true)
+      const context = createPluginContext(
+        createMockPlugin({
+          manifest: { ...mockManifest, networkAccess: { allowedDomains: ["example.com"] } },
+        }),
+        mockManager
+      )
+
+      await expect(
+        context.network.upload("https://files.example.com/upload", "report.txt", {
+          fileContentPolicy: "allow",
+        })
+      ).rejects.toThrow(/requires dataClassification/)
+    })
+
+    it("blocks upload file content by default before invoking the native gateway", async () => {
+      resetPermissionGuard()
+      getPermissionGuard().registerPlugin("test-plugin", ["network:upload"])
+      mockIsTauri.mockReturnValue(true)
+      const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
+      const context = createPluginContext(
+        createMockPlugin({
+          manifest: { ...mockManifest, networkAccess: { allowedDomains: ["example.com"] } },
+        }),
+        mockManager
+      )
+
+      await expect(
+        context.network.upload("https://files.example.com/upload", "report.txt")
+      ).rejects.toThrow(/file content is blocked/)
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_api_invoke", expect.anything())
+    })
   })
 
   describe("browser runtime adapters", () => {
@@ -1727,6 +1795,16 @@ describe("agent imperative API", () => {
       expect(decodeURIComponent(url)).toContain("<EMAIL_001>")
       expect(String(init.body)).not.toContain("alice@example.com")
       expect(String(init.body)).toContain("<EMAIL_001>")
+      const audit = getPermissionGuard().getAuditLog({ pluginId: "test-plugin" })
+      expect(audit).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            context:
+              "egress POST https://api.example.com/incidents classification=operational pii=redact",
+          }),
+        ])
+      )
+      expect(JSON.stringify(audit)).not.toContain("alice@example.com")
     })
 
     it("blocks browser downloads to undeclared domains before fetching", async () => {

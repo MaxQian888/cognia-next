@@ -503,7 +503,7 @@ fn prepare_node_launch(
     let declares = |permission: &str| {
         declared_permissions.iter().any(|value| value == permission) && granted.contains(permission)
     };
-    if declares("network:fetch") || declares("network:websocket") {
+    if declares("network:fetch") || declares("network:upload") || declares("network:websocket") {
         return Err(PluginError::InvalidArgument(
             "Node network grants require a scoped host broker and cannot run in-process".into(),
         ));

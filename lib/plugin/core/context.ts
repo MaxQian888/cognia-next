@@ -13,6 +13,7 @@ import {
   type NetworkHttpMethod,
 } from "@/lib/plugin/security/network-allowlist"
 import { sanitizePluginNetworkEgress } from "@/lib/plugin/api/plugin-pii-gate"
+import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { getPluginSecurityPosture } from "@/lib/plugin/security/security-posture"
 import type {
   Plugin,
@@ -1133,7 +1134,7 @@ const NETWORK_GUARD_MAP: Partial<Record<keyof PluginNetworkAPI, PluginPermission
   patch: "network:fetch",
   fetch: "network:fetch",
   download: "network:fetch",
-  upload: "network:fetch",
+  upload: "network:upload",
 }
 
 const NETWORK_HTTP_METHODS = new Set<NetworkHttpMethod>([
@@ -1196,6 +1197,23 @@ function createNetworkAPI(
   networkAccess?: PluginManifest["networkAccess"]
 ): PluginNetworkAPI {
   const rateLimiter = getPluginRateLimiter()
+  const auditEgress = (
+    url: string,
+    method: NetworkHttpMethod,
+    options?: Pick<NetworkRequestOptions, "dataClassification" | "piiPolicy">,
+    fileContentPolicy?: UploadOptions["fileContentPolicy"]
+  ): void => {
+    const target = new URL(url)
+    getPermissionGuard().recordUsage(
+      pluginId,
+      fileContentPolicy ? "network:upload" : "network:fetch",
+      `egress ${method} ${target.origin}${target.pathname} ` +
+        `classification=${options?.dataClassification ?? "unspecified"} ` +
+        (fileContentPolicy
+          ? `metadataPii=${options?.piiPolicy ?? "redact"} fileContent=${fileContentPolicy}/raw`
+          : `pii=${options?.piiPolicy ?? "redact"}`)
+    )
+  }
   const parseBrowserResponse = async <T>(
     response: Response,
     responseType?: NetworkRequestOptions["responseType"]
@@ -1249,6 +1267,7 @@ function createNetworkAPI(
       networkAccess,
       getPluginSecurityPosture()
     )
+    auditEgress(egress.url, method, options)
     const requestOptions = {
       ...options,
       method,
@@ -1320,6 +1339,7 @@ function createNetworkAPI(
         networkAccess,
         getPluginSecurityPosture()
       )
+      auditEgress(egress.url, "GET", options)
       if (!isPluginGatewayAvailable()) {
         const response = await fetch(egress.url, { headers: egress.headers })
         if (!response.ok) {
@@ -1374,6 +1394,16 @@ function createNetworkAPI(
         networkAccess,
         getPluginSecurityPosture()
       )
+      const fileContentPolicy = options?.fileContentPolicy ?? "block"
+      if (fileContentPolicy !== "allow") {
+        throw new Error("network:upload file content is blocked; set fileContentPolicy to allow")
+      }
+      if (!options?.dataClassification) {
+        throw new Error(
+          "network:upload requires dataClassification when fileContentPolicy is allow"
+        )
+      }
+      auditEgress(egress.url, "POST", options, fileContentPolicy)
       return invokePluginApi<NetworkResponse<unknown>>(pluginId, "network:upload", {
         url: egress.url,
         filePath,
@@ -1381,6 +1411,8 @@ function createNetworkAPI(
         // When set, the host sends multipart/form-data with this field name;
         // otherwise the file bytes are the raw request body.
         fieldName: options?.fieldName,
+        fileContentPolicy,
+        dataClassification: options?.dataClassification,
       })
     },
   }
