@@ -2,15 +2,12 @@
 
 /**
  * Static search dialog (D8). The exported Orama indexes are downloaded and
- * queried client-side; Chinese needs the mandarin tokenizer because Orama's
- * default tokenizer has no zh stemmer (build fails server-side, and a
- * whitespace tokenizer can't segment Chinese text client-side). Must stay in
- * sync with the `localeMap` in `app/api/search/route.ts`.
+ * queried client-side. Fumadocs' multilingual ZBSearch index handles both
+ * configured locales and filters results to the active locale.
  */
 
-import { create } from "@orama/orama"
-import { createTokenizer } from "@orama/tokenizers/mandarin"
 import { useDocsSearch } from "fumadocs-core/search/client"
+import { staticClient } from "fumadocs-core/search/client/orama-static"
 import {
   SearchDialog,
   SearchDialogClose,
@@ -24,19 +21,10 @@ import {
 } from "fumadocs-ui/components/dialog/search"
 import { useI18n } from "fumadocs-ui/contexts/i18n"
 
-function initOrama(locale?: string) {
-  return create({
-    schema: { _: "string" },
-    ...(locale === "zh" ? { components: { tokenizer: createTokenizer() } } : { language: locale }),
-  })
-}
-
 export default function StaticSearchDialog(props: SharedProps) {
   const { locale } = useI18n()
   const { search, setSearch, query } = useDocsSearch({
-    type: "static",
-    initOrama,
-    locale,
+    client: staticClient({ locale }),
   })
 
   return (
