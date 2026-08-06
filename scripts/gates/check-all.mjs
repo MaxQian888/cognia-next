@@ -118,6 +118,9 @@ const REGISTRY = [
   { script: "audit:slots", group: "audit" },
   { script: "audit:plugin-surfaces", group: "audit" },
   { script: "audit:ai-elements", group: "audit" },
+  // Local persistence governance rejects schema/catalog, TypeScript/Rust sync,
+  // version-order, and generated-documentation drift.
+  { script: "audit:data-governance", group: "audit" },
   // ADR-0090: unified execution paths must stay vendor-neutral (no
   // GLM/Kimi/provider-name branches in dispatch logic).
   { script: "check:provider-name-branches", group: "audit" },

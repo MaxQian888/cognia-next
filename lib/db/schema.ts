@@ -3574,6 +3574,15 @@ export class CogniaDB extends Dexie {
         if (rows.length > 0) await table.bulkPut(rows)
       })
 
+    // v150 — global trace-time index. Retention, recent-span, paging and
+    // dashboard-window reads previously materialized and sorted the entire
+    // high-write trace table. The existing compound indexes remain unchanged;
+    // `startTime` adds a bounded global cursor for those hot paths.
+    this.version(150).stores({
+      agentTraces:
+        "&id, startTime, sessionId, [sessionId+startTime], traceId, [traceId+startTime], parentSpanId, surface, projectId, [projectId+startTime]",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {

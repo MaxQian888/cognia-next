@@ -571,6 +571,33 @@ describe("getDb", () => {
     await Dexie.delete(name)
   }, 30_000)
 
+  it("v150 adds the global agent trace time index without rewriting rows", async () => {
+    const name = `cognia-agent-trace-v150-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(149).stores({
+      agentTraces:
+        "&id, sessionId, [sessionId+startTime], traceId, [traceId+startTime], parentSpanId, surface, projectId, [projectId+startTime]",
+    })
+    await legacy.open()
+    await legacy.table("agentTraces").bulkPut([
+      { id: "old", traceId: "trace-1", sessionId: "session-1", startTime: 10 },
+      { id: "new", traceId: "trace-2", sessionId: "session-2", startTime: 20 },
+    ])
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    expect(upgraded.verno).toBeGreaterThanOrEqual(150)
+    expect(upgraded.agentTraces.schema.indexes.map((index) => index.name)).toContain("startTime")
+    expect(
+      (await upgraded.agentTraces.orderBy("startTime").reverse().toArray()).map((row) => row.id)
+    ).toEqual(["new", "old"])
+
+    upgraded.close()
+    await Dexie.delete(name)
+  }, 30_000)
+
   it("v143 splits sandbox connections into provider/driver, keeping legacy mirrors", async () => {
     const name = `cognia-v143-sandbox-${Date.now()}`
     const legacy = new Dexie(name)

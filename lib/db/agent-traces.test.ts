@@ -481,4 +481,18 @@ describe("queryRecentTraces", () => {
     await seed()
     expect(await countTraces()).toBe(4)
   })
+
+  it("keeps hot list/window/count/prune paths off full-table materialization", async () => {
+    await seed()
+    const fullTableRead = jest.spyOn(getDb().agentTraces, "toArray")
+
+    await queryRecent(2)
+    await queryByWindow({ since: 20, until: 120 })
+    await queryRecentTraces(2)
+    await countTraces()
+    await pruneOlderThan(20)
+
+    expect(fullTableRead).not.toHaveBeenCalled()
+    fullTableRead.mockRestore()
+  })
 })

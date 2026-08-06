@@ -160,15 +160,27 @@ export async function claimNextMemoryJob(
 ): Promise<MemoryJob | undefined> {
   const db = getDb()
   return db.transaction("rw", db.memoryJobs, async () => {
-    const [queued, running] = await Promise.all([
-      db.memoryJobs.where("status").equals("queued").toArray(),
-      db.memoryJobs.where("status").equals("running").toArray(),
+    // `[status+queuedAt]` keeps the scan ordered by claim priority. `first()`
+    // stops as soon as it reaches an eligible row, rather than materializing
+    // every queued/running job and sorting both arrays in renderer memory.
+    const [queued, expiredLease] = await Promise.all([
+      db.memoryJobs
+        .where("[status+queuedAt]")
+        .between(["queued", 0], ["queued", Number.MAX_SAFE_INTEGER])
+        .filter((job) => (job.nextAttemptAt ?? 0) <= now)
+        .first(),
+      db.memoryJobs
+        .where("[status+queuedAt]")
+        .between(["running", 0], ["running", Number.MAX_SAFE_INTEGER])
+        .filter((job) => job.leaseExpiresAt !== undefined && job.leaseExpiresAt <= now)
+        .first(),
     ])
-    const eligible = [
-      ...queued.filter((job) => (job.nextAttemptAt ?? 0) <= now),
-      ...running.filter((job) => job.leaseExpiresAt !== undefined && job.leaseExpiresAt <= now),
-    ].sort((a, b) => a.queuedAt - b.queuedAt)
-    const next = eligible[0]
+    const next =
+      queued && expiredLease
+        ? queued.queuedAt <= expiredLease.queuedAt
+          ? queued
+          : expiredLease
+        : (queued ?? expiredLease)
     if (!next) return undefined
 
     const claimed: MemoryJob = {

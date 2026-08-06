@@ -2,12 +2,13 @@
 /**
  * Tests for the TTS keyring frontend wrapper. Drives both code paths:
  *   - Tauri (mocks `@tauri-apps/api/core` and `lib/tauri.isTauri`)
- *   - Web fallback (uses fake-indexeddb-backed Dexie)
+ *   - Web fallback (Browser Vault/session store plus legacy Dexie migration)
  */
 
 import "fake-indexeddb/auto"
 
 jest.mock("@/lib/tauri", () => ({
+  ...jest.requireActual("@/lib/tauri"),
   isTauri: jest.fn(),
 }))
 
@@ -76,9 +77,10 @@ describe("getProviderKey/setProviderKey/clearProviderKey (web fallback)", () => 
     expect(await getProviderKey("openai")).toBeNull()
   })
 
-  it("round-trips a value via Dexie", async () => {
+  it("round-trips a value without persisting cleartext in Dexie", async () => {
     await setProviderKey("openai", "sk-abc")
     expect(await getProviderKey("openai")).toBe("sk-abc")
+    expect(await getDb().tts_provider_keys.get("tts.providerKey.openai")).toBeUndefined()
   })
 
   it("trims surrounding whitespace before storing", async () => {

@@ -22,11 +22,14 @@
 import { isCapacitor, isTauri, transport } from "@/lib/tauri"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { makeDefaultLoader } from "@/lib/capacitor/_shared"
+import { getActiveBrowserVault } from "@/lib/runtime/browser-vault"
 
 export interface KeyringStore {
   save(keyId: string, value: string): Promise<void>
   load(keyId: string): Promise<string | null>
   delete(keyId: string): Promise<void>
+  /** Whether values currently survive a process/browser restart. */
+  isPersistent?(): boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +58,9 @@ class TauriKeyringStore implements KeyringStore {
     await this.call("keyring_secret_clear", {
       input: { namespace: this.namespace, key: keyId },
     })
+  }
+  isPersistent(): boolean {
+    return true
   }
 }
 
@@ -117,6 +123,9 @@ class CapacitorSecureStore implements KeyringStore {
       // Missing keys are fine; the plugin throws on absence.
     }
   }
+  isPersistent(): boolean {
+    return true
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +153,62 @@ class InMemoryStore implements KeyringStore {
   async delete(keyId: string): Promise<void> {
     this.store.delete(keyId)
   }
+  isPersistent(): boolean {
+    return false
+  }
+}
+
+/**
+ * Web adapter that upgrades transparently from session memory to the encrypted
+ * account Browser Vault as soon as it is unlocked. The namespace remains part
+ * of the stored name so independent domain modules cannot collide.
+ */
+class BrowserVaultStore implements KeyringStore {
+  private readonly fallback = new InMemoryStore()
+
+  constructor(private readonly namespace: string) {}
+
+  private name(keyId: string): string {
+    return `keyring:${this.namespace}:${keyId}`
+  }
+
+  async save(keyId: string, value: string): Promise<void> {
+    const vault = getActiveBrowserVault()
+    if (vault) {
+      await vault.storeSecret(this.name(keyId), value)
+      await this.fallback.delete(keyId)
+      return
+    }
+    await this.fallback.save(keyId, value)
+  }
+
+  async load(keyId: string): Promise<string | null> {
+    const vault = getActiveBrowserVault()
+    if (vault) {
+      const persisted = await vault.loadSecret(this.name(keyId))
+      if (persisted !== null) return persisted
+      const sessionValue = await this.fallback.load(keyId)
+      if (sessionValue !== null) {
+        // A value may have been entered while the account vault was locked.
+        // Promote it before returning so the next browser session can recover
+        // it; deleting the fallback happens only after the durable write.
+        await vault.storeSecret(this.name(keyId), sessionValue)
+        await this.fallback.delete(keyId)
+        return sessionValue
+      }
+    }
+    return this.fallback.load(keyId)
+  }
+
+  async delete(keyId: string): Promise<void> {
+    const vault = getActiveBrowserVault()
+    if (vault) await vault.deleteSecret(this.name(keyId))
+    await this.fallback.delete(keyId)
+  }
+
+  isPersistent(): boolean {
+    return getActiveBrowserVault() !== null
+  }
 }
 
 /**
@@ -155,8 +220,13 @@ export function createKeyringStore(namespace: string): KeyringStore {
   if (isTauri() || isHeadlessHost()) {
     return new TauriKeyringStore(namespace, (name, params) => transport.call(name, params))
   }
-  if (isCapacitor()) return new CapacitorSecureStore(namespace)
-  return new InMemoryStore()
+  // A number of domain tests intentionally provide a minimal `@/lib/tauri`
+  // mock with only `isTauri`. Keep the Web path resilient to that supported
+  // test/runtime seam instead of requiring every consumer to mock Capacitor.
+  if (typeof isCapacitor === "function" && isCapacitor()) {
+    return new CapacitorSecureStore(namespace)
+  }
+  return new BrowserVaultStore(namespace)
 }
 
 /**

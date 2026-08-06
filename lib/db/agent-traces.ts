@@ -11,6 +11,7 @@
 
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import type { AgentTraceSessionAnalyticsSummary } from "@/types/agent/agent-trace"
+import Dexie from "dexie"
 import { getDb } from "./schema"
 
 /** Idempotent upsert. The span's `id` is the Dexie primary key. */
@@ -28,21 +29,24 @@ export async function bulkInsertSpans(spans: AgentTraceSpan[]): Promise<void> {
 /** Read spans for one session, newest-first. `limit` defaults to 500. */
 export async function queryBySession(sessionId: string, limit = 500): Promise<AgentTraceSpan[]> {
   if (!sessionId) return []
-  const rows = await getDb().agentTraces.where("sessionId").equals(sessionId).toArray()
-  rows.sort((a, b) => b.startTime - a.startTime)
-  return rows.slice(0, Math.max(0, Math.floor(limit)))
+  const safeLimit = Math.max(0, Math.floor(limit))
+  if (safeLimit === 0) return []
+  return getDb()
+    .agentTraces.where("[sessionId+startTime]")
+    .between([sessionId, Dexie.minKey], [sessionId, Dexie.maxKey])
+    .reverse()
+    .limit(safeLimit)
+    .toArray()
 }
 
 /** Read the most-recent N spans across every session, newest-first. Used by
  * the unified log panel's Agent Trace merge (see `useAgentTraceAsLogs`).
- * Cardinality is low (≤ low thousands of rows) so a full-table scan + sort
- * is cheaper than maintaining a global `startTime` index. */
+ * Uses the v150 global `startTime` index so memory and latency are bounded by
+ * the caller's limit rather than total retained telemetry. */
 export async function queryRecent(limit = 500): Promise<AgentTraceSpan[]> {
   const safeLimit = Math.max(0, Math.floor(limit))
   if (safeLimit === 0) return []
-  const rows = await getDb().agentTraces.toArray()
-  rows.sort((a, b) => b.startTime - a.startTime)
-  return rows.slice(0, safeLimit)
+  return getDb().agentTraces.orderBy("startTime").reverse().limit(safeLimit).toArray()
 }
 
 /**
@@ -54,61 +58,73 @@ export async function queryRecent(limit = 500): Promise<AgentTraceSpan[]> {
  * calls collapsed the whole list to a single row, and there was no way to page
  * further back.
  *
- * `offset` skips whole traces, so the caller pages by trace too. Same
- * full-table-scan rationale as {@link queryRecent}: Dexie has no global
- * `startTime` index and the cardinality is low thousands.
+ * `offset` skips whole traces. The global time index is walked in bounded
+ * pages until enough distinct trace ids are found; only the selected traces'
+ * spans are then materialized through the existing `traceId` index.
  */
 export async function queryRecentTraces(limit = 50, offset = 0): Promise<AgentTraceSpan[]> {
   const safeLimit = Math.max(0, Math.floor(limit))
   const safeOffset = Math.max(0, Math.floor(offset))
   if (safeLimit === 0) return []
-  const rows = await getDb().agentTraces.toArray()
-  rows.sort((a, b) => b.startTime - a.startTime)
-
-  // Traces in order of their most recent span, which is the order the panel
-  // shows them in.
+  const db = getDb()
+  const needed = safeOffset + safeLimit
+  const scanPageSize = Math.max(100, needed * 4)
   const order: string[] = []
   const seen = new Set<string>()
-  for (const row of rows) {
-    if (seen.has(row.traceId)) continue
-    seen.add(row.traceId)
-    order.push(row.traceId)
+  let spanOffset = 0
+  while (order.length < needed) {
+    const page = await db.agentTraces
+      .orderBy("startTime")
+      .reverse()
+      .offset(spanOffset)
+      .limit(scanPageSize)
+      .toArray()
+    for (const row of page) {
+      if (seen.has(row.traceId)) continue
+      seen.add(row.traceId)
+      order.push(row.traceId)
+      if (order.length >= needed) break
+    }
+    if (page.length < scanPageSize) break
+    spanOffset += page.length
   }
   const wanted = new Set(order.slice(safeOffset, safeOffset + safeLimit))
-  return wanted.size === 0 ? [] : rows.filter((r) => wanted.has(r.traceId))
+  if (wanted.size === 0) return []
+  const rows = await db.agentTraces
+    .where("traceId")
+    .anyOf([...wanted])
+    .toArray()
+  rows.sort((a, b) => b.startTime - a.startTime)
+  return rows
 }
 
 /** How many distinct traces exist, for the panel's paging controls. */
 export async function countTraces(): Promise<number> {
-  const rows = await getDb().agentTraces.toArray()
-  return new Set(rows.map((r) => r.traceId)).size
+  return (await getDb().agentTraces.orderBy("traceId").uniqueKeys()).length
 }
 
 /** Read spans whose `startTime` falls in `[since, until]`, oldest-first. Used
  * by the observability dashboard's windowed reads. `until` defaults to "now
- * and later" (no upper bound). Same full-table-scan + client-filter rationale
- * as `aggregateStatsAll` — Dexie has no cheap global `startTime` index and the
- * cardinality is low thousands of rows. */
+ * and later" (no upper bound). Backed by the v150 global time index. */
 export async function queryByWindow(opts: {
   since: number
   until?: number
 }): Promise<AgentTraceSpan[]> {
   const { since, until } = opts
-  const rows = await getDb().agentTraces.toArray()
-  const filtered = rows.filter(
-    (r) => r.startTime >= since && (until === undefined || r.startTime <= until)
-  )
-  filtered.sort((a, b) => a.startTime - b.startTime)
-  return filtered
+  const index = getDb().agentTraces.where("startTime")
+  return until === undefined
+    ? index.aboveOrEqual(since).toArray()
+    : index.between(since, until, true, true).toArray()
 }
 
 /** Read all spans for one trace, ordered chronologically (oldest-first) so
  * the trace view can render a proper timeline. */
 export async function queryByTrace(traceId: string): Promise<AgentTraceSpan[]> {
   if (!traceId) return []
-  const rows = await getDb().agentTraces.where("traceId").equals(traceId).toArray()
-  rows.sort((a, b) => a.startTime - b.startTime)
-  return rows
+  return getDb()
+    .agentTraces.where("[traceId+startTime]")
+    .between([traceId, Dexie.minKey], [traceId, Dexie.maxKey])
+    .toArray()
 }
 
 /** Aggregate session-level stats from persisted spans. Matches the existing
@@ -157,10 +173,11 @@ export interface AgentTraceStatsSummary extends AgentTraceSessionAnalyticsSummar
 export async function aggregateStatsAll(opts?: {
   since?: number
 }): Promise<AgentTraceStatsSummary> {
-  const rows = await getDb().agentTraces.toArray()
-  const filtered =
-    typeof opts?.since === "number" ? rows.filter((r) => r.startTime >= opts!.since!) : rows
-  return aggregateStats(filtered)
+  const rows =
+    typeof opts?.since === "number"
+      ? await getDb().agentTraces.where("startTime").aboveOrEqual(opts.since).toArray()
+      : await getDb().agentTraces.toArray()
+  return aggregateStats(rows)
 }
 
 /** Same as `aggregateStatsAll` but scoped to one session. */
@@ -226,14 +243,10 @@ export async function deleteSpansForSession(sessionId: string): Promise<void> {
   await getDb().agentTraces.where("sessionId").equals(sessionId).delete()
 }
 
-/** Prune spans older than `olderThanMs` epoch ms. Cheap full-table scan; we
- * don't expect millions of rows. Returns the count deleted for callers that
- * want to surface "kept N entries" in the UI. */
+/** Prune spans older than `olderThanMs` through the v150 time index. */
 export async function pruneOlderThan(olderThanMs: number): Promise<number> {
   if (!Number.isFinite(olderThanMs) || olderThanMs <= 0) return 0
-  return getDb()
-    .agentTraces.filter((row) => row.startTime < olderThanMs)
-    .delete()
+  return getDb().agentTraces.where("startTime").below(olderThanMs).delete()
 }
 
 /** Count all persisted spans — drives the observability settings "N traces

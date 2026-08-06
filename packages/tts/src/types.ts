@@ -19,15 +19,15 @@ export type TTSProvider =
   | "openai-realtime"
 
 /**
- * Web-mode fallback row for the `tts_provider_keys` Dexie table. On the desktop
- * the keys live in the OS keyring; in the browser (no keyring) `lib/tts/keyring.ts`
- * falls back to this table. `schema.ts` imports + re-exports this type, so
- * existing `@/lib/db/schema` import sites keep working. See `lib/db/CONVENTIONS.md`.
+ * Legacy web fallback row for the `tts_provider_keys` Dexie table. New writes
+ * use the encrypted Browser Vault (or the OS keyring on desktop); this shape is
+ * retained so old cleartext rows can be migrated safely on read.
  */
 export interface TtsProviderKeyRow {
   /** "tts.providerKey.<provider>" */
   id: string
-  value: string
+  /** Legacy cleartext value. Never written by current code. */
+  value?: string
 }
 
 export interface TTSProviderInfo {

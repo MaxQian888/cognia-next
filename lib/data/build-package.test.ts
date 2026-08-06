@@ -304,7 +304,9 @@ describe("buildBackupPackage", () => {
     expect(pkg.payload.messages?.map((m) => m.id)).toEqual(["msg-1"])
     expect(pkg.payload.sessionState?.map((s) => s.sessionId)).toEqual(["sess-1"])
     expect(pkg.payload.trustedWorkspaces?.map((w) => w.path)).toEqual(["/some/dir"])
-    expect(pkg.payload.ttsProviderKeys?.map((k) => k.id)).toEqual(["tts.providerKey.openai"])
+    // Secret-bearing tables never leave the credential seam. Legacy packages
+    // carrying this optional field remain importable, but new exports omit it.
+    expect(pkg.payload.ttsProviderKeys).toBeUndefined()
   })
 
   it("includes built-ins and the API key when explicitly opted in", async () => {

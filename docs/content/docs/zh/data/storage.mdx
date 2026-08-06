@@ -5,7 +5,9 @@ description: 完整 IndexedDB schema、按版本演进、表索引清单与新�
 
 # 存储（Dexie schema）
 
-Cognia 几乎所有浏览器侧状态都通过 **Dexie 存在 IndexedDB**。Schema 定义在 `lib/db/schema.ts`，当前版本 **v115**。Schema 版本只增不改 —— 永远不要修改既有的 `.version(n).stores({...})` 块。
+Cognia 几乎所有浏览器侧状态都通过 **Dexie 存在 IndexedDB**。Schema 定义在 `lib/db/schema.ts`，当前版本 **v150**，共 **234** 张受治理静态表。Schema 版本只增不改 —— 永远不要修改既有的 `.version(n).stores({...})` 块。
+
+机器可读的治理权威是 `lib/data-governance/table-catalog.ts`，生成摘要位于 `docs/data-governance.generated.json`。`pnpm audit:data-governance` 会阻断 schema/catalog、TypeScript/Rust 同步表、版本顺序或生成文档的漂移。
 
 ## 数据库标识
 
@@ -217,6 +219,7 @@ timeline
 | **v26** | 聊天草稿              | + `chatDrafts`（每会话未发送的 Composer 内容）。                                                                                                                      |
 | **v27 – v112** | 后续追加              | OCR 结果、Goal 跟踪、Agent Team 持久化、角色 pack overlay、GitHub Delivery 状态、external agent 配置、移动同步游标、性能采样、终端会话、WeChat/WeCom 适配、公共分享链等。具体差异以 `lib/db/schema.ts` 为准。 |
 | **v115** | 资源评论 | 新增 `contextComments` 作为跨资源评论的唯一可写表，并幂等回填 Canvas 评论。所有历史版本块保持不变。 |
+| **v116 – v150** | 后续治理与运行时能力 | Sites、统一执行日志、记忆治理、账户 / RuntimeTarget 隔离、模板平台、Knowledge Base、单 Agent 任务、不可变工作流部署、可回放事件序列与 Agent Trace 全局时间索引。精确策略与数量由 catalog 生成。 |
 
 ### 资源评论（v115）
 

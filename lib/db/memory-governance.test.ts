@@ -80,6 +80,24 @@ describe("durable memory jobs", () => {
     })
   })
 
+  it("claims the oldest eligible row across queued work and expired leases", async () => {
+    await enqueueMemoryJob({ ...draft, id: "queued-new", dedupeKey: "queued-new", queuedAt: 200 })
+    await enqueueMemoryJob({
+      ...draft,
+      id: "running-old",
+      dedupeKey: "running-old",
+      status: "running",
+      queuedAt: 100,
+      leaseOwner: "dead-worker",
+      leaseExpiresAt: 900,
+    })
+
+    await expect(claimNextMemoryJob("replacement", 1_000)).resolves.toMatchObject({
+      id: "running-old",
+      leaseOwner: "replacement",
+    })
+  })
+
   it("claims a specific durable job only once", async () => {
     await enqueueMemoryJob(draft)
     expect(await claimMemoryJob("j1", "worker-a", 1_000, 100)).toMatchObject({

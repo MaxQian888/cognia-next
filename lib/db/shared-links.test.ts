@@ -41,6 +41,25 @@ describe("recordSharedLink", () => {
     expect(row.revoked).toBe(false)
     expect(await getSharedLinkByCode("AAA")).toMatchObject({ code: "AAA", revoked: false })
   })
+
+  it("persists only secret references while hydrating the public row", async () => {
+    await recordSharedLink(input("SEC", { ownerToken: "owner-secret" }))
+
+    const persisted = await getDb().sharedLinks.where("code").equals("SEC").first()
+    expect(persisted?.url).toBe("https://share.example/v/SEC")
+    expect(persisted?.ownerToken).toBeUndefined()
+    expect(persisted?.secretRefs).toEqual({
+      urlFragment: expect.any(String),
+      ownerToken: expect.any(String),
+    })
+
+    const hydrated = await getSharedLinkByCode("SEC")
+    expect(hydrated).toMatchObject({
+      url: "https://share.example/v/SEC#k=abc",
+      ownerToken: "owner-secret",
+    })
+    expect(hydrated?.secretRefs).toBeUndefined()
+  })
 })
 
 describe("listSharedLinks", () => {

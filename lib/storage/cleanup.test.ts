@@ -109,6 +109,24 @@ describe("quickCleanup", () => {
     expect(result.errors).toEqual([])
     expect(await getDb().backupHistory.count()).toBe(3)
   })
+
+  it("cleans governed cache tables in other without deleting authoritative other data", async () => {
+    await getDb().chatSearchState.put({ id: "cache", sessionId: "s1" } as never)
+    await getDb().chatGoals.put({
+      id: "goal",
+      sessionId: "s1",
+      title: "keep",
+      status: "active",
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+
+    const result = await quickCleanup()
+
+    expect(result.deletedItems).toBeGreaterThanOrEqual(1)
+    expect(await getDb().chatSearchState.get("cache")).toBeUndefined()
+    expect(await getDb().chatGoals.get("goal")).toBeDefined()
+  })
 })
 
 describe("deepCleanup", () => {
@@ -138,6 +156,24 @@ describe("selectableCategories", () => {
     expect(set).not.toContain("settings")
     expect(set).not.toContain("character")
     expect(set).toContain("backupHistory")
+  })
+})
+
+describe("governed other table plan", () => {
+  it("includes safe governed tables and excludes protected tables", () => {
+    const names = __TESTING__.cleanupTableNames("other", ["agentTraces", "chatGoals"])
+    expect(names).toContain("agentTraces")
+    expect(names).not.toContain("chatGoals")
+  })
+
+  it("fails closed for an unknown runtime table", () => {
+    expect(__TESTING__.cleanupTableNames("other", ["unknown-table"])).toEqual([])
+  })
+
+  it("fails closed for undated rows during age-based cleanup", () => {
+    expect(__TESTING__.isEligibleForCleanup({ id: "undated" }, Date.now())).toBe(false)
+    expect(__TESTING__.isEligibleForCleanup({ id: "trace", startTime: 10 }, 20)).toBe(true)
+    expect(__TESTING__.isEligibleForCleanup({ id: "trace", startTime: 30 }, 20)).toBe(false)
   })
 })
 

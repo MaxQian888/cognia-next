@@ -2,11 +2,15 @@
 // must match `lib/db/schema.ts` table names exactly; the storage-manager
 // walks `db.tables` and routes each table through this map to bucket rows.
 //
-// Names that aren't in the map fall through to the `other` category so adding
-// a new Dexie table won't make the breakdown panel under-report sizes —
-// they'll just show up under "Other" until somebody updates this map.
+// The table list is derived from DataTableCatalog. An unknown dynamic table
+// still falls through to `other`, while every static table is classified.
 
 import type { StorageCategory } from "./types"
+import {
+  DATA_TABLE_CATALOG,
+  policyForTable,
+  tableNamesForCategory,
+} from "@/lib/data-governance/table-catalog"
 
 interface CategoryDescriptor {
   /** i18n key under `settings.data.breakdown.categories.<key>` for the label. */
@@ -21,62 +25,62 @@ export const CATEGORY_INFO: Record<StorageCategory, CategoryDescriptor> = {
   settings: {
     i18nKey: "settings",
     defaultName: "Settings",
-    tables: ["settings"],
+    tables: tableNamesForCategory("settings"),
   },
   session: {
     i18nKey: "session",
     defaultName: "Sessions",
-    tables: ["sessions"],
+    tables: tableNamesForCategory("session"),
   },
   chat: {
     i18nKey: "chat",
     defaultName: "Messages",
-    tables: ["messages", "sessionState"],
+    tables: tableNamesForCategory("chat"),
   },
   character: {
     i18nKey: "character",
     defaultName: "Characters",
-    tables: ["characters"],
+    tables: tableNamesForCategory("character"),
   },
   skill: {
     i18nKey: "skill",
     defaultName: "Skills",
-    tables: ["skills", "skillResources"],
+    tables: tableNamesForCategory("skill"),
   },
   team: {
     i18nKey: "team",
     defaultName: "Teams",
-    tables: ["teams"],
+    tables: tableNamesForCategory("team"),
   },
   mcp: {
     i18nKey: "mcp",
     defaultName: "MCP servers",
-    tables: ["mcpServers"],
+    tables: tableNamesForCategory("mcp"),
   },
   preset: {
     i18nKey: "preset",
     defaultName: "Prompt presets",
-    tables: ["promptPresets"],
+    tables: tableNamesForCategory("preset"),
   },
   canvas: {
     i18nKey: "canvas",
     defaultName: "Canvas documents",
-    tables: ["canvasDocuments", "canvasVersions", "canvasComments", "canvasSessions"],
+    tables: tableNamesForCategory("canvas"),
   },
   trustedWorkspace: {
     i18nKey: "trustedWorkspace",
     defaultName: "Trusted workspaces",
-    tables: ["trustedWorkspaces"],
+    tables: tableNamesForCategory("trustedWorkspace"),
   },
   ttsKey: {
     i18nKey: "ttsKey",
     defaultName: "TTS keys",
-    tables: ["tts_provider_keys"],
+    tables: tableNamesForCategory("ttsKey"),
   },
   backupHistory: {
     i18nKey: "backupHistory",
     defaultName: "Backup history",
-    tables: ["backupHistory"],
+    tables: tableNamesForCategory("backupHistory"),
   },
   vector: {
     i18nKey: "vector",
@@ -93,23 +97,30 @@ export const CATEGORY_INFO: Record<StorageCategory, CategoryDescriptor> = {
   other: {
     i18nKey: "other",
     defaultName: "Other",
-    tables: [],
+    tables: tableNamesForCategory("other"),
   },
 }
 
 /** Reverse lookup: table name → category. */
 export const TABLE_TO_CATEGORY: Record<string, StorageCategory> = (() => {
   const map: Record<string, StorageCategory> = {}
-  for (const [key, value] of Object.entries(CATEGORY_INFO)) {
-    for (const table of value.tables) {
-      map[table] = key as StorageCategory
-    }
+  for (const entry of DATA_TABLE_CATALOG) {
+    map[entry.name] = entry.storageCategory
   }
   return map
 })()
 
 export function categoryForTable(tableName: string): StorageCategory {
-  return TABLE_TO_CATEGORY[tableName] ?? "other"
+  return policyForTable(tableName)?.storageCategory ?? "other"
+}
+
+/** Resolve the live table plan for a category. Unlike `CATEGORY_INFO.tables`,
+ * this includes every governed table in `other` plus dynamic plugin tables. */
+export function tablesForCategory(
+  category: StorageCategory,
+  runtimeTableNames?: readonly string[]
+): string[] {
+  return tableNamesForCategory(category, runtimeTableNames)
 }
 
 export function defaultDisplayName(category: StorageCategory): string {

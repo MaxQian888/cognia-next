@@ -124,6 +124,7 @@ export const EXEMPTIONS = {
   "audit:loading-states:test": "covered by scripts:test:gates",
   "audit:unreachable-components:test": "covered by scripts:test:gates",
   "audit:ai-elements:test": "covered by scripts:test:gates",
+  "audit:data-governance:test": "covered by scripts:test:gates",
   "lint:static-export:test": "covered by scripts:test:gates",
   "clean:cache:test": "covered by scripts:test:build",
   "terminal-host:prepare:test": "covered by scripts:test:build",
