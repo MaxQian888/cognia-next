@@ -339,9 +339,9 @@ export async function applyBackupPackage(
         respectBuiltIn: false,
       })
       await applyCollection({
-        rows: env.canvasComments?.map(contextCommentRowFromCanvas),
+        rows: env.contextComments ?? env.canvasComments?.map(contextCommentRowFromCanvas),
         table: db.contextComments,
-        kind: "canvasComments",
+        kind: env.contextComments ? "contextComments" : "canvasComments",
         opts,
         summary,
         idPrefix: "cmt",

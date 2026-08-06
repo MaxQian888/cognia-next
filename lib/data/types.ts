@@ -33,6 +33,7 @@ import type { LocalStorageSnapshot } from "./snapshots/types"
 import type { TemplateDefinitionRow, TemplatePackageRow } from "@/lib/db/template-platform"
 import type { TemplateInstanceRecord } from "@/lib/templates/repository"
 import type { ProfilesExport } from "@cognia/provider-types/profile-migration"
+import type { ContextCommentRow } from "@/types/context-comment"
 
 /** Schema version currently emitted by `buildBackupPackage`. */
 export const EXPORT_SCHEMA_VERSION = 3 as const
@@ -93,6 +94,9 @@ export interface BackupPayloadV3 {
   canvasDocuments?: CanvasDocumentRow[]
   canvasVersions?: CanvasVersionRow[]
   canvasComments?: CanvasCommentRow[]
+  /** Canonical comments for every Context Workbench resource. New v3 writers
+   * emit this additive field; `canvasComments` remains for older readers. */
+  contextComments?: ContextCommentRow[]
   canvasSessions?: CanvasSessionRow[]
   /** A2UI tables (schema v13). Surfaces are NOT exported — they're
    * runtime-derived; only saved apps + user templates + the debugger

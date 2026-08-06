@@ -39,6 +39,33 @@ beforeEach(async () => {
 })
 
 describe("applyBackupPackage — merge strategies", () => {
+  it("restores canonical comments without degrading non-canvas resources", async () => {
+    await applyBackupPackage(
+      pkg({
+        contextComments: [
+          {
+            id: "comment-project-file",
+            resourceKind: "project-file",
+            resourceId: "README.md",
+            projectId: "project-1",
+            anchor: { kind: "resource" },
+            authorId: "user-1",
+            authorName: "User",
+            content: "Portable context",
+            createdAt: 1,
+            reactions: [],
+          },
+        ],
+      }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false }
+    )
+
+    expect(await getDb().contextComments.get("comment-project-file")).toMatchObject({
+      resourceKind: "project-file",
+      content: "Portable context",
+    })
+  })
+
   it("validates and restores the secret-free Provider Profile Store", async () => {
     const db = getDb()
     const summary = await applyBackupPackage(
