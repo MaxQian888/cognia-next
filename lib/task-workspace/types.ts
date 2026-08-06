@@ -194,7 +194,12 @@ export interface PatchSet {
     beforeMode: number | null
     afterMode: number | null
     binary: boolean
-    hunks: Array<{ id: string; header: string }>
+    hunks: Array<{
+      id: string
+      header: string
+      forwardPatchHash: string
+      inversePatchHash: string
+    }>
   }>
   createdAt: number
 }

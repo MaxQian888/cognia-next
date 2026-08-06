@@ -9,6 +9,13 @@ import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { GitBranchPlusIcon, HistoryIcon, ScanLineIcon } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Commit,
+  CommitHash,
+  CommitMessage,
+  CommitMetadata,
+  CommitSeparator,
+} from "@/components/ai-elements/commit"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -134,10 +141,14 @@ export function CommitDetail({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="commit-detail">
+    <Commit
+      className="flex h-full min-h-0 flex-col rounded-none border-0"
+      data-testid="commit-detail"
+      defaultOpen
+    >
       <header className="shrink-0 border-b p-3">
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1 text-sm font-medium">{commit.summary}</div>
+          <CommitMessage className="min-w-0 flex-1">{commit.summary}</CommitMessage>
           {actions && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -239,11 +250,11 @@ export function CommitDetail({
             {commit.body}
           </pre>
         )}
-        <div className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground">
-          <span className="font-mono">{commit.shortHash}</span>
-          <span>·</span>
+        <CommitMetadata className="mt-1.5 text-[11px]">
+          <CommitHash>{commit.shortHash}</CommitHash>
+          <CommitSeparator />
           <span>{commit.authorName}</span>
-        </div>
+        </CommitMetadata>
       </header>
 
       <Dialog
@@ -392,6 +403,6 @@ export function CommitDetail({
           </div>
         </div>
       </div>
-    </div>
+    </Commit>
   )
 }

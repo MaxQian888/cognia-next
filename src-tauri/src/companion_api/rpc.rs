@@ -438,6 +438,14 @@ const KNOWN_COMMANDS: &[&str] = &[
     "team_run_pause",
     "team_run_resume",
     "team_run_stop",
+    // Single-Agent task board control. Metadata mirrors over the agentTasks
+    // sync tables; these live commands are validated by the desktop runtime.
+    "agent_task_start",
+    "agent_task_pause",
+    "agent_task_resume",
+    "agent_task_cancel",
+    "agent_task_comment",
+    "agent_task_move",
     // Resolve a host computer-use consent prompt from a remote device.
     // Calls the automation ConsentBroker directly (not via writes-bridge).
     "automation_consent_respond",
@@ -1054,6 +1062,12 @@ const CONTROL_COMMANDS: &[&str] = &[
     "team_run_pause",
     "team_run_resume",
     "team_run_stop",
+    "agent_task_start",
+    "agent_task_pause",
+    "agent_task_resume",
+    "agent_task_cancel",
+    "agent_task_comment",
+    "agent_task_move",
     "automation_consent_respond",
     // Destructive character mutation — gated for consistency with the other
     // delete surfaces below (Wave 4.1 policy: every remote delete is gated).
@@ -3366,6 +3380,14 @@ pub(super) async fn dispatch(
         | "team_run_pause"
         | "team_run_resume"
         | "team_run_stop"
+        // Single-Agent task board control — TS arms validate Agent ownership,
+        // state-machine moves, and Scheduler lifecycle actions.
+        | "agent_task_start"
+        | "agent_task_pause"
+        | "agent_task_resume"
+        | "agent_task_cancel"
+        | "agent_task_comment"
+        | "agent_task_move"
         // Wave 4.1 — Workflow CRUD, Twin source/job control, conversation
         // overrides, and app-data backup. Same generic bridge; TS-side dispatch
         // arms live in `lib/companion/desktop-write-source.ts`. Destructive
@@ -9873,6 +9895,31 @@ rl.on("line", (line) => {
         assert!(KNOWN_COMMANDS.contains(&"host_feature_manifest"));
         assert!(READ_ONLY_COMMANDS.contains(&"host_feature_manifest"));
         assert!(!CONTROL_COMMANDS.contains(&"host_feature_manifest"));
+    }
+
+    #[test]
+    fn single_agent_task_commands_are_control_gated() {
+        for command in [
+            "agent_task_start",
+            "agent_task_pause",
+            "agent_task_resume",
+            "agent_task_cancel",
+            "agent_task_comment",
+            "agent_task_move",
+        ] {
+            assert!(
+                KNOWN_COMMANDS.contains(&command),
+                "{command} must be reachable"
+            );
+            assert!(
+                CONTROL_COMMANDS.contains(&command),
+                "{command} must require remote control"
+            );
+            assert!(
+                !READ_ONLY_COMMANDS.contains(&command),
+                "{command} mutates the Agent task board"
+            );
+        }
     }
 
     #[test]

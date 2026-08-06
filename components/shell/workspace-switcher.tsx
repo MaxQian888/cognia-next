@@ -10,6 +10,7 @@ import {
   SearchIcon,
   ShieldAlertIcon,
   SlidersHorizontalIcon,
+  StarIcon,
   XIcon,
 } from "lucide-react"
 
@@ -49,6 +50,7 @@ export function WorkspaceSwitcher() {
   const projects = useProjectStore((s) => s.projects)
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const setActiveProject = useProjectStore((s) => s.setActiveProject)
+  const updateProject = useProjectStore((s) => s.updateProject)
 
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
@@ -68,6 +70,7 @@ export function WorkspaceSwitcher() {
         .slice(0, RECENT_COUNT),
     [visible]
   )
+  const pinned = useMemo(() => visible.filter((project) => project.pinned), [visible])
   const active = useMemo(
     () => projects.find((p) => p.id === activeProjectId) ?? null,
     [projects, activeProjectId]
@@ -85,6 +88,7 @@ export function WorkspaceSwitcher() {
   }, [visible, trimmed])
   // Pin the Recent group only when the list is large and unfiltered.
   const showRecent = isLarge && !trimmed && recent.length > 0
+  const showPinned = !trimmed && pinned.length > 0
 
   // Resolve per-workspace trust badges lazily (desktop only).
   useEffect(() => {
@@ -133,45 +137,58 @@ export function WorkspaceSwitcher() {
     const rootCount = p.roots?.length ?? 0
     const isActive = activeProjectId === p.id
     return (
-      <button
+      <div
         key={`${keyPrefix}${p.id}`}
-        type="button"
-        onClick={() => handleSwitch(p.id)}
-        data-testid={`workspace-switch-${keyPrefix}${p.id}`}
         className={cn(
-          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+          "group flex w-full items-center rounded-md text-sm transition-colors hover:bg-accent",
           isActive && "bg-primary/10"
         )}
       >
-        <span
-          className={cn(
-            "flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground",
-            isActive && "bg-primary/15 text-primary"
-          )}
+        <button
+          type="button"
+          onClick={() => handleSwitch(p.id)}
+          data-testid={`workspace-switch-${keyPrefix}${p.id}`}
+          className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
         >
-          {isActive ? <FolderOpenIcon className="size-4" /> : <FolderIcon className="size-4" />}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1">
-            <span className={cn("truncate", isActive && "font-medium")}>{p.name}</span>
-            {untrustedMap[p.id] && (
-              <ShieldAlertIcon
-                aria-label={t("untrustedHint")}
-                className="size-3 shrink-0 text-amber-500"
-              />
+          <span
+            className={cn(
+              "flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground",
+              isActive && "bg-primary/15 text-primary"
             )}
+          >
+            {isActive ? <FolderOpenIcon className="size-4" /> : <FolderIcon className="size-4" />}
           </span>
-          {primaryPath && (
-            <span className="block truncate font-mono text-[10px] text-muted-foreground">
-              {primaryPath}
-              {rootCount > 1 && (
-                <span className="ml-1">· {t("folderCount", { count: rootCount })}</span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1">
+              <span className={cn("truncate", isActive && "font-medium")}>{p.name}</span>
+              {untrustedMap[p.id] && (
+                <ShieldAlertIcon
+                  aria-label={t("untrustedHint")}
+                  className="size-3 shrink-0 text-amber-500"
+                />
               )}
             </span>
-          )}
-        </span>
-        {isActive && <CheckIcon className="size-4 shrink-0 text-primary" />}
-      </button>
+            {primaryPath && (
+              <span className="block truncate font-mono text-[10px] text-muted-foreground">
+                {primaryPath}
+                {rootCount > 1 && (
+                  <span className="ml-1">· {t("folderCount", { count: rootCount })}</span>
+                )}
+              </span>
+            )}
+          </span>
+          {isActive && <CheckIcon className="size-4 shrink-0 text-primary" />}
+        </button>
+        <button
+          type="button"
+          aria-label={p.pinned ? t("unpin", { name: p.name }) : t("pin", { name: p.name })}
+          data-testid={`workspace-pin-${keyPrefix}${p.id}`}
+          onClick={() => updateProject(p.id, { pinned: !p.pinned })}
+          className="mr-1 flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+        >
+          <StarIcon className={cn("size-3.5", p.pinned && "fill-current text-amber-500")} />
+        </button>
+      </div>
     )
   }
 
@@ -247,6 +264,14 @@ export function WorkspaceSwitcher() {
                 </div>
               ) : (
                 <>
+                  {showPinned && (
+                    <>
+                      <div className="px-2 pt-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                        {t("pinnedHeading")}
+                      </div>
+                      {pinned.map((project) => renderRow(project, "pinned-"))}
+                    </>
+                  )}
                   {showRecent && (
                     <>
                       <div className="px-2 pt-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">

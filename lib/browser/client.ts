@@ -16,6 +16,7 @@ import type {
   SnapshotOptions,
 } from "@/lib/browser/protocol"
 import type { RecordedStep } from "@/lib/browser/recording/protocol"
+import type { CdpCapability, CdpGrant } from "@/types/browser-developer"
 import { transport } from "@/lib/tauri"
 
 const isFiniteNumber = (value: unknown): value is number =>
@@ -295,6 +296,30 @@ export const browserClient = {
         ownerToken: requiredEmbedOwnerToken(),
       })
     ) as RecordedStep[],
+  cdpGrant: (grant: CdpGrant) =>
+    transport.call<void>("browser_cdp_grant", {
+      grant,
+      ownerToken: requiredEmbedOwnerToken(),
+    }),
+  cdpRevoke: (grantId: string) =>
+    transport.call<void>("browser_cdp_revoke", {
+      grantId,
+      ownerToken: requiredEmbedOwnerToken(),
+    }),
+  cdpExecute: (input: {
+    grantId: string
+    sessionId: string
+    browserSessionId: string
+    pageUrl: string
+    capability: CdpCapability
+    method: string
+    params: Record<string, unknown>
+    executionTarget: "local" | "remote" | "companion" | "cloud"
+  }) =>
+    transport.call<{ method: string; value: unknown }>("browser_cdp_execute", {
+      ...input,
+      ownerToken: requiredEmbedOwnerToken(),
+    }),
 }
 
 export type BrowserClient = typeof browserClient

@@ -12,6 +12,7 @@ import { useTranslations } from "next-intl"
 import {
   AlertTriangleIcon,
   DownloadIcon,
+  FileSearchIcon,
   FolderOpenIcon,
   GitBranchIcon,
   RefreshCwIcon,
@@ -51,9 +52,15 @@ import { TimelineView } from "./timeline-view"
 import { SourceControlViewSettings } from "./view-settings"
 import { WorktreePanel } from "./worktree-panel"
 import { CloneRepositoryDialog } from "./clone-repository-dialog"
+import { UnifiedReviewSheet } from "./unified-review-sheet"
+import { useProjectStore } from "@/stores/project/project-store"
+import { allRootPaths } from "@/lib/workspace/roots"
+import { useChatStore } from "@/stores/chat"
+import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 
 export function SourceControlPanel() {
   const t = useTranslations("sourceControl")
+  const tReview = useTranslations("unifiedReview")
   const { available, rootDir, refresh, openFolder } = useGitRepo()
   const actions = useGitActions(refresh)
   const { isDefault: prefsIsDefault } = useSourceControlPrefs()
@@ -71,6 +78,15 @@ export function SourceControlPanel() {
   const selectFile = useGitStore((s) => s.selectFile)
   const selectCommit = useGitStore((s) => s.selectCommit)
   const committing = useGitStore((s) => s.ops.commit)
+  const activeProject = useProjectStore((state) =>
+    state.activeProjectId
+      ? state.projects.find((project) => project.id === state.activeProjectId)
+      : undefined
+  )
+  const activeSessionId = useChatStore((state) => state.activeSessionId)
+  const activeTaskRun = useTaskWorkspaceStore((state) =>
+    activeSessionId ? state.activeBySession[activeSessionId] : undefined
+  )
 
   const [cloneOpen, setCloneOpen] = useState(false)
   const [stashOpen, setStashOpen] = useState(false)
@@ -83,6 +99,7 @@ export function SourceControlPanel() {
   const [rebaseBase, setRebaseBase] = useState<string | null>(null)
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [timelineFile, setTimelineFile] = useState<string | null>(null)
+  const [reviewOpen, setReviewOpen] = useState(false)
   const isNarrow = useMediaQuery("(max-width: 959.98px)")
   const layout = useResizableLayout(
     isNarrow ? "cognia-git-panel-vertical" : "cognia-git-panel-horizontal"
@@ -220,6 +237,15 @@ export function SourceControlPanel() {
               onOpenWorktrees={() => setWorktreesOpen(true)}
               onRefresh={refreshSafely}
             />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7 text-muted-foreground hover:text-foreground"
+              aria-label={tReview("open")}
+              onClick={() => setReviewOpen(true)}
+            >
+              <FileSearchIcon className="size-3.5" />
+            </Button>
             <Popover>
               <PopoverTrigger asChild>
                 <Button
@@ -432,6 +458,19 @@ export function SourceControlPanel() {
         }}
         rootDir={rootDir}
         filePath={timelineFile}
+      />
+      <UnifiedReviewSheet
+        open={reviewOpen}
+        onOpenChange={setReviewOpen}
+        rootDir={rootDir}
+        repositoryRoots={activeProject ? allRootPaths(activeProject) : [rootDir]}
+        branch={status?.branch ?? null}
+        stagedCount={status?.staged.length ?? 0}
+        committing={committing}
+        actions={actions}
+        lastTurnRunIdByRoot={
+          activeTaskRun ? { [activeTaskRun.workspaceRoot]: activeTaskRun.runId } : undefined
+        }
       />
     </div>
   )

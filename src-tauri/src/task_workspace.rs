@@ -223,6 +223,11 @@ pub fn task_workspace_get_patch_set(run_id: String) -> Result<Option<PatchSet>, 
 }
 
 #[tauri::command]
+pub async fn task_workspace_restore_snapshot(run_id: String) -> Result<TaskRun, String> {
+    blocking(move |service| service.restore_run_snapshot(&run_id)).await
+}
+
+#[tauri::command]
 pub fn task_resource_read_diff(
     run_id: String,
     path: String,

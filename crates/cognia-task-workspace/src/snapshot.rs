@@ -132,6 +132,7 @@ pub fn capture_with_policy(
         );
         blobs.entry(hash).or_insert(bytes);
     }
+    capture_worktree_includes(&canonical_root, &mut entries, &mut blobs)?;
     let generated_entries = capture_generated(&canonical_root, &policy.generated_output_roots)?;
     Ok((
         WorkspaceSnapshot {
@@ -140,6 +141,141 @@ pub fn capture_with_policy(
         },
         blobs,
     ))
+}
+
+/// `.worktreeinclude` is an explicit escape hatch for ignored local files that
+/// are required to initialize an isolated worktree. Each non-comment line is a
+/// relative file or directory; globbing is deliberately unsupported so the
+/// copied boundary remains reviewable. Known credential paths fail closed.
+fn capture_worktree_includes(
+    root: &Path,
+    entries: &mut BTreeMap<String, SnapshotEntry>,
+    blobs: &mut HashMap<String, Vec<u8>>,
+) -> Result<(), String> {
+    let allowlist = root.join(".worktreeinclude");
+    let Ok(text) = fs::read_to_string(&allowlist) else {
+        return Ok(());
+    };
+    for (line_index, raw) in text.lines().enumerate() {
+        let value = raw.trim().replace('\\', "/");
+        if value.is_empty() || value.starts_with('#') {
+            continue;
+        }
+        let relative = Path::new(&value);
+        if relative.is_absolute()
+            || value.contains(['*', '?', '[', ']'])
+            || relative.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir
+                        | std::path::Component::RootDir
+                        | std::path::Component::Prefix(_)
+                ) || matches!(
+                    component.as_os_str().to_str(),
+                    Some(".git" | "node_modules")
+                )
+            })
+        {
+            return Err(format!(
+                "invalid .worktreeinclude entry on line {}: {value}",
+                line_index + 1
+            ));
+        }
+        let candidate = root.join(relative);
+        let canonical = candidate.canonicalize().map_err(|error| {
+            format!(
+                "resolve .worktreeinclude entry on line {} ({value}): {error}",
+                line_index + 1
+            )
+        })?;
+        if !canonical.starts_with(root) {
+            return Err(format!(".worktreeinclude entry escapes workspace: {value}"));
+        }
+        if candidate.is_dir() {
+            let mut builder = WalkBuilder::new(&candidate);
+            builder
+                .hidden(false)
+                .git_ignore(false)
+                .git_exclude(false)
+                .git_global(false)
+                .ignore(false)
+                .parents(false)
+                .follow_links(false);
+            for item in builder.build() {
+                let item = item.map_err(|error| format!("walk included path {value}: {error}"))?;
+                if item.path() == candidate || item.file_type().is_some_and(|kind| kind.is_dir()) {
+                    continue;
+                }
+                capture_included_entry(root, item.path(), entries, blobs)?;
+            }
+        } else {
+            capture_included_entry(root, &candidate, entries, blobs)?;
+        }
+    }
+    Ok(())
+}
+
+fn capture_included_entry(
+    root: &Path,
+    path: &Path,
+    entries: &mut BTreeMap<String, SnapshotEntry>,
+    blobs: &mut HashMap<String, Vec<u8>>,
+) -> Result<(), String> {
+    let rel = path
+        .strip_prefix(root)
+        .map_err(|_| format!("included path escapes workspace: {}", path.display()))?;
+    let rel_path = rel.to_string_lossy().replace('\\', "/");
+    if is_sensitive_resource(&rel_path) {
+        return Err(format!(
+            "sensitive path is not allowed in .worktreeinclude: {rel_path}"
+        ));
+    }
+    if rel.components().any(|component| {
+        matches!(
+            component.as_os_str().to_str(),
+            Some(".git" | "node_modules")
+        )
+    }) {
+        return Err(format!(
+            "protected path is not allowed in .worktreeinclude: {rel_path}"
+        ));
+    }
+    let metadata = path
+        .symlink_metadata()
+        .map_err(|error| format!("stat included path {rel_path}: {error}"))?;
+    let (kind, bytes) = if metadata.file_type().is_symlink() {
+        let target = fs::read_link(path)
+            .map_err(|error| format!("read link {}: {error}", path.display()))?;
+        validate_symlink_target(rel, &target)?;
+        (
+            EntryKind::Symlink,
+            target.to_string_lossy().as_bytes().to_vec(),
+        )
+    } else if metadata.is_file() {
+        (
+            EntryKind::File,
+            fs::read(path).map_err(|error| format!("read included path {rel_path}: {error}"))?,
+        )
+    } else {
+        return Ok(());
+    };
+    let hash = hex::encode(Sha256::digest(&bytes));
+    let binary = kind == EntryKind::File && detect_binary(&bytes);
+    entries.insert(
+        rel_path.clone(),
+        SnapshotEntry {
+            path: rel_path.clone(),
+            kind,
+            hash: hash.clone(),
+            size: bytes.len() as u64,
+            mode: file_mode(path),
+            binary,
+            media_type: media_type_for(&rel_path, binary).to_string(),
+            sensitive: false,
+        },
+    );
+    blobs.entry(hash).or_insert(bytes);
+    Ok(())
 }
 
 fn capture_generated(
@@ -372,6 +508,28 @@ mod tests {
         assert!(capture(root.path())
             .unwrap_err()
             .contains("escapes workspace"));
+    }
+
+    #[test]
+    fn worktree_include_copies_ignored_files_but_rejects_credentials() {
+        let root = TempDir::new().unwrap();
+        fs::write(root.path().join(".gitignore"), "local/\n.env.local\n").unwrap();
+        fs::create_dir(root.path().join("local")).unwrap();
+        fs::write(root.path().join("local/toolchain.json"), "{}\n").unwrap();
+        fs::write(
+            root.path().join(".worktreeinclude"),
+            "local/toolchain.json\n",
+        )
+        .unwrap();
+
+        let (snapshot, _) = capture(root.path()).unwrap();
+        assert!(snapshot.entries.contains_key("local/toolchain.json"));
+
+        fs::write(root.path().join(".env.local"), "TOKEN=secret\n").unwrap();
+        fs::write(root.path().join(".worktreeinclude"), ".env.local\n").unwrap();
+        assert!(capture(root.path())
+            .unwrap_err()
+            .contains("sensitive path is not allowed"));
     }
 }
 

@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl"
 import { type FormEvent, useRef, useState } from "react"
 
 import { BrowserNavigationControls } from "@/components/browser/browser-navigation-controls"
+import { WebPreview, WebPreviewNavigation } from "@/components/ai-elements/web-preview"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -72,11 +73,12 @@ export function BrowserWebFallback({ initialUrl }: BrowserWebFallbackProps) {
 
   return (
     <TooltipProvider>
-      <div
-        className="flex h-full w-full min-h-0 min-w-0 max-w-full flex-col overflow-hidden"
+      <WebPreview
+        className="h-full min-h-0 min-w-0 max-w-full overflow-hidden rounded-none border-0"
         data-testid="browser-web-preview"
+        defaultUrl={normalizedInitialUrl ?? ""}
       >
-        <div className="flex items-center gap-1 border-b p-2">
+        <WebPreviewNavigation>
           <BrowserNavigationControls
             backDisabled={historyIndex <= 0}
             forwardDisabled={historyIndex < 0 || historyIndex >= history.length - 1}
@@ -109,7 +111,7 @@ export function BrowserWebFallback({ initialUrl }: BrowserWebFallbackProps) {
           >
             <ExternalLinkIcon />
           </TooltipIconButton>
-        </div>
+        </WebPreviewNavigation>
         <div className="flex min-w-0 items-center gap-3 border-b bg-muted/40 px-3 py-2">
           <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t("webFallback.notice")}</p>
           <Button asChild size="sm" variant="outline" className="shrink-0">
@@ -135,7 +137,7 @@ export function BrowserWebFallback({ initialUrl }: BrowserWebFallbackProps) {
             title={t("webFallback.frameTitle")}
           />
         </div>
-      </div>
+      </WebPreview>
     </TooltipProvider>
   )
 }

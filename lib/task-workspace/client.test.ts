@@ -18,6 +18,7 @@ import {
   resolveTaskWorkspaceConflict,
   runIdForTurn,
   settleTaskWorkspaceTurn,
+  restoreTaskWorkspaceSnapshot,
   taskIdForMessage,
 } from "./client"
 
@@ -106,6 +107,16 @@ describe("task workspace client", () => {
       resolution: "keepCurrent",
       selection: [],
       allowIrreversible: false,
+    })
+  })
+
+  it("restores a historical content-addressed snapshot", async () => {
+    call.mockResolvedValueOnce({ runId: "run:session:1", executionRoot: "/isolated" })
+    await expect(restoreTaskWorkspaceSnapshot("run:session:1")).resolves.toEqual(
+      expect.objectContaining({ executionRoot: "/isolated" })
+    )
+    expect(call).toHaveBeenCalledWith("task_workspace_restore_snapshot", {
+      runId: "run:session:1",
     })
   })
 

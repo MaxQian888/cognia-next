@@ -25,6 +25,27 @@ jest.mock("@/hooks/chat/use-resource-workbench-session", () => ({
   useResourceWorkbenchSession: (...args: unknown[]) => mockUseResourceWorkbenchSession(...args),
 }))
 
+// jsdom has no layout, so dnd-kit's collision detection never resolves an
+// `over` target and a real drag ends as a no-op. Capture the `onDragEnd` the
+// DndContext installs so the inline-reorder path can be tested synthetically.
+let lastDragEnd: ((event: unknown) => void) | undefined
+jest.mock("@dnd-kit/core", () => {
+  const actual = jest.requireActual<typeof import("@dnd-kit/core")>("@dnd-kit/core")
+  return {
+    ...actual,
+    DndContext: ({
+      children,
+      onDragEnd,
+    }: {
+      children: React.ReactNode
+      onDragEnd: (event: unknown) => void
+    }) => {
+      lastDragEnd = onDragEnd
+      return <>{children}</>
+    },
+  }
+})
+
 jest.mock("@/components/shell/shell-layout-dialog", () => ({
   ShellLayoutDialog: ({ open, surface }: { open: boolean; surface: string }) =>
     open ? <div data-testid={`shell-layout-dialog-${surface}`} /> : null,
@@ -1141,6 +1162,81 @@ describe("ContextWorkbench — customizable activity rail", () => {
     fireEvent.click(screen.getByTestId("context-workbench-customize-rail"))
 
     expect(screen.getByTestId("shell-layout-dialog-workbench")).toBeInTheDocument()
+  })
+
+  it("reorders activity buttons via inline drag and persists the new order", () => {
+    // Mock save to apply the patch synchronously (bypass Dexie roundtrip)
+    const saveSpy = jest
+      .spyOn(useSettingsStore.getState(), "save")
+      .mockImplementation(async (patch) => {
+        const current = useSettingsStore.getState().settings ?? ({} as never)
+        useSettingsStore.setState({ settings: { ...current, ...patch } as never })
+      })
+
+    renderWorkbench(PANELS)
+    // Initial order: review, ai, comments (from canonical sort)
+    expect(railLabels()).toEqual([
+      "contextWorkbench.panels.review",
+      "contextWorkbench.panels.ai",
+      "contextWorkbench.panels.comments",
+    ])
+
+    // Simulate dragging "review" to where "comments" is
+    act(() => {
+      lastDragEnd?.({ active: { id: "review" }, over: { id: "comments" } })
+    })
+
+    // After drag: ai, comments, review
+    expect(railLabels()).toEqual([
+      "contextWorkbench.panels.ai",
+      "contextWorkbench.panels.comments",
+      "contextWorkbench.panels.review",
+    ])
+
+    // Verify persistence: save was called with the new order
+    expect(saveSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workbenchRail: expect.objectContaining({
+          order: expect.arrayContaining(["ai", "comments", "review"]),
+        }),
+      })
+    )
+
+    saveSpy.mockRestore()
+  })
+
+  it("does not persist when drag lands on itself", () => {
+    renderWorkbench(PANELS)
+    const saveSpy = jest.spyOn(useSettingsStore.getState(), "save")
+
+    act(() => {
+      lastDragEnd?.({ active: { id: "review" }, over: { id: "review" } })
+    })
+
+    expect(saveSpy).not.toHaveBeenCalled()
+    saveSpy.mockRestore()
+  })
+
+  it("does not persist when drag lands outside any target", () => {
+    renderWorkbench(PANELS)
+    const saveSpy = jest.spyOn(useSettingsStore.getState(), "save")
+
+    act(() => {
+      lastDragEnd?.({ active: { id: "review" }, over: null })
+    })
+
+    expect(saveSpy).not.toHaveBeenCalled()
+    saveSpy.mockRestore()
+  })
+
+  it("renders activity buttons with cursor-grab style for drag hint", () => {
+    renderWorkbench(PANELS)
+    const buttons = screen
+      .getByTestId("context-workbench-activity-rail")
+      .querySelectorAll<HTMLButtonElement>("[data-workbench-activity-button]")
+    buttons.forEach((button) => {
+      expect(button.className).toContain("cursor-grab")
+    })
   })
 })
 

@@ -185,6 +185,23 @@ describe("WorkspaceSwitcher", () => {
     expect(screen.getByTestId("workspace-switch-p8")).toBeInTheDocument()
   })
 
+  it("pins and unpins a workspace in an explicit persisted group", () => {
+    act(() => {
+      useProjectStore.setState({
+        projects: [makeProject("p1", { name: "Alpha", rootDir: "/a" })],
+        activeProjectId: "p1",
+        loaded: true,
+      })
+    })
+    renderSwitcher()
+    fireEvent.click(screen.getByTestId("workspace-switcher"))
+    fireEvent.click(screen.getByTestId("workspace-pin-p1"))
+    expect(useProjectStore.getState().projects[0].pinned).toBe(true)
+    expect(screen.getByTestId("workspace-switch-pinned-p1")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("workspace-pin-pinned-p1"))
+    expect(useProjectStore.getState().projects[0].pinned).toBe(false)
+  })
+
   it("hides the search field and Recent group for a small workspace count", () => {
     act(() => {
       useProjectStore.setState({

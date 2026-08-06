@@ -38,6 +38,7 @@ import { TerminalDockMoveProvider } from "@/components/terminal/terminal-dock-mo
 import { TerminalDockRegion } from "@/components/terminal/terminal-dock-region"
 import { TerminalToggleShortcut } from "@/components/terminal/terminal-toggle-shortcut"
 import { useWorkbenchActivityShortcuts } from "@/hooks/context-workbench/use-workbench-activity-shortcuts"
+import { PanelQuickSwitch } from "@/components/context-workbench/panel-quick-switch"
 import { useMenuEventRouter } from "@/hooks/desktop/use-menu-event-router"
 import { usePlatform } from "@/hooks/use-platform"
 import { PageLoading } from "@/components/ui/loading-states"
@@ -47,6 +48,7 @@ import { loggers } from "@cognia/logging"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useUIStore } from "@/stores/ui/ui-store"
 import { DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
+import { AgentThreadBrowser } from "@/components/agent/agent-thread-browser"
 
 const log = loggers.shell
 
@@ -160,6 +162,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
       <WindowResizeEdges />
       <ZoomShortcuts />
       <TerminalToggleShortcut />
+      <PanelQuickSwitch />
       <TitleBar />
       {/* Owns the dock's drag-to-move context. Renders no DOM of its own; the
           edge drop zones it paints during a drag are `fixed`, so the row's
@@ -187,6 +190,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
         </div>
       </TerminalDockMoveProvider>
       {mounted && <CommandPalette onOpenSettings={handleOpenSettings} />}
+      {mounted && <AgentThreadBrowser />}
       <FindBar />
       <ShellLayoutNotice />
       {!statusBarCollapsed && <StatusBar />}

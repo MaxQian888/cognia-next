@@ -14,15 +14,16 @@
  * the user guessing which one they were editing.
  */
 
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useSyncExternalStore } from "react"
 
 import {
-  getWorkbenchRailCatalog,
+  getWorkbenchRailCatalogWithPlugins,
   isDefaultWorkbenchRailLayout,
   resolveWorkbenchRailLayout,
   type ResolvedWorkbenchRail,
   type WorkbenchRailCatalogItem,
 } from "@/lib/shell/workbench-rail"
+import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import {
   DEFAULT_WORKBENCH_RAIL_LAYOUT,
@@ -35,13 +36,15 @@ export interface UseWorkbenchRailLayout {
   resolved: ResolvedWorkbenchRail
   /** True when the effective layout equals the shipped default. */
   isDefault: boolean
+  /** True when reading from a project-specific layout rather than the global one. */
+  isProjectScoped: boolean
   /** Replace the full order with `ids` (filtered to catalog ids). */
   reorder: (ids: string[]) => Promise<void>
   /** Remove `id` from the rail, keeping its slot in the order. */
   hide: (id: string) => Promise<void>
   /** Put `id` back on the rail at the slot it already holds. */
   show: (id: string) => Promise<void>
-  /** Reset to the factory default layout. */
+  /** Reset to the factory default layout (clears project-specific if scoped). */
   reset: () => Promise<void>
 }
 
@@ -73,30 +76,49 @@ export function useWorkbenchRailPersistent(): boolean {
   return useSettingsStore((s) => s.settings?.workbenchRailPersistent ?? true)
 }
 
-export function useWorkbenchRailLayout(): UseWorkbenchRailLayout {
+export function useWorkbenchRailLayout(projectId?: string | null): UseWorkbenchRailLayout {
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
 
-  const catalog = useMemo(() => getWorkbenchRailCatalog(), [])
+  // Subscribe to plugin registry changes so new/removed plugin activities
+  // cause the catalog (and therefore the customizer) to re-evaluate.
+  const registryRevision = useSyncExternalStore(
+    contextPanelRegistry.subscribe,
+    contextPanelRegistry.getRevision,
+    contextPanelRegistry.getRevision
+  )
+
+  const catalog = useMemo(
+    () => getWorkbenchRailCatalogWithPlugins(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- registryRevision drives recalc
+    [registryRevision]
+  )
   const validIds = useMemo(() => new Set(catalog.map((c) => c.id)), [catalog])
 
-  // Key on the single settings field rather than the whole `settings` object:
-  // every settings write swaps in a fresh `settings` reference, and recomputing
-  // here would re-create all callbacks and re-render the workbench on unrelated
-  // changes (theme, fonts, pinned workflows, …).
-  const stored = settings?.workbenchRail
+  // Resolve: project-specific → global → default.
+  const globalStored = settings?.workbenchRail
+  const projectStored = projectId ? settings?.workbenchRailPerProject?.[projectId] : undefined
+  const isProjectScoped = Boolean(projectStored)
+  const stored = projectStored ?? globalStored
   const layout = useMemo(() => workbenchRailLayoutOf(stored), [stored])
 
   const resolved = useMemo(() => resolveWorkbenchRailLayout(catalog, layout), [catalog, layout])
   const isDefault = useMemo(() => isDefaultWorkbenchRailLayout(layout), [layout])
 
-  const commit = useCallback((next: WorkbenchRailLayout) => save({ workbenchRail: next }), [save])
+  const commit = useCallback(
+    (next: WorkbenchRailLayout) => {
+      if (projectId && isProjectScoped) {
+        // Write to the project-specific slot
+        const perProject = { ...(settings?.workbenchRailPerProject ?? {}), [projectId]: next }
+        return save({ workbenchRailPerProject: perProject })
+      }
+      return save({ workbenchRail: next })
+    },
+    [save, projectId, isProjectScoped, settings?.workbenchRailPerProject]
+  )
 
   const reorder = useCallback(
     (nextIds: string[]) => {
-      // Only ids the customizer showed are in `nextIds`; a plugin activity that
-      // is on the live rail but not in the canonical catalog must keep its
-      // stored slot rather than being dropped by the filter.
       const reordered = nextIds.filter((id) => validIds.has(id))
       const untouched = layout.order.filter((id) => !validIds.has(id))
       return commit({ ...layout, order: [...reordered, ...untouched] })
@@ -107,7 +129,6 @@ export function useWorkbenchRailLayout(): UseWorkbenchRailLayout {
   const hide = useCallback(
     (id: string) =>
       commit({
-        // A hidden id keeps its position, so unhiding restores it in place.
         order: layout.order.includes(id) ? layout.order : [...layout.order, id],
         hidden: layout.hidden.includes(id) ? layout.hidden : [...layout.hidden, id],
       }),
@@ -119,7 +140,15 @@ export function useWorkbenchRailLayout(): UseWorkbenchRailLayout {
     [commit, layout]
   )
 
-  const reset = useCallback(() => commit(DEFAULT_WORKBENCH_RAIL_LAYOUT), [commit])
+  const reset = useCallback(() => {
+    if (projectId && isProjectScoped) {
+      // Remove the project-specific override entirely, falling back to global
+      const perProject = { ...(settings?.workbenchRailPerProject ?? {}) }
+      delete perProject[projectId]
+      return save({ workbenchRailPerProject: perProject })
+    }
+    return commit(DEFAULT_WORKBENCH_RAIL_LAYOUT)
+  }, [commit, projectId, isProjectScoped, settings?.workbenchRailPerProject, save])
 
-  return { catalog, layout, resolved, isDefault, reorder, hide, show, reset }
+  return { catalog, layout, resolved, isDefault, isProjectScoped, reorder, hide, show, reset }
 }

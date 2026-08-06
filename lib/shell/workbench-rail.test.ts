@@ -1,5 +1,6 @@
 import {
   getWorkbenchRailCatalog,
+  getWorkbenchRailCatalogWithPlugins,
   isDefaultWorkbenchRailLayout,
   isWorkbenchActivityHidden,
   resolveWorkbenchRailLayout,
@@ -10,6 +11,7 @@ import {
   CANONICAL_CONTEXT_ACTIVITIES,
   CONTEXT_ACTIVITY_RAIL_ORDER,
 } from "@/types/context-workbench"
+import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 import { DEFAULT_WORKBENCH_RAIL_LAYOUT } from "@/types/shell/workbench-rail"
 
 describe("workbench rail catalog", () => {
@@ -104,5 +106,70 @@ describe("isDefaultWorkbenchRailLayout", () => {
         hidden: ["ai"],
       })
     ).toBe(false)
+  })
+})
+
+describe("getWorkbenchRailCatalogWithPlugins", () => {
+  afterEach(() => {
+    // Clean up any plugin registrations
+    contextPanelRegistry.unregisterPlugin("test-plugin")
+  })
+
+  it("returns only canonical activities when no plugins are registered", () => {
+    const catalog = getWorkbenchRailCatalogWithPlugins()
+    expect(catalog.map((i) => i.id)).toEqual([...CONTEXT_ACTIVITY_RAIL_ORDER])
+  })
+
+  it("includes plugin activities not in the canonical set", () => {
+    contextPanelRegistry.register({
+      id: "test-plugin:custom-panel",
+      activity: "custom-activity",
+      labelKey: "test.label",
+      appliesTo: () => true,
+      renderer: () => null,
+      pluginId: "test-plugin",
+    })
+
+    const catalog = getWorkbenchRailCatalogWithPlugins()
+    const ids = catalog.map((i) => i.id)
+    expect(ids).toContain("custom-activity")
+    // Plugin activities are appended after canonical
+    expect(ids.indexOf("custom-activity")).toBeGreaterThan(
+      ids.indexOf(CONTEXT_ACTIVITY_RAIL_ORDER[CONTEXT_ACTIVITY_RAIL_ORDER.length - 1])
+    )
+  })
+
+  it("does not duplicate canonical activities used by plugins", () => {
+    contextPanelRegistry.register({
+      id: "test-plugin:ai-panel",
+      activity: "ai",
+      labelKey: "test.label",
+      appliesTo: () => true,
+      renderer: () => null,
+      pluginId: "test-plugin",
+    })
+
+    const catalog = getWorkbenchRailCatalogWithPlugins()
+    const aiEntries = catalog.filter((i) => i.id === "ai")
+    expect(aiEntries).toHaveLength(1)
+  })
+
+  it("removes plugin activities when the plugin is unregistered", () => {
+    contextPanelRegistry.register({
+      id: "test-plugin:custom-panel",
+      activity: "ephemeral-activity",
+      labelKey: "test.label",
+      appliesTo: () => true,
+      renderer: () => null,
+      pluginId: "test-plugin",
+    })
+
+    expect(getWorkbenchRailCatalogWithPlugins().map((i) => i.id)).toContain("ephemeral-activity")
+
+    contextPanelRegistry.unregisterPlugin("test-plugin")
+
+    expect(getWorkbenchRailCatalogWithPlugins().map((i) => i.id)).not.toContain(
+      "ephemeral-activity"
+    )
   })
 })

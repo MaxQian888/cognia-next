@@ -224,6 +224,10 @@ export function getTaskPatchSet(runId: string): Promise<PatchSet | null> {
   return transport.call("task_workspace_get_patch_set", { runId })
 }
 
+export function restoreTaskWorkspaceSnapshot(runId: string): Promise<TaskRun> {
+  return transport.call("task_workspace_restore_snapshot", { runId })
+}
+
 export function readTaskResourceDiff(
   runId: string,
   path: string,

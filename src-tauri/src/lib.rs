@@ -88,6 +88,7 @@ mod plugins;
 // (external agents, chat sidecar, ACP + PTY terminals, MCP server) for the
 // performance panel's "Managed Processes" tab and the graceful teardown arm.
 mod process_registry;
+mod project_environment;
 /// ADR-0090 Phase 1 — headless Provider Profile Store (SQLite mirror of the
 /// renderer's Dexie v121 tables).
 pub mod provider_profiles;
@@ -408,6 +409,7 @@ pub fn run() {
         // setup() once the main window exists.
         .manage(webview_watchdog::WebviewWatchdog::new())
         .manage(browser::embedded::EmbeddedBrowserLease::default())
+        .manage(browser::cdp::NativeCdpGrants::default())
         // Arm the boot-time force-show safety net only after the initial main
         // document has finished loading. In dev, Next.js compiles `/` on its
         // first request and can legitimately take longer than the 8s grace;
@@ -825,6 +827,7 @@ pub fn run() {
             task_workspace::task_workspace_record_tool_event,
             task_workspace::task_workspace_get_resource,
             task_workspace::task_workspace_get_patch_set,
+            task_workspace::task_workspace_restore_snapshot,
             task_workspace::task_resource_read_diff,
             task_workspace::task_resource_read_text,
             task_workspace::task_resource_download_open,
@@ -872,6 +875,7 @@ pub fn run() {
             settings::write_claude_project_settings,
             settings::write_claude_local_settings,
             shell::shell_exec,
+            project_environment::project_environment_execute,
             terminal_host_bridge::terminal_spawn,
             terminal_host_bridge::terminal_reattach,
             terminal_host_bridge::terminal_write,
@@ -1407,6 +1411,9 @@ pub fn run() {
             browser::embedded::browser_embed_has_text,
             browser::embedded::browser_embed_has_selector,
             browser::embedded::browser_embed_evaluate,
+            browser::cdp::browser_cdp_execute,
+            browser::cdp::browser_cdp_grant,
+            browser::cdp::browser_cdp_revoke,
             browser::embedded::browser_embed_network_state,
             // Action recording (ADR-0072).
             browser::embedded::browser_embed_ref_for,

@@ -338,4 +338,42 @@ describe("browserClient agent methods", () => {
       expect(await browserClient.embedDrainRecord()).toEqual([])
     })
   })
+
+  it("binds CDP grants and execution to the embedded browser owner", async () => {
+    const grant = {
+      id: "grant-1",
+      sessionId: "session-1",
+      browserSessionId: "browser-1",
+      origin: "http://localhost:3000",
+      capabilities: ["runtime" as const],
+      grantedAt: 1,
+      expiresAt: 2,
+    }
+    await browserClient.cdpGrant(grant)
+    await browserClient.cdpExecute({
+      grantId: "grant-1",
+      sessionId: "session-1",
+      browserSessionId: "browser-1",
+      pageUrl: "http://localhost:3000",
+      capability: "runtime",
+      method: "Runtime.evaluate",
+      params: { expression: "document.title" },
+      executionTarget: "local",
+    })
+    await browserClient.cdpRevoke("grant-1")
+
+    expect(call).toHaveBeenNthCalledWith(1, "browser_cdp_grant", {
+      grant,
+      ownerToken: "owner-1",
+    })
+    expect(call).toHaveBeenNthCalledWith(
+      2,
+      "browser_cdp_execute",
+      expect.objectContaining({ grantId: "grant-1", ownerToken: "owner-1" })
+    )
+    expect(call).toHaveBeenNthCalledWith(3, "browser_cdp_revoke", {
+      grantId: "grant-1",
+      ownerToken: "owner-1",
+    })
+  })
 })

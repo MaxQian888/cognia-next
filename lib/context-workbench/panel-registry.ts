@@ -28,6 +28,14 @@ export interface ContextPanelRegistry {
    * `pluginId` and `permission-api`, injects `hasRequiredPermissions`.
    */
   resolve: (resource: ContextResource) => ContextPanelDefinition[]
+  /**
+   * All distinct activity ids contributed by currently-registered panels.
+   *
+   * Unlike `resolve`, this does not filter by resource or capabilities: it
+   * returns the complete set so the customizer can offer all plugin activities
+   * for ordering/hiding regardless of which resource is currently in view.
+   */
+  listActivities: () => string[]
   subscribe: (listener: () => void) => () => void
   getRevision: () => number
   refresh: () => void
@@ -102,6 +110,13 @@ export function createContextPanelRegistry(): ContextPanelRegistry {
           const order = (left.order ?? 100) - (right.order ?? 100)
           return order === 0 ? left.id.localeCompare(right.id) : order
         })
+    },
+    listActivities() {
+      const activities = new Set<string>()
+      for (const definition of definitions.values()) {
+        activities.add(definition.activity)
+      }
+      return [...activities]
     },
     subscribe(listener) {
       listeners.add(listener)

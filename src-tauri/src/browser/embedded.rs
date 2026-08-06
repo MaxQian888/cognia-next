@@ -60,7 +60,7 @@ impl EmbeddedBrowserLease {
         }
     }
 
-    fn assert_owner(&self, owner_token: &str, window_label: &str) -> Result<(), String> {
+    pub(crate) fn assert_owner(&self, owner_token: &str, window_label: &str) -> Result<(), String> {
         match self.owner.lock().as_ref() {
             Some(current)
                 if current.token == owner_token && current.window_label == window_label =>
@@ -400,7 +400,7 @@ fn build_act_call(reference: &str, action: &str, args_json: &str) -> Result<Stri
 /// eval available on WKWebView/WebView2/WebKitGTK) to an async command via a
 /// oneshot channel with a timeout.
 #[cfg(desktop)]
-async fn eval_embed_with_result(app: &AppHandle, js: &str) -> Result<String, String> {
+pub(crate) async fn eval_embed_with_result(app: &AppHandle, js: &str) -> Result<String, String> {
     use std::sync::{Arc, Mutex};
     use tauri::Manager;
     let wv = app

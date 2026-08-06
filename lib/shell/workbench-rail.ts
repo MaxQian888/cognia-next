@@ -20,6 +20,7 @@ import {
   InfoIcon,
   type LucideIcon,
   MessageSquareIcon,
+  PlugIcon,
   Rows3Icon,
   SquareCheckIcon,
 } from "lucide-react"
@@ -34,6 +35,7 @@ import {
   DEFAULT_WORKBENCH_RAIL_LAYOUT,
   type WorkbenchRailLayout,
 } from "@/types/shell/workbench-rail"
+import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 
 /**
  * Representative icon per canonical activity, for the customizer only.
@@ -79,6 +81,28 @@ export function getWorkbenchRailCatalog(): WorkbenchRailCatalogItem[] {
     id,
     Icon: WORKBENCH_ACTIVITY_ICONS[id as CanonicalContextActivity],
   }))
+}
+
+/**
+ * Extended catalog that includes both canonical activities AND activities
+ * contributed by currently-registered plugins.
+ *
+ * Plugin activities are discovered from `contextPanelRegistry` and appended
+ * after the canonical ones with a generic PlugIcon. When a plugin is uninstalled,
+ * its activities naturally drop out of the next call's result; the stored layout
+ * keeps the id (harmlessly) but `resolveOrderedLayout` ignores ids absent from
+ * the catalog, so dead entries never surface in the customizer.
+ */
+export function getWorkbenchRailCatalogWithPlugins(): WorkbenchRailCatalogItem[] {
+  const canonical = getWorkbenchRailCatalog()
+  const canonicalIds = new Set(canonical.map((item) => item.id))
+
+  const pluginActivities = contextPanelRegistry
+    .listActivities()
+    .filter((activity) => !canonicalIds.has(activity))
+    .map((activity) => ({ id: activity, Icon: PlugIcon }))
+
+  return [...canonical, ...pluginActivities]
 }
 
 /** Resolution of the canonical catalog against a stored layout. */
