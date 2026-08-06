@@ -8,7 +8,7 @@
 import React from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangle, X, ChevronDown, ChevronUp } from "lucide-react"
-import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
+import { ErrorTraceDetails } from "@/components/error/error-trace-details"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"

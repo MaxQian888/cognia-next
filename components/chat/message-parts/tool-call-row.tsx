@@ -40,13 +40,19 @@ import type { LucideIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 
 import { ToolDetailBody } from "@/components/chat/message-parts/tool-detail-body"
-import { summarizeToolCall, type ToolIconKey } from "@/lib/chat/tool-summary"
+import {
+  humanizeToolName,
+  resolveProvidedToolTitle,
+  summarizeToolCall,
+  type ToolIconKey,
+} from "@/lib/chat/tool-summary"
 import {
   describeRunningProgress,
   describeToolResult,
   type ToolResultDescriptor,
 } from "@/lib/chat/tool-result-summary"
 import { MotionCollapse, MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
+import { ToolSemanticBadges } from "@/components/ai-elements/tool-semantic-badges"
 import { cn } from "@/lib/utils"
 
 const ICON_MAP: Record<ToolIconKey, LucideIcon> = {
@@ -124,6 +130,10 @@ export const ToolCallRow = memo(function ToolCallRow({
   // store replaces per delta, the same assumption MessagePart's memo relies on —
   // so they don't re-run when an unrelated sibling row toggles or streams.
   const summary = useMemo(() => summarizeToolCall(part), [part])
+  const providedTitle = resolveProvidedToolTitle(part)
+  const displayName = providedTitle || humanizeToolName(summary.name)
+  const readOnlyHint = (part as ToolUIPart & { toolMetadata?: { readOnlyHint?: boolean | null } })
+    .toolMetadata?.readOnlyHint
   const result = useMemo(() => describeToolResult(part), [part])
   // Live output size while the tool is still running (Bash streams stdout);
   // null for tools that don't stream, leaving just the pulsing status glyph.
@@ -150,19 +160,20 @@ export const ToolCallRow = memo(function ToolCallRow({
         type="button"
         onClick={handleToggle}
         aria-expanded={open}
-        aria-label={t("rowAria", { name: summary.name, status: statusLabel })}
+        aria-label={t("rowAria", { name: displayName, status: statusLabel })}
         className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
       >
         <ChevronRightIcon
           className={cn("size-3.5 shrink-0 opacity-60 transition-transform", open && "rotate-90")}
         />
         <Icon className="size-3.5 shrink-0" />
-        <span className="font-medium text-foreground/80">{summary.name}</span>
-        {summary.target ? (
+        <span className="font-medium text-foreground/80">{displayName}</span>
+        {!providedTitle && summary.target ? (
           <span className="min-w-0 flex-1 truncate font-mono text-xs">{summary.target}</span>
         ) : (
           <span className="flex-1" />
         )}
+        <ToolSemanticBadges readOnlyHint={readOnlyHint} />
         {result ? (
           <ToolResultChip descriptor={result} />
         ) : running ? (

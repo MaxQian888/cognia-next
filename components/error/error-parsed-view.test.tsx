@@ -4,6 +4,7 @@
 
 import { render, screen, fireEvent } from "@testing-library/react"
 import { ErrorParsedView } from "./error-parsed-view"
+import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
 
 describe("ErrorParsedView", () => {
   it("renders text nodes", () => {
@@ -172,6 +173,33 @@ describe("ErrorParsedView", () => {
       />
     )
     expect(screen.getByRole("button", { name: /\/app\/x\.ts/ })).toBeInTheDocument()
+  })
+
+  it("preserves unknown stack-frame coordinates when opening a file", () => {
+    useFileViewerStore.setState({ open: false, path: null, line: null, column: null })
+    render(
+      <ErrorParsedView
+        parsed={{
+          nodes: [
+            {
+              kind: "stack",
+              content: "trace",
+              frames: [{ fn: "handler", file: "/app/x.ts", line: null, col: null }],
+            },
+          ],
+          parsed: true,
+        }}
+        rawText="trace"
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /\/app\/x\.ts/ }))
+
+    expect(useFileViewerStore.getState()).toMatchObject({
+      path: "/app/x.ts",
+      line: null,
+      column: null,
+    })
   })
 
   it("handles nodes missing optional fields and every statusCode tier", () => {

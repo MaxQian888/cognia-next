@@ -280,7 +280,7 @@ beforeEach(() => {
 })
 
 describe("useArtifactSurfacePanels", () => {
-  it("offers exactly the nine artifact-surface panels, in a stable order", () => {
+  it("offers exactly the ten artifact-surface panels, in a stable order", () => {
     // The rail's group button opens the lowest-ordered panel of an activity, so
     // these numbers are behaviour, not decoration.
     const panels = collect(useArtifactSurfacePanels, artifactInput())
@@ -292,6 +292,7 @@ describe("useArtifactSurfacePanels", () => {
       ["browser", "preview-run", 11],
       ["artifacts", "review", 15],
       ["metadata", "inspect", 35],
+      ["memory", "inspect", 36],
       [PROJECT_OVERVIEW_PANEL_ID, "workspace", 25],
       [WORKSPACE_PANEL_ID, "workspace", 40],
     ])
@@ -498,7 +499,7 @@ describe("the selection composer inside the resource chat", () => {
 })
 
 describe("useSessionSurfacePanels", () => {
-  it("offers exactly the eight session-surface panels, in a stable order", () => {
+  it("offers exactly the twelve session-surface panels, in a stable order", () => {
     const panels = collect(useSessionSurfacePanels, sessionInput())
     expect(panels.map((p) => [p.id, p.activity, p.order])).toEqual([
       ["artifacts", "review", 10],
@@ -506,9 +507,13 @@ describe("useSessionSurfacePanels", () => {
       ["browser", "preview-run", 20],
       [PROJECT_OVERVIEW_PANEL_ID, "workspace", 25],
       [WORKSPACE_PANEL_ID, "workspace", 30],
+      ["source-control", "workspace", 35],
       ["comments", "comments", 40],
       ["session-sources", "inspect", 45],
       ["metadata", "inspect", 50],
+      ["memory", "inspect", 55],
+      ["logs", "inspect", 60],
+      ["agent-status", "ai", 16],
     ])
   })
 

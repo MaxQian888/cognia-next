@@ -161,6 +161,20 @@ describe("CodeExecutionPanel — failed result", () => {
     expect(screen.getByText("Execution failed")).toBeInTheDocument()
   })
 
+  it("shows raw stderr in the dedicated errors tab", async () => {
+    const user = userEvent.setup()
+    render(
+      <CodeExecutionPanel
+        {...baseProps}
+        result={makeResult({ stderr: "boom", success: false, exitCode: 1 })}
+      />
+    )
+
+    await user.click(screen.getByRole("tab", { name: "Errors" }))
+
+    expect(screen.getAllByText("boom")).toHaveLength(2)
+  })
+
   it("renders exitCode 1 with the destructive style", () => {
     render(
       <CodeExecutionPanel

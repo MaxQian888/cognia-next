@@ -8,7 +8,7 @@
 import React, { Component } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangle, RotateCcw } from "lucide-react"
-import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
+import { ErrorTraceDetails } from "@/components/error/error-trace-details"
 import { Button } from "@/components/ui/button"
 import { loggers } from "@cognia/logging"
 import type { A2UIErrorBoundaryProps, A2UIErrorBoundaryState } from "@/types/a2ui/renderer"

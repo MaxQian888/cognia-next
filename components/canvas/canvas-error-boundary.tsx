@@ -7,7 +7,7 @@
 import React, { Component, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangle, RefreshCw } from "lucide-react"
-import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
+import { ErrorTraceDetails } from "@/components/error/error-trace-details"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Card, CardContent } from "@/components/ui/card"

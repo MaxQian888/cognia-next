@@ -65,14 +65,31 @@ jest.mock("@/components/ai-elements/tool", () => ({
   Tool: ({ children }: { children: ReactForMocks.ReactNode }) =>
     ReactForMocks.createElement("div", { "data-test": "tool" }, children),
   ToolBody: () => null,
-  ToolHeader: () => null,
+  ToolHeader: ({
+    title,
+    toolName,
+    readOnlyHint,
+  }: {
+    title?: string
+    toolName?: string
+    readOnlyHint?: boolean | null
+  }) =>
+    ReactForMocks.createElement(
+      "div",
+      {
+        "data-testid": "tool-header",
+        "data-tool-name": toolName,
+        "data-read-only": String(readOnlyHint),
+      },
+      title
+    ),
   ToolContent: ({ children }: { children: ReactForMocks.ReactNode }) =>
     ReactForMocks.createElement("div", null, children),
   ToolInput: ({ input }: { input: unknown }) =>
     ReactForMocks.createElement("div", { "data-test": "tool-input" }, JSON.stringify(input)),
 }))
 
-jest.mock("@/components/ai-elements/error-trace", () => ({
+jest.mock("@/components/error/error-trace-details", () => ({
   ErrorTraceDetails: ({
     error,
     title,
@@ -607,6 +624,36 @@ describe("custom extension parts", () => {
     render(<MessageRenderer message={msg} />)
     expect(document.querySelector("[data-testid='hook-notice-blocked']")).toBeTruthy()
   })
+
+  it("renders a persisted Claude tool-use summary inline", () => {
+    const msg: UIMessage = {
+      id: "summary-1",
+      role: "assistant",
+      parts: [
+        {
+          type: "data-tool-summary",
+          data: { summary: "Read two files", toolCallIds: ["t1", "t2"] },
+        } as unknown as UIMessage["parts"][number],
+      ],
+    }
+    render(<MessageRenderer message={msg} />)
+    expect(screen.getByTestId("tool-use-summary")).toHaveTextContent("Read two files")
+  })
+
+  it("ignores a malformed persisted Claude tool-use summary", () => {
+    const msg: UIMessage = {
+      id: "summary-malformed",
+      role: "assistant",
+      parts: [
+        {
+          type: "data-tool-summary",
+          data: { summary: 1, toolCallIds: "t1" },
+        } as unknown as UIMessage["parts"][number],
+      ],
+    }
+    expect(() => render(<MessageRenderer message={msg} />)).not.toThrow()
+    expect(screen.queryByTestId("tool-use-summary")).toBeNull()
+  })
 })
 
 // ── tool parts ────────────────────────────────────────────────────────────────
@@ -631,6 +678,27 @@ describe("tool parts", () => {
     expect(document.querySelector("[data-test='tool']")).toBeTruthy()
   })
 
+  it("passes the resolved title and semantic hint to the standard tool header", () => {
+    const msg: UIMessage = {
+      id: "t-title",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-calendar.create_event",
+          toolCallId: "call-title",
+          state: "output-available",
+          input: { date: "2026-08-07" },
+          output: "done",
+          title: "Calendar · Create event",
+          toolMetadata: { readOnlyHint: false },
+        } as unknown as UIMessage["parts"][number],
+      ],
+    }
+    render(<MessageRenderer message={msg} />)
+    expect(screen.getByTestId("tool-header")).toHaveTextContent("Calendar · Create event")
+    expect(screen.getByTestId("tool-header")).toHaveAttribute("data-read-only", "false")
+  })
+
   it("renders a dynamic-tool part as a tool call, not an unknown part", () => {
     // `dynamic-tool` is the AI SDK shape for a tool the client never declared
     // statically — imported transcripts and CLI handoff carry it.
@@ -651,6 +719,7 @@ describe("tool parts", () => {
     render(<MessageRenderer message={msg} />)
     expect(document.querySelector("[data-test='tool']")).toBeTruthy()
     expect(document.querySelector("[data-testid='unknown-part-card']")).toBeNull()
+    expect(screen.getByTestId("tool-header")).toHaveAttribute("data-tool-name", "SomeTool")
   })
 
   it("renders ErrorTraceDetails when the tool part is in output-error state", () => {

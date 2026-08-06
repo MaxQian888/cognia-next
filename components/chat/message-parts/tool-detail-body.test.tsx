@@ -35,7 +35,7 @@ jest.mock("@/components/chat/message-parts/terminal-tool-part", () => ({
 }))
 
 // Stub the error chrome, keep the real `normalizeErrorText` behind it.
-jest.mock("@/components/ai-elements/error-trace", () => ({
+jest.mock("@/components/error/error-trace-details", () => ({
   ErrorTraceDetails: ({ error, body }: { error: { message: string }; body?: unknown }) =>
     ReactForMocks.createElement(
       "div",

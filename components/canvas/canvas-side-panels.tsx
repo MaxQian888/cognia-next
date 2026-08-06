@@ -633,6 +633,7 @@ function ExecutionHost({ documentId }: { documentId: string }) {
   const { execute, cancel, clear, result, isExecuting } = useCanvasCodeExecution()
   return (
     <CodeExecutionPanel
+      code={doc?.content ?? ""}
       result={result}
       isExecuting={isExecuting}
       language={language}

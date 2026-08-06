@@ -6,8 +6,10 @@ import {
   ChartLineIcon,
   FolderOpenIcon,
   GitBranchIcon,
+  PlusIcon,
   SparklesIcon,
   StarIcon,
+  Trash2Icon,
   XIcon,
 } from "lucide-react"
 import { open as openDialog } from "@tauri-apps/plugin-dialog"
@@ -80,6 +82,10 @@ import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
 import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
+import { primaryRootOf } from "@/lib/workspace/roots"
+import { SessionExecutionWorkspace } from "./session-execution-workspace"
+import { ProjectEnvironmentManager } from "@/components/settings/project-environment-manager"
+import { createSessionExecutionContext } from "@/lib/task-workspace/session-execution-context"
 import { loggers } from "@cognia/logging"
 import { toast } from "sonner"
 import {
@@ -87,7 +93,18 @@ import {
   permissionModeMeta,
   permissionRiskMarker,
 } from "@/lib/settings/permission-mode-meta"
-import type { AppSettings, ChatSession, SystemPromptPreset } from "@cognia/agent-config-types"
+import {
+  isValidAgentEnvName,
+  resolveAgentExecutionPolicy,
+  resolveAgentModel,
+} from "@/lib/agent/agent-profile-policy"
+import { createAgentEnvSecretRef, saveAgentEnvSecret } from "@/lib/agent/agent-env-keyring"
+import type {
+  AgentEnvBinding,
+  AppSettings,
+  ChatSession,
+  SystemPromptPreset,
+} from "@cognia/agent-config-types"
 
 /**
  * Every permission mode, straight from the shared metadata rather than a local
@@ -112,6 +129,19 @@ interface FormState {
   bareMode: boolean
   debugMode: boolean
   briefMode: boolean
+  executionEffort: NonNullable<ChatSession["effort"]> | "inherit"
+  executionMaxTurns: string
+  executionEnvBindings: AgentEnvBinding[]
+}
+
+function executionFormState(session: ChatSession) {
+  return {
+    executionEffort: session.effort ?? session.executionPolicy?.effort ?? ("inherit" as const),
+    executionMaxTurns: session.executionPolicy?.maxTurns?.toString() ?? "",
+    executionEnvBindings: (session.executionPolicy?.envBindings ?? []).map((binding) => ({
+      ...binding,
+    })),
+  }
 }
 
 interface PendingPresetApply {
@@ -178,6 +208,7 @@ export function SessionSettingsSheet({
     characterWorkingDir: character?.workingDir,
     defaultWorkingDir,
   })
+  const activeProjectRoot = activeProject ? primaryRootOf(activeProject) : undefined
 
   const [form, setForm] = useState<FormState>({
     model: session.model ?? "",
@@ -187,7 +218,10 @@ export function SessionSettingsSheet({
     bareMode: Boolean(session.bareMode),
     debugMode: Boolean(session.debugMode),
     briefMode: Boolean(session.briefMode),
+    ...executionFormState(session),
   })
+  const [envSecretValues, setEnvSecretValues] = useState<Record<string, string>>({})
+  const [executionEffortDirty, setExecutionEffortDirty] = useState(false)
   const [presetId, setPresetId] = useState<string>("")
   const [pendingApply, setPendingApply] = useState<PendingPresetApply | null>(null)
 
@@ -211,7 +245,10 @@ export function SessionSettingsSheet({
       bareMode: Boolean(session.bareMode),
       debugMode: Boolean(session.debugMode),
       briefMode: Boolean(session.briefMode),
+      ...executionFormState(session),
     })
+    setEnvSecretValues({})
+    setExecutionEffortDirty(false)
     let resolvedId: string | null = null
     if (session.activePresetId) {
       const byId = presets.find((p) => p.id === session.activePresetId)
@@ -294,7 +331,74 @@ export function SessionSettingsSheet({
   const handleSave = async () => {
     const prevWorkingDir = session.workingDir ?? ""
     const newWorkingDir = form.workingDir.trim()
+    const maxTurnsText = form.executionMaxTurns.trim()
+    const maxTurns = maxTurnsText ? Number(maxTurnsText) : undefined
+    if (maxTurns !== undefined && (!Number.isInteger(maxTurns) || maxTurns < 1 || maxTurns > 100)) {
+      toast.error(t("execution.maxTurnsInvalid"))
+      return
+    }
+
+    const envBindings = form.executionEnvBindings.map((binding) => ({
+      ...binding,
+      name: binding.name.trim(),
+    }))
+    const envNames = new Set<string>()
+    for (const binding of envBindings) {
+      if (!isValidAgentEnvName(binding.name)) {
+        toast.error(t("execution.envNameInvalid", { name: binding.name || "?" }))
+        return
+      }
+      if (envNames.has(binding.name)) {
+        toast.error(t("execution.envNameDuplicate", { name: binding.name }))
+        return
+      }
+      envNames.add(binding.name)
+    }
+
+    const initialSecretRefs = new Set(
+      (session.executionPolicy?.envBindings ?? [])
+        .filter(
+          (binding): binding is Extract<AgentEnvBinding, { kind: "secret" }> =>
+            binding.kind === "secret"
+        )
+        .map((binding) => binding.secretRef)
+    )
+    for (const binding of envBindings) {
+      if (
+        binding.kind === "secret" &&
+        !initialSecretRefs.has(binding.secretRef) &&
+        !envSecretValues[binding.secretRef]
+      ) {
+        toast.error(t("execution.envSecretRequired", { name: binding.name }))
+        return
+      }
+    }
+
     try {
+      for (const binding of envBindings) {
+        if (binding.kind !== "secret") continue
+        const value = envSecretValues[binding.secretRef]
+        if (!value) continue
+        try {
+          await saveAgentEnvSecret(binding.secretRef, value)
+        } catch (error) {
+          loggers.chat.error("session environment secret save failed", error, {
+            sessionId: session.id,
+            name: binding.name,
+          })
+          toast.error(t("execution.envSecretSaveFailed", { name: binding.name }))
+          return
+        }
+      }
+
+      const effort = form.executionEffort === "inherit" ? undefined : form.executionEffort
+      const executionPolicy =
+        maxTurns !== undefined || envBindings.length > 0
+          ? {
+              maxTurns,
+              envBindings: envBindings.length > 0 ? envBindings : undefined,
+            }
+          : undefined
       await updateSession(session.id, {
         model: form.model.trim() || undefined,
         systemPrompt: form.systemPrompt.trim() || undefined,
@@ -304,6 +408,9 @@ export function SessionSettingsSheet({
         debugMode: form.debugMode || undefined,
         briefMode: form.briefMode || undefined,
         activePresetId: presetId || undefined,
+        effort,
+        thinkingLevel: executionEffortDirty ? effort : session.thinkingLevel,
+        executionPolicy,
       })
     } catch (err) {
       loggers.chat.error("session settings save failed", err, { sessionId: session.id })
@@ -388,6 +495,18 @@ export function SessionSettingsSheet({
     }
   }
 
+  const effectiveExecutionSummary = useMemo(() => {
+    if (!character) return null
+    const policy = resolveAgentExecutionPolicy(character.executionPolicy, session.executionPolicy)
+    return {
+      planModel: resolveAgentModel("plan", character, undefined),
+      executeModel: resolveAgentModel("execute", character, undefined),
+      utilityModel: resolveAgentModel("utility", character, undefined),
+      effort: session.effort ?? policy.effort,
+      maxTurns: policy.maxTurns,
+    }
+  }, [character, session.effort, session.executionPolicy])
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-md">
@@ -414,6 +533,40 @@ export function SessionSettingsSheet({
                   className="flex items-center gap-1 empty:hidden"
                 />
               </div>
+              {effectiveExecutionSummary && (
+                <div
+                  className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-md border bg-muted/20 p-2 text-[11px] sm:grid-cols-3"
+                  data-testid="agent-execution-summary"
+                >
+                  <ExecutionSummaryItem
+                    label={t("execution.summaryPlan")}
+                    value={effectiveExecutionSummary.planModel ?? t("execution.summaryDefault")}
+                  />
+                  <ExecutionSummaryItem
+                    label={t("execution.summaryExecute")}
+                    value={effectiveExecutionSummary.executeModel ?? t("execution.summaryDefault")}
+                  />
+                  <ExecutionSummaryItem
+                    label={t("execution.summaryUtility")}
+                    value={effectiveExecutionSummary.utilityModel ?? t("execution.summaryDefault")}
+                  />
+                  <ExecutionSummaryItem
+                    label={t("execution.summaryEffort")}
+                    value={
+                      effectiveExecutionSummary.effort
+                        ? effectiveExecutionSummary.effort
+                        : t("execution.summaryDefault")
+                    }
+                  />
+                  <ExecutionSummaryItem
+                    label={t("execution.summaryMaxTurns")}
+                    value={
+                      effectiveExecutionSummary.maxTurns?.toString() ??
+                      t("execution.summaryDefault")
+                    }
+                  />
+                </div>
+              )}
             </Section>
           )}
 
@@ -543,6 +696,240 @@ export function SessionSettingsSheet({
                 checked={form.briefMode}
                 onCheckedChange={(v) => setForm((f) => ({ ...f, briefMode: v }))}
               />
+            </div>
+          </Section>
+
+          <Section label={t("sheet.sections.execution")}>
+            <SessionExecutionWorkspace
+              session={session}
+              projectId={activeProject?.id}
+              projectRoot={activeProjectRoot?.path}
+              rootId={activeProjectRoot?.id}
+              environmentId={
+                session.executionContext?.environmentId ?? activeProject?.defaultEnvironmentId
+              }
+            />
+            {activeProject && activeProjectRoot && (
+              <ProjectEnvironmentManager
+                projectId={activeProject.id}
+                executionRoot={session.executionContext?.worktreePath ?? activeProjectRoot.path}
+                scope={
+                  session.executionContext?.location === "managedWorktree"
+                    ? "managedWorktree"
+                    : "local"
+                }
+                selectedEnvironmentId={
+                  session.executionContext?.environmentId ?? activeProject.defaultEnvironmentId
+                }
+                onSelectedEnvironmentChange={async (environmentId) => {
+                  const executionContext = session.executionContext
+                    ? { ...session.executionContext, environmentId }
+                    : createSessionExecutionContext({
+                        sessionId: session.id,
+                        projectId: activeProject.id,
+                        projectRoot: activeProjectRoot.path,
+                        rootId: activeProjectRoot.id,
+                        environmentId,
+                        requestedLocation: "local",
+                        isGitRepository: false,
+                        now: Date.now(),
+                      })
+                  await updateSession(session.id, { executionContext })
+                }}
+              />
+            )}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="session-execution-effort" className="text-xs">
+                  {t("execution.effort")}
+                </Label>
+                <Select
+                  value={form.executionEffort}
+                  onValueChange={(value) => {
+                    setExecutionEffortDirty(true)
+                    setForm((current) => ({
+                      ...current,
+                      executionEffort: value as FormState["executionEffort"],
+                    }))
+                  }}
+                >
+                  <SelectTrigger id="session-execution-effort" aria-label={t("execution.effort")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inherit">{t("execution.inherit")}</SelectItem>
+                    {(["low", "medium", "high", "xhigh", "max"] as const).map((effort) => (
+                      <SelectItem key={effort} value={effort}>
+                        {t(`execution.effortValues.${effort}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="session-execution-max-turns" className="text-xs">
+                  {t("execution.maxTurns")}
+                </Label>
+                <Input
+                  id="session-execution-max-turns"
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={form.executionMaxTurns}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      executionMaxTurns: event.target.value,
+                    }))
+                  }
+                  placeholder={t("execution.maxTurnsPlaceholder")}
+                />
+                <p className="text-[10px] text-muted-foreground">{t("execution.maxTurnsHint")}</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <Label className="text-xs font-medium">{t("execution.envTitle")}</Label>
+                  <p className="text-[10px] text-muted-foreground">
+                    {t("execution.envDescription")}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setForm((current) => ({
+                      ...current,
+                      executionEnvBindings: [
+                        ...current.executionEnvBindings,
+                        { name: "", kind: "plain", value: "" },
+                      ],
+                    }))
+                  }
+                >
+                  <PlusIcon className="mr-1 size-3.5" />
+                  {t("execution.addEnv")}
+                </Button>
+              </div>
+
+              {form.executionEnvBindings.map((binding, index) => {
+                const rowId = `session-env-${index}`
+                return (
+                  <div
+                    key={binding.kind === "secret" ? binding.secretRef : `plain-${index}`}
+                    className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_7.5rem_1fr_auto]"
+                  >
+                    <div className="space-y-1">
+                      <Label className="text-xs" htmlFor={`${rowId}-name`}>
+                        {t("execution.envName")}
+                      </Label>
+                      <Input
+                        id={`${rowId}-name`}
+                        value={binding.name}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            executionEnvBindings: current.executionEnvBindings.map((item, i) =>
+                              i === index ? { ...item, name: event.target.value } : item
+                            ),
+                          }))
+                        }
+                        placeholder={t("execution.envNamePlaceholder")}
+                        className="font-mono text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">{t("execution.envKind")}</Label>
+                      <Select
+                        value={binding.kind}
+                        onValueChange={(kind) =>
+                          setForm((current) => ({
+                            ...current,
+                            executionEnvBindings: current.executionEnvBindings.map((item, i) => {
+                              if (i !== index || item.kind === kind) return item
+                              return kind === "secret"
+                                ? {
+                                    name: item.name,
+                                    kind: "secret" as const,
+                                    secretRef: createAgentEnvSecretRef(
+                                      `session-${session.id}`,
+                                      item.name || "ENV"
+                                    ),
+                                  }
+                                : { name: item.name, kind: "plain" as const, value: "" }
+                            }),
+                          }))
+                        }
+                      >
+                        <SelectTrigger aria-label={t("execution.envKind")}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="plain">{t("execution.envPlain")}</SelectItem>
+                          <SelectItem value="secret">{t("execution.envSecret")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs" htmlFor={`${rowId}-value`}>
+                        {t("execution.envValue")}
+                      </Label>
+                      <Input
+                        id={`${rowId}-value`}
+                        type={binding.kind === "secret" ? "password" : "text"}
+                        autoComplete={binding.kind === "secret" ? "new-password" : undefined}
+                        value={
+                          binding.kind === "secret"
+                            ? (envSecretValues[binding.secretRef] ?? "")
+                            : binding.value
+                        }
+                        onChange={(event) => {
+                          if (binding.kind === "secret") {
+                            setEnvSecretValues((current) => ({
+                              ...current,
+                              [binding.secretRef]: event.target.value,
+                            }))
+                            return
+                          }
+                          setForm((current) => ({
+                            ...current,
+                            executionEnvBindings: current.executionEnvBindings.map((item, i) =>
+                              i === index && item.kind === "plain"
+                                ? { ...item, value: event.target.value }
+                                : item
+                            ),
+                          }))
+                        }}
+                        placeholder={
+                          binding.kind === "secret"
+                            ? t("execution.envSecretPlaceholder")
+                            : t("execution.envPlainPlaceholder")
+                        }
+                        className="font-mono text-xs"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() =>
+                        setForm((current) => ({
+                          ...current,
+                          executionEnvBindings: current.executionEnvBindings.filter(
+                            (_, i) => i !== index
+                          ),
+                        }))
+                      }
+                      aria-label={t("execution.removeEnv", { name: binding.name || "?" })}
+                    >
+                      <Trash2Icon className="size-4" />
+                    </Button>
+                  </div>
+                )
+              })}
             </div>
           </Section>
 
@@ -751,6 +1138,15 @@ function Section({ label, children }: { label: string; children: React.ReactNode
       </p>
       {children}
     </section>
+  )
+}
+
+function ExecutionSummaryItem({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="min-w-0">
+      <span className="text-muted-foreground">{label}: </span>
+      <span className="break-all font-medium">{value}</span>
+    </span>
   )
 }
 

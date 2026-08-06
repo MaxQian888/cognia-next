@@ -122,6 +122,17 @@ jest.mock("sonner", () => ({
   toast: { error: (text: string) => toastErrorMock(text) },
 }))
 
+jest.mock("@/components/ai-elements/persona", () => ({
+  Persona: ({ state, onLoadError }: { state: string; onLoadError?: (error: unknown) => void }) => (
+    <button
+      data-testid="live-voice-persona"
+      data-state={state}
+      onClick={() => onLoadError?.(new Error("webgl unavailable"))}
+      type="button"
+    />
+  ),
+}))
+
 import { LiveVoiceUnavailableError } from "@/lib/voice/live/session"
 
 import { LiveVoiceDialog } from "./live-voice-dialog"
@@ -304,6 +315,19 @@ describe("LiveVoiceDialog — start failures", () => {
 })
 
 describe("LiveVoiceDialog — live conversation", () => {
+  it("maps live phases to Persona states and falls back after a render failure", async () => {
+    const user = userEvent.setup()
+    renderDialog()
+    await user.click(screen.getByLabelText("startLive"))
+
+    act(() => publish({ phase: "responding" }))
+    const persona = screen.getByTestId("live-voice-persona")
+    expect(persona).toHaveAttribute("data-state", "speaking")
+
+    await user.click(persona)
+    expect(screen.getByTestId("live-voice-persona-fallback")).toBeInTheDocument()
+  })
+
   it("renders transcripts and forwards completed user turns", async () => {
     const user = userEvent.setup()
     const onUserTranscript = jest.fn()

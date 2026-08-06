@@ -18,7 +18,10 @@
  */
 
 import {
+  ActivityIcon,
   BotIcon,
+  BrainIcon,
+  GitBranchIcon,
   History,
   LibraryIcon,
   MessageSquareIcon,
@@ -53,6 +56,10 @@ import { ArtifactList } from "./artifact-list"
 import { ArtifactReviewView } from "./artifact-review-view"
 import { DockWorkspace } from "./workspace-mode/dock-workspace"
 import { ProjectOverviewPanel } from "./workspace-mode/project-overview-panel"
+import { MemoryWorkbenchPanel } from "@/components/context-workbench/panels/memory-workbench-panel"
+import { SourceControlWorkbenchPanel } from "@/components/context-workbench/panels/source-control-workbench-panel"
+import { LogsWorkbenchPanel } from "@/components/context-workbench/panels/logs-workbench-panel"
+import { AgentStatusWorkbenchPanel } from "@/components/context-workbench/panels/agent-status-workbench-panel"
 import type {
   ContextPanelDefinition,
   ContextPanelMode,
@@ -271,6 +278,16 @@ export function useArtifactSurfacePanels({
           ) : null,
       },
       {
+        id: "memory",
+        activity: "inspect",
+        labelKey: "contextWorkbench.memoryPanel.title",
+        icon: BrainIcon,
+        order: 36,
+        appliesTo: (resource) => resource.kind === "artifact",
+        retention: "stateful",
+        renderer: () => <MemoryWorkbenchPanel sessionId={activeSessionId} />,
+      },
+      {
         id: PROJECT_OVERVIEW_PANEL_ID,
         activity: "workspace",
         labelKey: "projectOverview.panelTitle",
@@ -343,6 +360,10 @@ export interface SessionSurfacePanelsInput {
   workspaceLayout: ChatDockWorkspaceLayout
   workspaceAvailable: boolean
   unresolvedCommentCount: number
+  /** Number of unique sources referenced in session messages. */
+  sourceCount?: number
+  /** Number of uncommitted file changes in the project workspace. */
+  uncommittedChangeCount?: number
   scopeKey: string
   onWidthHint: (mode: ContextPanelMode, panelId?: string) => void
 }
@@ -357,6 +378,8 @@ export function useSessionSurfacePanels({
   workspaceLayout,
   workspaceAvailable,
   unresolvedCommentCount,
+  sourceCount = 0,
+  uncommittedChangeCount = 0,
   scopeKey,
   onWidthHint,
 }: SessionSurfacePanelsInput): ContextPanelDefinition[] {
@@ -464,9 +487,27 @@ export function useSessionSurfacePanels({
         retention: "stateful",
         scope: "session",
         preferredMode: "wide",
+        getBadge: () => uncommittedChangeCount,
         renderer: () =>
           workspaceAvailable ? (
             <DockWorkspace activeSessionId={activeSessionId} layout={workspaceLayout} />
+          ) : (
+            <ContextCapabilityUnavailable capability="workspace" />
+          ),
+      },
+      {
+        id: "source-control",
+        activity: "workspace",
+        labelKey: "contextWorkbench.sourceControlPanel.title",
+        icon: GitBranchIcon,
+        order: 35,
+        appliesTo: (resource) => resource.kind === "session",
+        retention: "stateful",
+        scope: "session",
+        getBadge: () => uncommittedChangeCount,
+        renderer: () =>
+          workspaceAvailable ? (
+            <SourceControlWorkbenchPanel />
           ) : (
             <ContextCapabilityUnavailable capability="workspace" />
           ),
@@ -501,6 +542,7 @@ export function useSessionSurfacePanels({
         order: 45,
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
+        getBadge: () => sourceCount,
         renderer: () => <SessionSourcesPanel messages={sessionMessages} />,
       },
       {
@@ -541,6 +583,36 @@ export function useSessionSurfacePanels({
             />
           ) : null,
       },
+      {
+        id: "memory",
+        activity: "inspect",
+        labelKey: "contextWorkbench.memoryPanel.title",
+        icon: BrainIcon,
+        order: 55,
+        appliesTo: (resource) => resource.kind === "session",
+        retention: "stateful",
+        renderer: () => <MemoryWorkbenchPanel sessionId={activeSessionId} />,
+      },
+      {
+        id: "logs",
+        activity: "inspect",
+        labelKey: "contextWorkbench.logsPanel.title",
+        icon: ActivityIcon,
+        order: 60,
+        appliesTo: (resource) => resource.kind === "session",
+        retention: "stateful",
+        renderer: () => <LogsWorkbenchPanel />,
+      },
+      {
+        id: "agent-status",
+        activity: "ai",
+        labelKey: "contextWorkbench.agentStatusPanel.title",
+        icon: BotIcon,
+        order: 16,
+        appliesTo: (resource) => resource.kind === "session",
+        retention: "stateful",
+        renderer: () => <AgentStatusWorkbenchPanel />,
+      },
     ],
     [
       activeSessionId,
@@ -550,7 +622,9 @@ export function useSessionSurfacePanels({
       sessionMessages,
       sessionProject,
       scopeKey,
+      sourceCount,
       tWorkbench,
+      uncommittedChangeCount,
       unresolvedCommentCount,
       workspaceAvailable,
       workspaceLayout,

@@ -119,9 +119,7 @@ describe("CanvasErrorBoundary", () => {
         <ThrowError shouldThrow={true} />
       </CanvasErrorBoundary>
     )
-    // The vendored ErrorTraceDetails exposes a Show/Hide toggle for the
-    // stack frame block; the copy-error label is wired in via prop but the
-    // shim has not surfaced it as a separate button.
+    // The first-party wrapper exposes the official StackTrace trigger.
     expect(screen.getByRole("button", { name: /Show stack trace/i })).toBeInTheDocument()
   })
 
@@ -131,7 +129,7 @@ describe("CanvasErrorBoundary", () => {
         <ThrowError shouldThrow={true} />
       </CanvasErrorBoundary>
     )
-    expect(screen.getByText("Test error")).toBeInTheDocument()
+    expect(screen.getAllByText("Test error")).toHaveLength(2)
   })
 
   it("reveals raw stack details when the toggle is expanded", async () => {
@@ -144,13 +142,15 @@ describe("CanvasErrorBoundary", () => {
     )
 
     // Stack contents live inside a Collapsible that defaults to closed.
-    expect(screen.queryByText(/components\/canvas\/surface\.tsx/)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /components\/canvas\/surface\.tsx/ })
+    ).not.toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: /Show stack trace/i }))
 
-    // The vendored ErrorTraceDetails renders the full stack in a single
-    // <pre> block, so match a stable substring instead of an exact line.
-    expect(screen.getByText(/components\/canvas\/surface\.tsx/)).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /components\/canvas\/surface\.tsx/ })
+    ).toBeInTheDocument()
   })
 
   it("calls onReset when try again clicked", () => {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { AudioWaveformIcon, MicIcon, MicOffIcon, PhoneOffIcon } from "lucide-react"
 import { toast } from "sonner"
+import { Persona, type PersonaState } from "@/components/ai-elements/persona"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -28,6 +29,7 @@ import { DEFAULT_LIVE_VOICE_SETTINGS } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
+import type { LiveVoiceState } from "@/lib/voice/live/reducer"
 
 interface LiveVoiceDialogProps {
   disabled?: boolean
@@ -50,6 +52,16 @@ const UNAVAILABLE_MESSAGE_KEYS: Record<StartFailure, string> = {
   mintFailed: "errors.mintFailed",
 }
 
+const PERSONA_STATE_BY_PHASE: Record<LiveVoiceState["phase"], PersonaState> = {
+  idle: "asleep",
+  connecting: "thinking",
+  listening: "listening",
+  speaking: "listening",
+  thinking: "thinking",
+  responding: "speaking",
+  error: "asleep",
+}
+
 export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogProps) {
   const t = useTranslations("chat.composer.voice.live")
   const settings = useSettingsStore((store) => store.settings)
@@ -58,6 +70,7 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
   const [open, setOpen] = useState(false)
   const [controller, setController] = useState<LiveVoiceController | null>(null)
   const [startFailure, setStartFailure] = useState<StartFailure | null>(null)
+  const [personaFailed, setPersonaFailed] = useState(false)
   const controllerRef = useRef<LiveVoiceController | null>(null)
   const deliveredTurns = useRef(new Set<string>())
   /** Provenance + wall clock captured at start, so teardown can persist turns. */
@@ -136,6 +149,7 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
     if (disabled || controllerRef.current) return
     setOpen(true)
     setStartFailure(null)
+    setPersonaFailed(false)
 
     let next: LiveVoiceController | null = null
     try {
@@ -256,18 +270,28 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
 
           <div className="flex min-h-72 flex-col">
             <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-8">
-              <div
-                className={cn(
-                  "relative flex size-24 items-center justify-center rounded-full bg-primary/10 text-primary",
-                  phase === "speaking" && "animate-pulse bg-destructive/10 text-destructive",
-                  phase === "responding" && "bg-emerald-500/10 text-emerald-600"
-                )}
-              >
-                <AudioWaveformIcon className="size-11" />
-                {(phase === "speaking" || phase === "responding") && (
-                  <span className="absolute inset-0 animate-ping rounded-full border border-current opacity-30" />
-                )}
-              </div>
+              {personaFailed ? (
+                <div
+                  className={cn(
+                    "relative flex size-24 items-center justify-center rounded-full bg-primary/10 text-primary",
+                    phase === "speaking" && "animate-pulse bg-destructive/10 text-destructive",
+                    phase === "responding" && "bg-emerald-500/10 text-emerald-600"
+                  )}
+                  data-testid="live-voice-persona-fallback"
+                >
+                  <AudioWaveformIcon className="size-11" />
+                  {(phase === "speaking" || phase === "responding") && (
+                    <span className="absolute inset-0 animate-ping rounded-full border border-current opacity-30" />
+                  )}
+                </div>
+              ) : (
+                <Persona
+                  className="size-24"
+                  onLoadError={() => setPersonaFailed(true)}
+                  state={PERSONA_STATE_BY_PHASE[phase]}
+                  variant="obsidian"
+                />
+              )}
               <p aria-live="polite" className="text-sm font-medium">
                 {t(`phases.${phase}`)}
               </p>

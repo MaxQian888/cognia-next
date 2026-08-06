@@ -27,6 +27,18 @@ import { ExternalLink } from "@/components/shared/external-link"
 import { JsonTree } from "@/components/shared/json-tree"
 import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
 import { Badge } from "@/components/ui/badge"
+import {
+  StackTrace,
+  StackTraceActions,
+  StackTraceContent,
+  StackTraceCopyButton,
+  StackTraceError,
+  StackTraceErrorMessage,
+  StackTraceErrorType,
+  StackTraceExpandButton,
+  StackTraceFrames,
+  StackTraceHeader,
+} from "@/components/ai-elements/stack-trace"
 
 interface ErrorParsedViewProps {
   /** Pre-parsed result (legacy callers). When omitted, the view parses
@@ -195,6 +207,7 @@ function JsonNodeView({ node }: { node: ParsedNode }) {
 }
 
 function StackNodeView({ node }: { node: ParsedNode }) {
+  const t = useTranslations("errorPage")
   const openFile = useFileViewerStore((s) => s.openFile)
 
   const handlePathClick = useCallback(
@@ -208,25 +221,60 @@ function StackNodeView({ node }: { node: ParsedNode }) {
     return <span className="text-sm">{node.content}</span>
   }
 
+  const hasUnknownCoordinates = node.frames.some((frame) => frame.line == null || frame.col == null)
+  if (hasUnknownCoordinates) {
+    return (
+      <div className="space-y-1">
+        {node.frames.map((frame, index) => (
+          <div key={index} className="flex items-center gap-1 text-[11px] font-mono">
+            <span className="text-muted-foreground">at</span>
+            {frame.fn && frame.fn !== "<anonymous>" && (
+              <span className="text-chart-4">{frame.fn}</span>
+            )}
+            <button
+              type="button"
+              className="inline-flex items-center gap-0.5 text-primary hover:underline"
+              onClick={() => handlePathClick(frame.file, frame.line, frame.col)}
+            >
+              <FileCode className="h-3 w-3" />
+              {frame.file}:{frame.line ?? "?"}:{frame.col ?? "?"}
+            </button>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  const trace = [
+    `Error: ${node.content.split("\n", 1)[0]}`,
+    ...node.frames.map((frame) => {
+      const location = `${frame.file}:${frame.line}:${frame.col}`
+      return frame.fn && frame.fn !== "<anonymous>"
+        ? `    at ${frame.fn} (${location})`
+        : `    at ${location}`
+    }),
+  ].join("\n")
+
   return (
-    <div className="space-y-1">
-      {node.frames.map((frame, i) => (
-        <div key={i} className="flex items-center gap-1 text-[11px] font-mono">
-          <span className="text-muted-foreground">at</span>
-          {frame.fn && frame.fn !== "<anonymous>" && (
-            <span className="text-chart-4">{frame.fn}</span>
-          )}
-          <button
-            type="button"
-            className="inline-flex items-center gap-0.5 text-primary hover:underline"
-            onClick={() => handlePathClick(frame.file, frame.line, frame.col)}
-          >
-            <FileCode className="h-3 w-3" />
-            {frame.file}:{frame.line ?? "?"}:{frame.col ?? "?"}
-          </button>
-        </div>
-      ))}
-    </div>
+    <StackTrace
+      trace={trace}
+      defaultOpen
+      onFilePathClick={(path, line, column) => handlePathClick(path, line ?? null, column ?? null)}
+    >
+      <StackTraceHeader aria-label={t("hideStack")}>
+        <StackTraceError>
+          <StackTraceErrorType />
+          <StackTraceErrorMessage />
+        </StackTraceError>
+        <StackTraceActions aria-label={t("stackActions")}>
+          <StackTraceCopyButton aria-label={t("copyStack")} />
+          <StackTraceExpandButton aria-label={t("hideStack")} />
+        </StackTraceActions>
+      </StackTraceHeader>
+      <StackTraceContent>
+        <StackTraceFrames emptyLabel={t("noStackFrames")} />
+      </StackTraceContent>
+    </StackTrace>
   )
 }
 

@@ -20,6 +20,14 @@ import {
 } from "@/types/system/usage"
 import type { SessionReport } from "@/lib/analysis/session-report"
 import { AssessmentCard } from "@/components/chat/session-insights/assessment-card"
+import { SkillSuggestionCard } from "@/components/chat/skill-suggestion-card"
+import {
+  TestResults,
+  TestResultsContent,
+  TestResultsHeader,
+  TestResultsSummary,
+  TestSuiteStats,
+} from "@/components/ai-elements/test-results"
 
 function Kpi({ label, value }: { label: string; value: string | number }) {
   return (
@@ -30,7 +38,7 @@ function Kpi({ label, value }: { label: string; value: string | number }) {
   )
 }
 
-export function SessionReportView({ report }: { report: SessionReport }) {
+export function SessionReportView({ report, sessionId }: { report: SessionReport; sessionId?: string }) {
   const t = useTranslations("sessionInsights")
   const totalTokens =
     report.totalInputTokens +
@@ -56,9 +64,26 @@ export function SessionReportView({ report }: { report: SessionReport }) {
   const avgCost = turns > 0 ? formatCostInCurrency(report.totalCostUsd / turns) : "—"
   const avgDuration =
     turns > 0 && report.totalDurationMs > 0 ? formatDuration(report.totalDurationMs / turns) : "—"
+  const passedTests = report.testSnapshots.reduce((sum, snapshot) => sum + snapshot.passed, 0)
+  const failedTests = report.testSnapshots.reduce((sum, snapshot) => sum + snapshot.failed, 0)
 
   return (
     <div className="space-y-4" data-testid="session-report-view">
+      {sessionId ? (
+        <SkillSuggestionCard
+          source={{ kind: "session", sessionId }}
+          outcome={{
+            completed: true,
+            turns: report.turns,
+            errorCount: report.errorCount,
+            denialCount: report.denialCount,
+            toolCallTotal: report.toolCallTotal,
+            passedTests,
+            failedTests,
+            commitCount: report.commitCount,
+          }}
+        />
+      ) : null}
       {/* KPI tiles */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Kpi label={t("kpi.turns")} value={report.turns} />
@@ -146,6 +171,45 @@ export function SessionReportView({ report }: { report: SessionReport }) {
           )}
         </ul>
       </section>
+
+      {report.testSnapshots.length > 0 && (
+        <TestResults
+          data-testid="session-test-results"
+          summary={{
+            passed: passedTests,
+            failed: failedTests,
+            skipped: 0,
+            total: report.testSnapshots.reduce(
+              (sum, snapshot) => sum + snapshot.passed + snapshot.failed,
+              0
+            ),
+          }}
+        >
+          <TestResultsHeader>
+            <TestResultsSummary>
+              <span className="text-sm font-medium">{t("tests.title")}</span>
+            </TestResultsSummary>
+          </TestResultsHeader>
+          <TestResultsContent>
+            {report.testSnapshots.map((snapshot) => (
+              <div
+                className="flex items-center gap-3 rounded-lg border px-4 py-3"
+                data-testid={`session-test-snapshot-${snapshot.messageIndex}`}
+                key={snapshot.messageIndex}
+              >
+                <span className="min-w-0 flex-1 text-sm font-medium">
+                  {t("tests.snapshot", { index: snapshot.messageIndex + 1 })}
+                </span>
+                <TestSuiteStats>
+                  <span className={snapshot.failed > 0 ? "text-destructive" : "text-success"}>
+                    {t("tests.counts", { passed: snapshot.passed, failed: snapshot.failed })}
+                  </span>
+                </TestSuiteStats>
+              </div>
+            ))}
+          </TestResultsContent>
+        </TestResults>
+      )}
 
       {report.degraded && <p className="text-[10px] text-muted-foreground">{t("degradedTree")}</p>}
     </div>

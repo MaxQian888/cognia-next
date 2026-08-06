@@ -255,6 +255,8 @@ const projectCommon: Config = {
     // animation loop. Tests that assert on the post-animation style need
     // a mock that merges `animate` into `style` at render time.
     "^motion/react$": "<rootDir>/__mocks__/motion-react.js",
+    "^media-chrome/react$": "<rootDir>/__mocks__/media-chrome-react.js",
+    "^use-stick-to-bottom$": "<rootDir>/__mocks__/use-stick-to-bottom.js",
 
     // react-markdown and its remark/rehype plugin ecosystem are ESM-only.
     // Instead of fighting pnpm's two-layer path layout with transformIgnorePatterns,

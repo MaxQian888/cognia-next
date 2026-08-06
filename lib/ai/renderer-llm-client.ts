@@ -34,13 +34,20 @@ export interface BuildRendererLlmClientArgs {
   providerOverride?: string
   /** Explicit per-feature model id override (highest priority). */
   modelOverride?: string
+  /**
+   * Lower-priority model preference: used when no explicit `modelOverride` is
+   * given, but preferred over inheriting the session/default model. Useful for
+   * utility tasks that should use a cheap model regardless of what the user's
+   * session is configured for.
+   */
+  modelPreference?: string
 }
 
 /**
  * Build the `LlmClient` for a renderer-side feature call. Provider resolution
  * order: explicit override → session override → app default → anthropic. Model
- * order: explicit override → session model → resolved provider default → app
- * default model.
+ * order: explicit override → model preference → session model → resolved
+ * provider default → app default model.
  */
 export function buildRendererLlmClient({
   session,
@@ -48,6 +55,7 @@ export function buildRendererLlmClient({
   featureId,
   providerOverride,
   modelOverride,
+  modelPreference,
 }: BuildRendererLlmClientArgs): LlmClient | null {
   if (!appSettings) return null
 
@@ -77,7 +85,12 @@ export function buildRendererLlmClient({
   // works inside the sidecar; these calls run in the renderer.)
   if (!resolution.apiKey) return null
 
-  const model = modelOverride ?? session?.model ?? resolution.model ?? appSettings.defaultModel
+  const model =
+    modelOverride ??
+    modelPreference ??
+    session?.model ??
+    resolution.model ??
+    appSettings.defaultModel
   if (!model) return null
 
   // Plugin-contributed protocol ids (`${pluginId}:${id}`) execute only in the

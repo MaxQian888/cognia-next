@@ -25,6 +25,24 @@ import {
   TerminalHeader,
   TerminalStatus,
 } from "@/components/ai-elements/terminal"
+import { CodeBlock } from "@/components/ai-elements/code-block"
+import {
+  Sandbox,
+  SandboxTabContent,
+  SandboxTabs,
+  SandboxTabsBar,
+  SandboxTabsList,
+  SandboxTabsTrigger,
+} from "@/components/ai-elements/sandbox"
+import {
+  StackTrace,
+  StackTraceContent,
+  StackTraceError,
+  StackTraceErrorMessage,
+  StackTraceErrorType,
+  StackTraceFrames,
+  StackTraceHeader,
+} from "@/components/ai-elements/stack-trace"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
@@ -37,6 +55,7 @@ interface CodeExecutionPanelProps {
   result: CodeSandboxExecutionResult | null
   isExecuting: boolean
   language: string
+  code?: string
   onExecute: () => void
   onCancel: () => void
   onClear: () => void
@@ -47,6 +66,7 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
   result,
   isExecuting,
   language,
+  code = "",
   onExecute,
   onCancel,
   onClear,
@@ -83,7 +103,7 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
   }
 
   return (
-    <div className={cn("border-t flex flex-col", className)}>
+    <Sandbox className={cn("mb-0 flex flex-col rounded-none border-x-0 border-b-0", className)}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/30">
         <div className="flex items-center gap-2">
@@ -115,124 +135,158 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
 
       {/* Output */}
       {(result || isExecuting) && (
-        <Terminal
-          output={terminalOutput}
-          isStreaming={isExecuting}
-          className="flex-1 rounded-none border-0"
-        >
-          <TerminalHeader className="bg-popover">
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <TerminalIcon className="h-4 w-4" />
-                <span>{t("output")}</span>
-              </div>
-              {result && (
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
-                    {result.executionTime}ms
-                  </span>
-                  {result.exitCode !== null && (
-                    <span
-                      className={cn(
-                        "flex items-center gap-1",
-                        result.exitCode === 0 ? "text-success" : "text-destructive"
+        <SandboxTabs defaultValue="output">
+          <SandboxTabsBar>
+            <SandboxTabsList>
+              <SandboxTabsTrigger value="input">{t("input")}</SandboxTabsTrigger>
+              <SandboxTabsTrigger value="output">{t("output")}</SandboxTabsTrigger>
+              {result?.stderr && (
+                <SandboxTabsTrigger value="errors">{t("errors")}</SandboxTabsTrigger>
+              )}
+            </SandboxTabsList>
+          </SandboxTabsBar>
+          <SandboxTabContent value="input" className="p-3">
+            <CodeBlock code={code} language={language} />
+          </SandboxTabContent>
+          <SandboxTabContent value="output">
+            <Terminal
+              output={terminalOutput}
+              isStreaming={isExecuting}
+              className="flex-1 rounded-none border-0"
+            >
+              <TerminalHeader className="bg-popover">
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <TerminalIcon className="h-4 w-4" />
+                    <span>{t("output")}</span>
+                  </div>
+                  {result && (
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {result.executionTime}ms
+                      </span>
+                      {result.exitCode !== null && (
+                        <span
+                          className={cn(
+                            "flex items-center gap-1",
+                            result.exitCode === 0 ? "text-success" : "text-destructive"
+                          )}
+                        >
+                          {t("exitCode")}: {result.exitCode}
+                        </span>
                       )}
-                    >
-                      {t("exitCode")}: {result.exitCode}
-                    </span>
+                    </div>
                   )}
                 </div>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <TerminalStatus>{t("executing")}</TerminalStatus>
-              <TerminalActions>
-                {result && (
-                  <>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
+                <div className="flex items-center gap-2">
+                  <TerminalStatus>{t("executing")}</TerminalStatus>
+                  <TerminalActions>
+                    {result && (
+                      <>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:bg-accent hover:text-foreground"
+                              onClick={handleCopyOutput}
+                              disabled={isCopying || !terminalOutput}
+                              aria-label={t("copyOutput")}
+                            >
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t("copyOutput")}</TooltipContent>
+                        </Tooltip>
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 text-muted-foreground hover:bg-accent hover:text-foreground"
-                          onClick={handleCopyOutput}
-                          disabled={isCopying || !terminalOutput}
-                          aria-label={t("copyOutput")}
+                          onClick={onClear}
+                          aria-label={t("clearOutput")}
                         >
-                          <Copy className="h-3 w-3" />
+                          <X className="h-3 w-3" />
                         </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("copyOutput")}</TooltipContent>
-                    </Tooltip>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:bg-accent hover:text-foreground"
-                      onClick={onClear}
-                      aria-label={t("clearOutput")}
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </>
-                )}
-              </TerminalActions>
-            </div>
-          </TerminalHeader>
-          <TerminalContent className="max-h-[200px] p-3 text-xs sm:text-sm">
-            <div className="space-y-2">
-              {isExecuting && !result && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>{t("executingCode")}</span>
-                  </div>
-                  <Progress value={undefined} className="h-1" />
+                      </>
+                    )}
+                  </TerminalActions>
                 </div>
-              )}
-
-              {result && (
-                <>
-                  {/* Execution stats */}
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                    <span>{getStatusText()}</span>
-                  </div>
-
-                  {/* stdout */}
-                  {result.stdout && (
-                    <div className="space-y-1">
-                      <div className="text-xs font-medium text-muted-foreground">
-                        {t("output")}:
+              </TerminalHeader>
+              <TerminalContent className="max-h-[200px] p-3 text-xs sm:text-sm">
+                <div className="space-y-2">
+                  {isExecuting && !result && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>{t("executingCode")}</span>
                       </div>
-                      <pre className="p-2 rounded bg-muted text-xs sm:text-sm font-mono whitespace-pre-wrap overflow-x-auto">
-                        {result.stdout}
-                      </pre>
+                      <Progress value={undefined} className="h-1" />
                     </div>
                   )}
 
-                  {/* stderr */}
-                  {result.stderr && (
-                    <div className="space-y-1">
-                      <div className="text-xs font-medium text-destructive flex items-center gap-1">
-                        <AlertTriangle className="h-3 w-3" />
-                        {t("errors")}:
+                  {result && (
+                    <>
+                      {/* Execution stats */}
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                        <span>{getStatusText()}</span>
                       </div>
-                      <pre className="p-2 rounded bg-destructive/10 text-destructive text-xs sm:text-sm font-mono whitespace-pre-wrap overflow-x-auto">
-                        {result.stderr}
-                      </pre>
-                    </div>
-                  )}
 
-                  {/* No output message */}
-                  {!result.stdout && !result.stderr && result.success && (
-                    <div className="text-sm italic text-muted-foreground">{t("noOutput")}</div>
+                      {/* stdout */}
+                      {result.stdout && (
+                        <div className="space-y-1">
+                          <div className="text-xs font-medium text-muted-foreground">
+                            {t("output")}:
+                          </div>
+                          <pre className="p-2 rounded bg-muted text-xs sm:text-sm font-mono whitespace-pre-wrap overflow-x-auto">
+                            {result.stdout}
+                          </pre>
+                        </div>
+                      )}
+
+                      {/* stderr */}
+                      {result.stderr && (
+                        <div className="space-y-1">
+                          <div className="text-xs font-medium text-destructive flex items-center gap-1">
+                            <AlertTriangle className="h-3 w-3" />
+                            {t("errors")}:
+                          </div>
+                          <pre className="p-2 rounded bg-destructive/10 text-destructive text-xs sm:text-sm font-mono whitespace-pre-wrap overflow-x-auto">
+                            {result.stderr}
+                          </pre>
+                        </div>
+                      )}
+
+                      {/* No output message */}
+                      {!result.stdout && !result.stderr && result.success && (
+                        <div className="text-sm italic text-muted-foreground">{t("noOutput")}</div>
+                      )}
+                    </>
                   )}
-                </>
-              )}
-            </div>
-          </TerminalContent>
-        </Terminal>
+                </div>
+              </TerminalContent>
+            </Terminal>
+          </SandboxTabContent>
+          {result?.stderr && (
+            <SandboxTabContent value="errors" className="p-3">
+              <StackTrace trace={result.stderr} defaultOpen>
+                <StackTraceHeader>
+                  <StackTraceError>
+                    <StackTraceErrorType />
+                    <StackTraceErrorMessage />
+                  </StackTraceError>
+                </StackTraceHeader>
+                <StackTraceContent>
+                  <StackTraceFrames
+                    className="whitespace-pre-wrap break-words"
+                    emptyLabel={result.stderr}
+                  />
+                </StackTraceContent>
+              </StackTrace>
+            </SandboxTabContent>
+          )}
+        </SandboxTabs>
       )}
-    </div>
+    </Sandbox>
   )
 })

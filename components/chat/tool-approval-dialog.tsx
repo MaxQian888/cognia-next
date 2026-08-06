@@ -11,6 +11,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { CodeBlock } from "@/components/ai-elements/code-block"
+import {
+  Confirmation,
+  ConfirmationAction,
+  ConfirmationActions,
+  ConfirmationRequest,
+  ConfirmationTitle,
+} from "@/components/ai-elements/confirmation"
 import { DiffPreview } from "@/components/chat/message-parts/mcp-renderers/diff-preview"
 import type { ApprovalDecision, PendingApproval } from "@cognia/agent-config-types"
 import { ShieldAlertIcon } from "lucide-react"
@@ -170,26 +177,41 @@ export function ToolApprovalDialog({ approval, onRespond, onDismiss, onCancelRun
               {t("dismiss")}
             </Button>
           ) : (
-            <>
-              {isSubagent && approval?.subagentRunId && onCancelRun && (
-                <Button
-                  variant="ghost"
-                  className="mr-auto text-destructive"
-                  onClick={() => onCancelRun(approval.subagentRunId!)}
-                >
-                  {t("cancelRun")}
-                </Button>
-              )}
-              {/* deny-one-without-killing: denies this tool call; the subagent
-                  run continues (its idle watchdog re-arms after the ask). */}
-              <Button variant="ghost" onClick={() => void onRespond("deny")}>
-                {t("deny")}
-              </Button>
-              <Button variant="secondary" onClick={() => void onRespond("allow_always")}>
-                {t("allowAlways")}
-              </Button>
-              <Button onClick={() => void onRespond("allow")}>{t("allowOnce")}</Button>
-            </>
+            approval && (
+              <Confirmation
+                approval={{ id: approval.id }}
+                className="w-full border-0 p-0"
+                state="approval-requested"
+              >
+                <ConfirmationRequest>
+                  <ConfirmationTitle className="sr-only">{t("actionsTitle")}</ConfirmationTitle>
+                  <ConfirmationActions className="w-full">
+                    {isSubagent && approval.subagentRunId && onCancelRun && (
+                      <ConfirmationAction
+                        variant="ghost"
+                        className="mr-auto text-destructive"
+                        onClick={() => onCancelRun(approval.subagentRunId!)}
+                      >
+                        {t("cancelRun")}
+                      </ConfirmationAction>
+                    )}
+                    {/* Deny only this tool call; the subagent run remains alive. */}
+                    <ConfirmationAction variant="ghost" onClick={() => void onRespond("deny")}>
+                      {t("deny")}
+                    </ConfirmationAction>
+                    <ConfirmationAction
+                      variant="secondary"
+                      onClick={() => void onRespond("allow_always")}
+                    >
+                      {t("allowAlways")}
+                    </ConfirmationAction>
+                    <ConfirmationAction onClick={() => void onRespond("allow")}>
+                      {t("allowOnce")}
+                    </ConfirmationAction>
+                  </ConfirmationActions>
+                </ConfirmationRequest>
+              </Confirmation>
+            )
           )}
         </DialogFooter>
       </DialogContent>

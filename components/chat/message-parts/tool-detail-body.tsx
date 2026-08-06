@@ -27,7 +27,7 @@ import { useTranslations } from "next-intl"
 import type { ToolUIPart } from "ai"
 
 import { ToolInput } from "@/components/ai-elements/tool"
-import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
+import { ErrorTraceDetails } from "@/components/error/error-trace-details"
 import { ErrorParsedView } from "@/components/error/error-parsed-view"
 import { normalizeErrorText } from "@cognia/error-parsers"
 import { A2UIToolOutput, hasA2UIToolOutput } from "@/components/a2ui/a2ui-tool-output"
