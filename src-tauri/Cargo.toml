@@ -415,6 +415,12 @@ minidumper = "0.10"
 # note in [dependencies]. Without this feature keyring uses the mock store.
 keyring = { version = "3", features = ["windows-native"] }
 eventlog = "0.3"
+# Codex App exposes its app-server control plane over a Unix-domain socket on
+# every desktop platform. Windows needs the same compatibility stack Codex
+# itself uses for that socket transport.
+async-io = "2.6.0"
+tokio-util = { version = "0.7.18", features = ["compat"] }
+uds_windows = "1.1.0"
 # ADR-0067 Phase 5 — `uiautomation` moved to `crates/cognia-automation`.
 # Direct windows-rs dep for SendInput/MOUSEEVENTF_WHEEL/GetSystemMetrics calls
 # that aren't exposed publicly through `uiautomation::inputs`. Version pinned

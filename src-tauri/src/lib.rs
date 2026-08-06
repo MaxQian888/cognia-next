@@ -26,6 +26,7 @@ pub use cognia_ccswitch as ccswitch;
 mod claude;
 mod cli_bridge;
 mod code_adoption;
+mod codex_app_dispatch;
 mod codeserver;
 // ADR-0067 Phase 6 — extracted to cognia-core; re-aliased so `crate::command_error`
 // (claude, logging, plugin_api/vscode, top-level) resolves unchanged.
@@ -639,6 +640,7 @@ pub fn run() {
             agents::commands::agent_vendor_roots,
             // Project-scoped `.mcp.json` (read-only — it's usually committed).
             agents::commands::read_project_mcp_config,
+            codex_app_dispatch::codex_app_dispatch_conversation,
             // ADR-0062 — external-agent session-history import. Reads OpenCode's
             // local SQLite store read-only for the session importer.
             session_import::opencode_sessions_read,

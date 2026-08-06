@@ -170,6 +170,7 @@ commands.allow = [
   "codeserver_uninstall",
   "codeserver_write_runtime_args",
   "codeserver_write_user_settings",
+  "codex_app_dispatch_conversation",
   "codex_oauth_discover",
   "codex_oauth_poll_device_code",
   "codex_oauth_refresh",

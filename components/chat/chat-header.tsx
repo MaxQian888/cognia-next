@@ -2,7 +2,14 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { Columns2Icon, KeyRoundIcon, Settings2Icon } from "lucide-react"
+import {
+  Columns2Icon,
+  ExternalLinkIcon,
+  KeyRoundIcon,
+  Loader2Icon,
+  Settings2Icon,
+} from "lucide-react"
+import { toast } from "sonner"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { ArtifactDockToggle } from "@/components/artifacts/artifact-dock-toggle"
@@ -16,6 +23,8 @@ import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { BranchLineageChip } from "@/components/chat/branch-lineage-chip"
 import { BranchChildrenChip } from "@/components/chat/branch-children-chip"
+import { dispatchSessionToCodexApp } from "@/lib/chat/dispatch-to-codex-app"
+import { isTauri } from "@/lib/tauri"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 interface Props {
@@ -50,6 +59,19 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
   // lands after boot.
   const { keyOk } = useCredentialStatus()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [codexDispatching, setCodexDispatching] = useState(false)
+
+  const handleOpenInCodexApp = async () => {
+    setCodexDispatching(true)
+    try {
+      await dispatchSessionToCodexApp(session)
+      toast.success(t("openedInCodexApp"))
+    } catch {
+      toast.error(t("openInCodexAppFailed"))
+    } finally {
+      setCodexDispatching(false)
+    }
+  }
 
   const characterTooltip = character
     ? character.description
@@ -105,6 +127,24 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
 
       <PluginExtensionSlot point="chat.header" className="flex items-center gap-1 empty:hidden" />
 
+      {isTauri() ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          aria-label={t("openInCodexApp")}
+          title={t("openInCodexApp")}
+          disabled={codexDispatching}
+          onClick={() => void handleOpenInCodexApp()}
+        >
+          {codexDispatching ? (
+            <Loader2Icon className="size-4 animate-spin" />
+          ) : (
+            <ExternalLinkIcon className="size-4" />
+          )}
+        </Button>
+      ) : null}
+
       {onSplitView && (
         <Button
           variant="ghost"
@@ -129,7 +169,7 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
         </Button>
       )}
 
-      {/* Two persistent buttons, down from six. The browser-dock opener moved into the
+      {/* Three persistent buttons in Tauri, down from six. The browser-dock opener moved into the
           artifact dock's own menu, the agent-flow density switch already had a
           copy in the settings sheet and the appearance settings, and Insights
           became a row inside the sheet — none of the three is touched per turn.
