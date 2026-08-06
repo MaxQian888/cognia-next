@@ -622,6 +622,9 @@ function applySystemEvent(
         turnComplete: false,
       }
 
+    case "hook_audit":
+      return { messages, turnComplete: false }
+
     case "compact_boundary":
       return { messages: appendCompactBoundary(messages, evt), turnComplete: false }
 

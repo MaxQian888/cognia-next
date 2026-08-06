@@ -8,6 +8,7 @@ import {
   HOOK_PII_BLOCK_REASON,
   SUPPORTED_EVENTS,
   buildAgentHooks,
+  buildHookAuditPayload,
   buildHookFirePayload,
   extractDecision,
   hookFireOutcome,
@@ -285,14 +286,14 @@ test("runGroups: matcher filters, block short-circuits later handlers", async ()
   assert.equal(dec.additionalContext, undefined)
 })
 
-test("runGroups: unknown handler types are inert", async () => {
+test("runGroups: missing native adapters warn while unknown handler types stay inert", async () => {
   const dec = await runGroups(
     [{ hooks: [{ type: "prompt", prompt: "x" }, { type: "mystery" }] }],
     "Bash",
     "{}"
   )
   assert.equal(dec.block, undefined)
-  assert.equal(dec.warnings.length, 0)
+  assert.deepEqual(dec.warnings, ["hook prompt runtime adapter unavailable"])
 })
 
 // --- mapDecisionToOutput ----------------------------------------------------
@@ -519,6 +520,120 @@ test("runGroups: handlers run in parallel but merge deterministically in config 
   assert.equal(dec.block, "slow-block")
   // Parallel: total ≈ max(300, fast), well under the serial sum with margin.
   assert.ok(Date.now() - started < 5000)
+})
+
+test("runGroups: model-backed handlers use the native adapter and parse decision output", async () => {
+  const seen = []
+  const dec = await runGroups(
+    [{ hooks: [{ type: "prompt", prompt: "review" }] }],
+    "",
+    '{"hook_event_name":"Stop"}',
+    undefined,
+    undefined,
+    {
+      hookDepth: 0,
+      executeNativeHandler: async (handler, payload, context) => {
+        seen.push({ handler, payload, context })
+        return { output: '{"additionalContext":"native"}' }
+      },
+    }
+  )
+  assert.equal(dec.additionalContext, "native")
+  assert.equal(seen[0].context.depth, 0)
+})
+
+test("runGroups: redacts lifecycle payloads before model-backed handlers", async () => {
+  let received = ""
+  await runGroups(
+    [{ hooks: [{ type: "prompt", prompt: "review" }] }],
+    "",
+    JSON.stringify({ email: "alice@example.com", safe: "ok" }),
+    undefined,
+    undefined,
+    {
+      executeNativeHandler: async (_handler, payload) => {
+        received = payload
+        return { output: "{}" }
+      },
+    }
+  )
+  assert.ok(!received.includes("alice@example.com"))
+  assert.match(received, /<EMAIL_001>/)
+})
+
+test("runGroups: managed hook failures fail closed while user hooks stay open", async () => {
+  const executeNativeHandler = async () => ({ warning: "provider unavailable" })
+  const managed = await runGroups(
+    [{ hooks: [{ type: "agent", prompt: "review", policyClass: "managed" }] }],
+    "",
+    "{}",
+    undefined,
+    undefined,
+    { executeNativeHandler }
+  )
+  const user = await runGroups(
+    [{ hooks: [{ type: "agent", prompt: "review" }] }],
+    "",
+    "{}",
+    undefined,
+    undefined,
+    { executeNativeHandler }
+  )
+  assert.match(managed.block, /Managed hook failed closed/)
+  assert.equal(user.block, undefined)
+  assert.deepEqual(user.warnings, ["provider unavailable"])
+})
+
+test("runGroups: a crashing native adapter follows the same failure policy", async () => {
+  const dec = await runGroups(
+    [{ hooks: [{ type: "prompt", prompt: "review" }] }],
+    "",
+    "{}",
+    undefined,
+    undefined,
+    {
+      executeNativeHandler: () => {
+        throw new Error("boom")
+      },
+    }
+  )
+  assert.deepEqual(dec.warnings, ["hook prompt failed: boom"])
+  assert.equal(dec.block, undefined)
+})
+
+test("buildAgentHooks emits a structured audit for each matched handler", async () => {
+  const audits = []
+  const map = buildAgentHooks(
+    { Stop: [{ hooks: [{ type: "prompt", prompt: "review", policyClass: "managed" }] }] },
+    {
+      sessionId: "sess",
+      emit() {},
+      emitAudit: (event) => audits.push(event),
+      executeNativeHandler: async () => ({ output: "{}" }),
+    }
+  )
+  await map.Stop[0].hooks[0]({ hook_event_name: "Stop" }, undefined, {})
+  assert.equal(audits.length, 1)
+  assert.equal(audits[0].event.subtype, "hook_audit")
+  assert.equal(audits[0].event.handlerType, "prompt")
+  assert.equal(audits[0].event.policyClass, "managed")
+  assert.equal(audits[0].event.outcome, "allowed")
+})
+
+test("buildHookAuditPayload creates a persistence-ready system event", () => {
+  const payload = buildHookAuditPayload("s", {
+    hookId: "h",
+    hookEvent: "Stop",
+    provider: "claude",
+    handlerType: "command",
+    policyClass: "user",
+    outcome: "allowed",
+    latencyMs: 2,
+    redacted: false,
+  })
+  assert.equal(payload.sessionId, "s")
+  assert.equal(payload.event.subtype, "hook_audit")
+  assert.equal(payload.event.latencyMs, 2)
 })
 
 // ---- full lifecycle coverage (SDK-parity plan §3) ---------------------------

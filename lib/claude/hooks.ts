@@ -47,6 +47,8 @@ interface HookHandlerCommon {
   timeout?: number
   statusMessage?: string
   once?: boolean
+  /** Cognia-managed policy hooks fail closed; user-authored hooks fail open. */
+  policyClass?: "user" | "managed"
 }
 
 export type HookHandler =
@@ -65,6 +67,7 @@ export type HookHandler =
       headers?: Record<string, string>
       allowedEnvVars?: string[]
       timeout?: number
+      policyClass?: "user" | "managed"
     }
   | (HookHandlerCommon & {
       type: "http"

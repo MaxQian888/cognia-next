@@ -561,6 +561,13 @@ export type CanonicalAgentEvent =
       blockReason?: string
       additionalContext?: string
       warnings?: string[]
+      /** Structured execution audit fields for one matched handler. */
+      provider?: string
+      handlerType?: string
+      policyClass?: "user" | "managed"
+      latencyMs?: number
+      redacted?: boolean
+      error?: string
     }
   | {
       /**
