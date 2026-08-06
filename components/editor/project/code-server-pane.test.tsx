@@ -14,6 +14,9 @@ jest.mock("@/hooks/codeserver/use-code-server-locale-sync", () => ({
 jest.mock("@/hooks/codeserver/use-code-server-editor-events", () => ({
   useCodeServerEditorEvents: jest.fn(),
 }))
+jest.mock("@/hooks/codeserver/use-code-server-chat-bridge", () => ({
+  useCodeServerChatBridge: jest.fn(),
+}))
 
 const paneState = {
   phase: "starting" as "unsupported" | "starting" | "downloading" | "ready" | "error",

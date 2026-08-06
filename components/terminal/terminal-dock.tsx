@@ -107,6 +107,7 @@ export function TerminalDock() {
   const tabOrder = useTerminalStore((s) => s.tabOrder)
   const setTabOrder = useTerminalStore((s) => s.setTabOrder)
   const outputThrottled = useTerminalStore((s) => s.outputThrottled)
+  const tabActivity = useTerminalStore((s) => s.tabActivity)
 
   // Only the id: shell / cwd / env resolution moved into `spawnDefaultTerminal`,
   // so subscribing to the whole project row here would re-render the dock on
@@ -142,6 +143,11 @@ export function TerminalDock() {
   const throttledIds = useMemo(
     () => new Set(Object.keys(outputThrottled).filter((id) => outputThrottled[id])),
     [outputThrottled]
+  )
+
+  const activityIds = useMemo(
+    () => new Set(Object.keys(tabActivity).filter((id) => tabActivity[id])),
+    [tabActivity]
   )
 
   const activeId = activeByProject[projectKey] ?? null
@@ -506,6 +512,7 @@ export function TerminalDock() {
         onClose={requestCloseTab}
         testId="terminal-dock-tabs"
         throttledIds={throttledIds}
+        activityIds={activityIds}
         onReorder={handleReorder}
         leading={<TerminalDockGrip />}
         renderTabWrapper={renderTabWrapper}

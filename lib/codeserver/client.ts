@@ -147,7 +147,12 @@ export interface CodeServerExited {
 export interface CodeServerEditorEvent {
   /** Canonical project root of the reporting instance. */
   root: string
-  name: "activeEditorChanged" | "selectionChanged" | "documentSaved" | "diagnosticsChanged"
+  name:
+    | "activeEditorChanged"
+    | "selectionChanged"
+    | "documentSaved"
+    | "diagnosticsChanged"
+    | "chatContextRequested"
   payload: { path?: string | null; empty?: boolean; count?: number } | null
 }
 

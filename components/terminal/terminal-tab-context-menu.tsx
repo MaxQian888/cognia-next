@@ -40,6 +40,8 @@ export interface TerminalTabContextMenuProps {
   onClose: (id: string) => void
   onCloseOthers: (id: string) => void
   onToggleAgentTrust: (id: string, trusted: boolean) => void
+  /** Open the appearance picker for the tab. */
+  onChangeAppearance?: (id: string) => void
   /** Jump to the chat session that spawned this tab. Shown only for agent-spawned tabs. */
   onLocateInChat?: (chatSessionId: string, messageId?: string | null) => void
   /**
@@ -63,6 +65,7 @@ export function TerminalTabContextMenu({
   onClose,
   onCloseOthers,
   onToggleAgentTrust,
+  onChangeAppearance,
   onLocateInChat,
   onCopy,
   onPaste,
@@ -112,6 +115,14 @@ export function TerminalTabContextMenu({
         <ContextMenuItem onSelect={() => onRename(row.id)} data-testid="terminal-tab-menu-rename">
           {t("rename")}
         </ContextMenuItem>
+        {onChangeAppearance ? (
+          <ContextMenuItem
+            onSelect={() => onChangeAppearance(row.id)}
+            data-testid="terminal-tab-menu-appearance"
+          >
+            {t("appearance")}
+          </ContextMenuItem>
+        ) : null}
         <ContextMenuItem onSelect={() => onRestart(row.id)} data-testid="terminal-tab-menu-restart">
           {t("restart")}
         </ContextMenuItem>

@@ -72,6 +72,7 @@ interface FakeSession {
     l: (e: { kind: string; cwd?: string; exit_code?: number | null }) => void
   ) => () => void
   onExit: (l: (c: number | null) => void) => () => void
+  onData: (l: (data: Uint8Array) => void) => () => void
 }
 
 function makeFakeSession(id: string, info: Partial<SessionInfo> = {}): FakeSession {
@@ -108,6 +109,9 @@ function makeFakeSession(id: string, info: Partial<SessionInfo> = {}): FakeSessi
     },
     onExit: (l) => {
       onExitListeners.push(l)
+      return () => {}
+    },
+    onData: () => {
       return () => {}
     },
   }

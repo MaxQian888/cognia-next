@@ -84,6 +84,19 @@ describe("spawnDefaultTerminal", () => {
     expect(lastRequest().cwd).toBe("/repo")
   })
 
+  it("lets a durable child worktree override project and profile cwd", async () => {
+    const project = useProjectStore.getState().createProject({ name: "p", rootDir: "/repo" })
+    useProjectStore.getState().setActiveProject(project.id)
+    withSettings({
+      defaultProfileId: "p1",
+      profiles: [{ id: "p1", name: "Shell", shell: "/bin/zsh", cwd: "/profile" }],
+    })
+
+    await spawnDefaultTerminal({ cwdOverride: " /repo/.worktrees/child-1 " })
+
+    expect(lastRequest().cwd).toBe("/repo/.worktrees/child-1")
+  })
+
   it("an explicit shell override beats everything", async () => {
     withSettings({ defaultShell: "/usr/bin/fish", defaultProfileId: "p1" })
     await spawnDefaultTerminal({ shellOverride: "/bin/dash" })

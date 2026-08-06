@@ -27,6 +27,8 @@ function row(overrides: Partial<TerminalSessionRow> = {}): TerminalSessionRow {
     createdAt: 0,
     agentTrusted: false,
     agentSpawner: null,
+    tabColor: "none",
+    tabIcon: "none",
     promptBoundaries: [],
     lastCommands: [],
     historyOpen: false,

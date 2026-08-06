@@ -16,6 +16,8 @@ import { XIcon } from "lucide-react"
 
 import { MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
 import { cn } from "@/lib/utils"
+import { tabColorBorderClass } from "@/lib/terminal/tab-appearance"
+import { TAB_ICON_COMPONENTS } from "@/lib/terminal/tab-icon-map"
 import { displayTitle, type TerminalSessionRow } from "@/stores/terminal/terminal-store"
 
 export interface TerminalTabProps {
@@ -32,6 +34,8 @@ export interface TerminalTabProps {
   ref?: Ref<HTMLDivElement>
   /** Renderer backpressure is holding this session's output back. */
   throttled?: boolean
+  /** Session received output while in background (activity badge). */
+  hasActivity?: boolean
   /**
    * Extra DOM props injected by an `asChild` / drag-listener parent
    * (`data-state`, `aria-*`, pointer handlers). Spread first so the tab's own
@@ -48,6 +52,7 @@ export function TerminalTab({
   onContextMenu,
   ref,
   throttled,
+  hasActivity,
   ...rest
 }: TerminalTabProps) {
   const t = useTranslations("terminal.tab")
@@ -69,6 +74,9 @@ export function TerminalTab({
           ? "bg-emerald-500"
           : "bg-red-500"
         : "bg-muted-foreground/60"
+
+  const colorBorder = tabColorBorderClass(row.tabColor)
+  const TabIcon = row.tabIcon !== "none" ? TAB_ICON_COMPONENTS[row.tabIcon] : null
 
   return (
     <div
@@ -97,6 +105,8 @@ export function TerminalTab({
         active
           ? "border-b-foreground bg-background font-medium text-foreground"
           : "border-b-transparent text-muted-foreground hover:bg-muted/50",
+        colorBorder && "border-l-2",
+        colorBorder,
         row.agentTrusted && "ring-1 ring-amber-500/40",
         // A throttled background tab must be legible without switching to it.
         throttled && "ring-1 ring-orange-500/50"
@@ -109,7 +119,15 @@ export function TerminalTab({
           title={t(statusKey)}
         />
       </MotionStatusSwap>
+      {TabIcon && <TabIcon className="h-3 w-3 shrink-0 text-muted-foreground" />}
       <span className="max-w-[180px] truncate">{displayTitle(row)}</span>
+      {hasActivity && !active && (
+        <span
+          className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-sky-500"
+          aria-label={t("status.newOutput")}
+          title={t("status.newOutput")}
+        />
+      )}
       <button
         type="button"
         aria-label={t("close")}

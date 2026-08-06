@@ -53,6 +53,8 @@ export interface TerminalStoreLike {
   closePrompt(id: string, endMs: number): void
   pushCommand(id: string, record: { cmd: string; exitCode: number | null; endedAt: number }): void
   setHostState?(state: TerminalHostState, message?: string | null): void
+  /** Mark a background tab as having new output (activity badge). */
+  markTabActivity?(id: string): void
   /** Used by `restartFromDock` to read the previous row's shell/cwd for respawn. */
   sessions: Record<
     string,
@@ -255,6 +257,13 @@ export function wireSessionToStore(
   hooks: ReturnType<typeof getPluginEventHooks> = getPluginEventHooks()
 ): void {
   const capture = installCommandCapture(session)
+
+  // Activity badge — mark the tab when data arrives while it's not the active
+  // tab. The guard uses a lightweight subscription that does not buffer; it only
+  // flips a boolean, so it's cheap even on high-throughput PTY output.
+  session.onData(() => {
+    store.markTabActivity?.(session.info.id)
+  })
 
   session.onIntegration((event) => {
     switch (event.kind) {

@@ -34,6 +34,8 @@ export interface SpawnDefaultTerminalOptions {
   shellOverride?: string
   /** Launch a saved profile. Falls back to the resolved default when missing or blank. */
   profileId?: string
+  /** Explicit child worktree cwd; wins over profile and project defaults. */
+  cwdOverride?: string
   rows?: number
   cols?: number
 }
@@ -71,6 +73,7 @@ export async function spawnDefaultTerminal(
       return spawnFromDock({
         req: {
           ...fields,
+          ...(opts.cwdOverride?.trim() ? { cwd: opts.cwdOverride.trim() } : {}),
           profileId,
           rows,
           cols,
@@ -97,7 +100,11 @@ export async function spawnDefaultTerminal(
       shell,
       rows,
       cols,
-      cwd: project?.terminalConfig?.cwd?.trim() || project?.rootDir?.trim() || undefined,
+      cwd:
+        opts.cwdOverride?.trim() ||
+        project?.terminalConfig?.cwd?.trim() ||
+        project?.rootDir?.trim() ||
+        undefined,
       env: project?.terminalConfig?.env,
       projectId: projectId ?? undefined,
       enableShellIntegration: true,
