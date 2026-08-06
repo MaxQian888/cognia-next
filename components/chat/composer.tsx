@@ -105,7 +105,7 @@ import { ComposerCheatsheet } from "./composer/composer-cheatsheet"
 import { ComposerAttachMenu } from "./composer/attach-menu"
 import { nextPermissionMode } from "./permission-mode-indicator"
 import { useResolvedConnectorMode } from "./use-resolved-connector-mode"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { getDb } from "@/lib/db/schema"
 import {
   listPendingForConversation as listPendingDrafts,

@@ -18,14 +18,14 @@
  *   - Dead-letter after 5 attempts.
  *   - Stale-claim recovery: `sending` rows orphaned by a crash (claimed but
  *     never settled) are flipped back to `failed` after a 5-minute grace,
- *     on startup and lazily on every drain pass.
+ *     on startup and every five minutes thereafter.
  *
  * Task 39 addition:
- *   - Per-conversation FIFO: lanes serialize jobs claimed in one drain pass,
- *     and a cross-pass guard (`hasOlderActiveOutboundSibling`) skips a due
- *     job while an OLDER non-terminal sibling exists in the same
- *     conversation — so createdAt order holds even when an older job was
- *     deferred to a later pass. Cross-conversation sends run in parallel.
+ *   - Per-conversation FIFO: each bounded due batch resolves the true
+ *     `orderSeq` head before entering a lane. A lane advances only after its
+ *     current head becomes terminal, in bursts capped at the due-batch size;
+ *     deferred heads block later siblings. Cross-conversation sends run in
+ *     parallel behind the shared platform-send semaphore.
  *
  * Usage:
  *   const controller = new AbortController()
@@ -45,12 +45,15 @@ import {
   markFailed,
   markDeliveryUnknown,
   markDeadlettered,
-  enqueueOutbound,
   unclaimSending,
   recoverStaleSendingJobs,
   findDeliveredByIdempotencyKey,
   findOlderActiveOutboundSibling,
+  findNextActiveOutboundSibling,
+  isOutboundTerminal,
+  OUTBOUND_DUE_BATCH_SIZE,
 } from "@/lib/db/outbound-jobs"
+import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { getDb } from "@/lib/db/schema"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import type {
@@ -190,6 +193,8 @@ const RUNNER_AUDIT_ADAPTER_ID = "__outbound_runner__"
  * missed — it is NOT a poll interval. Overridable via `pollIntervalMs`.
  */
 const DEFAULT_IDLE_CAP_MS = 60_000
+export const MAX_ACTIVE_PLATFORM_SENDS = 16
+export const STALE_RECOVERY_INTERVAL_MS = 5 * 60_000
 
 // ── Per-bot outbound tuning ──────────────────────────────────────────────────
 
@@ -284,12 +289,51 @@ export class ConversationLane {
   // fire-and-forget contract: enqueue never rejects (errors are handled inside
   // `work`), so we swallow the mutex result here rather than in the primitive.
   private readonly mutex = createMutex()
+  private pending = 0
+
+  constructor(private readonly onIdle: () => void = () => undefined) {}
 
   /** Enqueue `work` behind the current tail; resolves when it settles. */
   enqueue(work: () => Promise<void>): Promise<void> {
-    return this.mutex.runExclusive(work).catch(() => {
-      // Errors are handled inside `work`; lane must not stall on them.
-    })
+    this.pending += 1
+    return this.mutex
+      .runExclusive(work)
+      .catch(() => {
+        // Errors are handled inside `work`; lane must not stall on them.
+      })
+      .finally(() => {
+        this.pending -= 1
+        if (this.pending === 0) this.onIdle()
+      })
+  }
+
+  pendingCount(): number {
+    return this.pending
+  }
+}
+
+class PlatformSendSemaphore {
+  private active = 0
+  private readonly waiters: Array<() => void> = []
+
+  constructor(
+    private readonly limit: number,
+    private readonly onChange: (active: number) => void
+  ) {}
+
+  async run<T>(work: () => Promise<T>): Promise<T> {
+    if (this.active >= this.limit) {
+      await new Promise<void>((resolve) => this.waiters.push(resolve))
+    }
+    this.active += 1
+    this.onChange(this.active)
+    try {
+      return await work()
+    } finally {
+      this.active -= 1
+      this.onChange(this.active)
+      this.waiters.shift()?.()
+    }
   }
 }
 
@@ -330,6 +374,12 @@ export interface OutboundRunnerOptions {
    * unit-testable. Must never throw.
    */
   onDelivered?: (conversationKey: string) => void
+  /** Test/diagnostic observer for structural scheduler budgets. */
+  onSchedulerState?: (state: {
+    activeSends: number
+    laneCount: number
+    dueBatchSize: number
+  }) => void
 }
 
 // ── Per-adapter state ────────────────────────────────────────────────────────
@@ -409,6 +459,19 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
   const idempotencyCache = new LruMap<string, string>(IDEMPOTENCY_LRU_CAP)
   // Task 39: per-conversation FIFO lanes
   const lanes = new Map<string, ConversationLane>()
+  let activeSends = 0
+  let lastDueBatchSize = 0
+  const publishSchedulerState = (): void => {
+    opts.onSchedulerState?.({
+      activeSends,
+      laneCount: lanes.size,
+      dueBatchSize: lastDueBatchSize,
+    })
+  }
+  const sendSemaphore = new PlatformSendSemaphore(MAX_ACTIVE_PLATFORM_SENDS, (active) => {
+    activeSends = active
+    publishSchedulerState()
+  })
   // Jobs currently enqueued into a lane but not yet terminal. `markSending`
   // happens late (after the muted/quiet/idempotency/breaker gates), so
   // without this guard a tight drain would re-pick a job that is still
@@ -424,6 +487,7 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
   // persistent Dexie failure is visible without flooding the audit table).
   // -Infinity ⇒ the first error always audits, whatever the injected clock.
   let lastDrainErrorAuditAt = -Infinity
+  let nextStaleRecoveryAt = -Infinity
 
   function getAdapterState(adapterId: string, row?: AdapterInstanceRow): AdapterState {
     const tuning = sanitizeOutboundTuning(row?.outboundTuning)
@@ -476,10 +540,17 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
   }
 
   function getLane(conversationKey: string): ConversationLane {
-    if (!lanes.has(conversationKey)) {
-      lanes.set(conversationKey, new ConversationLane())
-    }
-    return lanes.get(conversationKey)!
+    const existing = lanes.get(conversationKey)
+    if (existing) return existing
+    const lane = new ConversationLane(() => {
+      if (lane.pendingCount() === 0 && lanes.get(conversationKey) === lane) {
+        lanes.delete(conversationKey)
+        publishSchedulerState()
+      }
+    })
+    lanes.set(conversationKey, lane)
+    publishSchedulerState()
+    return lane
   }
 
   /**
@@ -649,18 +720,9 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
     const { idempotencyKey } = request.metadata
 
     // ── Cross-pass FIFO guard ─────────────────────────────────────────────
-    // Lanes only serialize jobs claimed in ONE drain pass. When an older
-    // sibling in this conversation was deferred to a later pass (retry
-    // backoff, quiet hours, breaker cooldown), a newer sibling must not
-    // overtake it. Push this job's `nextAttemptAt` out to the blocker's
-    // retry time (status untouched) so it re-evaluates right when the older
-    // sibling resolves — leaving it "due now" would busy-spin the wake loop.
-    const olderSibling = await findOlderActiveOutboundSibling(job).catch(() => undefined)
-    if (olderSibling) {
-      const blockedUntil = Math.max(now + 1_000, olderSibling.nextAttemptAt)
-      await getDb().outboundQueue.update(job.id, { nextAttemptAt: blockedUntil })
-      return
-    }
+    // The drain resolves the true conversation head before entering this
+    // lane. Rechecking every older row here turns a 1,000-job FIFO burst into
+    // an O(n²) IndexedDB scan as terminal predecessors accumulate.
 
     // ── Muted / quiet-hours check ─────────────────────────────────────────
     let adapterRow: AdapterInstanceRow | undefined
@@ -941,7 +1003,7 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
     // pending/failed, yield rather than double-send the same message.
     // Claimed BEFORE the token bucket so a lost claim never consumes a
     // rate-limit token.
-    const claimed = await markSending(job.id)
+    const claimed = await markSending(job.id, now)
     if (!claimed) {
       return
     }
@@ -1008,7 +1070,7 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
     const editTargetId = request.editTargetMessageId
     try {
       if (editTargetId && typeof adapter.edit === "function") {
-        result = await adapter.edit(editTargetId, request)
+        result = await sendSemaphore.run(() => adapter.edit!(editTargetId, request))
       } else {
         if (editTargetId) {
           await appendAudit({
@@ -1021,7 +1083,7 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
             message: `${adapterId} adapter has no edit() — falling back to send()`,
           })
         }
-        result = await adapter.send(request)
+        result = await sendSemaphore.run(() => adapter.send(request))
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -1231,44 +1293,48 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       // never stall outbound delivery.
       await wakeSnoozedConversations(clock()).catch(() => undefined)
 
-      // Stale-claim recovery (startup + every pass): flip `sending` rows
+      // Stale-claim recovery (startup + every five minutes): flip `sending` rows
       // orphaned by a crashed/reloaded runner (claimed > 5 min ago, never
       // settled) back to `failed` so this drain can retry them. Best-effort;
       // audited per recovered row. `inFlight` jobs are claimed seconds ago
       // and sit safely inside the grace window.
-      try {
-        const recoveredRows = await recoverStaleSendingJobs(clock())
-        for (const row of recoveredRows) {
-          const recoveredAdapter = opts.adapters.get(row.adapterId)
-          if (recoveredAdapter?.runtimeCapabilities?.ambiguousDelivery !== "remote_idempotent") {
-            await markDeliveryUnknown(
-              row.id,
-              "stale_sending_delivery_unknown",
-              "The runner stopped while delivery was in flight; reconcile before retrying"
-            )
+      if (clock() >= nextStaleRecoveryAt) {
+        try {
+          const recoveredRows = await recoverStaleSendingJobs(clock())
+          for (const row of recoveredRows) {
+            const recoveredAdapter = opts.adapters.get(row.adapterId)
+            if (recoveredAdapter?.runtimeCapabilities?.ambiguousDelivery !== "remote_idempotent") {
+              await markDeliveryUnknown(
+                row.id,
+                "stale_sending_delivery_unknown",
+                "The runner stopped while delivery was in flight; reconcile before retrying"
+              )
+              await appendAudit({
+                adapterId: row.adapterId,
+                kind: "delivery.error",
+                at: clock(),
+                conversationKey: row.conversationKey,
+                idempotencyKey: row.idempotencyKey,
+                reason: "delivery_unknown",
+                message: "Stale send has an ambiguous remote outcome and requires reconciliation",
+              }).catch(() => undefined)
+              continue
+            }
             await appendAudit({
               adapterId: row.adapterId,
               kind: "delivery.error",
               at: clock(),
               conversationKey: row.conversationKey,
               idempotencyKey: row.idempotencyKey,
-              reason: "delivery_unknown",
-              message: "Stale send has an ambiguous remote outcome and requires reconciliation",
+              reason: "stale_sending_recovered",
+              message: "Recovered a stale sending claim — retrying now",
             }).catch(() => undefined)
-            continue
           }
-          await appendAudit({
-            adapterId: row.adapterId,
-            kind: "delivery.error",
-            at: clock(),
-            conversationKey: row.conversationKey,
-            idempotencyKey: row.idempotencyKey,
-            reason: "stale_sending_recovered",
-            message: "Recovered a stale sending claim — retrying now",
-          }).catch(() => undefined)
+          nextStaleRecoveryAt = clock() + STALE_RECOVERY_INTERVAL_MS
+        } catch (err) {
+          console.error("[outbound-runner] stale-sending recovery failed:", err)
+          nextStaleRecoveryAt = clock() + STALE_RECOVERY_INTERVAL_MS
         }
-      } catch (err) {
-        console.error("[outbound-runner] stale-sending recovery failed:", err)
       }
 
       // Drain everything currently due into per-conversation lanes in one
@@ -1276,21 +1342,75 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       // one; the `inFlight` guard prevents re-enqueuing a job that is still
       // `pending` while its lane spins up.
       try {
-        const due = await listDueNow()
+        const drainNow = clock()
+        const due = await listDueNow({ now: drainNow })
+        lastDueBatchSize = due.length
+        publishSchedulerState()
         // Per-drain caches shared across all jobs scheduled in this pass so a
         // busy adapter / conversation reads its (stable) adapter + override row
         // once instead of once per job. Recreated each pass → bounded staleness.
         const adapterCache = new Map<string, AdapterInstanceRow | undefined>()
         const overrideCache = new Map<string, ConversationOverrideRow | null>()
+        const heads = new Map<string, OutboundJobRow>()
         for (const job of due) {
+          const current = heads.get(job.conversationKey)
+          if (
+            !current ||
+            (job.orderSeq ?? job.createdAt) < (current.orderSeq ?? current.createdAt)
+          ) {
+            heads.set(job.conversationKey, job)
+          }
+        }
+        // The due index is ordered by retry deadline, not conversation FIFO.
+        // When more than one batch of same-millisecond jobs belongs to one
+        // conversation, its true orderSeq head may fall outside this 128-row
+        // window. Resolve that oldest active row directly instead of repeatedly
+        // deferring arbitrary later candidates until the random primary-key tie
+        // order happens to surface the head.
+        const resolvedHeads = await Promise.all(
+          Array.from(heads.values(), async (candidate) => {
+            if ((lanes.get(candidate.conversationKey)?.pendingCount() ?? 0) > 0) return undefined
+            const older = await findOlderActiveOutboundSibling(candidate)
+            if (!older) return candidate
+            if (older.status === "sending" || older.nextAttemptAt > drainNow) return undefined
+            return older
+          })
+        )
+        for (const job of resolvedHeads) {
+          if (!job) continue
           if (inFlight.has(job.id)) continue
           inFlight.add(job.id)
-          const { id: jobId, adapterId, conversationKey } = job
+          const { conversationKey } = job
           getLane(conversationKey).enqueue(async () => {
+            let current: OutboundJobRow | undefined = job
+            let processed = 0
             try {
-              await processJob(jobId, adapterId, adapterCache, overrideCache)
+              while (current && processed < OUTBOUND_DUE_BATCH_SIZE) {
+                const currentId: string = current.id
+                await processJob(currentId, current.adapterId, adapterCache, overrideCache)
+                inFlight.delete(currentId)
+                processed += 1
+
+                const settled: OutboundJobRow | undefined = await getDb().outboundQueue.get(
+                  currentId
+                )
+                if (!settled || !isOutboundTerminal(settled.status)) break
+                const next: OutboundJobRow | undefined = await findNextActiveOutboundSibling(
+                  settled
+                ).catch(() => undefined)
+                if (
+                  !next ||
+                  next.status === "sending" ||
+                  next.nextAttemptAt > clock() ||
+                  inFlight.has(next.id)
+                ) {
+                  break
+                }
+                inFlight.add(next.id)
+                current = next
+              }
             } finally {
-              inFlight.delete(jobId)
+              if (current) inFlight.delete(current.id)
               // Re-evaluate: the job may have been rescheduled to a sooner
               // deadline than the loop is currently sleeping for.
               wake()
@@ -1323,7 +1443,7 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       // and rely on the enqueue/lane wake to fire sooner.
       let sleepMs = idleCapMs
       try {
-        const nextAt = await peekNextWakeAt()
+        const nextAt = await peekNextWakeAt(clock())
         if (typeof nextAt === "number") {
           sleepMs = Math.max(0, Math.min(idleCapMs, nextAt - clock()))
         }

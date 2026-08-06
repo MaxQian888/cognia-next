@@ -20,6 +20,11 @@ import { createConnectorsAPI } from "./connectors-api"
 import { getPermissionGuard, resetPermissionGuard } from "@/lib/plugin/security"
 import { PermissionError } from "@/lib/plugin/security/permission-guard"
 
+const appendAudit = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/connectors/audit", () => ({
+  appendAudit: (...args: unknown[]) => appendAudit(...args),
+}))
+
 // ── bus mock ──────────────────────────────────────────────────────────────────
 const sendOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true, platformMessageId: "m1" }))
 const editOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true, platformMessageId: "m2" }))
@@ -271,17 +276,15 @@ const enqueueOutbound = jest.fn(
     source: "plugin",
   })
 )
-jest.mock("@/lib/db/outbound-jobs", () => ({
-  // Keep the real waitForOutboundTerminal (the shared delivery-feedback
-  // wait) — it reads through the getDb stub below, exactly like the old
-  // inline implementation this suite was written against.
-  ...jest.requireActual("@/lib/db/outbound-jobs"),
-  enqueueOutbound: (...a: unknown[]) => enqueueOutbound(...(a as [never])),
-}))
-
 // Delivery-feedback reads (`getOutboundJob` / `waitForDelivery`) hit the
 // outboundQueue table directly — stub just that surface of the Dexie db.
 const outboundQueueGet = jest.fn(async (_id: string): Promise<unknown> => undefined)
+jest.mock("@/lib/db/outbound-jobs", () => ({
+  ...jest.requireActual("@/lib/db/outbound-jobs"),
+  enqueueOutbound: (...a: unknown[]) => enqueueOutbound(...(a as [never])),
+  waitForOutboundTerminal: (id: string) => outboundQueueGet(id),
+}))
+
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
     outboundQueue: { get: (...a: unknown[]) => outboundQueueGet(...(a as [string])) },
@@ -483,11 +486,17 @@ describe("createConnectorsAPI", () => {
     beforeEach(() => guard.registerPlugin(PLUGIN, ["connectors:read", "connectors:send"]))
 
     it("send forwards a full outbound request", async () => {
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
       const api = createConnectorsAPI(PLUGIN)
       const req = { conversationRef: { x: 1 }, segments: [], metadata: { idempotencyKey: "k" } }
       const res = await api.send("tg", req as never)
       expect(res).toEqual({ ok: true, platformMessageId: "m1" })
       expect(sendOutbound).toHaveBeenCalledWith("tg", req)
+      expect(appendAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "delivery.legacy_direct" })
+      )
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("enqueueSend"))
+      warn.mockRestore()
     })
 
     it("sendText wraps text into a single segment with a fresh idempotency key", async () => {

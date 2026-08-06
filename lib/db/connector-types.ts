@@ -527,7 +527,7 @@ export interface OutboundJobWorkflowSource {
 
 /**
  * One row per outbound delivery job. The runner processes rows in
- * `[conversationKey+createdAt]` order (FIFO per conversation lane).
+ * `[conversationKey+orderSeq]` order (stable FIFO per conversation lane).
  */
 export interface OutboundJobRow {
   id: string
@@ -542,6 +542,14 @@ export interface OutboundJobRow {
   /** Error code from the last attempt, used by the audit log + breaker. */
   lastErrorCode?: string
   createdAt: number
+  /**
+   * Monotonic sequence allocated transactionally within a conversation.
+   * New rows always carry it; optional only so pre-v151 backup payloads can
+   * still be imported and backfilled without lying to TypeScript.
+   */
+  orderSeq?: number
+  /** Claim timestamp used by the indexed stale-sending recovery sweep. */
+  claimedAt?: number
   /** Wall-clock at which the runner is allowed to retry. */
   nextAttemptAt: number
   idempotencyKey: string

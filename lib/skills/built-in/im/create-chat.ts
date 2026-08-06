@@ -89,7 +89,8 @@ const skill: BuiltInSkill<typeof schema> = {
         })
         firstMessage = "pii_blocked"
       } else {
-        const { enqueueOutbound } = await import("@/lib/db/outbound-jobs")
+        const { enqueueGoverned: enqueueOutbound } =
+          await import("@/lib/connectors/delivery-gateway")
         const { newIdempotencyKey } = await import("@/types/connectors/outbound")
         await enqueueOutbound({
           adapterId: resolved.adapterId,

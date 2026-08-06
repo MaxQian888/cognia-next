@@ -54,9 +54,10 @@ import {
 import { getRunningAdapter, listRunningAdapters } from "@/lib/connectors/lifecycle"
 import { matchDispatchRule, type DispatchRuleHit } from "@/lib/connectors/dispatch-rules"
 import { shouldRespondToMessage, type AtGateDecision } from "@/lib/connectors/at-gate"
-import { enqueueOutbound, waitForOutboundTerminal } from "@/lib/db/outbound-jobs"
+import { waitForOutboundTerminal } from "@/lib/db/outbound-jobs"
 import { requireMethod, withScopeCapture } from "@/lib/skills/built-in/im/_helpers"
-import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { getConnectorDeliveryGateway } from "@/lib/connectors/delivery-gateway"
+import { appendAudit } from "@/lib/connectors/audit"
 import {
   createA2UIBuilder,
   type PluginConnectorsA2UIBuilder,
@@ -324,9 +325,15 @@ export interface PluginConnectorsAPI {
   waitForDelivery(jobId: string, opts?: { timeoutMs?: number }): Promise<PluginOutboundJobStatus>
 
   // ── Outbound mutations (connectors:send, DANGEROUS) ──────────────────────
-  /** Send a fully-formed outbound request through an adapter. */
+  /**
+   * Send a fully-formed request directly for one compatibility cycle.
+   * @deprecated Use {@link enqueueSend}; this bypasses queue governance and emits a waiver audit.
+   */
   send(adapterId: string, req: OutboundRequest): Promise<OutboundResult>
-  /** Convenience: send a plain-text message to a conversation. */
+  /**
+   * Convenience direct-send retained for one compatibility cycle.
+   * @deprecated Use {@link enqueueSend}; this bypasses queue governance and emits a waiver audit.
+   */
   sendText(
     adapterId: string,
     conversationRef: ConversationReference,
@@ -591,9 +598,9 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
     },
 
     // ── outbound mutations ───────────────────────────────────────────────────
-    send: (adapterId, req) => getBus().sendOutbound(adapterId, req),
+    send: (adapterId, req) => legacyDirectSend(pluginId, adapterId, req),
     sendText: (adapterId, conversationRef, text) =>
-      getBus().sendOutbound(adapterId, {
+      legacyDirectSend(pluginId, adapterId, {
         conversationRef,
         segments: [{ type: "text", text }],
         metadata: { idempotencyKey: newIdempotencyKey() },
@@ -617,14 +624,7 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
     uploadFile: (adapterId, file) => getBus().uploadFileOutbound(adapterId, file),
     streamReply: (adapterId, req) => getBus().streamReplyOutbound(adapterId, req),
     enqueueSend: async (adapterId, conversationKey, req, opts) => {
-      // The durable-queue path is never PII-scanned downstream (same verified
-      // gap the `im.broadcast` skill closes) — gate the content here.
-      if (!hasNoLeakingPiiDeep(req.segments)) {
-        throw new Error(
-          "ctx.connectors.enqueueSend: payload rejected by the PII gate — redact identifiers and retry."
-        )
-      }
-      const row = await enqueueOutbound({
+      const row = await getConnectorDeliveryGateway().enqueue({
         adapterId,
         conversationKey,
         request: req,
@@ -743,4 +743,23 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
       unguarded: ["newIdempotencyKey"],
     }
   )
+}
+
+async function legacyDirectSend(
+  pluginId: string,
+  adapterId: string,
+  request: OutboundRequest
+): Promise<OutboundResult> {
+  console.warn(
+    `[connectors-api] plugin ${pluginId} used deprecated direct send; migrate to ctx.connectors.enqueueSend`
+  )
+  await appendAudit({
+    adapterId,
+    kind: "delivery.legacy_direct",
+    at: Date.now(),
+    idempotencyKey: request.metadata.idempotencyKey,
+    reason: "plugin_compatibility_waiver",
+    fields: { pluginId, migrationTarget: "ctx.connectors.enqueueSend" },
+  }).catch(() => undefined)
+  return getBus().sendOutbound(adapterId, request)
 }

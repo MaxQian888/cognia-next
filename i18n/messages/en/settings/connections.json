@@ -69,6 +69,15 @@
         "half_open": "Half-open",
         "open": "Open"
       },
+      "connectorExecutions": "Connector AI",
+      "desiredObserved": "Desired / observed",
+      "desiredState": {
+        "disabled": "Disabled",
+        "enabled": "Enabled",
+        "suspended": "Suspended"
+      },
+      "executionCounts": "{running} running, {waiting} waiting",
+      "generation": "Generation",
       "lastError": "Last error",
       "lastOk": "Last OK",
       "nextRetry": "Next retry",
@@ -85,7 +94,19 @@
       },
       "reconnectNow": "Reconnect now",
       "reconnectQueued": "Reconnect queued.",
+      "restartReason": "Restart reason",
+      "retryEta": "Retry ETA",
+      "retryInSeconds": "in {seconds}s",
       "runtimeTitle": "Outbound runtime",
+      "observedState": {
+        "building": "Building",
+        "degraded": "Degraded",
+        "failed": "Failed",
+        "retry_wait": "Retry wait",
+        "running": "Running",
+        "starting": "Starting",
+        "stopped": "Stopped"
+      },
       "state": {
         "degraded": "Degraded",
         "down": "Down",
@@ -1150,6 +1171,8 @@
     "title": "Run operators"
   },
   "sendTest": {
+    "advancedDescription": "Direct transport probe. This bypasses quiet hours, FIFO, retry, rate limits, and the circuit breaker; use it only to isolate adapter or credential faults.",
+    "advancedTitle": "Advanced transport diagnostics",
     "bodyLabel": "Body",
     "chatIdHelp": {
       "dingtalk": "1:1: the sender''s staff id (or single:'<'staffId>). Group: group:'<'conversationId> from an inbound callback.",
@@ -1167,8 +1190,10 @@
     "chatIdLabel": "Target chat / channel id",
     "defaultBody": "[cognia] Test message from the Adapters → Config tab.",
     "desktopOnly": "Sending requires the desktop runtime so the adapter is registered with the bus.",
-    "intro": "Drive an end-to-end send through the bus to confirm the adapter, credentials, and outbound pipeline all work. The runner uses the exact same path.",
-    "sendButton": "Send test",
+    "intro": "Queue a governed end-to-end test and wait for delivery. This exercises quiet hours, FIFO, retry, rate limits, and the circuit breaker.",
+    "pendingResult": "The job is still queued or retrying. Check the Outbound tab for progress.",
+    "probeButton": "Run direct transport probe",
+    "sendButton": "Send governed test",
     "sentError": "Send failed ({code}): {message}",
     "sentSuccess": "Sent. platform_message_id = {messageId}",
     "targetPlaceholder": {

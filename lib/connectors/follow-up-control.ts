@@ -8,7 +8,7 @@ import type {
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getDb } from "@/lib/db/schema"
 import { getExecutionRun } from "@/lib/db/execution-runs"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { executeRunControlCommand, type RunControlResult } from "@/lib/execution/run-control"
 
 interface FollowUpControlItem {

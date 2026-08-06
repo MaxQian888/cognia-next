@@ -23,7 +23,7 @@
 
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { recordAndCheckInbound } from "@/lib/connectors/dedup"
 import { appendAudit } from "@/lib/connectors/audit"
 import { buildA2UISegment } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"

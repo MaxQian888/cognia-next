@@ -16,7 +16,7 @@ import { appendAudit } from "@/lib/connectors/audit"
 import { recordConnectorMetric } from "@/lib/connectors/metrics"
 import { createBindRequest } from "@/lib/db/feishu-principals"
 import { markConnectorInboundJobHistoryOnly } from "@/lib/db/connector-inbound-jobs"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { hashOpenId, type PrincipalResolution } from "./resolve"
 
 export type UnresolvedPrincipalResolution = Exclude<

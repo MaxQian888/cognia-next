@@ -11,6 +11,7 @@ import { createWechatOaAdapter } from "./wechat-oa"
 import { createDingTalkAdapter } from "./dingtalk"
 import type { PlatformAdapter } from "@/types/connectors/adapter"
 import type { ConversationDeliveryTarget } from "@/types/connectors/event"
+import { serializeSend as serializeLarkSend } from "./lark/serialize"
 
 const secret = async () => "test"
 
@@ -94,6 +95,33 @@ function adapters(): PlatformAdapter[] {
 }
 
 describe("built-in connector runtime contract", () => {
+  it("allows remote_idempotent only when the real serializer propagates the stable key", () => {
+    const remoteIdempotent = adapters().filter(
+      (adapter) => adapter.runtimeCapabilities?.ambiguousDelivery === "remote_idempotent"
+    )
+
+    for (const adapter of remoteIdempotent) {
+      const request = {
+        conversationRef: {
+          platform: adapter.meta.type,
+          adapterId: adapter.id,
+          channelId: "oc_contract",
+        },
+        segments: [{ type: "text" as const, text: "contract" }],
+        metadata: { idempotencyKey: "stable-contract-key" },
+      }
+      if (adapter.meta.type === "lark") {
+        expect(serializeLarkSend(request).payload["uuid"]).toBe("stable-contract-key")
+        continue
+      }
+      throw new Error(
+        `${adapter.meta.type} declares remote_idempotent without a serializer contract assertion`
+      )
+    }
+
+    expect(remoteIdempotent.map((adapter) => adapter.meta.type)).toEqual(["lark"])
+  })
+
   it.each(adapters().map((adapter) => [adapter.meta.type, adapter] as const))(
     "%s declares isolation, degradation, and ambiguous-delivery behavior",
     (_platform, adapter) => {

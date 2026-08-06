@@ -40,7 +40,7 @@ import type {
 import type { AuditKind } from "@/types/connectors/audit"
 import type { InboxSendPolicy } from "@/lib/claude/build-options"
 import { getDb } from "@/lib/db/schema"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { createDraft } from "@/lib/db/connector-drafts"
 import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getCharacter } from "@/lib/db/characters"

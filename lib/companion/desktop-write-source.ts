@@ -20,7 +20,7 @@
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
 import type { CharacterDraft } from "@/lib/db/characters"
 import { approveDraft, rejectDraft } from "@/lib/db/connector-drafts"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { attachSession, detachSession } from "@/lib/companion/remote-attach-registry"
 import {
   handleTeamRunPause,

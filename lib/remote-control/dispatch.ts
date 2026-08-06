@@ -258,7 +258,7 @@ const HANDLERS: Record<RemoteCommandTarget, RemoteCommandHandler> = {
     const { hasNoLeakingPii } = await import("@cognia/redact")
     if (!hasNoLeakingPii(text)) return reject(runId, "pii_blocked")
     const { parseConversationKey } = await import("@/types/connectors/event")
-    const { enqueueOutbound } = await import("@/lib/db/outbound-jobs")
+    const { enqueueGoverned: enqueueOutbound } = await import("@/lib/connectors/delivery-gateway")
     const { platform } = parseConversationKey(conversationKey)
     // `source: "manual"` — a remote-operator-initiated send (not an AI reply).
     // The Idempotency-Key (or runId) dedupes a retry storm at the queue.
