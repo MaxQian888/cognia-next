@@ -74,21 +74,25 @@ it("deletes every physical target database before removing registry metadata", a
     getActiveTarget: jest.fn(),
     ensureStandaloneTarget: jest.fn(),
     activateTarget: jest.fn(),
-    listTargets: jest.fn(async () => [
-      standalone,
-      { ...standalone, id: "desktop-studio", kind: "companion" as const },
-    ]),
+    listTargets: jest
+      .fn()
+      .mockResolvedValueOnce([
+        standalone,
+        { ...standalone, id: "desktop-studio", kind: "companion" as const },
+      ])
+      .mockResolvedValueOnce([]),
     deleteTarget: jest.fn(),
     deleteAccountTargets: jest.fn(async () => {
       events.push("metadata")
     }),
   }
 
-  await removeAccountRuntimeTargets("acct_runtime", {
+  const result = await removeAccountRuntimeTargets("acct_runtime", {
     registry,
     deleteDatabase: async (name) => {
       events.push(name)
     },
+    databaseExists: async () => false,
   })
 
   expect(events).toEqual([
@@ -96,6 +100,35 @@ it("deletes every physical target database before removing registry metadata", a
     "cognia-account-acct_runtime-target-desktop-studio",
     "metadata",
   ])
+  expect(result).toEqual({
+    accountId: "acct_runtime",
+    targetIds: ["web-standalone", "desktop-studio"],
+    deletedDatabases: [
+      "cognia-account-acct_runtime-target-web-standalone",
+      "cognia-account-acct_runtime-target-desktop-studio",
+    ],
+    registryRowsDeleted: 2,
+  })
+})
+
+it("fails before metadata removal when physical deletion cannot be verified", async () => {
+  const registry = {
+    getActiveTarget: jest.fn(),
+    ensureStandaloneTarget: jest.fn(),
+    activateTarget: jest.fn(),
+    listTargets: jest.fn(async () => [standalone]),
+    deleteTarget: jest.fn(),
+    deleteAccountTargets: jest.fn(),
+  }
+
+  await expect(
+    removeAccountRuntimeTargets("acct_runtime", {
+      registry,
+      deleteDatabase: jest.fn(async () => {}),
+      databaseExists: jest.fn(async () => true),
+    })
+  ).rejects.toThrow(/could not be verified/)
+  expect(registry.deleteAccountTargets).not.toHaveBeenCalled()
 })
 
 it("derives a stable opaque target id without embedding the endpoint", async () => {

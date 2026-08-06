@@ -41,6 +41,7 @@ interface PrepareDependencies {
 interface RemoveDependencies {
   registry: AccountRuntimeTargetRegistry
   deleteDatabase(name: string): Promise<void>
+  databaseExists?(name: string): Promise<boolean>
 }
 
 interface SwitchDependencies {
@@ -95,12 +96,38 @@ export async function removeAccountRuntimeTargets(
     registry: runtimeTargetRegistry,
     deleteDatabase: (name) => Dexie.delete(name),
   }
-): Promise<void> {
+): Promise<RuntimeTargetDeletionResult> {
   const targets = await dependencies.registry.listTargets(accountId)
+  const deletedDatabases: string[] = []
   for (const target of targets) {
-    await dependencies.deleteDatabase(runtimeTargetDatabaseName(accountId, target.id))
+    const databaseName = runtimeTargetDatabaseName(accountId, target.id)
+    await dependencies.deleteDatabase(databaseName)
+    const databaseExists = dependencies.databaseExists ?? ((name: string) => Dexie.exists(name))
+    if (await databaseExists(databaseName)) {
+      throw new Error(`Runtime target database deletion could not be verified: ${databaseName}`)
+    }
+    deletedDatabases.push(databaseName)
   }
   await dependencies.registry.deleteAccountTargets(accountId)
+  const remainingTargets = await dependencies.registry.listTargets(accountId)
+  if (remainingTargets.length > 0) {
+    throw new Error(
+      `Runtime target registry deletion could not be verified for ${accountId}: ${remainingTargets.length} row(s) remain.`
+    )
+  }
+  return {
+    accountId,
+    targetIds: targets.map((target) => target.id),
+    deletedDatabases,
+    registryRowsDeleted: targets.length,
+  }
+}
+
+export interface RuntimeTargetDeletionResult {
+  accountId: string
+  targetIds: string[]
+  deletedDatabases: string[]
+  registryRowsDeleted: number
 }
 
 export async function deriveCompanionRuntimeTargetId(

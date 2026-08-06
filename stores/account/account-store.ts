@@ -94,7 +94,7 @@ export interface AccountStoreDependencies {
   clearAccountLocalState: () => void
   prepareRuntimeTarget: (accountId: string) => Promise<RuntimeTargetRecord>
   prepareDatabase: () => Promise<unknown>
-  removeRuntimeTargets: (accountId: string) => Promise<void>
+  removeRuntimeTargets: (accountId: string) => Promise<unknown>
 }
 
 export type AccountStore = UseBoundStore<StoreApi<AccountStoreState>>
