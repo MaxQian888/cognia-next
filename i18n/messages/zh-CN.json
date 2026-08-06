@@ -9211,6 +9211,7 @@
     "agents": {
       "claude-code": "Claude Code",
       "codex": "Codex",
+      "cognia": "Cognia",
       "opencode": "OpenCode"
     },
     "island": {
@@ -9694,10 +9695,6 @@
         "desc": "工具运行前触发；hook 可拦截或改写该调用。",
         "label": "工具调用前"
       },
-      "Setup": {
-        "desc": "设置仓库或工作树环境时触发。",
-        "label": "环境设置"
-      },
       "SessionEnd": {
         "desc": "会话结束时触发；可做清理或日志记录。",
         "label": "会话结束"
@@ -9705,6 +9702,10 @@
       "SessionStart": {
         "desc": "会话开始时触发；适合注入常驻上下文。",
         "label": "会话开始"
+      },
+      "Setup": {
+        "desc": "设置仓库或工作树环境时触发。",
+        "label": "环境设置"
       },
       "Stop": {
         "desc": "助手完成本轮回复时触发。",
@@ -26026,9 +26027,17 @@
         "headersAdd": "新建头部",
         "headersEmpty": "暂无自定义头部。",
         "headersLabel": "请求头",
+        "inputLabel": "输入 JSON",
+        "modelLabel": "模型（可选）",
+        "promptLabel": "提示词",
+        "promptRequired": "提示词不能为空。",
         "removeAria": "移除处理器",
+        "serverLabel": "MCP 服务器",
+        "serverRequired": "MCP 服务器不能为空。",
         "timeoutLabel": "超时（秒）",
         "timeoutPlaceholder": "30",
+        "toolLabel": "工具",
+        "toolRequired": "MCP 工具不能为空。",
         "typeCommand": "命令",
         "typeLabel": "类型",
         "typeWebhook": "Webhook",
@@ -26039,8 +26048,6 @@
           "mcp_tool": "MCP 工具",
           "prompt": "提示词"
         },
-        "toolLabel": "工具",
-        "toolRequired": "MCP 工具不能为空。",
         "urlInvalid": "请输入有效的 http(s) URL。",
         "urlLabel": "URL",
         "urlPlaceholder": "https://example.com/hook",
@@ -37410,9 +37417,3 @@
     "unpin": "取消固定 Worktree"
   }
 }
-        "inputLabel": "输入 JSON",
-        "modelLabel": "模型（可选）",
-        "promptLabel": "提示词",
-        "promptRequired": "提示词不能为空。",
-        "serverLabel": "MCP 服务器",
-        "serverRequired": "MCP 服务器不能为空。",

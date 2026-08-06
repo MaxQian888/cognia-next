@@ -4,7 +4,8 @@
  * kebab-case — pinned by the Rust serde tests.
  */
 
-export type FleetAgent = "claude-code" | "codex" | "opencode"
+export type FleetAgent = "claude-code" | "codex" | "opencode" | "cognia"
+export type FleetOrigin = "built-in" | "team" | "workflow" | "external"
 
 export type FleetStatus =
   "idle" | "working" | "waiting-input" | "waiting-permission" | "plan-pending" | "ended"
@@ -110,6 +111,10 @@ export interface FleetError {
 
 export interface FleetSession {
   agent: FleetAgent
+  /** Execution-authority origin. Legacy external snapshots omit this field. */
+  origin?: FleetOrigin
+  /** Whether lifecycle came from a native canonical event or a heuristic. */
+  lifecycleConfidence?: "native" | "inferred"
   sessionId: string
   status: FleetStatus
   cwd: string | null

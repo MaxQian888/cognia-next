@@ -9211,6 +9211,7 @@
     "agents": {
       "claude-code": "Claude Code",
       "codex": "Codex",
+      "cognia": "Cognia",
       "opencode": "OpenCode"
     },
     "island": {
@@ -9694,10 +9695,6 @@
         "desc": "Fires before a tool runs; a hook can block or rewrite the call.",
         "label": "Before tool"
       },
-      "Setup": {
-        "desc": "Fires while a repository or worktree environment is being set up.",
-        "label": "Setup"
-      },
       "SessionEnd": {
         "desc": "Fires when a session ends; run cleanup or logging.",
         "label": "Session end"
@@ -9705,6 +9702,10 @@
       "SessionStart": {
         "desc": "Fires when a session begins; good for injecting standing context.",
         "label": "Session start"
+      },
+      "Setup": {
+        "desc": "Fires while a repository or worktree environment is being set up.",
+        "label": "Setup"
       },
       "Stop": {
         "desc": "Fires when the assistant finishes its turn.",
@@ -26026,9 +26027,17 @@
         "headersAdd": "Add header",
         "headersEmpty": "No custom headers.",
         "headersLabel": "Headers",
+        "inputLabel": "Input JSON",
+        "modelLabel": "Model (optional)",
+        "promptLabel": "Prompt",
+        "promptRequired": "Prompt can't be empty.",
         "removeAria": "Remove handler",
+        "serverLabel": "MCP server",
+        "serverRequired": "MCP server is required.",
         "timeoutLabel": "Timeout (seconds)",
         "timeoutPlaceholder": "30",
+        "toolLabel": "Tool",
+        "toolRequired": "MCP tool is required.",
         "typeCommand": "Command",
         "typeLabel": "Type",
         "typeWebhook": "Webhook",
@@ -26039,8 +26048,6 @@
           "mcp_tool": "MCP tool",
           "prompt": "Prompt"
         },
-        "toolLabel": "Tool",
-        "toolRequired": "MCP tool is required.",
         "urlInvalid": "Enter a valid http(s) URL.",
         "urlLabel": "URL",
         "urlPlaceholder": "https://example.com/hook",
@@ -37410,9 +37417,3 @@
     "unpin": "Unpin Worktree"
   }
 }
-        "inputLabel": "Input JSON",
-        "modelLabel": "Model (optional)",
-        "promptLabel": "Prompt",
-        "promptRequired": "Prompt can't be empty.",
-        "serverLabel": "MCP server",
-        "serverRequired": "MCP server is required.",

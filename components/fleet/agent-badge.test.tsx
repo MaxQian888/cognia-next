@@ -12,7 +12,7 @@ jest.mock("next-intl", () => ({
 
 describe("AgentBadge", () => {
   it("renders a translated chip per agent", () => {
-    for (const agent of ["claude-code", "codex", "opencode"] as const) {
+    for (const agent of ["claude-code", "codex", "opencode", "cognia"] as const) {
       const { unmount } = render(<AgentBadge agent={agent} />)
       expect(screen.getByTestId(`agent-badge-${agent}`)).toHaveTextContent(`agents.${agent}`)
       unmount()
