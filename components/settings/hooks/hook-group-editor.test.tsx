@@ -105,6 +105,23 @@ describe("HookGroupEditor", () => {
     })
   })
 
+  it("uses the first runtime-proven handler type for a new handler", () => {
+    const onChange = jest.fn()
+    render(
+      <HookGroupEditor
+        value={baseGroup}
+        onChange={onChange}
+        onRemove={jest.fn()}
+        supportedHandlerTypes={["http"]}
+      />
+    )
+    fireEvent.click(screen.getByTestId("group-add-handler"))
+    expect(onChange).toHaveBeenCalledWith({
+      matcher: "Bash",
+      hooks: [{ type: "http", url: "", headers: {} }],
+    })
+  })
+
   it("editing a handler bubbles up an updated handlers array (immutable)", () => {
     const { onChange } = setup({
       hooks: [

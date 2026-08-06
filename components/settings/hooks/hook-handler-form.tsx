@@ -36,6 +36,20 @@ interface Props {
   supportedHandlerTypes?: readonly HookHandlerType[]
 }
 
+export function emptyHandlerForType(type: HookHandlerType): HookHandler {
+  switch (type) {
+    case "command":
+      return { type, command: "" }
+    case "http":
+      return { type, url: "", headers: {} }
+    case "mcp_tool":
+      return { type, server: "", tool: "", input: {} }
+    case "prompt":
+    case "agent":
+      return { type, prompt: "" }
+  }
+}
+
 export function HookHandlerForm({
   value,
   onChange,
@@ -45,20 +59,7 @@ export function HookHandlerForm({
   const t = useTranslations("settings.hooks.handler")
 
   const setType = (type: HookHandlerType) => {
-    switch (type) {
-      case "command":
-        onChange({ type, command: "" })
-        break
-      case "http":
-        onChange({ type, url: "", headers: {} })
-        break
-      case "mcp_tool":
-        onChange({ type, server: "", tool: "", input: {} })
-        break
-      case "prompt":
-      case "agent":
-        onChange({ type, prompt: "" })
-    }
+    onChange(emptyHandlerForType(type))
   }
 
   const error = validateHandler(value)

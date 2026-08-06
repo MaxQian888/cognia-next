@@ -4,7 +4,7 @@
 
 import { fireEvent, render, screen } from "@testing-library/react"
 import type { HookHandler } from "@/lib/claude/hooks"
-import { HookHandlerForm, validateHandler } from "./hook-handler-form"
+import { emptyHandlerForType, HookHandlerForm, validateHandler } from "./hook-handler-form"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -346,5 +346,20 @@ describe("validateHandler", () => {
     expect(validateHandler({ type: "mcp_tool", server: "policy", tool: "" })).toBe("toolRequired")
     expect(validateHandler({ type: "prompt", prompt: "" })).toBe("promptRequired")
     expect(validateHandler({ type: "agent", prompt: "inspect" })).toBeNull()
+  })
+})
+
+describe("emptyHandlerForType", () => {
+  it("creates valid editable shapes for every runtime-proven handler type", () => {
+    expect(emptyHandlerForType("command")).toEqual({ type: "command", command: "" })
+    expect(emptyHandlerForType("http")).toEqual({ type: "http", url: "", headers: {} })
+    expect(emptyHandlerForType("mcp_tool")).toEqual({
+      type: "mcp_tool",
+      server: "",
+      tool: "",
+      input: {},
+    })
+    expect(emptyHandlerForType("prompt")).toEqual({ type: "prompt", prompt: "" })
+    expect(emptyHandlerForType("agent")).toEqual({ type: "agent", prompt: "" })
   })
 })
