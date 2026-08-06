@@ -34,6 +34,7 @@ describe("groupBridgeScopes", () => {
     const runtime = groups.find((g) => g.id === "runtime")
     expect(runtime?.scopes).toContain("runtime:skills")
     expect(runtime?.scopes).toContain("runtime:agent-teams")
+    expect(groups.find((g) => g.id === "workflow")?.scopes).toEqual(["workflow:run"])
   })
 
   it("renders a scope with an unrecognised prefix rather than dropping it", () => {

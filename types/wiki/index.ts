@@ -110,6 +110,11 @@ export type BridgeScope =
    * agent may not rewrite the assistant's working instructions — ADR-0069).
    */
   | "memory:write"
+  /**
+   * Discover and execute immutable workflow deployments through External
+   * Bridge MCP lifecycle and dynamically typed tools. Default OFF.
+   */
+  | "workflow:run"
 
 export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "wiki:cognia",
@@ -131,6 +136,14 @@ export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "inbound:write",
   "memory:read",
   "memory:write",
+  "workflow:run",
+] as const
+
+export const WORKFLOW_MCP_LIFECYCLE_TOOL_NAMES = [
+  "workflow_list",
+  "workflow_status",
+  "workflow_events",
+  "workflow_cancel",
 ] as const
 
 /** Scopes enabled by default for a fresh install. Public-code wiki + RAG only. */

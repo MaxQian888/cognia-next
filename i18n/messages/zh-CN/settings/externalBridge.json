@@ -136,7 +136,8 @@
     "runtime:skills": "⚠ 暴露已安装的 Skills 内容。",
     "runtime:twins": "⚠ 暴露孪生档案。已执行 PII 脱敏，但启用前请审核。",
     "wiki:cognia": "Cognia 公开代码 Wiki — 安全可暴露。",
-    "wiki:user-repo": "用户仓库 Wiki。Phase 3 — Phase 1 暂不可用。"
+    "wiki:user-repo": "用户仓库 Wiki。Phase 3 — Phase 1 暂不可用。",
+    "workflow:run": "⚠ 列出并运行当前生效的不可变工作流部署、读取持久事件并可取消运行。默认关闭。"
   },
   "scopes": {
     "description": "每个范围默认关闭，需手动启用。默认安装仅开启公开代码 Wiki 相关范围。",
@@ -150,6 +151,7 @@
       "plugin": "插件",
       "rag": "检索",
       "runtime": "运行时",
+      "workflow": "工作流",
       "wiki": "Wiki"
     },
     "plannedBadge": "规划中",

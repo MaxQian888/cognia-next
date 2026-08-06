@@ -7,6 +7,7 @@ import {
   executeDeployedWorkflow,
   WorkflowAdmissionError,
 } from "@/lib/workflow/runtime/execution-authority"
+import type { WorkflowEntrypoint } from "@/types/workflow/deployment"
 import type { RunStatus, WorkflowRunRow } from "@/types/workflow/visual"
 
 const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(["succeeded", "failed", "cancelled"])
@@ -63,6 +64,8 @@ async function getOwnedRun(accountId: string, runId: string): Promise<WorkflowRu
 export interface CreateWorkflowApiRunInput {
   accountId: string
   deploymentId: string
+  /** Trusted host-selected origin. Public HTTP bridge payloads always use the default. */
+  entrypoint?: WorkflowEntrypoint
   caller: string
   scopes: readonly string[]
   idempotencyKey?: string
@@ -102,7 +105,7 @@ export async function createWorkflowApiRun(
   const execution = executeDeployedWorkflow({
     workflowId: deployment.workflowId,
     environment: deployment.environment,
-    entrypoint: "http",
+    entrypoint: input.entrypoint ?? "http",
     caller: input.caller,
     ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
     authorizedScopes: input.scopes,

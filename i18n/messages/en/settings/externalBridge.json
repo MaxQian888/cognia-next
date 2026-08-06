@@ -136,7 +136,8 @@
     "runtime:skills": "⚠ Exposes your installed skills' content.",
     "runtime:twins": "⚠ Exposes Twin profiles. PII redaction has run, but review before enabling.",
     "wiki:cognia": "Public Cognia code wiki — safe to expose.",
-    "wiki:user-repo": "Wiki for user-supplied repos. Phase 3 — disabled in Phase 1."
+    "wiki:user-repo": "Wiki for user-supplied repos. Phase 3 — disabled in Phase 1.",
+    "workflow:run": "⚠ Lists and runs active immutable workflow deployments, reads their durable events, and can cancel runs. Default OFF."
   },
   "scopes": {
     "description": "Each scope is opt-in. Default install ships with only the public-code wiki scopes enabled.",
@@ -150,6 +151,7 @@
       "plugin": "Plugins",
       "rag": "Retrieval",
       "runtime": "Runtime",
+      "workflow": "Workflows",
       "wiki": "Wiki"
     },
     "plannedBadge": "Planned",

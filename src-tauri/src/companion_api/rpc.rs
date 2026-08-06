@@ -52,6 +52,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     agents::commands as agent_commands,
     claude::{commands as claude_commands, mcp_test, sidecar::kill_sidecar},
+    mcp_server::orchestration_proxy::OrchestrationEventSink,
     skills::{install, native as skills_native, registry},
 };
 
@@ -2069,6 +2070,17 @@ async fn sync_external_bridge_verifiers(
     }
 }
 
+fn headless_orchestration_event_sink() -> OrchestrationEventSink {
+    use super::bridge_transport::BridgeTransport;
+
+    std::sync::Arc::new(move |event| {
+        let payload = serde_json::to_value(event).map_err(|error| error.to_string())?;
+        let bridge = super::ws_bridge::socket_bridge_transport()
+            .ok_or_else(|| "headless Brain bridge is disconnected".to_string())?;
+        bridge.emit(crate::mcp_server::orchestration_proxy::EXEC_EVENT, payload)
+    })
+}
+
 async fn external_bridge_start_for_host(
     host: &super::dispatch_host::DispatchHost,
     restart: bool,
@@ -2161,7 +2173,7 @@ async fn external_bridge_start_for_host(
                             .await
                             .map_err(RpcError::internal)?,
                     ),
-                    None,
+                    Some(headless_orchestration_event_sink()),
                 )
                 .await
         }
@@ -2169,15 +2181,7 @@ async fn external_bridge_start_for_host(
 
     match started {
         Ok(port) => {
-            if matches!(host, super::dispatch_host::DispatchHost::Headless(_)) {
-                super::external_bridge::set_runtime_state(
-                    &data_dir,
-                    "degraded",
-                    Some("host-local orchestration executor is unavailable".into()),
-                );
-            } else {
-                super::external_bridge::set_runtime_state(&data_dir, "running", None);
-            }
+            super::external_bridge::set_runtime_state(&data_dir, "running", None);
             Ok(json!(port))
         }
         Err(error) => {
@@ -3102,7 +3106,7 @@ pub(super) async fn dispatch(
                                 .await
                                 .map_err(RpcError::internal)?,
                         ),
-                        None,
+                        Some(headless_orchestration_event_sink()),
                     )
                     .await
                     .map(|bound| json!(bound))
@@ -3131,7 +3135,6 @@ pub(super) async fn dispatch(
             let status = host.mcp_server_status();
             serde_json::to_value(status).map_err(|e| RpcError::internal(e.to_string()))
         }
-
         // ── Sync down (M4.7) ──────────────────────────────────────────────────
 
         "register_push_token" => {
@@ -6638,6 +6641,19 @@ pub(super) async fn dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::companion_api::{
+        deny_list::DenyList, idempotency::IdempotencyCache, jwt::issue_device_jwt,
+        redemption_lru::RedemptionLru, CompanionState,
+    };
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        Router,
+    };
+    use parking_lot::RwLock;
+    use serde_json::json;
+    use std::sync::Arc;
+    use tower::ServiceExt as _;
 
     /// Moved here from external_agent::exec_backend when the crate was
     /// extracted (ADR-0067): the round trip needs the companion EventBus,
@@ -6662,20 +6678,36 @@ mod tests {
             _ => panic!("subscribe failed"),
         }
     }
-    use crate::companion_api::{
-        deny_list::DenyList, idempotency::IdempotencyCache, jwt::issue_device_jwt,
-        redemption_lru::RedemptionLru, CompanionState,
-    };
-    use axum::{
-        body::Body,
-        http::{Request, StatusCode},
-        Router,
-    };
-    use parking_lot::RwLock;
-    use serde_json::json;
-    use std::sync::Arc;
-    use tower::ServiceExt as _;
 
+    #[tokio::test]
+    async fn headless_orchestration_sink_uses_the_service_only_brain_bridge() {
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
+        let mut receiver =
+            crate::companion_api::ws_bridge::test_support::install_socket_for_testing();
+        let sink = headless_orchestration_event_sink();
+
+        sink(crate::mcp_server::orchestration_proxy::ExecEvent {
+            id: "request-1".to_string(),
+            command: "workflowRunCreate".to_string(),
+            args: serde_json::json!({ "arguments": [{ "deploymentId": "deployment-1" }] }),
+        })
+        .expect("headless sink");
+
+        let axum::extract::ws::Message::Text(frame) = receiver.try_recv().expect("bridge frame")
+        else {
+            panic!("expected text bridge frame");
+        };
+        let frame: Value = serde_json::from_str(frame.as_str()).expect("valid bridge frame");
+        assert_eq!(frame["type"], "event");
+        assert_eq!(
+            frame["event"],
+            crate::mcp_server::orchestration_proxy::EXEC_EVENT
+        );
+        assert_eq!(frame["payload"]["id"], "request-1");
+        assert_eq!(frame["payload"]["command"], "workflowRunCreate");
+        crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
+    }
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
     const ACCOUNT_ID: &str = "local_acct_a";
 

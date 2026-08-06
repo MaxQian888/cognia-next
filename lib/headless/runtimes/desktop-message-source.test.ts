@@ -37,7 +37,7 @@ function makeCtx(bridge: RuntimeBridge): HeadlessRuntimeContext {
 }
 
 describe("desktop-message-source headless smoke", () => {
-  it("installs both sources' listeners in a pure-Node process", async () => {
+  it("installs message, write, and orchestration listeners in a pure-Node process", async () => {
     __resetHeadlessRuntimesForTesting()
     await import("./desktop-message-source")
 
@@ -54,6 +54,7 @@ describe("desktop-message-source headless smoke", () => {
       "companion://message-get-by-session-request",
       "companion://message-send-request",
       "companion://desktop-write-request",
+      "orchestration-proxy:exec",
     ]) {
       expect(listeners.has(channel)).toBe(true)
     }

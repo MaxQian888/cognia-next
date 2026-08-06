@@ -17,11 +17,7 @@
 
 import { useEffect } from "react"
 
-import {
-  subscribeOrchestrationExec,
-  sendOrchestrationResponse,
-} from "@/lib/external-bridge/orchestration-ipc"
-import { runOrchestrationExec } from "@/lib/external-bridge/handlers/orchestration"
+import { installOrchestrationDispatchSource } from "@/lib/external-bridge/orchestration-ipc"
 import { loggers } from "@cognia/logging"
 
 export function OrchestrationDispatchProvider() {
@@ -29,25 +25,12 @@ export function OrchestrationDispatchProvider() {
     let cancelled = false
     let unlisten: (() => void) | null = null
 
-    void subscribeOrchestrationExec((req) => {
-      // runOrchestrationExec never throws (each `*Core` collapses failures onto
-      // its `error` field), so the happy path is `ok: true` with the handler
-      // output in `result`. The write-back is the only thing that can reject.
-      void runOrchestrationExec(req.command, req.args)
-        .then((result) => sendOrchestrationResponse({ id: req.id, ok: true, result }))
-        .catch((err) =>
-          sendOrchestrationResponse({
-            id: req.id,
-            ok: false,
-            error: err instanceof Error ? err.message : String(err),
-          })
-        )
-        .catch((err) => {
-          loggers.app.error("orchestration_proxy_response write failed", {
-            id: req.id,
-            error: String(err),
-          })
+    void installOrchestrationDispatchSource({
+      onError: (error) => {
+        loggers.app.error("orchestration_proxy_response write failed", {
+          error: String(error),
         })
+      },
     }).then((fn) => {
       if (cancelled) fn()
       else unlisten = fn

@@ -49,6 +49,26 @@ describe("workflow HTTP API service", () => {
     })
   })
 
+  it("preserves a trusted non-HTTP entrypoint in the canonical execution binding", async () => {
+    const { publication } = await publishedWorkflow("MCP workflow")
+    const deployment = (await getDb().workflowDeployments.get(publication.deploymentId))!
+
+    const started = await createWorkflowApiRun({
+      accountId: deployment.accountId,
+      deploymentId: deployment.id,
+      entrypoint: "mcp",
+      caller: "mcp:client-1",
+      scopes: ["workflow:run", "workflow:read"],
+      input: { topic: "shipping" },
+    })
+
+    expect((await getDb().workflowRuns.get(started.runId))?.executionBinding).toMatchObject({
+      entrypoint: "mcp",
+      caller: "mcp:client-1",
+      deploymentId: deployment.id,
+    })
+  })
+
   it("fails closed for another account and for a caller without workflow:run", async () => {
     const { publication } = await publishedWorkflow()
     const accountId = (await getDb().workflowDeployments.get(publication.deploymentId))!.accountId

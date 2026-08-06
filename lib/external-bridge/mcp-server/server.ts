@@ -14,11 +14,15 @@
  *   5. Convert handler output to MCP envelope shape.
  */
 
-import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js"
+import {
+  McpServer,
+  ResourceTemplate,
+  type RegisteredTool,
+} from "@modelcontextprotocol/sdk/server/mcp.js"
 import { completable } from "@modelcontextprotocol/sdk/server/completable.js"
 import { z } from "zod"
 import type { BridgeScope, ExternalBridgeSettings } from "@/types/wiki"
-import { ALL_BRIDGE_SCOPES, SELF_CORPUS_ID } from "@/types/wiki"
+import { ALL_BRIDGE_SCOPES, SELF_CORPUS_ID, WORKFLOW_MCP_LIFECYCLE_TOOL_NAMES } from "@/types/wiki"
 import { listAllWikiArticles, getWikiArticleBySlug } from "@/lib/db/wiki-articles"
 import { listSkills, getSkill } from "@/lib/db/skills"
 import { listCharacters, getCharacter } from "@/lib/db/characters"
@@ -55,6 +59,12 @@ import {
   memoryForget,
 } from "../handlers/memory"
 import { spawnTask } from "../handlers/spawn-task"
+import {
+  proxiedWorkflowMcpHost,
+  type WorkflowMcpDeploymentDescriptor,
+  type WorkflowMcpHost,
+} from "../handlers/workflow"
+import { jsonSchemaToZodShape } from "@/lib/workflow/nodes/ai/schema-validate"
 
 /** Function the caller injects so the server always sees fresh settings. */
 export type SettingsGetter = () => Promise<ExternalBridgeSettings | undefined>
@@ -87,9 +97,11 @@ async function scopedSettings(
 export interface BuildServerOptions {
   serverInfo?: { name: string; version: string }
   settingsGetter: SettingsGetter
+  workflowHost?: WorkflowMcpHost
 }
 
 const DEFAULT_SERVER_INFO = { name: "cognia", version: "1.0.0" }
+const WORKFLOW_MCP_RESERVED_TOOL_NAMES = new Set<string>(WORKFLOW_MCP_LIFECYCLE_TOOL_NAMES)
 
 /**
  * Build the McpServer. The returned instance is not connected yet —
@@ -112,10 +124,370 @@ export function buildMcpServer(opts: BuildServerOptions): McpServer {
   registerConnectorTools(server, opts.settingsGetter)
   registerInboundTools(server, opts.settingsGetter)
   registerMemoryTools(server, opts.settingsGetter)
+  registerWorkflowLifecycleTools(
+    server,
+    opts.settingsGetter,
+    opts.workflowHost ?? proxiedWorkflowMcpHost
+  )
   registerResources(server, opts.settingsGetter)
   registerPrompts(server, opts.settingsGetter)
 
   return server
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Immutable workflow deployments
+// ─────────────────────────────────────────────────────────────────────────────
+
+function bridgeCaller(extra: BridgeRequestExtra): string {
+  const raw = extra._meta?.cogniaBridgeClientId
+  if (typeof raw !== "string" || !raw.trim()) return "mcp:stdio"
+  const normalized = raw
+    .trim()
+    .replace(/[^a-zA-Z0-9._:-]/g, "_")
+    .slice(0, 128)
+  return `mcp:${normalized || "client"}`
+}
+
+function bridgeIdempotencyKey(extra: BridgeRequestExtra): string | undefined {
+  const raw = extra._meta?.cogniaIdempotencyKey
+  if (typeof raw !== "string") return undefined
+  const normalized = raw.trim().slice(0, 256)
+  return normalized || undefined
+}
+
+function registerWorkflowLifecycleTools(
+  server: McpServer,
+  settingsGetter: SettingsGetter,
+  host: WorkflowMcpHost
+): void {
+  server.registerTool(
+    "workflow_list",
+    {
+      title: "List active workflow deployments",
+      description: "List account-scoped active immutable workflow deployments exposed by Cognia.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {},
+    },
+    async (_args, extra) =>
+      runWithGate({
+        tool: "workflow_list",
+        scope: "workflow:run",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "workflow_list"),
+        body: async () => ({ deployments: await host.listDeployments() }),
+      })
+  )
+
+  server.registerTool(
+    "workflow_status",
+    {
+      title: "Get workflow run status",
+      description: "Get the redacted status projection for a workflow run.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: { runId: z.string().min(1) },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "workflow_status",
+        scope: "workflow:run",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "workflow_status"),
+        body: () => host.getRun({ runId: args.runId }),
+      })
+  )
+
+  server.registerTool(
+    "workflow_events",
+    {
+      title: "List workflow run events",
+      description: "Read durable redacted workflow events after a monotonic sequence cursor.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        runId: z.string().min(1),
+        afterSequence: z.number().int().min(0).optional(),
+        limit: z.number().int().min(1).max(1_000).optional(),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "workflow_events",
+        scope: "workflow:run",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "workflow_events"),
+        body: () =>
+          host.listEvents({
+            runId: args.runId,
+            afterSequence: args.afterSequence ?? 0,
+            ...(args.limit !== undefined ? { limit: args.limit } : {}),
+          }),
+      })
+  )
+
+  server.registerTool(
+    "workflow_cancel",
+    {
+      title: "Cancel workflow run",
+      description: "Request cancellation through the canonical workflow runtime.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: { runId: z.string().min(1) },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "workflow_cancel",
+        scope: "workflow:run",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "workflow_cancel"),
+        body: () => host.cancelRun({ runId: args.runId, caller: bridgeCaller(extra) }),
+      })
+  )
+}
+
+interface RegisteredWorkflowTool {
+  prepared: PreparedWorkflowTool
+  registration: RegisteredTool
+}
+
+interface PreparedWorkflowTool {
+  descriptor: WorkflowMcpDeploymentDescriptor
+  descriptorDigest: string
+  inputSchema: ReturnType<typeof jsonSchemaToZodShape>
+}
+
+export interface WorkflowToolRefreshController {
+  refresh(): Promise<void>
+  stop(): void
+}
+
+export interface WorkflowToolRefreshOptions extends BuildServerOptions {
+  refreshIntervalMs?: number
+}
+
+function workflowDescriptorDigest(descriptor: WorkflowMcpDeploymentDescriptor): string {
+  return JSON.stringify({
+    deploymentId: descriptor.deploymentId,
+    versionId: descriptor.versionId,
+    revision: descriptor.revision,
+    toolName: descriptor.toolName,
+    name: descriptor.name,
+    description: descriptor.description,
+    inputSchema: descriptor.inputSchema,
+  })
+}
+
+function workflowToolMetadata(descriptor: WorkflowMcpDeploymentDescriptor) {
+  return {
+    title: descriptor.name,
+    description:
+      descriptor.description ??
+      `Run the active immutable deployment of the ${descriptor.name} workflow.`,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    _meta: {
+      cogniaWorkflowDeploymentId: descriptor.deploymentId,
+      cogniaWorkflowVersionId: descriptor.versionId,
+      cogniaWorkflowDeploymentRevision: descriptor.revision,
+    },
+  }
+}
+
+function workflowToolCallback(
+  settingsGetter: SettingsGetter,
+  host: WorkflowMcpHost,
+  descriptor: WorkflowMcpDeploymentDescriptor
+) {
+  return async (args: Record<string, unknown>, extra: BridgeRequestExtra) => {
+    const idempotencyKey = bridgeIdempotencyKey(extra)
+    return runWithGate({
+      tool: descriptor.toolName,
+      scope: "workflow:run",
+      check: checkScope(await scopedSettings(settingsGetter, extra), "workflow:run"),
+      body: () =>
+        host.createRun({
+          deploymentId: descriptor.deploymentId,
+          caller: bridgeCaller(extra),
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+          input: args,
+        }),
+    })
+  }
+}
+
+function registerDynamicWorkflowTool(
+  server: McpServer,
+  settingsGetter: SettingsGetter,
+  host: WorkflowMcpHost,
+  descriptor: WorkflowMcpDeploymentDescriptor,
+  inputSchema: ReturnType<typeof jsonSchemaToZodShape>
+): RegisteredTool {
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(descriptor.toolName)) {
+    throw new Error(`Invalid workflow MCP tool name '${descriptor.toolName}'`)
+  }
+  return server.registerTool(
+    descriptor.toolName,
+    {
+      ...workflowToolMetadata(descriptor),
+      inputSchema,
+    },
+    workflowToolCallback(settingsGetter, host, descriptor)
+  )
+}
+
+function updateDynamicWorkflowTool(
+  registration: RegisteredTool,
+  settingsGetter: SettingsGetter,
+  host: WorkflowMcpHost,
+  prepared: PreparedWorkflowTool
+): void {
+  const { descriptor, inputSchema } = prepared
+  registration.update({
+    ...workflowToolMetadata(descriptor),
+    paramsSchema: inputSchema,
+    callback: workflowToolCallback(settingsGetter, host, descriptor),
+  })
+}
+
+/**
+ * Keep deployment-backed tools aligned with the host's atomic pointers. The
+ * initial refresh runs before connect; subsequent changes emit MCP tool-list
+ * notifications. Failures leave the last known-good registration set intact.
+ */
+export async function startWorkflowToolRefresh(
+  server: McpServer,
+  opts: WorkflowToolRefreshOptions
+): Promise<WorkflowToolRefreshController> {
+  const host = opts.workflowHost ?? proxiedWorkflowMcpHost
+  const registered = new Map<string, RegisteredWorkflowTool>()
+  let timer: ReturnType<typeof setInterval> | undefined
+  let refreshing = false
+
+  const controller: WorkflowToolRefreshController = {
+    async refresh() {
+      if (refreshing) return
+      refreshing = true
+      try {
+        const settings = await opts.settingsGetter()
+        const descriptors =
+          settings?.enabled && settings.enabledScopes.includes("workflow:run")
+            ? await host.listDeployments()
+            : []
+        const desired = new Map<string, PreparedWorkflowTool>()
+        for (const descriptor of descriptors) {
+          if (!/^[a-zA-Z0-9_-]{1,64}$/.test(descriptor.toolName)) {
+            throw new Error(`Invalid workflow MCP tool name '${descriptor.toolName}'`)
+          }
+          if (WORKFLOW_MCP_RESERVED_TOOL_NAMES.has(descriptor.toolName)) {
+            throw new Error(`Workflow MCP tool name '${descriptor.toolName}' is reserved`)
+          }
+          if (desired.has(descriptor.toolName)) {
+            throw new Error(`Duplicate workflow MCP tool name '${descriptor.toolName}'`)
+          }
+          desired.set(descriptor.toolName, {
+            descriptor,
+            descriptorDigest: workflowDescriptorDigest(descriptor),
+            inputSchema: jsonSchemaToZodShape(descriptor.inputSchema),
+          })
+        }
+
+        const added = new Map<string, RegisteredWorkflowTool>()
+        const updated: RegisteredWorkflowTool[] = []
+        try {
+          // Additions run first. A collision with a static MCP tool fails
+          // before any last-known-good workflow registration is touched.
+          for (const [toolName, next] of desired) {
+            if (registered.has(toolName)) continue
+            added.set(toolName, {
+              prepared: next,
+              registration: registerDynamicWorkflowTool(
+                server,
+                opts.settingsGetter,
+                host,
+                next.descriptor,
+                next.inputSchema
+              ),
+            })
+          }
+
+          // Same-name deployment upgrades use the SDK's in-place update, so
+          // clients observe one list-change notification instead of a remove
+          // followed by a second registration notification.
+          for (const [toolName, next] of desired) {
+            const current = registered.get(toolName)
+            if (!current || current.prepared.descriptorDigest === next.descriptorDigest) continue
+            updateDynamicWorkflowTool(current.registration, opts.settingsGetter, host, next)
+            updated.push(current)
+          }
+
+          for (const [toolName, current] of registered) {
+            if (!desired.has(toolName)) current.registration.remove()
+          }
+        } catch (error) {
+          for (const current of updated.reverse()) {
+            updateDynamicWorkflowTool(
+              current.registration,
+              opts.settingsGetter,
+              host,
+              current.prepared
+            )
+          }
+          for (const current of added.values()) current.registration.remove()
+          throw error
+        }
+
+        const nextRegistered = new Map<string, RegisteredWorkflowTool>()
+        for (const [toolName, next] of desired) {
+          const current = registered.get(toolName)
+          nextRegistered.set(
+            toolName,
+            added.get(toolName) ?? { prepared: next, registration: current!.registration }
+          )
+        }
+        registered.clear()
+        for (const [toolName, current] of nextRegistered) registered.set(toolName, current)
+      } finally {
+        refreshing = false
+      }
+    },
+    stop() {
+      if (timer !== undefined) clearInterval(timer)
+      timer = undefined
+    },
+  }
+
+  try {
+    await controller.refresh()
+  } catch {
+    // The host can start after the sidecar. Polling below retries without
+    // taking down unrelated External Bridge tools.
+  }
+  const intervalMs = opts.refreshIntervalMs ?? 5_000
+  if (intervalMs > 0) {
+    timer = setInterval(() => {
+      void controller.refresh().catch(() => undefined)
+    }, intervalMs)
+    ;(timer as unknown as { unref?: () => void }).unref?.()
+  }
+  return controller
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
