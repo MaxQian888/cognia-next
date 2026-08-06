@@ -116,7 +116,7 @@ describe("PanelQuickSwitch", () => {
     const handler = (globalThis as Record<string, unknown>).__quickSwitchHandler as () => void
     act(() => handler())
 
-    expect(screen.getByText("No matching panels")).toBeInTheDocument()
+    expect(screen.getByText("No matching panels.")).toBeInTheDocument()
   })
 
   it("toggles dialog open/closed on repeated shortcut invocation", () => {
