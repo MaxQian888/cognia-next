@@ -7,11 +7,15 @@ export type DataBackupMode = "portable" | "device-local" | "derived" | "ephemera
 export type DataSyncMode = "none" | "companion-readonly"
 export type DataCleanupPolicy = "protected" | "quick" | "deep"
 export type DataExpectedScale = "small" | "medium" | "large" | "very-large"
+export type DataRetentionEnforcement = "central" | "domain" | "explicit-delete"
 
 export interface DataRetentionPolicy {
   mode: "permanent" | "ttl" | "cap"
   days?: number
   maxRows?: number
+  enforcement: DataRetentionEnforcement
+  /** Deduplicated executor name consumed by the central retention sweeper. */
+  executorId?: string
   reason: string
 }
 
@@ -587,24 +591,84 @@ function backupFor(
   }
 }
 
-function retentionFor(role: DataTableRole): DataRetentionPolicy {
-  if (role === "audit")
-    return {
-      mode: "cap",
-      maxRows: 5_000,
-      reason: "Bound high-write evidence while retaining recent diagnostics.",
-    }
-  if (role === "queue")
-    return {
-      mode: "ttl",
-      days: 30,
-      reason: "Completed operational work must not grow without bound.",
-    }
-  if (role === "cache" || role === "projection")
-    return { mode: "ttl", days: 30, reason: "Derived rows can be rebuilt after expiry." }
+const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> = {
+  agentTraces: {
+    mode: "ttl",
+    days: 30,
+    enforcement: "central",
+    executorId: "agentTraces",
+    reason: "The storage retention sweeper prunes spans through the global startTime index.",
+  },
+  evalSamples: {
+    mode: "ttl",
+    enforcement: "central",
+    executorId: "evalArtifacts",
+    reason: "Rows carry expiresAt and are removed by the central eval-artifact sweep.",
+  },
+  evalAssets: {
+    mode: "ttl",
+    enforcement: "central",
+    executorId: "evalArtifacts",
+    reason: "Unreferenced rows carry expiresAt and are removed by the central eval-artifact sweep.",
+  },
+  terminalHistory: {
+    mode: "cap",
+    maxRows: 5_000,
+    enforcement: "domain",
+    reason: "The terminal history writer trims least-recently-used commands after insert.",
+  },
+  remoteControlAudit: {
+    mode: "cap",
+    maxRows: 1_000,
+    enforcement: "domain",
+    reason: "The remote-control audit writer trims oldest rows after append.",
+  },
+  unattendedExecAudit: {
+    mode: "cap",
+    maxRows: 1_000,
+    enforcement: "domain",
+    reason: "The unattended-execution audit writer trims oldest rows after append.",
+  },
+  sessionUsage: {
+    mode: "ttl",
+    days: 90,
+    enforcement: "domain",
+    reason: "Provider-cost initializers prune usage older than 90 days.",
+  },
+  outboundQueue: {
+    mode: "ttl",
+    days: 14,
+    enforcement: "domain",
+    reason: "The connector runtime prunes terminal outbound jobs after 14 days.",
+  },
+  actionReviewReceipts: {
+    mode: "ttl",
+    days: 90,
+    enforcement: "domain",
+    reason: "Receipts receive an indexed expiresAt when written and are pruned by their owner.",
+  },
+  behaviorEvents: {
+    mode: "cap",
+    enforcement: "domain",
+    reason: "The behavior-event writer applies its caller-provided age and row caps.",
+  },
+  notifications: {
+    mode: "cap",
+    enforcement: "domain",
+    reason: "The notification writer applies user-configured age and item limits after delivery.",
+  },
+}
+
+function retentionFor(name: CoreTableName, role: DataTableRole): DataRetentionPolicy {
+  const override = RETENTION_OVERRIDES[name]
+  if (override) return override
   return {
     mode: "permanent",
-    reason: "Authoritative user data is retained until an explicit domain delete.",
+    enforcement: "explicit-delete",
+    reason:
+      role === "authoritative"
+        ? "Authoritative user data is retained until an explicit domain delete."
+        : "No generic timestamp/cap contract is approved; the owner must delete rows explicitly.",
   }
 }
 
@@ -629,7 +693,7 @@ function createEntry(name: CoreTableName): DataTableCatalogEntry {
     syncPolicy: COMPANION_SYNC_TABLES.has(name)
       ? { mode: "companion-readonly", reason: "Desktop-authoritative offline mirror." }
       : { mode: "none", reason: "Not exposed through the Companion data plane." },
-    retentionPolicy: retentionFor(role),
+    retentionPolicy: retentionFor(name, role),
     deleteCascade: {
       account: accountScope !== "global",
       runtimeTarget: accountScope === "runtime-target",
@@ -683,6 +747,7 @@ export function policyForTable(name: string): DataTableCatalogEntry | undefined 
     },
     retentionPolicy: {
       mode: "permanent",
+      enforcement: "explicit-delete",
       reason: "Retained until explicit plugin purge or plugin-owned cleanup.",
     },
     deleteCascade: {
@@ -703,4 +768,18 @@ export function tableNamesForCategory(
   runtimeTableNames: readonly string[] = CORE_TABLE_NAMES
 ): string[] {
   return runtimeTableNames.filter((name) => policyForTable(name)?.storageCategory === category)
+}
+
+/** Central retention executors requested by governed tables, de-duplicated in
+ * catalog order so runtime scheduling is deterministic. */
+export function centralRetentionExecutorIds(): string[] {
+  return [
+    ...new Set(
+      DATA_TABLE_CATALOG.flatMap((entry) =>
+        entry.retentionPolicy.enforcement === "central" && entry.retentionPolicy.executorId
+          ? [entry.retentionPolicy.executorId]
+          : []
+      )
+    ),
+  ]
 }

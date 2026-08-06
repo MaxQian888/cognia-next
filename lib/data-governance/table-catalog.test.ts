@@ -7,6 +7,7 @@ import {
   DATA_TABLE_CATALOG,
   PORTABLE_BACKUP_BINDINGS,
   PORTABLE_BACKUP_TABLES,
+  centralRetentionExecutorIds,
   policyForTable,
   tableNamesForCategory,
 } from "./table-catalog"
@@ -31,8 +32,11 @@ describe("DataTableCatalog", () => {
       expect(entry.deleteCascade.reason).not.toBe("")
       expect(entry.queryBudget.hotReadMaxMs).toBeGreaterThan(0)
       expect(entry.queryBudget.pageSize).toBeGreaterThan(0)
-      if (entry.role !== "authoritative") {
-        expect(entry.retentionPolicy.mode).not.toBe("permanent")
+      if (entry.retentionPolicy.enforcement === "central") {
+        expect(entry.retentionPolicy.executorId).not.toBe("")
+      }
+      if (entry.retentionPolicy.mode === "permanent") {
+        expect(entry.retentionPolicy.enforcement).toBe("explicit-delete")
       }
     }
   })
@@ -61,6 +65,19 @@ describe("DataTableCatalog", () => {
     expect(policyForTable("tts_provider_keys")?.backupPolicy.mode).not.toBe("portable")
   })
 
+  it("derives central retention executors without duplicate eval targets", () => {
+    expect(centralRetentionExecutorIds()).toEqual(["agentTraces", "evalArtifacts"])
+    expect(policyForTable("terminalHistory")?.retentionPolicy).toMatchObject({
+      mode: "cap",
+      maxRows: 5_000,
+      enforcement: "domain",
+    })
+    expect(policyForTable("agentTasks")?.retentionPolicy).toMatchObject({
+      mode: "permanent",
+      enforcement: "explicit-delete",
+    })
+  })
+
   it("fails closed for user history, sync state, and pending work during generic cleanup", () => {
     for (const name of [
       "agentTasks",
@@ -80,7 +97,6 @@ describe("DataTableCatalog", () => {
       "conversationOverrides",
       "evalTasks",
       "skillRecordings",
-      "terminalHistory",
     ] as const) {
       expect(policyForTable(name)?.role).toBe("authoritative")
       expect(policyForTable(name)?.retentionPolicy.mode).toBe("permanent")

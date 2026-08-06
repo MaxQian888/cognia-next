@@ -55,6 +55,20 @@ describe("pruneRetainedTables", () => {
     expect(prune).not.toHaveBeenCalled()
   })
 
+  it("still deletes independently expired rows when trace retention is keep-forever", async () => {
+    const windowPrune = jest.fn(async () => 1)
+    const expiryPrune = jest.fn(async () => 2)
+
+    await expect(
+      pruneRetainedTables(0, [
+        { id: "window", policy: "configured-window", prune: windowPrune },
+        { id: "expiry", policy: "row-expiry", prune: expiryPrune },
+      ])
+    ).resolves.toEqual([{ id: "expiry", removed: 2 }])
+    expect(windowPrune).not.toHaveBeenCalled()
+    expect(expiryPrune).toHaveBeenCalledTimes(1)
+  })
+
   it("passes a cutoff of now - days and aggregates removed counts", async () => {
     let seenCutoff = 0
     const targets: RetentionTarget[] = [
