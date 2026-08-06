@@ -161,13 +161,20 @@ describe("selectableCategories", () => {
 
 describe("governed other table plan", () => {
   it("includes safe governed tables and excludes protected tables", () => {
-    const names = __TESTING__.cleanupTableNames("other", ["agentTraces", "chatGoals"])
+    const names = __TESTING__.cleanupTableNames("other", ["agentTraces", "agentTasks", "chatGoals"])
     expect(names).toContain("agentTraces")
+    expect(names).not.toContain("agentTasks")
     expect(names).not.toContain("chatGoals")
   })
 
   it("fails closed for an unknown runtime table", () => {
     expect(__TESTING__.cleanupTableNames("other", ["unknown-table"])).toEqual([])
+  })
+
+  it("does not infer generic deletion safety from a queue or audit-shaped name", () => {
+    expect(
+      __TESTING__.cleanupTableNames("other", ["agentTasks", "browserRecordings", "hostSyncCursors"])
+    ).toEqual([])
   })
 
   it("fails closed for undated rows during age-based cleanup", () => {

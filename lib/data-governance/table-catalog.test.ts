@@ -52,6 +52,34 @@ describe("DataTableCatalog", () => {
     expect(tableNamesForCategory("other")).toContain("workflowRunEvents")
   })
 
+  it("fails closed for user history, sync state, and pending work during generic cleanup", () => {
+    for (const name of [
+      "agentTasks",
+      "browserRecordings",
+      "conversationOverrides",
+      "hostSyncCursors",
+      "skillRecordings",
+      "syncTombstones",
+      "terminalHistory",
+    ] as const) {
+      expect(policyForTable(name)?.cleanupPolicy).toBe("protected")
+    }
+    for (const name of [
+      "agentTasks",
+      "browserRecordings",
+      "chatInputHistory",
+      "conversationOverrides",
+      "evalTasks",
+      "skillRecordings",
+      "terminalHistory",
+    ] as const) {
+      expect(policyForTable(name)?.role).toBe("authoritative")
+      expect(policyForTable(name)?.retentionPolicy.mode).toBe("permanent")
+    }
+    expect(policyForTable("agentTraces")?.cleanupPolicy).toBe("deep")
+    expect(policyForTable("chatSearchState")?.cleanupPolicy).toBe("quick")
+  })
+
   it("makes RuntimeTarget-owned tables cascade through both isolation levels", () => {
     expect(policyForTable("hostSyncCursors")).toMatchObject({
       accountScope: "runtime-target",

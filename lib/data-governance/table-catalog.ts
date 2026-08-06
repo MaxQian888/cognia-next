@@ -402,10 +402,63 @@ const PROJECTION_TABLES = new Set<CoreTableName>([
   "agentCompatibilityRecords",
   "agentTeamBoard",
   "chatSearchText",
-  "conversationOverrides",
   "profileStoreMeta",
   "providerCostDaily",
   "remoteControlRunStatus",
+])
+
+// Cleanup is deliberately more conservative than role inference. A table may
+// be a cache/queue/audit without being safe for a generic storage action (for
+// example sync cursors, user-created recordings, and pending work). Only rows
+// whose owning module has declared them rebuildable or disposable belong here.
+const QUICK_CLEANUP_TABLES = new Set<CoreTableName>([
+  "a2uiSurfaces",
+  "chatSearchState",
+  "chatSearchText",
+  "knowledgeBaseChunks",
+  "modelsDevCatalog",
+  "openVsxCache",
+  "openrouterCatalog",
+  "projectChunks",
+  "providerCatalogAliases",
+  "providerCatalogModels",
+  "providerCatalogOfferings",
+  "providerCatalogProviders",
+  "providerCatalogRevisions",
+  "providerCatalogState",
+  "providerConnectionInventory",
+  "remoteControlRunStatus",
+  "twinChunks",
+  "vscodeExtensionRuntime",
+  "wikiArticlesStaging",
+  "wikiSectionsStaging",
+])
+
+const DEEP_CLEANUP_TABLES = new Set<CoreTableName>([
+  "agentTraces",
+  "automationAuditLog",
+  "backupHistory",
+  "connectorAudit",
+  "gatewayRequestLog",
+  "inboxTelemetryEvents",
+  "integrationAudit",
+  "mcpAuditLog",
+  "remoteControlAudit",
+  "unattendedExecAudit",
+])
+
+// These names look like generic queues/audit logs, but the rows are part of a
+// user-visible domain history or are the desktop source of truth. Keeping the
+// overrides explicit prevents naming heuristics from silently changing their
+// backup/retention semantics.
+const AUTHORITATIVE_ROLE_OVERRIDES = new Set<CoreTableName>([
+  "agentTasks",
+  "browserRecordings",
+  "chatInputHistory",
+  "conversationOverrides",
+  "evalTasks",
+  "skillRecordings",
+  "terminalHistory",
 ])
 
 const AUDIT_TABLES = new Set<CoreTableName>(
@@ -497,6 +550,7 @@ function ownerFor(name: CoreTableName): string {
 }
 
 function roleFor(name: CoreTableName): DataTableRole {
+  if (AUTHORITATIVE_ROLE_OVERRIDES.has(name)) return "authoritative"
   if (QUEUE_TABLES.has(name)) return "queue"
   if (CACHE_TABLES.has(name)) return "cache"
   if (PROJECTION_TABLES.has(name)) return "projection"
@@ -582,12 +636,11 @@ function createEntry(name: CoreTableName): DataTableCatalogEntry {
             : "Deleted with the owning account database.",
     },
     storageCategory: STORAGE_CATEGORY_OVERRIDES[name] ?? "other",
-    cleanupPolicy:
-      role === "cache" || role === "projection"
-        ? "quick"
-        : role === "audit" || role === "queue"
-          ? "deep"
-          : "protected",
+    cleanupPolicy: QUICK_CLEANUP_TABLES.has(name)
+      ? "quick"
+      : DEEP_CLEANUP_TABLES.has(name)
+        ? "deep"
+        : "protected",
     expectedScale: VERY_LARGE_TABLES.has(name)
       ? "very-large"
       : LARGE_TABLES.has(name)
