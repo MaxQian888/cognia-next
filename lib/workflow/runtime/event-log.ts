@@ -37,6 +37,17 @@ function nextTs(): number {
   return lastTs
 }
 
+async function nextRunSequence(
+  table: ReturnType<typeof getDb>["workflowRunEvents"],
+  runId: string
+): Promise<number> {
+  const latest = await table
+    .where("[runId+sequence]")
+    .between([runId, 0], [runId, Number.MAX_SAFE_INTEGER])
+    .last()
+  return (latest?.sequence ?? 0) + 1
+}
+
 /** Append a single event. Use `appendEvents` for batches in a hot path. */
 export async function appendEvent(input: AppendEventInput): Promise<WorkflowRunEventRow> {
   const row: WorkflowRunEventRow = {
@@ -48,7 +59,11 @@ export async function appendEvent(input: AppendEventInput): Promise<WorkflowRunE
     level: input.level,
     payload: input.payload,
   }
-  await getDb().workflowRunEvents.put(row)
+  const db = getDb()
+  await db.transaction("rw", db.workflowRunEvents, async () => {
+    row.sequence = await nextRunSequence(db.workflowRunEvents, input.runId)
+    await db.workflowRunEvents.put(row)
+  })
   return row
 }
 
@@ -66,7 +81,19 @@ export async function appendEvents(inputs: AppendEventInput[]): Promise<void> {
     level: i.level,
     payload: i.payload,
   }))
-  await getDb().workflowRunEvents.bulkPut(rows)
+  const db = getDb()
+  await db.transaction("rw", db.workflowRunEvents, async () => {
+    const nextByRun = new Map<string, number>()
+    for (const row of rows) {
+      let sequence = nextByRun.get(row.runId)
+      if (sequence === undefined) {
+        sequence = await nextRunSequence(db.workflowRunEvents, row.runId)
+      }
+      row.sequence = sequence
+      nextByRun.set(row.runId, sequence + 1)
+    }
+    await db.workflowRunEvents.bulkPut(rows)
+  })
 }
 
 // ── Coalescing writer ──────────────────────────────────────────────────────
@@ -107,7 +134,15 @@ async function flushRunEvents(): Promise<void> {
   await Promise.all(
     Array.from(byRun.values()).map(async (group) => {
       try {
-        await getDb().workflowRunEvents.bulkPut(group.map((p) => p.row))
+        const db = getDb()
+        await db.transaction("rw", db.workflowRunEvents, async () => {
+          let sequence = await nextRunSequence(db.workflowRunEvents, group[0].row.runId)
+          for (const pending of group) {
+            pending.row.sequence = sequence
+            sequence += 1
+          }
+          await db.workflowRunEvents.bulkPut(group.map((pending) => pending.row))
+        })
         for (const p of group) p.resolve(p.row)
       } catch (err) {
         for (const p of group) p.reject(err)

@@ -16,6 +16,7 @@ export {
   ALL_BRIDGE_SCOPES,
   DEFAULT_ENABLED_SCOPES,
   DEFAULT_EXTERNAL_BRIDGE_SETTINGS,
+  WORKFLOW_MCP_LIFECYCLE_TOOL_NAMES,
 } from "@/types/wiki"
 
 import type { BridgeScope } from "@/types/wiki"
@@ -69,6 +70,10 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
   memory_store: "memory:write",
   memory_update: "memory:write",
   memory_forget: "memory:write",
+  workflow_list: "workflow:run",
+  workflow_status: "workflow:run",
+  workflow_events: "workflow:run",
+  workflow_cancel: "workflow:run",
 }
 
 /**

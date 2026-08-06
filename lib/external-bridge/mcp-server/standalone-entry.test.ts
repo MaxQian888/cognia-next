@@ -1,9 +1,21 @@
-import { __TESTING__, isEntrypoint } from "./standalone-entry"
+import { __TESTING__, isEntrypoint, runMcpServerStdio } from "./standalone-entry"
 import { pathToFileURL } from "node:url"
 import { DEFAULT_EXTERNAL_BRIDGE_SETTINGS } from "@/types/wiki"
 import fs from "node:fs/promises"
 import path from "node:path"
 import os from "node:os"
+
+const connectMock = jest.fn()
+const stopWorkflowRefreshMock = jest.fn()
+const startWorkflowToolRefreshMock = jest.fn()
+const createStdioTransportMock = jest.fn()
+jest.mock("./server", () => ({
+  buildMcpServer: jest.fn(() => ({ connect: (...args: unknown[]) => connectMock(...args) })),
+  startWorkflowToolRefresh: (...args: unknown[]) => startWorkflowToolRefreshMock(...args),
+}))
+jest.mock("./transport-stdio", () => ({
+  createStdioTransport: (...args: unknown[]) => createStdioTransportMock(...args),
+}))
 
 const { resolveSettingsGetter, bridgedSettingsGetter, standaloneSettingsGetter } = __TESTING__
 
@@ -17,6 +29,33 @@ afterEach(() => {
   for (const [key, value] of Object.entries(originalEnv)) {
     process.env[key] = value
   }
+})
+
+beforeEach(() => {
+  connectMock.mockReset().mockResolvedValue(undefined)
+  stopWorkflowRefreshMock.mockReset()
+  startWorkflowToolRefreshMock.mockReset().mockResolvedValue({
+    refresh: jest.fn(),
+    stop: stopWorkflowRefreshMock,
+  })
+  createStdioTransportMock.mockReset().mockReturnValue({ transport: "stdio" })
+})
+
+describe("runMcpServerStdio", () => {
+  test("starts workflow tool refresh and always stops it after transport closes", async () => {
+    await runMcpServerStdio()
+
+    expect(startWorkflowToolRefreshMock).toHaveBeenCalledTimes(1)
+    expect(connectMock).toHaveBeenCalledWith({ transport: "stdio" })
+    expect(stopWorkflowRefreshMock).toHaveBeenCalledTimes(1)
+  })
+
+  test("stops workflow refresh when the MCP transport fails", async () => {
+    connectMock.mockRejectedValue(new Error("transport closed unexpectedly"))
+
+    await expect(runMcpServerStdio()).rejects.toThrow("transport closed unexpectedly")
+    expect(stopWorkflowRefreshMock).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("bridgedSettingsGetter", () => {

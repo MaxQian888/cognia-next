@@ -26,6 +26,19 @@ jest.mock("@/lib/plugin/core/invoke-plugin-tool", () => ({
   invokePluginTool: (...a: unknown[]) => invokePluginToolMock(...a),
 }))
 
+const workflowListDeploymentsCoreMock = jest.fn()
+const createWorkflowRunCoreMock = jest.fn()
+const getWorkflowRunCoreMock = jest.fn()
+const listWorkflowEventsCoreMock = jest.fn()
+const cancelWorkflowRunCoreMock = jest.fn()
+jest.mock("./workflow", () => ({
+  listWorkflowDeploymentsCore: (...args: unknown[]) => workflowListDeploymentsCoreMock(...args),
+  createWorkflowRunCore: (...args: unknown[]) => createWorkflowRunCoreMock(...args),
+  getWorkflowRunCore: (...args: unknown[]) => getWorkflowRunCoreMock(...args),
+  listWorkflowEventsCore: (...args: unknown[]) => listWorkflowEventsCoreMock(...args),
+  cancelWorkflowRunCore: (...args: unknown[]) => cancelWorkflowRunCoreMock(...args),
+}))
+
 const redactTextMock = jest.fn((text: string) => ({ redacted: text, map: {} }))
 const hasNoLeakingPiiMock = jest.fn<boolean, [string]>(() => true)
 const hasNoLeakingPiiDeepMock = jest.fn<boolean, [unknown]>(() => true)
@@ -49,6 +62,11 @@ beforeEach(() => {
   runTeamMock.mockReset()
   executeAgentMock.mockReset()
   invokePluginToolMock.mockReset()
+  workflowListDeploymentsCoreMock.mockReset()
+  createWorkflowRunCoreMock.mockReset()
+  getWorkflowRunCoreMock.mockReset()
+  listWorkflowEventsCoreMock.mockReset()
+  cancelWorkflowRunCoreMock.mockReset()
   redactTextMock.mockReset().mockImplementation((text: string) => ({ redacted: text, map: {} }))
   hasNoLeakingPiiMock.mockReset().mockReturnValue(true)
   hasNoLeakingPiiDeepMock.mockReset().mockReturnValue(true)
@@ -409,6 +427,25 @@ describe("runOrchestrationExec (renderer dispatch entry for the sidecar path)", 
       "p",
       expect.objectContaining({ toolsEnabled: true })
     )
+  })
+
+  it("routes workflow MCP operations through the host-side workflow adapter", async () => {
+    workflowListDeploymentsCoreMock.mockResolvedValue([{ deploymentId: "deployment-1" }])
+    createWorkflowRunCoreMock.mockResolvedValue({ runId: "run-1", status: "pending" })
+
+    await expect(
+      runOrchestrationExec("workflowListDeployments", { arguments: [] })
+    ).resolves.toEqual([{ deploymentId: "deployment-1" }])
+    await expect(
+      runOrchestrationExec("workflowRunCreate", {
+        arguments: [{ deploymentId: "deployment-1", caller: "mcp:client", input: {} }],
+      })
+    ).resolves.toEqual({ runId: "run-1", status: "pending" })
+    expect(createWorkflowRunCoreMock).toHaveBeenCalledWith({
+      deploymentId: "deployment-1",
+      caller: "mcp:client",
+      input: {},
+    })
   })
 
   it("rejects a malformed generic host bridge envelope", async () => {

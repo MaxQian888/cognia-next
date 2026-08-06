@@ -2918,46 +2918,44 @@ registerNodeExecutor({
       )
     }
     // Lazy-imports avoid a circular dep through the node registry.
-    const [{ getWorkflow }, { runWorkflow }] = await Promise.all([
-      import("@/lib/db/workflows"),
-      import("@/lib/workflow/runtime/orchestrator"),
-    ])
-    const workflow = await getWorkflow(workflowId)
-    if (!workflow) {
-      throw nonRetryable(`flow.subworkflow: workflow ${workflowId} not found`)
-    }
-    // Typed-interface validation (D5): when the target declares an input
-    // schema, the call payload must satisfy it BEFORE the run starts.
-    const inputSchema = workflow.interface?.inputSchema
-    if (inputSchema && Object.keys(inputSchema).length > 0) {
-      const v = validateAgainstJsonSchema(inputSchema, params.input ?? null)
-      if (!v.ok) {
-        throw nonRetryable(
-          `flow.subworkflow: input violates the target's schema — ${v.errors.join("; ")}`
-        )
-      }
-    }
-    const result = await runWorkflow({
-      workflow,
-      trigger: {
+    const { executeDeployedWorkflow, WorkflowAdmissionError } =
+      await import("@/lib/workflow/runtime/execution-authority")
+    let execution: Awaited<ReturnType<typeof executeDeployedWorkflow>>
+    try {
+      execution = await executeDeployedWorkflow({
         workflowId,
-        kind: "trigger.manual",
+        entrypoint: "subworkflow",
+        caller: `run:${ctx.runId}`,
+        idempotencyKey: ctx.stepId,
+        triggerKind: "trigger.manual",
         payload: {
           parentRunId: ctx.runId,
           parentStepId: ctx.stepId,
           input: params.input ?? null,
           depth: parentDepth + 1,
         },
-        originAt: Date.now(),
-      },
-      signal: ctx.signal,
-    })
+        signal: ctx.signal,
+      })
+    } catch (error) {
+      if (error instanceof WorkflowAdmissionError) {
+        if (error.code === "deployment-not-found") {
+          throw nonRetryable(`flow.subworkflow: workflow ${workflowId} is not deployed`)
+        }
+        if (error.code === "input-schema-violation") {
+          throw nonRetryable(
+            `flow.subworkflow: input violates the target's schema — ${error.message}`
+          )
+        }
+      }
+      throw error
+    }
+    const result = execution.result
     if (result.status !== "succeeded") {
       const message = result.error?.message ?? "subworkflow run failed"
       throw nonRetryable(`flow.subworkflow: ${message}`)
     }
     // Validate the terminal output against the declared output schema.
-    const outputSchema = workflow.interface?.outputSchema
+    const outputSchema = execution.version.interface.outputSchema
     if (outputSchema && Object.keys(outputSchema).length > 0) {
       const v = validateAgainstJsonSchema(outputSchema, result.output)
       if (!v.ok) {

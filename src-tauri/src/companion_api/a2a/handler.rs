@@ -337,6 +337,7 @@ mod tests {
             device_id: "dev-1".into(),
             account_id: "acct-1".into(),
             scope: "device".into(),
+            granted_scopes: Vec::new(),
         }
     }
 

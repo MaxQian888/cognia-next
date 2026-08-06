@@ -121,6 +121,15 @@ import type {
   WorkflowRunEventRow,
   WorkflowTriggerRow,
 } from "@/types/workflow/visual"
+import type {
+  WorkflowDeployment,
+  WorkflowInvocation,
+  WorkflowVersion,
+} from "@/types/workflow/deployment"
+import {
+  createWorkflowVersion,
+  workflowDeploymentId,
+} from "@/lib/workflow/versioning/version-snapshot"
 import type { WorkflowFolder } from "@/types/workflow/folder"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 import type { SessionUsageRow } from "./session-usage"
@@ -509,6 +518,10 @@ export class CogniaDB extends Dexie {
   workflowRuns!: Table<WorkflowRunRow, string>
   workflowRunEvents!: Table<WorkflowRunEventRow, string>
   workflowTriggers!: Table<WorkflowTriggerRow, string>
+  // v148 — Immutable workflow publication control plane.
+  workflowVersions!: Table<WorkflowVersion, string>
+  workflowDeployments!: Table<WorkflowDeployment, string>
+  workflowInvocations!: Table<WorkflowInvocation, string>
   // v52 — Workflow library folders (ADR-0011 library upgrade). See
   // `types/workflow/folder.ts`.
   workflowFolders!: Table<WorkflowFolder, string>
@@ -3475,6 +3488,91 @@ export class CogniaDB extends Dexie {
       agentTaskAttempts:
         "&id, taskId, agentId, status, attemptNo, schedulerExecutionId, updatedAt, [taskId+attemptNo], [taskId+updatedAt]",
     })
+
+    // v148 — Immutable workflow versions + atomic environment deployments.
+    // Legacy `published` rows become version 1 and an active production
+    // deployment. The old publication envelope remains as a dual-read
+    // projection for one compatibility release; draft edits never rewrite the
+    // immutable artifact.
+    this.version(148)
+      .stores({
+        workflowVersions: "&id, workflowId, [workflowId+sequence], digest, createdAt",
+        workflowDeployments:
+          "&id, &[accountId+workflowId+environment], workflowId, environment, versionId, status, updatedAt",
+        workflowInvocations:
+          "&id, &[accountId+entrypoint+deploymentId+caller+idempotencyKey], deploymentId, versionId, runId, status, createdAt",
+      })
+      .upgrade(async (tx) => {
+        const accountId = accountIdFromDatabaseName(name) ?? "local_acct_a"
+        const workflowTable = tx.table("workflows")
+        const rows = (await workflowTable.toArray()) as WorkflowRow[]
+        const versions: WorkflowVersion[] = []
+        const deployments: WorkflowDeployment[] = []
+
+        for (const workflow of rows) {
+          if (!workflow.published) continue
+          const version = createWorkflowVersion({
+            workflow,
+            workflowInterface: workflow.interface ?? {},
+            accountId,
+            sequence: 1,
+            createdAt: workflow.published.at,
+          })
+          const deploymentId = workflowDeploymentId(accountId, workflow.id, "production")
+          versions.push(version)
+          deployments.push({
+            id: deploymentId,
+            accountId,
+            workflowId: workflow.id,
+            environment: "production",
+            versionId: version.id,
+            revision: 1,
+            status: "active",
+            createdAt: workflow.published.at,
+            updatedAt: workflow.published.at,
+          })
+          await workflowTable.update(workflow.id, {
+            published: {
+              ...workflow.published,
+              versionId: version.id,
+              deploymentId,
+              deploymentRevision: 1,
+            },
+          })
+        }
+
+        if (versions.length > 0) await tx.table("workflowVersions").bulkPut(versions)
+        if (deployments.length > 0) await tx.table("workflowDeployments").bulkPut(deployments)
+      })
+
+    // v149 — durable, per-run workflow event cursors for HTTP/SSE replay.
+    // Historical rows are ordered deterministically by timestamp then id;
+    // every future event-log write allocates the next sequence transactionally.
+    this.version(149)
+      .stores({
+        workflowRunEvents:
+          "&id, runId, [runId+ts], [runId+sequence], stepId, [runId+stepId], type, projectId",
+      })
+      .upgrade(async (tx) => {
+        const table = tx.table("workflowRunEvents")
+        const rows = (await table.toArray()) as WorkflowRunEventRow[]
+        rows.sort((left, right) =>
+          left.runId === right.runId
+            ? left.ts - right.ts || left.id.localeCompare(right.id)
+            : left.runId.localeCompare(right.runId)
+        )
+        let runId = ""
+        let sequence = 0
+        for (const row of rows) {
+          if (row.runId !== runId) {
+            runId = row.runId
+            sequence = 0
+          }
+          sequence += 1
+          row.sequence = sequence
+        }
+        if (rows.length > 0) await table.bulkPut(rows)
+      })
 
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.

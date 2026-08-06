@@ -7,6 +7,7 @@
  */
 
 import { listWorkflows } from "@/lib/db/workflows"
+import { resolveWorkflowDeployment } from "@/lib/db/workflow-deployments"
 import { dispatchPluginTrigger } from "@/lib/plugin/bridge/plugin-trigger-dispatch"
 import { recordSilentFailure } from "@/lib/plugin/contracts/diagnostics-store"
 import type { VisualWorkflow, WorkflowNode } from "@/types/workflow/visual"
@@ -289,7 +290,9 @@ export function initPluginTriggerLifecycle(): void {
         await lifecycleDisposal
         if (!isLifecycleCurrent(epoch)) return
         for (const workflow of workflows) {
-          await syncPluginTriggerInstancesForEpoch(workflow, epoch)
+          const deployed = await resolveWorkflowDeployment(workflow.id)
+          if (deployed) await syncPluginTriggerInstancesForEpoch(deployed.workflow, epoch)
+          else await unsyncPluginTriggerInstances(workflow)
         }
       })
       .catch((error) => {

@@ -20,10 +20,10 @@ function setup(over: Partial<ExternalBridgeSettings> = {}) {
 }
 
 describe("BridgeScopesPanel", () => {
-  it("renders every scope — all nineteen, not the nine the old header claimed", () => {
+  it("renders every declared scope", () => {
     setup()
 
-    expect(ALL_BRIDGE_SCOPES.length).toBe(19)
+    expect(ALL_BRIDGE_SCOPES.length).toBe(20)
     for (const scope of ALL_BRIDGE_SCOPES) {
       expect(screen.getByTestId(`bridge-scope-row-${scope}`)).toBeInTheDocument()
     }
@@ -35,6 +35,7 @@ describe("BridgeScopesPanel", () => {
     expect(screen.getByTestId("bridge-scope-group-wiki")).toBeInTheDocument()
     expect(screen.getByTestId("bridge-scope-group-runtime")).toBeInTheDocument()
     expect(screen.getByTestId("bridge-scope-group-memory")).toBeInTheDocument()
+    expect(screen.getByTestId("bridge-scope-group-workflow")).toBeInTheDocument()
   })
 
   it("grants a scope", () => {

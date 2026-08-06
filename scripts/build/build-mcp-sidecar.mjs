@@ -45,6 +45,7 @@ const HOST_BRIDGED_IMPORTS = new Set([
   "../handlers/connectors",
   "../handlers/inbound",
   "../handlers/memory",
+  "../handlers/workflow",
 ])
 
 const hostBridgePlugin = {

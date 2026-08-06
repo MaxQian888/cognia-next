@@ -186,14 +186,14 @@ describe("createWorkflowSource", () => {
     expect(stubs.sync).not.toHaveBeenCalled()
   })
 
-  it("runNow invokes runWorkflow with a manual trigger event", async () => {
+  it("runNow invokes the deployment authority adapter", async () => {
     const stubs = makeStubs()
     const source = createWorkflowSource({ db: stubs.db, sync: stubs.sync, run: stubs.run })
     await source.runNow("trigger-1")
     expect(stubs.run).toHaveBeenCalledTimes(1)
     expect(stubs.run).toHaveBeenCalledWith(
       expect.objectContaining({
-        workflow: expect.objectContaining({ id: "wf-1" }),
+        workflowId: "wf-1",
         triggerId: "trigger-1",
       })
     )

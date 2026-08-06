@@ -179,6 +179,16 @@ export async function dispatchCommand(
   command: string,
   payload: Record<string, unknown>
 ): Promise<unknown> {
+  if (
+    command === "workflow_api_run_create" ||
+    command === "workflow_api_run_get" ||
+    command === "workflow_api_events_list" ||
+    command === "workflow_api_run_cancel"
+  ) {
+    const { dispatchWorkflowApiBridgeCommand } =
+      await import("@/lib/workflow/api/workflow-api-service")
+    return dispatchWorkflowApiBridgeCommand(command, payload)
+  }
   if (isScheduledTaskRpc(command)) {
     return dispatchScheduledTaskRpc(command, payload)
   }

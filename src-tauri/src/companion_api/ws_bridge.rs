@@ -1,13 +1,13 @@
 //! Bridge WebSocket — `GET /ws/v1/bridge` (ADR-0059 W3, protocol v1).
 //!
 //! The headless Node brain connects here and becomes the data plane: the
-//! three companion bridges (`sync_bridge`, `desktop_messages_bridge`,
-//! `desktop_writes_bridge`) emit their request frames through
-//! [`SocketBridgeTransport`] instead of a Tauri `AppHandle`, and the brain
-//! answers with `respond` frames that route back into the same `resolve()`
-//! machinery the desktop WebView uses.
+//! companion bridges (`sync_bridge`, `desktop_messages_bridge`,
+//! `desktop_writes_bridge`, and the MCP orchestration proxy) emit request
+//! frames through [`SocketBridgeTransport`] instead of a Tauri `AppHandle`,
+//! and the brain answers with `respond` frames that route back into the same
+//! `resolve()` machinery the desktop WebView uses.
 //!
-//! This channel carries ONLY the three bridges' request/respond plus
+//! This channel carries ONLY host-local bridge request/respond plus
 //! lifecycle frames (`hello`/`hello_ack`/`ping`/`pong`/`token_refresh`).
 //! All other server→brain events (`claude://message`, `a2ui://dispatch`,
 //! `external-agent://*`, `connectors://webhook/<id>`) ride the existing
@@ -603,7 +603,25 @@ fn handle_brain_frame(state: &SharedState, text: &str, transport: &SocketBridgeT
     }
 }
 
-/// Route a `respond` frame to the matching bridge's `resolve()`. All three
+fn resolve_orchestration_response(payload: Value) -> Result<(), String> {
+    let id = payload
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| "missing orchestration response id".to_string())?
+        .to_string();
+    let reply =
+        serde_json::from_value::<crate::mcp_server::orchestration_proxy::OrchestrationReply>(
+            payload,
+        )
+        .map_err(|error| error.to_string())?;
+    let services = crate::headless::headless_services()
+        .ok_or_else(|| "headless services are unavailable".to_string())?;
+    services.mcp_server.resolve_orchestration_reply(&id, reply);
+    Ok(())
+}
+
+/// Route a `respond` frame to the matching bridge's `resolve()`. All
 /// resolvers are no-op-safe for unknown / timed-out request ids.
 fn route_respond(state: &SharedState, command: &str, payload: Value) {
     match command {
@@ -627,6 +645,11 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
             ) {
                 Ok(response) => state.desktop_writes_bridge.resolve(response),
                 Err(e) => log::warn!("companion-api ws-bridge: bad write respond payload: {e}"),
+            }
+        }
+        "orchestration_proxy_response" => {
+            if let Err(error) = resolve_orchestration_response(payload) {
+                log::warn!("companion-api ws-bridge: bad orchestration respond payload: {error}");
             }
         }
         other => {
@@ -1193,7 +1216,29 @@ mod tests {
             "companion_sync_pull_response",
             json!({ "requestId": "never-registered", "delta": {}, "error": null }),
         );
+        route_respond(
+            &state,
+            "orchestration_proxy_response",
+            json!({ "ok": true }),
+        );
         assert_eq!(state.sync_bridge.pending_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn orchestration_response_routes_to_the_headless_mcp_state() {
+        let _guard = lock_slot().await;
+        crate::headless::install_headless_services(Some(
+            crate::headless::HeadlessServices::stub_for_tests(),
+        ));
+
+        resolve_orchestration_response(json!({
+            "id": "unknown-request",
+            "ok": false,
+            "error": "cancelled",
+        }))
+        .expect("unknown reply ids are an idempotent no-op");
+
+        crate::headless::install_headless_services(None);
     }
 
     #[tokio::test]

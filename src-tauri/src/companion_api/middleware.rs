@@ -15,8 +15,9 @@
 //!
 //! # Error shape
 //!
-//! All failures return JSON `{ "error": { "code": "...", "message": "..." } }`
-//! with HTTP 401, matching the error envelope in [`super::auth`].
+//! All failures return the flat JSON envelope
+//! `{ "code": "...", "message": "...", "requestId": "..." }` with HTTP
+//! 401 and the same request id in `x-request-id`.
 //!
 //! # Device attribution
 //!
@@ -63,6 +64,10 @@ pub struct DeviceContext {
     /// handlers that may need to inspect the scope.
     #[allow(dead_code)]
     pub scope: String,
+    /// OAuth/OIDC permission scopes granted to this caller. Legacy paired
+    /// device/service tokens leave this empty and use their existing device
+    /// permission gate; OIDC routes enforce these values explicitly.
+    pub granted_scopes: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +339,7 @@ async fn authenticate_request(
         device_id: device_id.clone(),
         account_id: account_id.clone(),
         scope: claims.scope.clone(),
+        granted_scopes: Vec::new(),
     });
 
     // ── 6. Forward request ──────────────────────────────────────────────────
@@ -368,14 +374,20 @@ async fn authenticate_request(
 /// Wave 3.1: unified flat envelope `{ code, message, details? }`.
 fn error_response(code: &str, message: &str) -> Response {
     super::metrics::record_auth_failure();
-    (
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let mut response = (
         StatusCode::UNAUTHORIZED,
         Json(json!({
             "code": code,
             "message": message,
+            "requestId": request_id.clone(),
         })),
     )
-        .into_response()
+        .into_response();
+    if let Ok(value) = HeaderValue::from_str(&request_id) {
+        response.headers_mut().insert("x-request-id", value);
+    }
+    response
 }
 
 /// Map validated Logto claims (ADR-0059 cloud mode) onto a [`DeviceContext`].
@@ -390,6 +402,7 @@ fn oidc_device_context(claims: &oidc::OidcClaims) -> DeviceContext {
             .clone()
             .unwrap_or_else(|| claims.sub.clone()),
         scope: "oidc".to_string(),
+        granted_scopes: claims.scopes.clone(),
     }
 }
 
@@ -569,8 +582,15 @@ mod tests {
             .unwrap();
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 401);
+        let request_id = resp
+            .headers()
+            .get("x-request-id")
+            .and_then(|value| value.to_str().ok())
+            .expect("authentication errors expose a request id")
+            .to_string();
         let body = body_json(resp).await;
         assert_eq!(body["code"], "missing_authorization");
+        assert_eq!(body["requestId"], request_id);
     }
 
     // ── Malformed JWT ────────────────────────────────────────────────────────

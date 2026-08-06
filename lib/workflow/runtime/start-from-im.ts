@@ -16,9 +16,8 @@
  * card pushed by the runner, not as a tool response.
  */
 
-import { getWorkflow } from "@/lib/db/workflows"
-import { runWorkflow } from "./orchestrator"
-import type { TriggerEvent, WorkflowTriggeredFrom } from "@/types/workflow/visual"
+import type { WorkflowTriggeredFrom } from "@/types/workflow/visual"
+import { executeDeployedWorkflow, WorkflowAdmissionError } from "./execution-authority"
 
 export interface StartWorkflowFromIMInput {
   workflowId: string
@@ -43,47 +42,42 @@ export type StartWorkflowFromIMResult =
 export async function startWorkflowFromIM(
   input: StartWorkflowFromIMInput
 ): Promise<StartWorkflowFromIMResult> {
-  const workflow = await getWorkflow(input.workflowId)
-  if (!workflow) return { ok: false, reason: "workflow-not-found", workflowId: input.workflowId }
-
-  const trigger: TriggerEvent = {
-    workflowId: workflow.id,
-    kind: "trigger.manual",
-    payload: input.runParams ?? {},
-    originAt: Date.now(),
-    binding: {
-      adapterId: input.triggeredFrom.adapterId,
-      conversationKey: input.triggeredFrom.conversationKey,
-      sessionId: input.triggeredFrom.sessionId,
-    },
-  }
-
-  // Generate the runId up front so callers can correlate logs / outbound
-  // metadata before the orchestrator promise resolves. We pass it back
-  // synchronously and let the orchestrator promise progress in the
-  // background — the runner subscribes via Dexie liveQuery, no shared
-  // promise needed.
-  const runId = "run_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
-
-  // Detach after the orchestrator persists its run row. Awaiting the FULL run
-  // would block the caller for the entire workflow duration.
+  let admittedRunId: string | undefined
   let markPersisted: () => void = () => undefined
   const persisted = new Promise<void>((resolve) => {
     markPersisted = resolve
   })
-  const execution = runWorkflow({
-    workflow,
-    trigger,
-    runId,
+  const execution = executeDeployedWorkflow({
+    workflowId: input.workflowId,
+    entrypoint: "skill",
+    caller: input.triggeredFrom.initiator?.principalId ?? "im",
+    triggerKind: "trigger.manual",
+    payload: input.runParams ?? {},
+    triggerBinding: {
+      adapterId: input.triggeredFrom.adapterId,
+      conversationKey: input.triggeredFrom.conversationKey,
+      sessionId: input.triggeredFrom.sessionId,
+    },
     signal: input.signal,
     triggeredBy: input.triggeredFrom,
+    onAdmitted: (runId) => {
+      admittedRunId = runId
+    },
     onPersisted: markPersisted,
   })
   // A valid run resolves `persisted` immediately after its durable row lands.
   // A validation/preflight failure can finish before creating that row, so the
   // execution promise is the second race arm and prevents this handoff from
   // hanging. The race also owns the rejection handler for the detached run.
-  await Promise.race([persisted, execution.then(() => undefined)])
+  try {
+    await Promise.race([persisted, execution.then(() => undefined)])
+  } catch (error) {
+    if (error instanceof WorkflowAdmissionError && error.code === "deployment-not-found") {
+      return { ok: false, reason: "workflow-not-found", workflowId: input.workflowId }
+    }
+    throw error
+  }
 
-  return { ok: true, runId }
+  if (!admittedRunId) admittedRunId = (await execution).runId
+  return { ok: true, runId: admittedRunId }
 }

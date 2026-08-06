@@ -12,6 +12,7 @@ import {
   DEFAULT_EXTERNAL_BRIDGE_SETTINGS,
   RUNTIME_ENTITY_TO_SCOPE,
   TOOL_TO_SCOPE,
+  WORKFLOW_MCP_LIFECYCLE_TOOL_NAMES,
 } from "./types"
 
 describe("external-bridge types", () => {
@@ -23,6 +24,17 @@ describe("external-bridge types", () => {
 
   it("DEFAULT_ENABLED_SCOPES is exactly the public-code wiki + RAG pair", () => {
     expect([...DEFAULT_ENABLED_SCOPES].sort()).toEqual(["rag:cognia", "wiki:cognia"])
+  })
+
+  it("declares workflow execution as an explicit opt-in scope", () => {
+    expect(ALL_BRIDGE_SCOPES).toContain("workflow:run")
+    expect(DEFAULT_ENABLED_SCOPES).not.toContain("workflow:run")
+    expect(WORKFLOW_MCP_LIFECYCLE_TOOL_NAMES).toEqual([
+      "workflow_list",
+      "workflow_status",
+      "workflow_events",
+      "workflow_cancel",
+    ])
   })
 
   it("DEFAULT_EXTERNAL_BRIDGE_SETTINGS starts disabled with default scopes", () => {

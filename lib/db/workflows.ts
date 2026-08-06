@@ -41,8 +41,16 @@ function nowMs(): number {
  */
 async function projectPersistedWorkflowTriggers(workflow: VisualWorkflow): Promise<void> {
   try {
-    const { syncWorkflowTriggers } = await import("@/lib/workflow/runtime/webhook-bridge")
-    await syncWorkflowTriggers(workflow)
+    const { syncWorkflowTriggers, unsyncWorkflowTriggers } =
+      await import("@/lib/workflow/runtime/webhook-bridge")
+    if (!workflow.published?.deploymentId) {
+      await unsyncWorkflowTriggers(workflow)
+      return
+    }
+    const { resolveWorkflowDeployment } = await import("./workflow-deployments")
+    const deployed = await resolveWorkflowDeployment(workflow.id)
+    if (deployed) await syncWorkflowTriggers(deployed.workflow)
+    else await unsyncWorkflowTriggers(workflow)
   } catch (error) {
     console.warn(`Workflow ${workflow.id} trigger projection failed:`, error)
   }

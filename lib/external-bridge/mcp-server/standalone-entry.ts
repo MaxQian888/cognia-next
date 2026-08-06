@@ -18,7 +18,7 @@
  * main process via the IPC bridge.
  */
 
-import { buildMcpServer, type SettingsGetter } from "./server"
+import { buildMcpServer, startWorkflowToolRefresh, type SettingsGetter } from "./server"
 import { createStdioTransport } from "./transport-stdio"
 import { DEFAULT_EXTERNAL_BRIDGE_SETTINGS } from "@/types/wiki"
 import type { ExternalBridgeSettings } from "@/types/wiki"
@@ -77,9 +77,16 @@ function standaloneSettingsGetter(): SettingsGetter {
  * await the connection lifecycle deterministically.
  */
 export async function runMcpServerStdio(): Promise<void> {
-  const server = buildMcpServer({ settingsGetter: resolveSettingsGetter() })
+  const settingsGetter = resolveSettingsGetter()
+  const options = { settingsGetter }
+  const server = buildMcpServer(options)
+  const workflowTools = await startWorkflowToolRefresh(server, options)
   const transport = createStdioTransport()
-  await server.connect(transport)
+  try {
+    await server.connect(transport)
+  } finally {
+    workflowTools.stop()
+  }
 }
 
 // Auto-run when invoked as a CLI (node bin/cognia-mcp.js). Skipped when the

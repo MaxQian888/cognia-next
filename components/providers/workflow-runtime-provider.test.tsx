@@ -8,7 +8,9 @@ import { WorkflowRuntimeProvider } from "./workflow-runtime-provider"
 
 const installTriggerBridgeMock = jest.fn()
 const listWorkflowsMock = jest.fn()
+const resolveWorkflowDeploymentMock = jest.fn()
 const syncWorkflowTriggersMock = jest.fn()
+const unsyncWorkflowTriggersMock = jest.fn()
 const resumeInFlightRunsMock = jest.fn()
 const initPluginTriggerLifecycleMock = jest.fn()
 const disposePluginTriggerLifecycleMock = jest.fn(async () => undefined)
@@ -23,9 +25,15 @@ jest.mock("@/lib/db/workflows", () => ({
   listWorkflows: (...args: unknown[]) => listWorkflowsMock(...args),
 }))
 
+jest.mock("@/lib/db/workflow-deployments", () => ({
+  __esModule: true,
+  resolveWorkflowDeployment: (...args: unknown[]) => resolveWorkflowDeploymentMock(...args),
+}))
+
 jest.mock("@/lib/workflow/runtime/webhook-bridge", () => ({
   __esModule: true,
   syncWorkflowTriggers: (...args: unknown[]) => syncWorkflowTriggersMock(...args),
+  unsyncWorkflowTriggers: (...args: unknown[]) => unsyncWorkflowTriggersMock(...args),
 }))
 
 jest.mock("@/lib/workflow/runtime/resume-controller", () => ({
@@ -42,6 +50,10 @@ beforeEach(() => {
   installTriggerBridgeMock.mockReset()
   listWorkflowsMock.mockReset()
   syncWorkflowTriggersMock.mockReset()
+  unsyncWorkflowTriggersMock.mockReset().mockResolvedValue(undefined)
+  resolveWorkflowDeploymentMock.mockReset().mockImplementation(async (workflowId: string) => ({
+    workflow: { id: workflowId, nodes: [], edges: [] },
+  }))
   resumeInFlightRunsMock.mockReset()
   initPluginTriggerLifecycleMock.mockClear()
   disposePluginTriggerLifecycleMock.mockClear()
@@ -50,7 +62,7 @@ beforeEach(() => {
 })
 
 describe("WorkflowRuntimeProvider", () => {
-  it("installs the trigger bridge and syncs every workflow on mount", async () => {
+  it("installs the trigger bridge and syncs every deployed workflow on mount", async () => {
     const disposer = jest.fn()
     installTriggerBridgeMock.mockResolvedValue(disposer)
     listWorkflowsMock.mockResolvedValue([
@@ -67,6 +79,7 @@ describe("WorkflowRuntimeProvider", () => {
 
     await waitFor(() => expect(installTriggerBridgeMock).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(listWorkflowsMock).toHaveBeenCalledTimes(1))
+    expect(resolveWorkflowDeploymentMock).toHaveBeenCalledTimes(2)
     await waitFor(() => expect(syncWorkflowTriggersMock).toHaveBeenCalledTimes(2))
     expect(initPluginTriggerLifecycleMock).toHaveBeenCalledTimes(1)
     expect(syncWorkflowTriggersMock).toHaveBeenCalledWith(expect.objectContaining({ id: "wf_a" }), {
@@ -79,6 +92,22 @@ describe("WorkflowRuntimeProvider", () => {
     unmount()
     expect(disposer).toHaveBeenCalledTimes(1)
     expect(disposePluginTriggerLifecycleMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("removes trigger registrations for workflows without an active deployment", async () => {
+    installTriggerBridgeMock.mockResolvedValue(jest.fn())
+    const draft = { id: "wf_draft", nodes: [], edges: [] }
+    listWorkflowsMock.mockResolvedValue([draft])
+    resolveWorkflowDeploymentMock.mockResolvedValue(undefined)
+
+    render(
+      <WorkflowRuntimeProvider>
+        <div />
+      </WorkflowRuntimeProvider>
+    )
+
+    await waitFor(() => expect(unsyncWorkflowTriggersMock).toHaveBeenCalledWith(draft))
+    expect(syncWorkflowTriggersMock).not.toHaveBeenCalled()
   })
 
   it("does not sync template or built-in gallery workflows on mount", async () => {
@@ -247,18 +276,23 @@ describe("WorkflowRuntimeProvider", () => {
 describe("WorkflowRuntimeProvider — root layout wiring", () => {
   const layoutSource = readFileSync(resolve(__dirname, "../../app/layout.tsx"), "utf8")
   const deferredSource = readFileSync(
-    resolve(__dirname, "initializers/deferred-boot-initializers-impl.tsx"),
+    resolve(__dirname, "initializers/deferred-boot-initializers.tsx"),
+    "utf8"
+  )
+  const automationSource = readFileSync(
+    resolve(__dirname, "initializers/workflow-automation-boot-initializers.tsx"),
     "utf8"
   )
 
-  it("is imported by the deferred boot implementation", () => {
-    expect(deferredSource).toMatch(
+  it("is imported by the workflow automation boot group", () => {
+    expect(automationSource).toMatch(
       /import\s*\{\s*WorkflowRuntimeProvider\s*\}\s*from\s*["']@\/components\/providers\/workflow-runtime-provider["']/
     )
   })
 
   it("is mounted exactly once through the root layout's deferred boot bundle", () => {
-    expect(deferredSource.match(/<WorkflowRuntimeProvider\b/g)).toHaveLength(1)
+    expect(automationSource.match(/<WorkflowRuntimeProvider\b/g)).toHaveLength(1)
+    expect(deferredSource).toMatch(/<WorkflowAutomationBootInitializers\b/)
     expect(layoutSource).toMatch(/<DeferredBootInitializers\b/)
     expect(layoutSource).not.toMatch(/<WorkflowRuntimeProvider\b/)
   })

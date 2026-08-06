@@ -397,6 +397,15 @@ const hostOperationLoaders: Record<string, () => Promise<HostOperation>> = {
   listCharacters: async () => (await import("@/lib/db/characters")).listCharacters as HostOperation,
   getCharacter: async () => (await import("@/lib/db/characters")).getCharacter as HostOperation,
   recordCall: async () => (await import("../audit-log")).recordCall as HostOperation,
+  workflowListDeployments: async () =>
+    (await import("./workflow")).listWorkflowDeploymentsCore as HostOperation,
+  workflowRunCreate: async () =>
+    (await import("./workflow")).createWorkflowRunCore as HostOperation,
+  workflowRunGet: async () => (await import("./workflow")).getWorkflowRunCore as HostOperation,
+  workflowEventsList: async () =>
+    (await import("./workflow")).listWorkflowEventsCore as HostOperation,
+  workflowRunCancel: async () =>
+    (await import("./workflow")).cancelWorkflowRunCore as HostOperation,
 }
 
 /**

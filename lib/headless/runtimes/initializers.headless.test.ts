@@ -16,6 +16,7 @@ import {
 } from "@/lib/workflow/triggers/registry"
 import type { PluginTriggerDef } from "@/types/plugin/plugin-workflow"
 import { createWorkflow } from "@/lib/db/workflows"
+import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
 import { _waitForPluginTriggerReconciliationForTest } from "@/lib/workflow/triggers/lifecycle"
 
 const EXPECTED = [
@@ -73,6 +74,7 @@ describe("initializer batch headless smoke", () => {
         },
       ],
     })
+    await publishWorkflow(workflow.id, Date.now())
     const stop = jest.fn(async () => undefined)
     const start = jest.fn(async () => ({ stop }))
     const registration: TriggerRegistration = {

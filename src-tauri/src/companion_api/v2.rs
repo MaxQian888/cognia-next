@@ -139,6 +139,7 @@ fn authenticate_owner_request(
         device_id: access.sub,
         account_id: access.tenant_id,
         scope: "owner_v2".to_string(),
+        granted_scopes: Vec::new(),
     })
 }
 
@@ -723,6 +724,7 @@ fn authenticate_device_request(
         device_id: access.sub,
         account_id: access.tenant_id,
         scope: "device_v2".to_string(),
+        granted_scopes: Vec::new(),
     })
 }
 

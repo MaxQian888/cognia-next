@@ -337,6 +337,22 @@ fn build_router_for_mode(state: SharedState, mode: super::deployment::Deployment
         .route("/api/v1/whoami", get(auth::whoami_handler))
         .route("/api/v1/_rpc/{name}", post(rpc::rpc_handler))
         .route(
+            "/api/v1/workflow-deployments/{deployment_id}/runs",
+            post(super::workflow_api::create_run_handler),
+        )
+        .route(
+            "/api/v1/workflow-runs/{run_id}",
+            get(super::workflow_api::get_run_handler),
+        )
+        .route(
+            "/api/v1/workflow-runs/{run_id}/events",
+            get(super::workflow_api::events_handler),
+        )
+        .route(
+            "/api/v1/workflow-runs/{run_id}/cancel",
+            post(super::workflow_api::cancel_run_handler),
+        )
+        .route(
             "/api/v1/browser/stream-ticket",
             post(super::browser_gateway::issue_ticket_handler),
         )
@@ -841,6 +857,75 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status().as_u16(), 401, "no token → 401");
+    }
+
+    #[tokio::test]
+    async fn workflow_api_routes_are_protected_and_mounted_on_the_companion_gateway() {
+        use tower::ServiceExt as _;
+
+        let unauthorized = build_router(test_state())
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/workflow-deployments/deployment-1/runs")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"input":{}}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let jwt = crate::companion_api::jwt::issue_device_jwt(SECRET, "device-1", ACCOUNT_ID)
+            .expect("issue workflow route JWT");
+        let invalid_json = build_router(test_state())
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/workflow-deployments/deployment-1/runs")
+                    .header("authorization", format!("Bearer {jwt}"))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"input":}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(invalid_json.status(), StatusCode::BAD_REQUEST);
+        assert!(invalid_json.headers().contains_key("x-request-id"));
+        let invalid_json_body = axum::body::to_bytes(invalid_json.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let invalid_json_body: serde_json::Value =
+            serde_json::from_slice(&invalid_json_body).unwrap();
+        assert_eq!(invalid_json_body["code"], "invalid_request");
+        assert!(invalid_json_body["requestId"].is_string());
+
+        let unavailable = build_router(test_state())
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/workflow-deployments/deployment-1/runs")
+                    .header("authorization", format!("Bearer {jwt}"))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"input":{}}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let invalid_cursor = build_router(test_state())
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/v1/workflow-runs/run-1/events")
+                    .header("authorization", format!("Bearer {jwt}"))
+                    .header("last-event-id", "not-a-sequence")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(invalid_cursor.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
