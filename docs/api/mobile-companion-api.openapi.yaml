@@ -54,10 +54,11 @@ info:
 
     ## Error envelopes
 
-    Two distinct error shapes — one per route family. The **pair / whoami /
-    middleware** family wraps the body in `{ error: { code, message } }`.
-    The **RPC dispatch** family is flat: `{ code, message }`. Both are
-    documented as schemas (`AuthError`, `RpcError`).
+    Authenticated middleware failures and the **RPC dispatch** family use a
+    flat `{ code, message }` envelope. Middleware failures additionally carry
+    `requestId`; the workflow API always returns
+    `{ code, message, requestId, details? }` and mirrors `requestId` in the
+    `x-request-id` header.
 
     ## Sequencing & RPC dispatch
 
@@ -88,6 +89,8 @@ tags:
     description: Pre-authentication pair exchange (no JWT required).
   - name: identity
     description: Authenticated device identity probe.
+  - name: workflow-api
+    description: Deployment-scoped workflow runs, durable status, cancellation, and SSE events.
   - name: rpc-dispatch
     description: The wildcard RPC dispatch route + the read-only command list.
   - name: rpc-claude-session
@@ -143,6 +146,109 @@ security:
   - bearerAuth: []
 
 paths:
+  /api/v1/workflow-deployments/{deploymentId}/runs:
+    post:
+      operationId: createWorkflowRun
+      tags: [workflow-api]
+      summary: Admit a run against the deployment's current immutable version.
+      parameters:
+        - in: path
+          name: deploymentId
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/WorkflowIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                input: {}
+      responses:
+        "202":
+          description: The authority durably admitted the run.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkflowRunAccepted" }
+        "400": { $ref: "#/components/responses/WorkflowApiError" }
+        "401": { $ref: "#/components/responses/WorkflowApiError" }
+        "403": { $ref: "#/components/responses/WorkflowApiError" }
+        "404": { $ref: "#/components/responses/WorkflowApiError" }
+        "409": { $ref: "#/components/responses/WorkflowApiError" }
+        "422": { $ref: "#/components/responses/WorkflowApiError" }
+        "502": { $ref: "#/components/responses/WorkflowApiError" }
+        "503": { $ref: "#/components/responses/WorkflowApiError" }
+
+  /api/v1/workflow-runs/{runId}:
+    get:
+      operationId: getWorkflowRun
+      tags: [workflow-api]
+      summary: Read an account-owned run status projection.
+      parameters:
+        - $ref: "#/components/parameters/WorkflowRunId"
+      responses:
+        "200":
+          description: Current durable run state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkflowRunView" }
+        "401": { $ref: "#/components/responses/WorkflowApiError" }
+        "403": { $ref: "#/components/responses/WorkflowApiError" }
+        "404": { $ref: "#/components/responses/WorkflowApiError" }
+        "502": { $ref: "#/components/responses/WorkflowApiError" }
+        "503": { $ref: "#/components/responses/WorkflowApiError" }
+
+  /api/v1/workflow-runs/{runId}/events:
+    get:
+      operationId: streamWorkflowRunEvents
+      tags: [workflow-api]
+      summary: Stream durable redacted run events after a monotonic cursor.
+      parameters:
+        - $ref: "#/components/parameters/WorkflowRunId"
+        - in: header
+          name: Last-Event-ID
+          required: false
+          schema: { type: integer, minimum: 0, maximum: 9007199254740991 }
+      responses:
+        "200":
+          description: SSE frames. Each frame id equals its event `sequence`.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/WorkflowApiError" }
+        "401": { $ref: "#/components/responses/WorkflowApiError" }
+        "403": { $ref: "#/components/responses/WorkflowApiError" }
+        "404": { $ref: "#/components/responses/WorkflowApiError" }
+        "502": { $ref: "#/components/responses/WorkflowApiError" }
+        "503": { $ref: "#/components/responses/WorkflowApiError" }
+
+  /api/v1/workflow-runs/{runId}/cancel:
+    post:
+      operationId: cancelWorkflowRun
+      tags: [workflow-api]
+      summary: Request cancellation through the canonical run cancellation path.
+      parameters:
+        - $ref: "#/components/parameters/WorkflowRunId"
+      responses:
+        "202":
+          description: Cancellation request accepted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runId, cancelled, mode]
+                properties:
+                  runId: { type: string }
+                  cancelled: { type: boolean }
+                  mode: { type: string }
+        "401": { $ref: "#/components/responses/WorkflowApiError" }
+        "403": { $ref: "#/components/responses/WorkflowApiError" }
+        "404": { $ref: "#/components/responses/WorkflowApiError" }
+        "502": { $ref: "#/components/responses/WorkflowApiError" }
+        "503": { $ref: "#/components/responses/WorkflowApiError" }
+
   # ─────────────────────────────────────────────────────────────────────────
   # auth
   # ─────────────────────────────────────────────────────────────────────────
@@ -12361,15 +12467,34 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: JWT
+      bearerFormat: JWT or OIDC access token
       description: |
-        HS256 device JWT issued by `POST /api/v1/auth/pair`. Claims:
+        Either an HS256 device JWT issued by `POST /api/v1/auth/pair`, or an
+        OIDC access token. Device JWT claims:
         - `scope`: `"device"`
         - `iat`, `exp` (90-day TTL)
         - `device_id` (UUIDv4)
         Secret material lives in the Tauri process; no remote signing.
 
   parameters:
+    WorkflowRunId:
+      in: path
+      name: runId
+      required: true
+      schema: { type: string }
+
+    WorkflowIdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: false
+      description: |
+        Optional opaque key of at most 255 bytes. Workflow admission stores it
+        durably under `(account, entrypoint, deployment, caller, key)`; every
+        retry returns the original run even after the deployment pointer moves.
+      schema:
+        type: string
+        maxLength: 255
+
     IdempotencyKey:
       in: header
       name: Idempotency-Key
@@ -12417,6 +12542,12 @@ components:
           - sync_pull
 
   responses:
+    WorkflowApiError:
+      description: Stable Cognia workflow API error.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/WorkflowApiError" }
+
     JwtRejected:
       description: |
         JWT missing, malformed, expired, wrong scope, or wrong signature.
@@ -12424,21 +12555,29 @@ components:
         `expired_token`, `wrong_scope`.
       content:
         application/json:
-          schema: { $ref: "#/components/schemas/AuthError" }
+          schema: { $ref: "#/components/schemas/WorkflowApiError" }
           examples:
             missing:
               value:
                 {
-                  error:
-                    {
-                      code: missing_authorization,
-                      message: "Authorization header or ?token= query parameter is required",
-                    },
+                  code: missing_authorization,
+                  message: "Authorization header or ?token= query parameter is required",
+                  requestId: "d169e67b-7b58-4e1a-8286-d32702235a36",
                 }
             expired:
-              value: { error: { code: expired_token, message: "ExpiredSignature" } }
+              value:
+                {
+                  code: expired_token,
+                  message: "ExpiredSignature",
+                  requestId: "d169e67b-7b58-4e1a-8286-d32702235a36",
+                }
             wrongScope:
-              value: { error: { code: wrong_scope, message: 'JWT scope must be "device"' } }
+              value:
+                {
+                  code: wrong_scope,
+                  message: 'JWT scope must be "device"',
+                  requestId: "d169e67b-7b58-4e1a-8286-d32702235a36",
+                }
     PayloadTooLarge:
       description: Request body exceeded the 64 KiB limit.
       content:
@@ -12481,6 +12620,48 @@ components:
                 }
 
   schemas:
+    WorkflowRunAccepted:
+      type: object
+      required: [runId, status]
+      properties:
+        runId: { type: string }
+        status:
+          type: string
+          enum: [pending, running, waiting, paused, succeeded, failed, cancelled]
+
+    WorkflowRunView:
+      type: object
+      required: [runId, workflowId, status, startedAt]
+      properties:
+        runId: { type: string }
+        workflowId: { type: string }
+        versionId: { type: string }
+        deploymentId: { type: string }
+        deploymentRevision: { type: integer, minimum: 1 }
+        status:
+          type: string
+          enum: [pending, running, waiting, paused, succeeded, failed, cancelled]
+        startedAt: { type: integer, format: int64 }
+        completedAt: { type: integer, format: int64 }
+        output: {}
+        error:
+          type: object
+          required: [message]
+          properties:
+            message: { type: string }
+            nodeId: { type: string }
+            code: { type: string }
+
+    WorkflowApiError:
+      type: object
+      required: [code, message, requestId]
+      additionalProperties: false
+      properties:
+        code: { type: string }
+        message: { type: string }
+        requestId: { type: string, format: uuid }
+        details: {}
+
     # ── Auth wire shapes ─────────────────────────────────────────────────────
 
     IssueResponse:

@@ -537,6 +537,40 @@ describe("getDb", () => {
     await Dexie.delete(name)
   }, 30_000)
 
+  it("v145 backfills deterministic per-run workflow event sequences", async () => {
+    const name = `cognia-event-sequence-v145-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(144).stores({
+      workflowRunEvents: "&id, runId, [runId+ts], stepId, [runId+stepId], type, projectId",
+    })
+    await legacy.open()
+    await legacy.table("workflowRunEvents").bulkPut([
+      { id: "event-b", runId: "run-1", ts: 10, type: "run_completed" },
+      { id: "event-a", runId: "run-1", ts: 10, type: "run_started" },
+      { id: "event-c", runId: "run-2", ts: 5, type: "run_started" },
+    ])
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    expect(
+      (
+        await upgraded.workflowRunEvents
+          .where("[runId+sequence]")
+          .between(["run-1", 0], ["run-1", 9])
+          .toArray()
+      ).map((event) => [event.id, event.sequence])
+    ).toEqual([
+      ["event-a", 1],
+      ["event-b", 2],
+    ])
+    expect((await upgraded.workflowRunEvents.get("event-c"))?.sequence).toBe(1)
+
+    upgraded.close()
+    await Dexie.delete(name)
+  }, 30_000)
+
   it("v143 splits sandbox connections into provider/driver, keeping legacy mirrors", async () => {
     const name = `cognia-v143-sandbox-${Date.now()}`
     const legacy = new Dexie(name)

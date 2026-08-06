@@ -934,6 +934,8 @@ export type RunEventLogLevel = "debug" | "info" | "warn" | "error"
 export interface WorkflowRunEventRow {
   id: string
   runId: string
+  /** Durable per-run cursor. Present on v145+ rows; migration backfills history. */
+  sequence?: number
   ts: number
   type: RunEventType
   /** Node id if the event is step-scoped; absent for run-scoped events. */

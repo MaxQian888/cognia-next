@@ -80,6 +80,7 @@ pub mod tls;
 pub mod tunnel;
 pub mod tunnel_config;
 pub mod v2;
+pub mod workflow_api;
 pub mod ws;
 pub mod ws_bridge;
 pub mod ws_terminal;

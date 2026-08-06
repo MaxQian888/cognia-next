@@ -3435,6 +3435,35 @@ export class CogniaDB extends Dexie {
         if (deployments.length > 0) await tx.table("workflowDeployments").bulkPut(deployments)
       })
 
+    // v145 — durable, per-run workflow event cursors for HTTP/SSE replay.
+    // Historical rows are ordered deterministically by timestamp then id;
+    // every future event-log write allocates the next sequence transactionally.
+    this.version(145)
+      .stores({
+        workflowRunEvents:
+          "&id, runId, [runId+ts], [runId+sequence], stepId, [runId+stepId], type, projectId",
+      })
+      .upgrade(async (tx) => {
+        const table = tx.table("workflowRunEvents")
+        const rows = (await table.toArray()) as WorkflowRunEventRow[]
+        rows.sort((left, right) =>
+          left.runId === right.runId
+            ? left.ts - right.ts || left.id.localeCompare(right.id)
+            : left.runId.localeCompare(right.runId)
+        )
+        let runId = ""
+        let sequence = 0
+        for (const row of rows) {
+          if (row.runId !== runId) {
+            runId = row.runId
+            sequence = 0
+          }
+          sequence += 1
+          row.sequence = sequence
+        }
+        if (rows.length > 0) await table.bulkPut(rows)
+      })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {

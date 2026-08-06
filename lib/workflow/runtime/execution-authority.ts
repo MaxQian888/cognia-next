@@ -13,6 +13,7 @@ import type {
 import type {
   TriggerEvent,
   WorkflowNodeKind,
+  WorkflowRunRow,
   WorkflowTriggerBinding,
   WorkflowTriggeredFrom,
 } from "@/types/workflow/visual"
@@ -58,6 +59,8 @@ export interface ExecuteDeployedWorkflowResult {
   executionBinding: WorkflowExecutionBinding
   result: RunWorkflowResult
 }
+
+const activeInvocations = new Map<string, Promise<ExecuteDeployedWorkflowResult>>()
 
 function invocationId(input: {
   accountId: string
@@ -161,9 +164,45 @@ export async function executeDeployedWorkflow(
     createdAt: now,
     updatedAt: now,
   }
+  const trigger: TriggerEvent = {
+    workflowId: resolved.workflow.id,
+    kind: input.triggerKind,
+    ...(input.triggerId ? { triggerId: input.triggerId } : {}),
+    ...(input.triggerBinding ? { binding: input.triggerBinding } : {}),
+    payload: input.payload,
+    originAt: now,
+  }
+  const executionBinding: WorkflowExecutionBinding = {
+    ...resolved.binding,
+    invocationId: invocation.id,
+  }
+  const pendingRun: WorkflowRunRow = {
+    id: proposedRunId,
+    workflowId: resolved.workflow.id,
+    versionId: resolved.version.id,
+    deploymentId: resolved.deployment.id,
+    deploymentRevision: resolved.deployment.revision,
+    executionBinding,
+    status: "pending",
+    triggerKind: trigger.kind,
+    ...(trigger.triggerId ? { triggerId: trigger.triggerId } : {}),
+    triggerPayload: trigger.payload,
+    ...(trigger.binding ? { triggerBinding: trigger.binding } : {}),
+    startedAt: now,
+    workflowSnapshot: resolved.workflow,
+    ...(input.triggeredBy ? { triggeredBy: input.triggeredBy } : {}),
+    triggeredBySource: input.triggeredBy?.source ?? "ui",
+  }
   let admission: { invocation: WorkflowInvocation; reused: boolean }
   try {
-    await getDb().workflowInvocations.add(invocation)
+    const db = getDb()
+    await db.transaction("rw", db.workflowInvocations, db.workflowRuns, async () => {
+      await db.workflowInvocations.add(invocation)
+      // The admission ledger and its externally visible pending run are one
+      // durability unit. A process crash can no longer leave an invocation
+      // that points at a run id absent from status/events APIs.
+      await db.workflowRuns.add(pendingRun)
+    })
     admission = { invocation, reused: false }
   } catch (error) {
     // Idempotent requests use a deterministic primary key. A concurrent
@@ -175,51 +214,73 @@ export async function executeDeployedWorkflow(
   }
 
   const runId = admission.invocation.runId!
-  input.onAdmitted?.(runId)
   if (admission.reused) {
-    return reuseInvocation(admission.invocation)
+    return reuseInvocation(admission.invocation, input.onAdmitted)
   }
+  const driving = driveInvocation({
+    invocation: admission.invocation,
+    version: resolved.version,
+    workflow: resolved.workflow,
+    trigger,
+    executionBinding,
+    signal: input.signal,
+    triggeredBy: input.triggeredBy,
+    onPersisted: input.onPersisted,
+  })
+  activeInvocations.set(admission.invocation.id, driving)
+  input.onAdmitted?.(runId)
+  try {
+    return await driving
+  } finally {
+    if (activeInvocations.get(admission.invocation.id) === driving) {
+      activeInvocations.delete(admission.invocation.id)
+    }
+  }
+}
 
-  await getDb().workflowInvocations.update(admission.invocation.id, {
+interface DriveInvocationInput {
+  invocation: WorkflowInvocation
+  version: WorkflowVersion
+  workflow: import("@/types/workflow/visual").VisualWorkflow
+  trigger: TriggerEvent
+  executionBinding: WorkflowExecutionBinding
+  signal?: AbortSignal
+  triggeredBy?: WorkflowTriggeredFrom
+  onPersisted?: (runId: string) => void
+}
+
+async function driveInvocation(
+  input: DriveInvocationInput
+): Promise<ExecuteDeployedWorkflowResult> {
+  const runId = input.invocation.runId!
+  await getDb().workflowInvocations.update(input.invocation.id, {
     status: "running",
     updatedAt: Date.now(),
   })
-  const trigger: TriggerEvent = {
-    workflowId: resolved.workflow.id,
-    kind: input.triggerKind,
-    ...(input.triggerId ? { triggerId: input.triggerId } : {}),
-    ...(input.triggerBinding ? { binding: input.triggerBinding } : {}),
-    payload: input.payload,
-    originAt: Date.now(),
-  }
-  const executionBinding: WorkflowExecutionBinding = {
-    ...resolved.binding,
-    invocationId: admission.invocation.id,
-  }
   try {
     const result = await runWorkflow({
-      workflow: resolved.workflow,
-      trigger,
+      workflow: input.workflow,
+      trigger: input.trigger,
       runId,
       signal: input.signal,
       triggeredBy: input.triggeredBy,
-      executionBinding,
+      executionBinding: input.executionBinding,
       onPersisted: input.onPersisted,
     })
-    await getDb().workflowInvocations.update(admission.invocation.id, {
+    await getDb().workflowInvocations.update(input.invocation.id, {
       status: "completed",
       updatedAt: Date.now(),
     })
     return {
-      invocationId: admission.invocation.id,
+      invocationId: input.invocation.id,
       runId,
       reused: false,
-      version: resolved.version,
-      executionBinding,
+      version: input.version,
+      executionBinding: input.executionBinding,
       result,
     }
   } catch (error) {
-    await getDb().workflowInvocations.update(admission.invocation.id, {
+    await getDb().workflowInvocations.update(input.invocation.id, {
       status: "rejected",
       updatedAt: Date.now(),
     })
@@ -247,6 +308,47 @@ async function reuseInvocation(
   }
   onAdmitted?.(runId)
   const existingRun = await getDb().workflowRuns.get(runId)
+  const active = activeInvocations.get(invocation.id)
+  if (active) {
+    return { ...(await active), reused: true }
+  }
+  if (existingRun?.status === "pending") {
+    // No in-process driver owns this durable admission. This is the recovery
+    // path after a process crash between admission and orchestrator startup.
+    const executionBinding: WorkflowExecutionBinding = {
+      invocationId: invocation.id,
+      versionId: invocation.versionId,
+      deploymentId: invocation.deploymentId,
+      deploymentRevision: invocation.deploymentRevision,
+      entrypoint: invocation.entrypoint,
+      caller: invocation.caller,
+      ...(invocation.idempotencyKey ? { idempotencyKey: invocation.idempotencyKey } : {}),
+    }
+    const trigger: TriggerEvent = {
+      workflowId: version.workflowId,
+      kind: existingRun.triggerKind,
+      ...(existingRun.triggerId ? { triggerId: existingRun.triggerId } : {}),
+      ...(existingRun.triggerBinding ? { binding: existingRun.triggerBinding } : {}),
+      payload: existingRun.triggerPayload,
+      originAt: existingRun.startedAt,
+    }
+    const recovery = driveInvocation({
+      invocation,
+      version,
+      workflow: version.definition,
+      trigger,
+      executionBinding,
+      triggeredBy: existingRun.triggeredBy,
+    })
+    activeInvocations.set(invocation.id, recovery)
+    try {
+      return { ...(await recovery), reused: true }
+    } finally {
+      if (activeInvocations.get(invocation.id) === recovery) {
+        activeInvocations.delete(invocation.id)
+      }
+    }
+  }
   return {
     invocationId: invocation.id,
     runId,
