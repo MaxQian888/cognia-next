@@ -177,18 +177,18 @@ describe("createWorkflow", () => {
     expect(wf.published).toBeUndefined()
   })
 
-  it("projects the persisted workflow into the trigger runtime", async () => {
+  it("keeps draft triggers unregistered until the workflow is deployed", async () => {
     const wf = await createWorkflow({ name: "Projected", nodes: [manualNode("trigger-a")] })
 
-    expect(syncWorkflowTriggersMock).toHaveBeenCalledTimes(1)
-    expect(syncWorkflowTriggersMock).toHaveBeenCalledWith(
+    expect(syncWorkflowTriggersMock).not.toHaveBeenCalled()
+    expect(unsyncWorkflowTriggersMock).toHaveBeenCalledWith(
       expect.objectContaining({ id: wf.id, nodes: wf.nodes })
     )
   })
 
   it("keeps the database write when trigger projection fails", async () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
-    syncWorkflowTriggersMock.mockRejectedValueOnce(new Error("native runtime unavailable"))
+    unsyncWorkflowTriggersMock.mockRejectedValueOnce(new Error("native runtime unavailable"))
 
     const wf = await createWorkflow({ name: "Still persisted", nodes: [manualNode("trigger-a")] })
 
@@ -263,12 +263,12 @@ describe("updateWorkflow / replaceWorkflow", () => {
     await expect(replaceWorkflow({ ...wf, id: "wf_missing" })).rejects.toThrow(/not found/)
   })
 
-  it("projects the complete post-update and replacement snapshots", async () => {
+  it("keeps complete post-update and replacement draft snapshots unregistered", async () => {
     const wf = await createWorkflow({ name: "A" })
-    syncWorkflowTriggersMock.mockClear()
+    unsyncWorkflowTriggersMock.mockClear()
 
     await updateWorkflow(wf.id, { nodes: [manualNode("updated-trigger")] })
-    expect(syncWorkflowTriggersMock).toHaveBeenLastCalledWith(
+    expect(unsyncWorkflowTriggersMock).toHaveBeenLastCalledWith(
       expect.objectContaining({ id: wf.id, nodes: [manualNode("updated-trigger")] })
     )
 
@@ -277,7 +277,7 @@ describe("updateWorkflow / replaceWorkflow", () => {
       nodes: [manualNode("replacement-trigger")],
     }
     await replaceWorkflow(replacement)
-    expect(syncWorkflowTriggersMock).toHaveBeenLastCalledWith(
+    expect(unsyncWorkflowTriggersMock).toHaveBeenLastCalledWith(
       expect.objectContaining({ id: wf.id, nodes: [manualNode("replacement-trigger")] })
     )
   })
@@ -343,6 +343,7 @@ describe("deleteWorkflow", () => {
   it("keeps triggers registered when the atomic workflow and Skill delete rolls back", async () => {
     const wf = await createWorkflow({ name: "A", nodes: [manualNode("n_manual")] })
     const publication = await publishWorkflow(wf.id, 10)
+    unsyncWorkflowTriggersMock.mockClear()
     const skillDelete = jest
       .spyOn(getDb().skills, "delete")
       .mockRejectedValueOnce(new Error("skill delete failed"))
@@ -408,13 +409,13 @@ describe("duplicateWorkflow", () => {
     await expect(duplicateWorkflow("wf_missing")).rejects.toThrow(/not found/)
   })
 
-  it("projects the duplicated workflow under its new id", async () => {
+  it("keeps the duplicated draft unregistered under its new id", async () => {
     const wf = await createWorkflow({ name: "Original", nodes: [manualNode("n1")] })
-    syncWorkflowTriggersMock.mockClear()
+    unsyncWorkflowTriggersMock.mockClear()
 
     const copy = await duplicateWorkflow(wf.id)
 
-    expect(syncWorkflowTriggersMock).toHaveBeenCalledWith(
+    expect(unsyncWorkflowTriggersMock).toHaveBeenCalledWith(
       expect.objectContaining({ id: copy.id, nodes: copy.nodes })
     )
   })

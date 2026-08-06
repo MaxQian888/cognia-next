@@ -9,9 +9,7 @@
  * HTTP caller's 202 stays fast.
  */
 
-import { getWorkflow } from "@/lib/db/workflows"
-import { runWorkflow } from "./orchestrator"
-import type { TriggerEvent } from "@/types/workflow/visual"
+import { executeDeployedWorkflow, WorkflowAdmissionError } from "./execution-authority"
 
 export interface StartWorkflowFromRemoteInput {
   workflowId: string
@@ -33,29 +31,36 @@ export type StartWorkflowFromRemoteResult =
 export async function startWorkflowFromRemote(
   input: StartWorkflowFromRemoteInput
 ): Promise<StartWorkflowFromRemoteResult> {
-  const workflow = await getWorkflow(input.workflowId)
-  if (!workflow) return { ok: false, reason: "workflow-not-found", workflowId: input.workflowId }
-
-  const trigger: TriggerEvent = {
-    workflowId: workflow.id,
-    kind: "trigger.manual",
-    payload: input.runParams ?? {},
-    originAt: Date.now(),
-  }
-
   const runId =
     input.runId ?? "run_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
 
   // Fire-and-forget: the orchestrator persists the run row inline before the
   // first step executes, so the row exists by the time callers correlate.
   // Awaiting the full run would block the inbound 202 for the whole duration.
-  void runWorkflow({
-    workflow,
-    trigger,
-    runId,
+  let markAdmitted: () => void = () => undefined
+  const admitted = new Promise<void>((resolve) => {
+    markAdmitted = resolve
+  })
+  const execution = executeDeployedWorkflow({
+    workflowId: input.workflowId,
+    entrypoint: "http",
+    caller: input.deviceId ? `device:${input.deviceId}` : "remote-control",
+    idempotencyKey: input.runId,
+    requestedRunId: runId,
+    triggerKind: "trigger.manual",
+    payload: input.runParams ?? {},
     signal: input.signal,
     triggeredBy: { source: "api", ...(input.deviceId ? { deviceId: input.deviceId } : {}) },
+    onAdmitted: markAdmitted,
   })
+  try {
+    await Promise.race([execution.then(() => undefined), admitted])
+  } catch (error) {
+    if (error instanceof WorkflowAdmissionError && error.code === "deployment-not-found") {
+      return { ok: false, reason: "workflow-not-found", workflowId: input.workflowId }
+    }
+    throw error
+  }
 
   return { ok: true, runId }
 }

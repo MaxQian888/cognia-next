@@ -1,4 +1,3 @@
-import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createWorkflow, updateWorkflow } from "@/lib/db/workflows"
 import { executeRunWorkflowTyped } from "./run-workflow-typed-tool"
@@ -48,18 +47,25 @@ async function seedPublished(
         position: { x: 0, y: 0 },
         data: { label: "start", params: { inputSchema } },
       },
+      ...(opts.outputSchema
+        ? [
+            {
+              id: "n_output",
+              type: "io.output" as const,
+              typeVersion: 1,
+              position: { x: 200, y: 0 },
+              data: {
+                label: "output",
+                disabled: true,
+                params: { outputSchema: opts.outputSchema },
+              },
+            },
+          ]
+        : []),
     ],
     edges: [],
   })
   await publishWorkflow(wf.id, 1)
-  // This fixture targets the runner's final output guard rather than the
-  // io.output node's own schema validation, so inject the stored contract
-  // directly after the canonical publish path has established publication.
-  if (opts.outputSchema) {
-    await getDb().workflows.update(wf.id, {
-      interface: { inputSchema, outputSchema: opts.outputSchema },
-    })
-  }
   return wf.id
 }
 
@@ -139,7 +145,7 @@ describe("executeRunWorkflowTyped", () => {
     }
   })
 
-  it("reports run-failed when the published graph fails to run", async () => {
+  it("keeps running the immutable deployment when the draft graph becomes invalid", async () => {
     const id = await seedPublished("Broken")
     // Corrupt the graph AFTER publishing: a dangling edge fails validation at
     // run time, so the runner surfaces run-failed instead of throwing.
@@ -147,11 +153,7 @@ describe("executeRunWorkflowTyped", () => {
       edges: [{ id: "e_ghost", source: "n_start", target: "n_missing" }],
     })
     const r = await executeRunWorkflowTyped({ name: "Broken", input: { topic: "x" } })
-    expect(r.ok).toBe(false)
-    if (!r.ok) {
-      expect(r.error.code).toBe("run-failed")
-      expect(r.error.message).toMatch(/Invalid workflow/)
-    }
+    expect(r.ok).toBe(true)
   })
 
   it("collapses unexpected throws into a structured error", async () => {

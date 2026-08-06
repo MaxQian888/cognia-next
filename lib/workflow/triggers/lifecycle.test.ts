@@ -11,11 +11,15 @@ import {
 
 const dispatchPluginTrigger = jest.fn(async (_input: unknown) => ({ ok: true }))
 const listWorkflows = jest.fn(async () => [] as VisualWorkflow[])
+const resolveWorkflowDeployment = jest.fn()
 jest.mock("@/lib/plugin/bridge/plugin-trigger-dispatch", () => ({
   dispatchPluginTrigger: (input: unknown) => dispatchPluginTrigger(input),
 }))
 jest.mock("@/lib/db/workflows", () => ({
   listWorkflows: () => listWorkflows(),
+}))
+jest.mock("@/lib/db/workflow-deployments", () => ({
+  resolveWorkflowDeployment: (...args: unknown[]) => resolveWorkflowDeployment(...args),
 }))
 jest.mock("@/lib/plugin/contracts/diagnostics-store", () => ({
   recordSilentFailure: jest.fn(),
@@ -80,6 +84,7 @@ beforeEach(() => {
   __resetTriggerRegistryForTesting()
   dispatchPluginTrigger.mockClear()
   listWorkflows.mockReset().mockResolvedValue([])
+  resolveWorkflowDeployment.mockReset().mockResolvedValue(undefined)
   initPluginTriggerLifecycle()
 })
 
@@ -263,6 +268,7 @@ it("does not reconcile a late registration after lifecycle disposal", async () =
 it("reconciles existing workflows when a trigger registers after runtime startup", async () => {
   const wf = workflow()
   listWorkflows.mockResolvedValue([wf])
+  resolveWorkflowDeployment.mockResolvedValue({ workflow: wf })
   const reg = registration()
 
   registerPluginTrigger(reg)

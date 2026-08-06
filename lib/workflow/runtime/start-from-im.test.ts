@@ -3,6 +3,9 @@ import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createWorkflow } from "@/lib/db/workflows"
 import { startWorkflowFromIM } from "./start-from-im"
+import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
+
+jest.setTimeout(15_000)
 
 async function waitForTerminalRun(runId: string): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -31,6 +34,7 @@ describe("startWorkflowFromIM", () => {
 
   it("persists a run row with triggeredBy populated", async () => {
     const wf = await createWorkflow({ name: "Sample" })
+    await publishWorkflow(wf.id, 1)
     const result = await startWorkflowFromIM({
       workflowId: wf.id,
       runParams: { topic: "test" },

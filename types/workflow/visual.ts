@@ -519,6 +519,12 @@ export interface WorkflowPublication {
   at: number
   /** Display-only slug; execution always uses the shared typed workflow runner. */
   toolName: string
+  /** Immutable artifact selected by the production deployment. */
+  versionId?: string
+  /** Stable production deployment pointer. Optional only during legacy migration. */
+  deploymentId?: string
+  /** Revision of the pointer when this projection was written. */
+  deploymentRevision?: number
 }
 
 export interface WorkflowNode<TParams = Record<string, unknown>> {
@@ -800,6 +806,13 @@ export interface WorkflowRunLease {
 export interface WorkflowRunRow {
   id: string
   workflowId: string
+  /** Immutable artifact used for this formal invocation. */
+  versionId?: string
+  /** Deployment pointer resolved before the run was admitted. */
+  deploymentId?: string
+  deploymentRevision?: number
+  /** Formal ingress provenance; draft/editor runs intentionally omit it. */
+  executionBinding?: import("./deployment").WorkflowExecutionBinding
   /**
    * Owning workspace id — Workspace isolation column (Dexie v86). Workflow
    * DEFINITIONS stay profile-shared; only their RUN history is per-project.

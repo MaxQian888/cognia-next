@@ -115,6 +115,15 @@ import type {
   WorkflowRunEventRow,
   WorkflowTriggerRow,
 } from "@/types/workflow/visual"
+import type {
+  WorkflowDeployment,
+  WorkflowInvocation,
+  WorkflowVersion,
+} from "@/types/workflow/deployment"
+import {
+  createWorkflowVersion,
+  workflowDeploymentId,
+} from "@/lib/workflow/versioning/version-snapshot"
 import type { WorkflowFolder } from "@/types/workflow/folder"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 import type { SessionUsageRow } from "./session-usage"
@@ -495,6 +504,10 @@ export class CogniaDB extends Dexie {
   workflowRuns!: Table<WorkflowRunRow, string>
   workflowRunEvents!: Table<WorkflowRunEventRow, string>
   workflowTriggers!: Table<WorkflowTriggerRow, string>
+  // v144 — Immutable workflow publication control plane.
+  workflowVersions!: Table<WorkflowVersion, string>
+  workflowDeployments!: Table<WorkflowDeployment, string>
+  workflowInvocations!: Table<WorkflowInvocation, string>
   // v52 — Workflow library folders (ADR-0011 library upgrade). See
   // `types/workflow/folder.ts`.
   workflowFolders!: Table<WorkflowFolder, string>
@@ -3364,6 +3377,62 @@ export class CogniaDB extends Dexie {
         const { rows: migrated, changed } = migrateSandboxConnectionRows(rows)
         if (changed === 0) return
         await table.bulkPut(migrated)
+      })
+
+    // v144 — Immutable workflow versions + atomic environment deployments.
+    // Legacy `published` rows become version 1 and an active production
+    // deployment. The old publication envelope remains as a dual-read
+    // projection for one compatibility release; draft edits never rewrite the
+    // immutable artifact.
+    this.version(144)
+      .stores({
+        workflowVersions: "&id, workflowId, [workflowId+sequence], digest, createdAt",
+        workflowDeployments:
+          "&id, &[accountId+workflowId+environment], workflowId, environment, versionId, status, updatedAt",
+        workflowInvocations:
+          "&id, &[accountId+entrypoint+deploymentId+caller+idempotencyKey], deploymentId, versionId, runId, status, createdAt",
+      })
+      .upgrade(async (tx) => {
+        const accountId = accountIdFromDatabaseName(name) ?? "local_acct_a"
+        const workflowTable = tx.table("workflows")
+        const rows = (await workflowTable.toArray()) as WorkflowRow[]
+        const versions: WorkflowVersion[] = []
+        const deployments: WorkflowDeployment[] = []
+
+        for (const workflow of rows) {
+          if (!workflow.published) continue
+          const version = createWorkflowVersion({
+            workflow,
+            workflowInterface: workflow.interface ?? {},
+            accountId,
+            sequence: 1,
+            createdAt: workflow.published.at,
+          })
+          const deploymentId = workflowDeploymentId(accountId, workflow.id, "production")
+          versions.push(version)
+          deployments.push({
+            id: deploymentId,
+            accountId,
+            workflowId: workflow.id,
+            environment: "production",
+            versionId: version.id,
+            revision: 1,
+            status: "active",
+            createdAt: workflow.published.at,
+            updatedAt: workflow.published.at,
+          })
+          await workflowTable.update(workflow.id, {
+            published: {
+              ...workflow.published,
+              versionId: version.id,
+              deploymentId,
+              deploymentRevision: 1,
+            },
+          })
+        }
+
+        if (versions.length > 0) await tx.table("workflowVersions").bulkPut(versions)
+        if (deployments.length > 0) await tx.table("workflowDeployments").bulkPut(deployments)
       })
 
     // First full-chain construction under Jest: cache the merged spec so every

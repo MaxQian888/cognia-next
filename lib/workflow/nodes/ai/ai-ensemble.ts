@@ -149,22 +149,16 @@ export async function defaultAiEnsembleDeps(): Promise<AiEnsembleDeps> {
       return { text: r.text }
     },
     runSubworkflow: async (input) => {
-      const [{ getWorkflow }, { runWorkflow }] = await Promise.all([
-        import("@/lib/db/workflows"),
-        import("@/lib/workflow/runtime/orchestrator"),
-      ])
-      const workflow = await getWorkflow(input.workflowId)
-      if (!workflow) throw new Error(`ai.ensemble: workflow ${input.workflowId} not found`)
-      const result = await runWorkflow({
-        workflow,
-        trigger: {
-          workflowId: input.workflowId,
-          kind: "trigger.manual",
-          payload: input.payload,
-          originAt: Date.now(),
-        },
+      const { executeDeployedWorkflow } = await import("@/lib/workflow/runtime/execution-authority")
+      const execution = await executeDeployedWorkflow({
+        workflowId: input.workflowId,
+        entrypoint: "subworkflow",
+        caller: "ai.ensemble",
+        triggerKind: "trigger.manual",
+        payload: input.payload,
         signal: input.signal,
       })
+      const result = execution.result
       if (result.status !== "succeeded") {
         throw new Error(`ai.ensemble: sub-workflow ${result.status}`)
       }

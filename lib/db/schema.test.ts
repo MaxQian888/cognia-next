@@ -477,6 +477,66 @@ describe("getDb", () => {
     await Dexie.delete(name)
   }, 30_000)
 
+  it("v144 backfills immutable versions and deployments for legacy publications", async () => {
+    const name = `cognia-account-acct_v144_${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(143).stores({ workflows: "&id, name, updatedAt" })
+    await legacy.open()
+    await legacy.table("workflows").bulkPut([
+      {
+        id: "wf_published",
+        schemaVersion: 2,
+        name: "Published",
+        createdAt: 1,
+        updatedAt: 2,
+        nodes: [],
+        edges: [],
+        settings: { maxConcurrency: 4 },
+        interface: { inputSchema: { type: "object" } },
+        published: { at: 10, toolName: "wf_published" },
+      },
+      {
+        id: "wf_draft",
+        schemaVersion: 2,
+        name: "Draft",
+        createdAt: 1,
+        updatedAt: 2,
+        nodes: [],
+        edges: [],
+        settings: { maxConcurrency: 4 },
+      },
+    ])
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    const versions = await upgraded.workflowVersions.toArray()
+    const deployments = await upgraded.workflowDeployments.toArray()
+    expect(versions).toHaveLength(1)
+    expect(versions[0]).toMatchObject({
+      workflowId: "wf_published",
+      sequence: 1,
+      accountId: expect.stringContaining("acct_v144_"),
+    })
+    expect(deployments).toHaveLength(1)
+    expect(deployments[0]).toMatchObject({
+      workflowId: "wf_published",
+      versionId: versions[0].id,
+      environment: "production",
+      revision: 1,
+      status: "active",
+    })
+    expect((await upgraded.workflows.get("wf_published"))?.published).toMatchObject({
+      versionId: versions[0].id,
+      deploymentId: deployments[0].id,
+      deploymentRevision: 1,
+    })
+
+    upgraded.close()
+    await Dexie.delete(name)
+  }, 30_000)
+
   it("v143 splits sandbox connections into provider/driver, keeping legacy mirrors", async () => {
     const name = `cognia-v143-sandbox-${Date.now()}`
     const legacy = new Dexie(name)

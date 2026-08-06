@@ -18,6 +18,7 @@ import { WORKFLOW_RUNNER_TOOL_NAME } from "./runner-tool"
 import {
   derivePublishedInterface,
   publishWorkflowLifecycle,
+  rollbackWorkflowLifecycle,
   toolNameForWorkflow,
   unpublishWorkflowLifecycle,
   workflowSkillCanonicalId,
@@ -33,10 +34,39 @@ export type PublishResult = PublishWorkflowResult
  * derived interface, the publication timestamp, and the skill entry.
  */
 export async function publishWorkflow(workflowId: string, at: number): Promise<PublishResult> {
-  return publishWorkflowLifecycle(workflowId, at)
+  const result = await publishWorkflowLifecycle(workflowId, at)
+  const { resolveWorkflowDeployment } = await import("@/lib/db/workflow-deployments")
+  const deployed = await resolveWorkflowDeployment(workflowId)
+  if (deployed) {
+    const { syncWorkflowTriggers } = await import("@/lib/workflow/runtime/webhook-bridge")
+    await syncWorkflowTriggers(deployed.workflow)
+  }
+  return result
 }
 
 /** Unpublish: clear the publication and drop the backing skill entry. */
 export async function unpublishWorkflow(workflowId: string): Promise<void> {
+  const { getWorkflow } = await import("@/lib/db/workflows")
+  const before = await getWorkflow(workflowId)
   await unpublishWorkflowLifecycle(workflowId)
+  if (before) {
+    const { unsyncWorkflowTriggers } = await import("@/lib/workflow/runtime/webhook-bridge")
+    await unsyncWorkflowTriggers(before)
+  }
+}
+
+/** Roll the production deployment pointer back to an existing version. */
+export async function rollbackWorkflow(
+  workflowId: string,
+  versionId: string,
+  at: number
+): Promise<PublishResult> {
+  const result = await rollbackWorkflowLifecycle(workflowId, versionId, at)
+  const { resolveWorkflowDeployment } = await import("@/lib/db/workflow-deployments")
+  const deployed = await resolveWorkflowDeployment(workflowId)
+  if (deployed) {
+    const { syncWorkflowTriggers } = await import("@/lib/workflow/runtime/webhook-bridge")
+    await syncWorkflowTriggers(deployed.workflow)
+  }
+  return result
 }

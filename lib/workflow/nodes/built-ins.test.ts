@@ -2274,6 +2274,7 @@ describe("flow.subworkflow", () => {
   it("invokes another workflow and returns its output", async () => {
     // Seed a small subworkflow.
     const { createWorkflow } = await import("@/lib/db/workflows")
+    const { publishWorkflow } = await import("@/lib/workflow/publish/publish-workflow")
     const sub = await createWorkflow({
       name: "Sub",
       nodes: [
@@ -2294,6 +2295,7 @@ describe("flow.subworkflow", () => {
       ],
       edges: [{ id: "e1", source: "n_start", target: "n_set" }],
     })
+    await publishWorkflow(sub.id, 1)
     const r = await exec("flow.subworkflow", makeCtx("flow.subworkflow", { workflowId: sub.id }))
     const out = r.output as { runId: string; status: string }
     expect(out.runId).toMatch(/^run_/)

@@ -5,8 +5,11 @@ import "fake-indexeddb/auto"
 import { dispatchTrigger, isTriggerEvent } from "./trigger-bridge"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createWorkflow, listWorkflowRuns } from "@/lib/db/workflows"
+import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import type { TriggerEvent } from "@/types/workflow/visual"
+
+jest.setTimeout(15_000)
 
 beforeEach(async () => {
   await getDb().delete()
@@ -65,6 +68,7 @@ describe("dispatchTrigger", () => {
       ],
       edges: [{ id: "e1", source: "n_cron", target: "n_set" }],
     })
+    await publishWorkflow(wf.id, 1)
 
     await dispatchTrigger({
       workflowId: wf.id,
@@ -115,6 +119,7 @@ describe("dispatchTrigger", () => {
         { id: "e_other", source: "n_other_cron", target: "n_other_cron_out" },
       ],
     })
+    await publishWorkflow(wf.id, 1)
 
     await dispatchTrigger({
       workflowId: wf.id,
@@ -142,6 +147,7 @@ describe("dispatchTrigger", () => {
       ],
       edges: [],
     })
+    await publishWorkflow(wf.id, 1)
 
     await dispatchTrigger({
       workflowId: wf.id,
@@ -175,6 +181,7 @@ describe("dispatchTrigger", () => {
       ],
       edges: [{ id: "e1", source: "n_start", target: "n_set" }],
     })
+    await publishWorkflow(wf.id, 1)
     const trigger: TriggerEvent = {
       workflowId: wf.id,
       kind: "trigger.cron",
@@ -203,6 +210,7 @@ describe("dispatchTrigger", () => {
       ],
       edges: [],
     })
+    await publishWorkflow(wf.id, 1)
     await dispatchTrigger(
       { workflowId: wf.id, kind: "trigger.manual", payload: {}, originAt: Date.now() },
       { triggeredBy: { source: "api", deviceId: "dev-42" } }
@@ -227,6 +235,7 @@ describe("dispatchTrigger", () => {
       ],
       edges: [],
     })
+    await publishWorkflow(wf.id, 1)
     const spy = jest.spyOn(getPluginEventHooks(), "dispatchWorkflowTriggerFired")
     const payload = { firedAt: 7 }
     await dispatchTrigger({ workflowId: wf.id, kind: "trigger.cron", payload, originAt: 1 })

@@ -39,6 +39,7 @@ import type {
   WorkflowRunRow,
   WorkflowTriggeredFrom,
 } from "@/types/workflow/visual"
+import type { WorkflowExecutionBinding } from "@/types/workflow/deployment"
 // Importing the built-ins triggers their registration side effect.
 import "@/lib/workflow/nodes/built-ins"
 import { createRunLogger } from "./event-log"
@@ -98,6 +99,8 @@ const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(["succeeded", "failed
 export interface RunWorkflowInput {
   workflow: VisualWorkflow
   trigger: TriggerEvent
+  /** Immutable deployment provenance for formal invocations; absent for draft tests. */
+  executionBinding?: WorkflowExecutionBinding
   /** Override the auto-generated run id (used by the resume path). */
   runId?: string
   /** Override the secret resolver (tests inject in-memory resolvers here). */
@@ -251,6 +254,14 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   let runRow: WorkflowRunRow = {
     id: runId,
     workflowId: workflow.id,
+    ...(input.executionBinding
+      ? {
+          versionId: input.executionBinding.versionId,
+          deploymentId: input.executionBinding.deploymentId,
+          deploymentRevision: input.executionBinding.deploymentRevision,
+          executionBinding: input.executionBinding,
+        }
+      : {}),
     projectId,
     status: "running",
     triggerKind: trigger.kind,
