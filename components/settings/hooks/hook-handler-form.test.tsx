@@ -50,7 +50,7 @@ describe("HookHandlerForm", () => {
     expect((screen.getByTestId("handler-command") as HTMLTextAreaElement).value).toBe("echo hi")
   })
 
-  it("switching type from command to webhook resets fields to webhook defaults", () => {
+  it("switching type from command to HTTP creates the canonical handler", () => {
     const onChange = jest.fn()
     render(
       <HookHandlerForm
@@ -65,13 +65,11 @@ describe("HookHandlerForm", () => {
       .closest("div")!
       .querySelector("button")!
     fireEvent.click(hiddenSelect)
-    // Radix select renders options to a portal; click the webhook option.
-    fireEvent.click(screen.getByText("typeWebhook"))
+    fireEvent.click(screen.getByText("types.http"))
     expect(onChange).toHaveBeenCalledWith({
-      type: "webhook",
+      type: "http",
       url: "",
       headers: {},
-      timeout: undefined,
     })
   })
 
@@ -241,24 +239,50 @@ describe("HookHandlerForm", () => {
     expect(screen.getByText("headersEmpty")).toBeInTheDocument()
   })
 
-  it("shows the webhook-unsupported note only for webhook handlers", () => {
-    const { rerender } = render(
+  it("limits the type selector to runtime-proven handler kinds", () => {
+    render(
       <HookHandlerForm
         value={{ type: "command", command: "echo hi" }}
         onChange={() => undefined}
         onRemove={() => undefined}
+        supportedHandlerTypes={["command", "http"]}
       />
     )
-    expect(screen.queryByTestId("handler-webhook-unsupported")).toBeNull()
+    fireEvent.click(screen.getByTestId("handler-type-select"))
+    expect(screen.getAllByText("types.command")).toHaveLength(2)
+    expect(screen.getByText("types.http")).toBeInTheDocument()
+    expect(screen.queryByText("types.agent")).toBeNull()
+  })
 
-    rerender(
+  it("edits MCP tool fields", () => {
+    const onChange = jest.fn()
+    render(
       <HookHandlerForm
-        value={{ type: "webhook", url: "https://x.test" }}
-        onChange={() => undefined}
+        value={{ type: "mcp_tool", server: "policy", tool: "check", input: {} }}
+        onChange={onChange}
         onRemove={() => undefined}
       />
     )
-    expect(screen.getByTestId("handler-webhook-unsupported")).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("handler-tool"), { target: { value: "scan" } })
+    expect(onChange).toHaveBeenCalledWith({
+      type: "mcp_tool",
+      server: "policy",
+      tool: "scan",
+      input: {},
+    })
+  })
+
+  it("edits prompt and agent handlers", () => {
+    const onChange = jest.fn()
+    render(
+      <HookHandlerForm
+        value={{ type: "agent", prompt: "inspect" }}
+        onChange={onChange}
+        onRemove={() => undefined}
+      />
+    )
+    fireEvent.change(screen.getByTestId("handler-prompt"), { target: { value: "audit" } })
+    expect(onChange).toHaveBeenCalledWith({ type: "agent", prompt: "audit" })
   })
 
   it("surfaces an inline error for an empty command", () => {
@@ -315,5 +339,12 @@ describe("validateHandler", () => {
   it("rejects a non-parseable or non-http(s) URL", () => {
     expect(validateHandler({ type: "webhook", url: "not a url" })).toBe("urlInvalid")
     expect(validateHandler({ type: "webhook", url: "ftp://example.com" })).toBe("urlInvalid")
+  })
+
+  it("validates MCP and model-backed handler requirements", () => {
+    expect(validateHandler({ type: "mcp_tool", server: "", tool: "scan" })).toBe("serverRequired")
+    expect(validateHandler({ type: "mcp_tool", server: "policy", tool: "" })).toBe("toolRequired")
+    expect(validateHandler({ type: "prompt", prompt: "" })).toBe("promptRequired")
+    expect(validateHandler({ type: "agent", prompt: "inspect" })).toBeNull()
   })
 })

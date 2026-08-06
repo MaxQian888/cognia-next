@@ -26004,7 +26004,7 @@
         "discard": "Discard & switch",
         "title": "Discard unsaved changes?"
       },
-      "description": "Run shell commands or send webhooks at lifecycle events. Stored in ~/.claude/settings.json (User scope) or .claude/settings.json under a project. The full settings document round-trips — unrelated keys are preserved.",
+      "description": "Run runtime-supported handlers at lifecycle events. Claude supports command, HTTP, MCP tool, prompt, and agent handlers; other runtimes expose only probed capabilities.",
       "eventListLabel": "Events",
       "group": {
         "addHandler": "Add handler",
@@ -26027,11 +26027,20 @@
         "headersEmpty": "No custom headers.",
         "headersLabel": "Headers",
         "removeAria": "Remove handler",
-        "timeoutLabel": "Timeout (ms)",
-        "timeoutPlaceholder": "5000",
+        "timeoutLabel": "Timeout (seconds)",
+        "timeoutPlaceholder": "30",
         "typeCommand": "Command",
         "typeLabel": "Type",
         "typeWebhook": "Webhook",
+        "types": {
+          "agent": "Agent",
+          "command": "Command",
+          "http": "HTTP",
+          "mcp_tool": "MCP tool",
+          "prompt": "Prompt"
+        },
+        "toolLabel": "Tool",
+        "toolRequired": "MCP tool is required.",
         "urlInvalid": "Enter a valid http(s) URL.",
         "urlLabel": "URL",
         "urlPlaceholder": "https://example.com/hook",
@@ -37401,3 +37410,9 @@
     "unpin": "Unpin Worktree"
   }
 }
+        "inputLabel": "Input JSON",
+        "modelLabel": "Model (optional)",
+        "promptLabel": "Prompt",
+        "promptRequired": "Prompt can't be empty.",
+        "serverLabel": "MCP server",
+        "serverRequired": "MCP server is required.",

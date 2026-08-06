@@ -18,7 +18,7 @@
 import { spawn } from "node:child_process"
 
 import { HOOK_EVENTS } from "@anthropic-ai/claude-agent-sdk"
-import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
 
 const DEFAULT_TIMEOUT_SECS = 5
 const HARD_TIMEOUT_CAP_SECS = 30
@@ -354,7 +354,11 @@ export function runCommandHandler(command, configuredTimeout, payloadJson, signa
  * errors become soft-allow warnings.
  */
 export async function runWebhookHandler(url, headers, configuredTimeout, payloadJson, signal) {
-  if (!hasNoLeakingPiiDeep(payloadJson)) {
+  // Outbound hooks never receive the original sensitive payload. Redact first;
+  // then apply the deep gate to the redacted representation and fail closed if
+  // a detector still finds data that the redactor could not remove.
+  const redactedPayloadJson = redactText(payloadJson).redacted
+  if (!hasNoLeakingPiiDeep(redactedPayloadJson)) {
     return { block: HOOK_PII_BLOCK_REASON }
   }
   const timeoutSecs = Math.min(
@@ -373,7 +377,7 @@ export async function runWebhookHandler(url, headers, configuredTimeout, payload
     const res = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json", ...(headers ?? {}) },
-      body: payloadJson,
+      body: redactedPayloadJson,
       signal: controller.signal,
     })
     const body = await res.text()
@@ -396,7 +400,7 @@ function runHandler(handler, payloadJson, signal, cwd) {
   if (handler.type === "command" && typeof handler.command === "string") {
     return runCommandHandler(handler.command, handler.timeout, payloadJson, signal, cwd)
   }
-  if (handler.type === "webhook" && typeof handler.url === "string") {
+  if ((handler.type === "http" || handler.type === "webhook") && typeof handler.url === "string") {
     return runWebhookHandler(handler.url, handler.headers, handler.timeout, payloadJson, signal)
   }
   // prompt / mcp_tool / agent / unknown — inert in this phase (round-trips in

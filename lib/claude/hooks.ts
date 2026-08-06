@@ -3,12 +3,14 @@
 // (e.g. the future hooks settings tab) that need to read or render the hook
 // config block from settings.json.
 
-/** Hook lifecycle events. Phase 1 wires `UserPromptSubmit` and `PreToolUse`. */
+/** Claude Agent SDK 0.3.220 lifecycle events. */
 export type HookEvent =
   | "PreToolUse"
   | "PostToolUse"
   | "UserPromptSubmit"
   | "Stop"
+  | "Setup"
+  | "SubagentStart"
   | "SubagentStop"
   | "SessionStart"
   | "SessionEnd"
@@ -22,6 +24,7 @@ export type HookEvent =
   | "WorktreeCreate"
   | "WorktreeRemove"
   | "FileChanged"
+  | "DirectoryAdded"
   | "CwdChanged"
   | "InstructionsLoaded"
   | "ConfigChange"
@@ -32,15 +35,54 @@ export type HookEvent =
   | "StopFailure"
   | "TeammateIdle"
   | "UserPromptExpansion"
+  | "MessageDisplay"
+
+export type HookHandlerType = "command" | "http" | "mcp_tool" | "prompt" | "agent"
+export type HookShell = "bash" | "powershell"
+
+interface HookHandlerCommon {
+  /** Permission-rule filter supported by native Claude tool events. */
+  if?: string
+  /** Timeout in seconds, matching the upstream settings.json contract. */
+  timeout?: number
+  statusMessage?: string
+  once?: boolean
+}
 
 export type HookHandler =
-  | { type: "command"; command: string; timeout?: number }
+  | (HookHandlerCommon & {
+      type: "command"
+      command: string
+      args?: string[]
+      async?: boolean
+      asyncRewake?: boolean
+      shell?: HookShell
+    })
   | {
+      /** Legacy Cognia alias. Writers should migrate this to `http`. */
       type: "webhook"
       url: string
       headers?: Record<string, string>
+      allowedEnvVars?: string[]
       timeout?: number
     }
+  | (HookHandlerCommon & {
+      type: "http"
+      url: string
+      headers?: Record<string, string>
+      allowedEnvVars?: string[]
+    })
+  | (HookHandlerCommon & {
+      type: "mcp_tool"
+      server: string
+      tool: string
+      input?: Record<string, unknown>
+    })
+  | (HookHandlerCommon & {
+      type: "prompt" | "agent"
+      prompt: string
+      model?: string
+    })
 
 export interface HookGroup {
   /** Tool-name regex, pipe-list, or `"*"`. Omitted = match all. */

@@ -218,14 +218,52 @@ test("runWebhookHandler: 2xx JSON body parsed, non-2xx warns", async () => {
   }
 })
 
-test("runWebhookHandler: refuses a PII-bearing lifecycle payload before fetch", async () => {
-  const out = await runWebhookHandler(
-    "http://127.0.0.1:1/unreachable",
-    undefined,
-    5,
-    JSON.stringify({ prompt: "email alice@example.com" })
-  )
-  assert.deepEqual(out, { block: HOOK_PII_BLOCK_REASON })
+test("runWebhookHandler: redacts a PII-bearing lifecycle payload before fetch", async () => {
+  let received = ""
+  const server = http.createServer((req, res) => {
+    req.on("data", (chunk) => (received += chunk))
+    req.on("end", () => {
+      res.writeHead(204)
+      res.end()
+    })
+  })
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const { port } = server.address()
+  try {
+    const out = await runWebhookHandler(
+      `http://127.0.0.1:${port}/hook`,
+      undefined,
+      5,
+      JSON.stringify({ prompt: "email alice@example.com" })
+    )
+    assert.equal(out.block, undefined)
+    assert.doesNotMatch(received, /alice@example\.com/)
+    assert.match(received, /<EMAIL_001>/)
+  } finally {
+    server.close()
+  }
+})
+
+test("runGroups: canonical http handler executes like the legacy webhook alias", async () => {
+  let calls = 0
+  const server = http.createServer((_req, res) => {
+    calls += 1
+    res.writeHead(204)
+    res.end()
+  })
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const { port } = server.address()
+  try {
+    const dec = await runGroups(
+      [{ hooks: [{ type: "http", url: `http://127.0.0.1:${port}/hook` }] }],
+      "",
+      "{}"
+    )
+    assert.equal(dec.block, undefined)
+    assert.equal(calls, 1)
+  } finally {
+    server.close()
+  }
 })
 
 // --- runGroups --------------------------------------------------------------

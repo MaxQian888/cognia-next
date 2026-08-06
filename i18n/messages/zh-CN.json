@@ -26004,7 +26004,7 @@
         "discard": "放弃并切换",
         "title": "放弃未保存的更改?"
       },
-      "description": "在生命周期事件触发时运行 shell 命令或调用 webhook。配置写入 ~/.claude/settings.json (用户作用域) 或项目下的 .claude/settings.json。整份配置原样回写,未识别的字段会被保留。",
+      "description": "在生命周期事件触发时运行当前运行时支持的处理器。Claude 支持命令、HTTP、MCP 工具、提示词和 Agent；其他运行时只显示探测确认的能力。",
       "eventListLabel": "事件",
       "group": {
         "addHandler": "新建处理器",
@@ -26027,11 +26027,20 @@
         "headersEmpty": "暂无自定义头部。",
         "headersLabel": "请求头",
         "removeAria": "移除处理器",
-        "timeoutLabel": "超时 (ms)",
-        "timeoutPlaceholder": "5000",
+        "timeoutLabel": "超时（秒）",
+        "timeoutPlaceholder": "30",
         "typeCommand": "命令",
         "typeLabel": "类型",
         "typeWebhook": "Webhook",
+        "types": {
+          "agent": "Agent",
+          "command": "命令",
+          "http": "HTTP",
+          "mcp_tool": "MCP 工具",
+          "prompt": "提示词"
+        },
+        "toolLabel": "工具",
+        "toolRequired": "MCP 工具不能为空。",
         "urlInvalid": "请输入有效的 http(s) URL。",
         "urlLabel": "URL",
         "urlPlaceholder": "https://example.com/hook",
@@ -37401,3 +37410,9 @@
     "unpin": "取消固定 Worktree"
   }
 }
+        "inputLabel": "输入 JSON",
+        "modelLabel": "模型（可选）",
+        "promptLabel": "提示词",
+        "promptRequired": "提示词不能为空。",
+        "serverLabel": "MCP 服务器",
+        "serverRequired": "MCP 服务器不能为空。",

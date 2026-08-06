@@ -6,9 +6,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Hook lifecycle events. Phase 1 wires `UserPromptSubmit` (in `claude_send`)
-/// and `PreToolUse` (intercepted inside `sidecar.rs`'s stdout reader). Other
-/// variants are recognised so settings.json round-trips cleanly.
+/// Claude Agent SDK 0.3.220 lifecycle events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum HookEvent {
@@ -16,6 +14,8 @@ pub enum HookEvent {
     PostToolUse,
     UserPromptSubmit,
     Stop,
+    Setup,
+    SubagentStart,
     SubagentStop,
     SessionStart,
     SessionEnd,
@@ -29,6 +29,7 @@ pub enum HookEvent {
     WorktreeCreate,
     WorktreeRemove,
     FileChanged,
+    DirectoryAdded,
     CwdChanged,
     InstructionsLoaded,
     ConfigChange,
@@ -39,6 +40,7 @@ pub enum HookEvent {
     StopFailure,
     TeammateIdle,
     UserPromptExpansion,
+    MessageDisplay,
 }
 
 /// One hook block in `settings.json`'s `hooks.{Event}` array.
@@ -65,6 +67,14 @@ pub enum HookHandler {
     },
     /// HTTP POST with the event payload as JSON body. Phase 2.
     Webhook {
+        url: String,
+        #[serde(default)]
+        headers: std::collections::HashMap<String, String>,
+        #[serde(default)]
+        timeout: Option<u64>,
+    },
+    /// Canonical Claude settings name. `webhook` remains a legacy alias.
+    Http {
         url: String,
         #[serde(default)]
         headers: std::collections::HashMap<String, String>,
@@ -152,4 +162,39 @@ pub struct HookEventPayload {
     /// Free-form bag of event-specific fields (prompt text, tool name + input, etc.).
     #[serde(flatten)]
     pub fields: Value,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserializes_new_sdk_events() {
+        for (name, expected) in [
+            ("Setup", HookEvent::Setup),
+            ("SubagentStart", HookEvent::SubagentStart),
+            ("DirectoryAdded", HookEvent::DirectoryAdded),
+            ("MessageDisplay", HookEvent::MessageDisplay),
+        ] {
+            let event: HookEvent = serde_json::from_value(Value::String(name.into())).unwrap();
+            assert_eq!(event, expected);
+        }
+    }
+
+    #[test]
+    fn deserializes_canonical_http_and_legacy_webhook_handlers() {
+        let http: HookHandler = serde_json::from_value(serde_json::json!({
+            "type": "http",
+            "url": "https://example.test/hook"
+        }))
+        .unwrap();
+        let webhook: HookHandler = serde_json::from_value(serde_json::json!({
+            "type": "webhook",
+            "url": "https://example.test/hook"
+        }))
+        .unwrap();
+
+        assert!(matches!(http, HookHandler::Http { .. }));
+        assert!(matches!(webhook, HookHandler::Webhook { .. }));
+    }
 }

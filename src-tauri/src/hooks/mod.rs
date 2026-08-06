@@ -125,6 +125,11 @@ async fn run_handler(handler: HookHandler, payload_json: &str) -> HookOutcome {
             url,
             headers,
             timeout,
+        }
+        | HookHandler::Http {
+            url,
+            headers,
+            timeout,
         } => webhook::run_webhook_handler(&url, &headers, timeout, payload_json).await,
         HookHandler::Unsupported => HookOutcome::InternalError {
             reason: "unsupported handler type".to_string(),

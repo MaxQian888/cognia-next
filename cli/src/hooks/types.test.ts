@@ -9,6 +9,10 @@ describe("HOOK_EVENTS", () => {
     expect(HOOK_EVENTS).toContain("PostCompact")
     expect(HOOK_EVENTS).toContain("StopFailure")
     expect(HOOK_EVENTS).toContain("PostToolUseFailure")
+    expect(HOOK_EVENTS).toHaveLength(31)
+    expect(HOOK_EVENTS).toEqual(
+      expect.arrayContaining(["Setup", "SubagentStart", "DirectoryAdded", "MessageDisplay"])
+    )
     // No duplicates.
     expect(new Set(HOOK_EVENTS).size).toBe(HOOK_EVENTS.length)
   })
@@ -63,6 +67,19 @@ describe("HooksConfigSchema", () => {
       server: "github",
       tool: "notify",
     })
+  })
+
+  it("accepts the canonical http handler name", () => {
+    const result = hookGroupSchema.safeParse({
+      hooks: [
+        {
+          type: "http",
+          url: "https://example.test/hook",
+          allowedEnvVars: ["TOKEN"],
+        },
+      ],
+    })
+    expect(result.success).toBe(true)
   })
 
   it("tolerates unknown event keys without dropping known ones", () => {

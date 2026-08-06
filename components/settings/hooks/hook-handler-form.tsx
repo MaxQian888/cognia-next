@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * HookHandlerForm — discriminated form for `HookHandler` (`command` | `webhook`).
+ * Capability-aware editor for every handler the selected runtime proves.
  *
  * Phase 5 of the ClaudeCode 完整化 plan. Renders inside `HookGroupEditor`,
  * which owns the array of handlers in a single `HookGroup`. This form is
@@ -11,7 +11,7 @@
  */
 
 import { useTranslations } from "next-intl"
-import { InfoIcon, Trash2Icon } from "lucide-react"
+import { Trash2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -24,22 +24,40 @@ import {
 } from "@/components/ui/select"
 import { LightCodeEditor } from "@/components/editor/light-code-editor"
 import { cn } from "@/lib/utils"
-import type { HookHandler } from "@/lib/claude/hooks"
+import type { HookHandler, HookHandlerType } from "@/lib/claude/hooks"
+import { knownHookRuntimeCapabilities } from "@/lib/claude/hooks/runtime-capabilities"
+
+const DEFAULT_HANDLER_TYPES = knownHookRuntimeCapabilities("claude").handlerTypes
 
 interface Props {
   value: HookHandler
   onChange: (next: HookHandler) => void
   onRemove: () => void
+  supportedHandlerTypes?: readonly HookHandlerType[]
 }
 
-export function HookHandlerForm({ value, onChange, onRemove }: Props) {
+export function HookHandlerForm({
+  value,
+  onChange,
+  onRemove,
+  supportedHandlerTypes = DEFAULT_HANDLER_TYPES,
+}: Props) {
   const t = useTranslations("settings.hooks.handler")
 
-  const setType = (type: HookHandler["type"]) => {
-    if (type === "command") {
-      onChange({ type: "command", command: "", timeout: undefined })
-    } else {
-      onChange({ type: "webhook", url: "", headers: {}, timeout: undefined })
+  const setType = (type: HookHandlerType) => {
+    switch (type) {
+      case "command":
+        onChange({ type, command: "" })
+        break
+      case "http":
+        onChange({ type, url: "", headers: {} })
+        break
+      case "mcp_tool":
+        onChange({ type, server: "", tool: "", input: {} })
+        break
+      case "prompt":
+      case "agent":
+        onChange({ type, prompt: "" })
     }
   }
 
@@ -54,13 +72,19 @@ export function HookHandlerForm({ value, onChange, onRemove }: Props) {
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Label className="text-xs text-muted-foreground">{t("typeLabel")}</Label>
-          <Select value={value.type} onValueChange={(v) => setType(v as HookHandler["type"])}>
-            <SelectTrigger className="h-7 w-32 text-xs" data-testid="handler-type-select">
+          <Select
+            value={value.type === "webhook" ? "http" : value.type}
+            onValueChange={(v) => setType(v as HookHandlerType)}
+          >
+            <SelectTrigger className="h-7 w-36 text-xs" data-testid="handler-type-select">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="command">{t("typeCommand")}</SelectItem>
-              <SelectItem value="webhook">{t("typeWebhook")}</SelectItem>
+              {supportedHandlerTypes.map((type) => (
+                <SelectItem key={type} value={type}>
+                  {t(`types.${type}`)}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -110,15 +134,8 @@ export function HookHandlerForm({ value, onChange, onRemove }: Props) {
             </p>
           ) : null}
         </div>
-      ) : (
+      ) : value.type === "http" || value.type === "webhook" ? (
         <>
-          <p
-            className="flex items-start gap-1.5 rounded border border-dashed bg-muted/40 p-1.5 text-[0.6875rem] text-muted-foreground"
-            data-testid="handler-webhook-unsupported"
-          >
-            <InfoIcon className="mt-px size-3 shrink-0" aria-hidden />
-            <span>{t("webhookUnsupported")}</span>
-          </p>
           <div className="space-y-1">
             <Label className="text-xs">{t("urlLabel")}</Label>
             <Input
@@ -135,6 +152,70 @@ export function HookHandlerForm({ value, onChange, onRemove }: Props) {
             headers={value.headers ?? {}}
             onChange={(h) => onChange({ ...value, headers: h })}
           />
+        </>
+      ) : value.type === "mcp_tool" ? (
+        <>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label className="text-xs">{t("serverLabel")}</Label>
+              <Input
+                value={value.server}
+                onChange={(e) => onChange({ ...value, server: e.target.value })}
+                data-testid="handler-server"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">{t("toolLabel")}</Label>
+              <Input
+                value={value.tool}
+                onChange={(e) => onChange({ ...value, tool: e.target.value })}
+                data-testid="handler-tool"
+              />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{t("inputLabel")}</Label>
+            <Input
+              value={JSON.stringify(value.input ?? {})}
+              onChange={(e) => {
+                try {
+                  const input = JSON.parse(e.target.value) as Record<string, unknown>
+                  onChange({ ...value, input })
+                } catch {
+                  // Keep the last valid structured input; validation is shown below.
+                }
+              }}
+              className="font-mono text-xs"
+              data-testid="handler-input"
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="space-y-1">
+            <Label className="text-xs">{t("promptLabel")}</Label>
+            <LightCodeEditor
+              value={value.prompt}
+              onChange={(prompt) => onChange({ ...value, prompt })}
+              language="markdown"
+              lineNumbers={false}
+              search={false}
+              diagnostics={false}
+              statusBar={false}
+              wordWrap
+              fontSize={12}
+              aria-label={t("promptLabel")}
+              data-testid="handler-prompt"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{t("modelLabel")}</Label>
+            <Input
+              value={value.model ?? ""}
+              onChange={(e) => onChange({ ...value, model: e.target.value || undefined })}
+              data-testid="handler-model"
+            />
+          </div>
         </>
       )}
 
@@ -171,9 +252,23 @@ export function HookHandlerForm({ value, onChange, onRemove }: Props) {
  */
 export function validateHandler(
   h: HookHandler
-): "commandRequired" | "urlRequired" | "urlInvalid" | null {
+):
+  | "commandRequired"
+  | "urlRequired"
+  | "urlInvalid"
+  | "serverRequired"
+  | "toolRequired"
+  | "promptRequired"
+  | null {
   if (h.type === "command") {
     return h.command.trim() === "" ? "commandRequired" : null
+  }
+  if (h.type === "mcp_tool") {
+    if (!h.server.trim()) return "serverRequired"
+    return h.tool.trim() ? null : "toolRequired"
+  }
+  if (h.type === "prompt" || h.type === "agent") {
+    return h.prompt.trim() ? null : "promptRequired"
   }
   const url = h.url.trim()
   if (url === "") return "urlRequired"
