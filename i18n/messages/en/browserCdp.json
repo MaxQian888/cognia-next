@@ -1,0 +1,22 @@
+{
+  "title": "Developer mode (CDP)",
+  "description": "Grant temporary, audited access to this local embedded-browser session only.",
+  "capabilities": "Capabilities",
+  "dom": "DOM",
+  "runtime": "Runtime",
+  "console": "Console",
+  "network": "Network",
+  "performance": "Performance",
+  "duration": "Grant duration",
+  "minutes": "{count} minutes",
+  "grant": "Grant access",
+  "revoke": "Revoke access",
+  "inspect": "Inspect document",
+  "active": "Grant expires at {time}",
+  "audit": "Session audit",
+  "auditEntry": "{outcome} · {method}",
+  "noAudit": "No CDP audit events for this task.",
+  "result": "Document inspection completed.",
+  "error": "CDP request failed: {message}",
+  "localOnly": "Remote, companion, cloud, and web execution are denied."
+}

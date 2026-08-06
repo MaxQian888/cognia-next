@@ -137,8 +137,8 @@
       "manageMcp": "Manage MCP servers",
       "manageSkills": "Manage skills",
       "manageTeams": "Manage teams",
-      "newChat": "New chat",
-      "newChatHint": "new",
+      "newChat": "Quick Chat",
+      "newChatHint": "persisted task",
       "openFolder": "Open folder as workspace…",
       "openSettings": "Open settings",
       "toggleTheme": "Toggle theme"
@@ -372,7 +372,7 @@
       "label": "File",
       "newAgentTeam": "New Agent Team",
       "newCharacter": "New Character",
-      "newChat": "New Chat",
+      "newChat": "Quick Chat",
       "newWorkflow": "New Workflow",
       "openLogs": "Open Logs",
       "openSettings": "Settings…",
@@ -651,6 +651,7 @@
     "terminal": "{count, plural, =0 {Terminal} one {# terminal} other {# terminals}}",
     "terminalRunning": "Terminal panel — a session is running",
     "terminalToggle": "Toggle terminal panel",
+    "terminalAiShellToggle": "Toggle AI Shell panel",
     "usage": "Usage & limits",
     "usageOpen": "Open usage & limits"
   },

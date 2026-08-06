@@ -8,7 +8,7 @@
   "createCharacterFirst": "请先创建角色",
   "delete": "删除",
   "deleteAria": "删除 {name}",
-  "description": "团队是一组角色的命名集合,可在群聊中协同响应。用 @CharacterName 单独点名某个成员;否则每位成员按声明顺序各回一次。监督者模式让一位领导分派子任务给其他成员并整合结果。",
+  "description": "团队是当前用户与多个 Agent 之间的私有群会话。显式 @ 时仅触发被点名的 Agent；未提及时，可由智能主答选择一位响应者、让全体响应，或由固定主持人处理。",
   "duplicate": "复制",
   "duplicateAria": "复制 {name}",
   "duplicatedToast": "已复制为「{name}」。",
@@ -38,6 +38,8 @@
     "orchestration": "编排方式",
     "overrideHelp": "每个覆盖项仅替换该角色在本团队中的默认值。留空表示继承。技能始终在最上层叠加。",
     "pickColor": "选择颜色 {color}",
+    "responseCap": "每轮 Agent 回复上限",
+    "responseCapHelp": "限制全体响应与主持人分派数量；重复回复和重复分派会被抑制。",
     "role": "角色标签",
     "rolePlaceholder": "如 Critic",
     "supervisor": "监督者（领导）",
@@ -53,8 +55,8 @@
   "newTeam": "新建团队",
   "orchestration": {
     "manual": "手动（用户挑选）",
-    "mention_round_robin": "@提及 + 轮询",
-    "round_robin": "轮询（始终全员发言）",
+    "mention_round_robin": "智能主答",
+    "round_robin": "全体 Agent 响应",
     "supervisor": "监督者（一位领导分派）"
   },
   "remove": "删除",
@@ -68,6 +70,7 @@
   "validation": {
     "atLeastOneMember": "团队至少需要一位成员。",
     "nameRequired": "请填写名称。",
+    "responseCapInvalid": "回复上限必须是 1 到 12 之间的整数。",
     "supervisorMustBeMember": "监督者必须是团队成员之一。",
     "supervisorRequired": "监督者模式需要指定一位监督者。"
   }

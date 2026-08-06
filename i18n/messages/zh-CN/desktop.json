@@ -137,8 +137,8 @@
       "manageMcp": "管理 MCP 服务器",
       "manageSkills": "管理技能",
       "manageTeams": "管理团队",
-      "newChat": "新建聊天",
-      "newChatHint": "新建",
+      "newChat": "快速聊天",
+      "newChatHint": "持久化任务",
       "openFolder": "打开文件夹为工作区…",
       "openSettings": "打开设置",
       "toggleTheme": "切换主题"
@@ -372,7 +372,7 @@
       "label": "文件",
       "newAgentTeam": "新建智能体团队",
       "newCharacter": "新建角色",
-      "newChat": "新建对话",
+      "newChat": "快速对话",
       "newWorkflow": "新建工作流",
       "openLogs": "打开日志",
       "openSettings": "设置…",
@@ -651,6 +651,7 @@
     "terminal": "{count, plural, =0 {终端} other {# 个终端}}",
     "terminalRunning": "终端面板 — 有会话正在运行",
     "terminalToggle": "切换终端面板",
+    "terminalAiShellToggle": "切换 AI Shell 面板",
     "usage": "用量与额度",
     "usageOpen": "打开用量与额度"
   },

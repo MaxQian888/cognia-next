@@ -108,7 +108,18 @@
     "diagnosticsTitle": "更多诊断",
     "openIssueDescription": "包含 Bug 报告与功能请求模板。",
     "openIssueLabel": "在 GitHub 提交 Issue",
-    "reportTitle": "反馈问题"
+    "reportTitle": "反馈问题",
+    "support": {
+      "cancel": "取消",
+      "confirmExport": "确认并导出",
+      "description": "确认后，Cognia 会根据你的描述和已脱敏诊断在本地生成 Markdown 草稿，不会自动发送任何内容。",
+      "exportFailed": "无法生成支持反馈文件。",
+      "exported": "已导出支持反馈。",
+      "placeholder": "发生了什么？你原本期望什么结果？",
+      "summary": "反馈描述",
+      "title": "生成支持反馈？",
+      "trigger": "生成已脱敏的支持反馈"
+    }
   },
   "feedbackRow": "反馈与诊断",
   "goalsRow": "目标",

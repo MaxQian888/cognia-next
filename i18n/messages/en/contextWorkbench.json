@@ -1,4 +1,24 @@
 {
+  "agentStatusPanel": {
+    "active": "{count, plural, one {# active} other {# active}}",
+    "emptyDescription": "Add teammates to the team to see their status here.",
+    "emptyTitle": "No teammates",
+    "noTeam": "No agent team",
+    "noTeamDescription": "Start an agent team session to see status here.",
+    "openFullPage": "Open agent workspace",
+    "statuses": {
+      "awaiting_approval": "Awaiting approval",
+      "cancelled": "Cancelled",
+      "completed": "Completed",
+      "executing": "Executing",
+      "failed": "Failed",
+      "idle": "Idle",
+      "paused": "Paused",
+      "planning": "Planning",
+      "shutdown": "Shutdown"
+    },
+    "title": "Agent Status"
+  },
   "actions": {
     "collapse": "Collapse workbench",
     "expand": "Expand workbench",
@@ -10,6 +30,8 @@
     "resetLayout": "Reset layout",
     "resize": "Resize workbench",
     "retry": "Retry panel",
+    "historyBack": "Go back",
+    "historyForward": "Go forward",
     "switchPanel": "Switch panel",
     "unpin": "Unpin panel",
     "wide": "Wide mode"
@@ -116,6 +138,34 @@
     "version": "Version",
     "workingDir": "Working directory"
   },
+  "logsPanel": {
+    "count": "{count, plural, one {# entry} other {# entries}}",
+    "emptyDescription": "No log entries match the current filter.",
+    "emptyTitle": "No logs",
+    "filterLabel": "Filter by level",
+    "levels": {
+      "all": "All",
+      "debug": "Debug",
+      "error": "Error",
+      "info": "Info",
+      "trace": "Trace",
+      "warn": "Warn"
+    },
+    "loading": "Loading logs…",
+    "openFullPage": "Open full log viewer",
+    "title": "Logs"
+  },
+  "memoryPanel": {
+    "addMemory": "Add memory",
+    "count": "{count, plural, one {# memory} other {# memories}}",
+    "emptyDescription": "Memories will appear here as the assistant learns. You can also add them manually.",
+    "emptyTitle": "No memories yet",
+    "openFullPage": "Open full memory page",
+    "searchLabel": "Search memories",
+    "searchPlaceholder": "Search memories…",
+    "sortLabel": "Sort memories",
+    "title": "Memory"
+  },
   "mobileDescription": "AI, comments, inspection, review, and preview tools for the current resource.",
   "mobileTitle": "Context Workbench",
   "panelError": "Panel unavailable",
@@ -129,6 +179,12 @@
     "undo": "Undo apply"
   },
   "proposalReview": "Proposal review",
+  "quickSwitch": {
+    "description": "Jump to any panel in the workbench.",
+    "empty": "No matching panels.",
+    "placeholder": "Search panels…",
+    "title": "Switch panel"
+  },
   "resourceChat": "AI conversation",
   "sessionSidechat": "Side chat",
   "sessionSources": {
@@ -158,6 +214,21 @@
     "searchLabel": "Search conversation sources",
     "searchPlaceholder": "Search files, web pages, and tools…",
     "title": "Conversation sources"
+  },
+  "sourceControlPanel": {
+    "changeCount": "{count, plural, one {# change} other {# changes}}",
+    "clean": "Working tree clean",
+    "cleanDescription": "No uncommitted changes.",
+    "commit": "Commit",
+    "commitLabel": "Commit message",
+    "commitPlaceholder": "Commit message…",
+    "detached": "HEAD detached",
+    "noRepo": "No repository",
+    "noRepoDescription": "Open a project with a Git repository to see source control here.",
+    "openFullPage": "Open full source control",
+    "staged": "{count, plural, one {# staged} other {# staged}}",
+    "title": "Source Control",
+    "unstaged": "{count, plural, one {# change} other {# changes}}"
   },
   "sidechatPlaceholder": {
     "description": "Open a conversation first, then use Side chat to investigate something without adding noise to the main thread.",

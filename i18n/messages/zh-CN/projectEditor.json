@@ -39,6 +39,11 @@
     "unsupportedDesc": "code-server 没有适配你操作系统的版本，请改用本机 VS Code。",
     "unsupportedTitle": "此平台不支持 Pro IDE"
   },
+  "proIdeChatBridge": {
+    "explain": "请解释这段代码。",
+    "fix": "请修复这段代码中的问题。",
+    "review": "请审查这段代码，找出潜在的错误和改进点。"
+  },
   "refresh": "刷新",
   "rename": "重命名",
   "rootLabel": "项目根目录",

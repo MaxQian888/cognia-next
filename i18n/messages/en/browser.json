@@ -1,4 +1,15 @@
 {
+  "adjust": {
+    "accept": "Accept feedback",
+    "accepted": "Adjustment feedback is ready to send. The live preview was reverted.",
+    "color": "Color (for example, #2563eb)",
+    "font": "Font (for example, 16px Inter)",
+    "label": "Browser Adjust",
+    "preview": "Preview",
+    "revert": "Revert",
+    "spacing": "Spacing (for example, 8px 12px)",
+    "text": "Replacement text"
+  },
   "actions": {
     "back": "Back",
     "cancelSelect": "Cancel selection",

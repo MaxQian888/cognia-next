@@ -1,4 +1,24 @@
 {
+  "agentStatusPanel": {
+    "active": "{count, plural, other {# 个运行中}}",
+    "emptyDescription": "向团队添加成员即可在此查看状态。",
+    "emptyTitle": "暂无成员",
+    "noTeam": "无 Agent 团队",
+    "noTeamDescription": "启动 Agent 团队会话即可在此查看状态。",
+    "openFullPage": "打开 Agent 工作区",
+    "statuses": {
+      "awaiting_approval": "等待审批",
+      "cancelled": "已取消",
+      "completed": "已完成",
+      "executing": "执行中",
+      "failed": "失败",
+      "idle": "空闲",
+      "paused": "已暂停",
+      "planning": "规划中",
+      "shutdown": "已关闭"
+    },
+    "title": "Agent 状态"
+  },
   "actions": {
     "collapse": "收起工作台",
     "expand": "展开工作台",
@@ -10,6 +30,8 @@
     "resetLayout": "重置布局",
     "resize": "调整工作台宽度",
     "retry": "重试面板",
+    "historyBack": "后退",
+    "historyForward": "前进",
     "switchPanel": "切换面板",
     "unpin": "取消固定面板",
     "wide": "宽栏模式"
@@ -116,6 +138,34 @@
     "version": "版本",
     "workingDir": "工作目录"
   },
+  "logsPanel": {
+    "count": "{count, plural, other {# 条日志}}",
+    "emptyDescription": "当前过滤条件下没有日志条目。",
+    "emptyTitle": "暂无日志",
+    "filterLabel": "按级别过滤",
+    "levels": {
+      "all": "全部",
+      "debug": "调试",
+      "error": "错误",
+      "info": "信息",
+      "trace": "追踪",
+      "warn": "警告"
+    },
+    "loading": "正在加载日志…",
+    "openFullPage": "打开完整日志查看器",
+    "title": "日志"
+  },
+  "memoryPanel": {
+    "addMemory": "添加记忆",
+    "count": "{count, plural, other {# 条记忆}}",
+    "emptyDescription": "助手学习过程中记忆会显示在这里，也可以手动添加。",
+    "emptyTitle": "暂无记忆",
+    "openFullPage": "打开完整记忆页面",
+    "searchLabel": "搜索记忆",
+    "searchPlaceholder": "搜索记忆…",
+    "sortLabel": "排序方式",
+    "title": "记忆"
+  },
   "mobileDescription": "当前资源的 AI、评论、检查、审阅与预览工具。",
   "mobileTitle": "上下文工作台",
   "panelError": "面板暂不可用",
@@ -129,6 +179,12 @@
     "undo": "撤销应用"
   },
   "proposalReview": "提案审阅",
+  "quickSwitch": {
+    "description": "跳转到工作台中的任意面板。",
+    "empty": "没有匹配的面板。",
+    "placeholder": "搜索面板…",
+    "title": "切换面板"
+  },
   "resourceChat": "AI 会话",
   "sessionSidechat": "侧聊",
   "sessionSources": {
@@ -158,6 +214,21 @@
     "searchLabel": "搜索会话来源",
     "searchPlaceholder": "搜索文件、网页和工具…",
     "title": "会话来源"
+  },
+  "sourceControlPanel": {
+    "changeCount": "{count, plural, other {# 项变更}}",
+    "clean": "工作区干净",
+    "cleanDescription": "没有未提交的变更。",
+    "commit": "提交",
+    "commitLabel": "提交信息",
+    "commitPlaceholder": "提交信息…",
+    "detached": "HEAD 已分离",
+    "noRepo": "无仓库",
+    "noRepoDescription": "打开包含 Git 仓库的项目即可在此查看源代码管理。",
+    "openFullPage": "打开完整源代码管理",
+    "staged": "{count, plural, other {# 项已暂存}}",
+    "title": "源代码管理",
+    "unstaged": "{count, plural, other {# 项变更}}"
   },
   "sidechatPlaceholder": {
     "description": "请先打开一个会话，再使用侧聊调查旁支问题，避免打扰主对话。",

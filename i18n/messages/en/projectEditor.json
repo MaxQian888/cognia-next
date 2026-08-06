@@ -39,6 +39,11 @@
     "unsupportedDesc": "code-server has no build for your operating system. Use your local VS Code instead.",
     "unsupportedTitle": "Pro IDE unavailable here"
   },
+  "proIdeChatBridge": {
+    "explain": "Please explain this code.",
+    "fix": "Please fix the issues in this code.",
+    "review": "Please review this code for potential bugs and improvements."
+  },
   "refresh": "Refresh",
   "rename": "Rename",
   "rootLabel": "Project root",

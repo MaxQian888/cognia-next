@@ -26,6 +26,10 @@
       "matches": "{count, plural, =1 {1 match} other {# matches}}"
     },
     "rowAria": "{name} tool call — {status}",
+    "semantic": {
+      "readOnly": "Read only",
+      "writeCapable": "Can modify"
+    },
     "status": {
       "awaitingApproval": "Awaiting approval",
       "completed": "Completed",
@@ -37,6 +41,10 @@
     },
     "subagents": {
       "summary": "{count, plural, =1 {1 agent} other {# agents}}"
+    },
+    "toolSummary": {
+      "ariaLabel": "Summary of preceding tool calls",
+      "label": "Tool summary"
     }
   },
   "agentTeamDispatch": {
@@ -156,6 +164,15 @@
     "undo": "Undo compaction",
     "undoFailed": "Couldn't restore the conversation",
     "undoSuccess": "Conversation restored"
+  },
+  "checkpoint": {
+    "action": "Restore files to this checkpoint",
+    "cancel": "Cancel",
+    "confirm": "Restore files",
+    "description": "Review the dry-run result before restoring tracked files. Conversation history is not changed.",
+    "previewFailed": "Could not preview this checkpoint.",
+    "restoreFailed": "Could not restore this checkpoint.",
+    "title": "Restore file checkpoint"
   },
   "composer": {
     "ariaAttachImage": "Attach files",
@@ -390,7 +407,8 @@
       "noProviders": "No providers configured",
       "routingGroup": "Routing",
       "searchPlaceholder": "Search models…",
-      "switchModelAria": "Switch model"
+      "switchModelAria": "Switch model",
+      "title": "Select a model"
     },
     "paramForm": {
       "cancel": "Cancel",
@@ -792,6 +810,43 @@
     "providerUndoTooltip": "Run the provider's advertised /undo command",
     "providerUndoWarningDescription": "The provider may revert conversation state and file changes. This is provider-native undo, not a compaction restore. This warning is remembered for this external-agent configuration.",
     "providerUndoWarningTitle": "Provider Undo may change files",
+    "execution": {
+      "addEnv": "Add variable",
+      "effort": "Execution effort",
+      "effortValues": {
+        "high": "High",
+        "low": "Low",
+        "max": "Maximum",
+        "medium": "Medium",
+        "xhigh": "Extra high"
+      },
+      "envDescription": "Session values override variables with the same name on the Agent. Secret values stay in the secure keyring.",
+      "envKind": "Type",
+      "envName": "Environment variable name",
+      "envNameDuplicate": "Environment variable {name} is duplicated.",
+      "envNameInvalid": "Environment variable {name} has an invalid name.",
+      "envNamePlaceholder": "API_BASE_URL",
+      "envPlain": "Plain",
+      "envPlainPlaceholder": "Value",
+      "envSecret": "Secret",
+      "envSecretPlaceholder": "Stored securely; leave blank to keep the current value",
+      "envSecretRequired": "Enter a secret value for {name}.",
+      "envSecretSaveFailed": "Could not securely save {name}.",
+      "envTitle": "Environment variables",
+      "envValue": "Environment variable value",
+      "inherit": "Inherit Agent or app default",
+      "maxTurns": "Maximum turns",
+      "maxTurnsHint": "Leave empty to inherit the Agent limit. Allowed range: 1–100.",
+      "maxTurnsInvalid": "Maximum turns must be an integer from 1 to 100.",
+      "maxTurnsPlaceholder": "Inherit",
+      "removeEnv": "Remove environment variable {name}",
+      "summaryDefault": "Default",
+      "summaryEffort": "Effort",
+      "summaryExecute": "Execute",
+      "summaryMaxTurns": "Turns",
+      "summaryPlan": "Plan",
+      "summaryUtility": "Utility"
+    },
     "save": "Save",
     "sheet": {
       "sections": {
@@ -799,6 +854,7 @@
         "actions": "Session actions",
         "behavior": "Behavior",
         "display": "Display",
+        "execution": "Execution overrides",
         "memory": "Memory",
         "role": "Role & abilities",
         "status": "Status"
@@ -845,12 +901,15 @@
   },
   "inlineError": {
     "dismiss": "Dismiss",
+    "environmentSetupFailed": "Project environment setup failed. Retry, or explicitly bypass setup for this interactive turn.",
+    "environmentUnavailable": "The selected project environment is unavailable.",
     "noSession": "No conversation is open. Start a new one to send this.",
     "openSettings": "Open settings",
     "pendingPromptPiiBlocked": "The automated prompt was blocked because it may contain private or credential-like data. Start a normal chat and share only the details you intend to send.",
     "retry": "Retry",
     "sidecarExited": "The assistant stopped unexpectedly and the turn was interrupted. Retry to continue.",
     "title": "Failed to send",
+    "managedWorktreeUnavailable": "The managed worktree is unavailable. This task was not run locally.",
     "unflushedEditorBuffers": "{count, plural, one {# open file could not be saved} other {# open files could not be saved}} before this turn, so the agent may read an out-of-date copy: {files}"
   },
   "jump": {
@@ -1158,6 +1217,7 @@
       "failedToLoad": "Failed to load audio",
       "loop": "Loop",
       "mute": "Mute",
+      "playPause": "Play or pause audio",
       "skipBack": "-10s",
       "skipForward": "+10s",
       "unmute": "Unmute"
@@ -1362,10 +1422,12 @@
     "ranSlashCommand": "ran slash command"
   },
   "sourcesPart": {
+    "agentKnowledgeHeader": "Agent Knowledge Base excerpts ({count})",
     "citationsLabel": "{count, plural, =1 {1 web source} other {# web sources}}",
     "degradedNotice": "Twin retrieval unavailable — this reply skipped the twin's documents.",
     "originLabel": {
       "anthropic": "Web",
+      "agentKnowledgeBase": "Agent KB",
       "footnote": "Note",
       "memory": "Memory",
       "twinRag": "Twin",
@@ -1439,6 +1501,7 @@
     "yesterday": "Yesterday"
   },
   "toolApproval": {
+    "actionsTitle": "Approval actions",
     "allowAlways": "Allow always",
     "allowOnce": "Allow once",
     "askedBySubagent": "Asked by {subagent} (run {runId})",

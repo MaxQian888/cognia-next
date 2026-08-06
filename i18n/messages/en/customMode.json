@@ -75,6 +75,7 @@
   "mcpTools": "MCP Tools",
   "modeGenerationFailed": "Failed to generate mode from description",
   "modePreview": "Mode Preview",
+  "noToolsSelected": "No tools selected",
   "modelOverride": "Model Override",
   "modelOverridePlaceholder": "Leave empty to use default",
   "modelSettings": "Model",
@@ -99,6 +100,7 @@
   "templates": "Quick Start Templates",
   "tools": "Tools",
   "toolsLabel": "Tools:",
+  "unnamedMode": "Unnamed mode",
   "toolsUnavailable": "Some tools require configuration",
   "yes": "Yes"
 }

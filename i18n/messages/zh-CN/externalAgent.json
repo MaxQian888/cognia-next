@@ -318,6 +318,7 @@
   "statusError": "错误",
   "statusReconnecting": "重连中",
   "stepsCompleted": "已完成",
+  "togglePlan": "展开或收起执行计划",
   "traceHealth": {
     "cost": "成本",
     "errorDensity": "错误密度",

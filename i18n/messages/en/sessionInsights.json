@@ -94,7 +94,21 @@
     "thrashing": "Repeated command/edit thrashing detected",
     "title": "Friction & thrashing"
   },
+  "skillSuggestion": {
+    "action": "Review and extract",
+    "description": "This successful workflow may be reusable as a Skill.",
+    "error": "Could not prepare the Skill review.",
+    "preparing": "Preparing…",
+    "privacy": "Conversation content is read only after this click, redacted locally, and the resulting Skill stays disabled until you approve a trial.",
+    "ready": "Opened the Skill review.",
+    "title": "Extract this workflow as a Skill"
+  },
   "title": "Session insights",
+  "tests": {
+    "counts": "{passed} passed, {failed} failed",
+    "snapshot": "Test snapshot {index}",
+    "title": "Test results"
+  },
   "units": {
     "tokPerSec": "{value} tok/s"
   }

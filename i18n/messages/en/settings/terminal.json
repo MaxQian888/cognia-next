@@ -188,6 +188,8 @@
     "remove": "Remove profile",
     "setDefault": "Set as default",
     "shellLabel": "Shell",
+    "startupLabel": "Startup commands (one per line)",
+    "startupPlaceholder": "source ~/.nvm/nvm.sh\nnvm use 20",
     "syncError": "Could not synchronize terminal profiles with the terminal host",
     "title": "Launch profiles"
   },

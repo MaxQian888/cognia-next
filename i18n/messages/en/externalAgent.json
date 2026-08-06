@@ -318,6 +318,7 @@
   "statusError": "Error",
   "statusReconnecting": "Reconnecting",
   "stepsCompleted": "completed",
+  "togglePlan": "Toggle execution plan",
   "traceHealth": {
     "cost": "Cost",
     "errorDensity": "Error density",

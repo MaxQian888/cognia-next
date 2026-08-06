@@ -188,6 +188,8 @@
     "remove": "删除配置文件",
     "setDefault": "设为默认",
     "shellLabel": "Shell",
+    "startupLabel": "启动命令（每行一条）",
+    "startupPlaceholder": "source ~/.nvm/nvm.sh\nnvm use 20",
     "syncError": "无法与终端主机同步终端配置",
     "title": "启动配置文件"
   },

@@ -1,0 +1,61 @@
+{
+  "open": "Task board",
+  "openAria": "Open {name}'s task board",
+  "dialogTitle": "{name} task board",
+  "dialogDescription": "Queue, schedule, run, review, pause, and retry this Agent's durable tasks.",
+  "titleLabel": "Task title",
+  "descriptionLabel": "Instructions",
+  "priorityLabel": "Priority",
+  "approvalLabel": "Approval policy",
+  "scheduleLabel": "Planned time (optional)",
+  "dependenciesLabel": "Dependencies",
+  "create": "Add task",
+  "emptyTitle": "No tasks yet",
+  "emptyDescription": "Add a task above to build this Agent's queue.",
+  "emptyColumn": "No tasks",
+  "start": "Start",
+  "retry": "Retry",
+  "pause": "Pause",
+  "resume": "Resume",
+  "cancel": "Cancel",
+  "approve": "Approve",
+  "reject": "Reject",
+  "comment": "Comment",
+  "commentPlaceholder": "Add a review note…",
+  "details": "{attempts} attempts · {comments} comments",
+  "attempt": "Attempt {number}: {status}",
+  "dependencyCount": "{count} dependencies",
+  "moveDenied": "That move is owned by dependencies or the running Agent.",
+  "error": "Task action failed: {message}",
+  "status": {
+    "pending": "Pending",
+    "blocked": "Blocked",
+    "in_progress": "In progress",
+    "review": "Review",
+    "paused": "Paused",
+    "completed": "Completed",
+    "failed": "Failed",
+    "cancelled": "Cancelled"
+  },
+  "priority": {
+    "low": "Low",
+    "normal": "Normal",
+    "high": "High",
+    "critical": "Critical"
+  },
+  "approval": {
+    "auto": "Auto-approve success",
+    "on-risk": "Review risky results",
+    "manual": "Always review"
+  },
+  "attemptStatus": {
+    "queued": "Queued",
+    "running": "Running",
+    "paused": "Paused",
+    "review": "Review",
+    "completed": "Completed",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
+    "interrupted": "Interrupted"
+  }
+}

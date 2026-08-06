@@ -219,6 +219,7 @@
       "missingKey": "请在「设置 → Providers」配置 Anthropic API Key 后再使用 @claude。",
       "noAgent": "尚未为 {runtime} 配置外部 Agent。请到「设置 → 外部 Agent」添加。"
     },
+    "scrollToLatest": "滚动到最新消息",
     "streaming": "思考中…",
     "structuredPayload": "载荷",
     "tokenUsage": {
@@ -723,7 +724,8 @@
     "overview": "概览",
     "settings": "设置",
     "tasks": "任务",
-    "worktrees": "工作树"
+    "worktrees": "工作树",
+    "operations": "运行控制"
   },
   "tasks": {
     "addTask": "新建任务",
@@ -874,5 +876,164 @@
     },
     "refresh": "刷新",
     "title": "Agent 分支"
+  },
+  "commandCenter": {
+    "tab": "指挥中心",
+    "title": "持久化指挥中心",
+    "description": "统一管理全部持久化团队、运行、子任务、审批门、资源预算和交付栈。",
+    "bulkActions": "批量运行控制",
+    "empty": "没有符合筛选条件的持久化运行。",
+    "selectRun": "选择运行 {id}",
+    "stale": "轨迹已过期",
+    "gates": "{count} 个待处理审批门",
+    "children": "{count} 个子任务",
+    "priority": "优先级 {value}",
+    "queuePosition": "队列第 {value} 位",
+    "queueInactive": "未排队",
+    "usage": "{tokens} tokens · {seconds} 秒",
+    "cost": "预计 ${value}",
+    "costUnavailable": "成本不可用",
+    "slots": "{active}/{max} 个并发槽位",
+    "attempts": "{attempts} 次尝试 · {failures} 次失败",
+    "delivery": "{count} 个交付层",
+    "pullRequest": "PR #{number}",
+    "actionFailed": "{count} 个运行操作失败。",
+    "actionApplied": "已应用到 {count} 个运行。",
+    "filters": {
+      "search": "搜索团队、运行或目标",
+      "status": "状态",
+      "allStatuses": "全部状态",
+      "repository": "仓库",
+      "allRepositories": "全部仓库",
+      "project": "项目",
+      "allProjects": "全部项目",
+      "team": "团队",
+      "allTeams": "全部团队",
+      "runtime": "运行时",
+      "allRuntimes": "全部运行时",
+      "gate": "审批门",
+      "allGates": "全部审批门状态",
+      "pendingGate": "有待处理审批门",
+      "clearGate": "无待处理审批门",
+      "failureClass": "失败分类",
+      "allFailures": "全部失败分类"
+    },
+    "actions": {
+      "pause": "暂停",
+      "resume": "恢复",
+      "sleep": "休眠",
+      "wake": "唤醒",
+      "stop": "停止",
+      "terminate": "终止"
+    },
+    "status": {
+      "queued": "已排队",
+      "running": "运行中",
+      "pausing": "正在暂停",
+      "paused": "已暂停",
+      "sleeping": "休眠中",
+      "recovering": "恢复中",
+      "needs_input": "需要输入",
+      "completed": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "terminated": "已终止"
+    },
+    "deliveryStatus": {
+      "blocked": "已阻塞",
+      "ready": "就绪",
+      "publishing": "正在发布",
+      "ci_pending": "等待 CI",
+      "needs_remediation": "需要修复",
+      "awaiting_approval": "等待批准",
+      "merging": "正在合并",
+      "merged": "已合并",
+      "failed": "失败",
+      "cancelled": "已取消"
+    }
+  },
+  "operations": {
+    "legacy": "此团队将继续使用旧版运行时，直到你接受 durable-v2 迁移预览。",
+    "empty": "此团队尚无持久化运行。",
+    "status": {
+      "queued": "已排队",
+      "running": "运行中",
+      "pausing": "正在暂停",
+      "paused": "已暂停",
+      "sleeping": "休眠中",
+      "recovering": "恢复中",
+      "needs_input": "需要输入",
+      "completed": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "terminated": "已终止"
+    },
+    "run": {
+      "title": "当前持久化运行",
+      "decisionVersion": "决策版本 {value}",
+      "tokens": "{value} tokens",
+      "children": "{value} 个子任务"
+    },
+    "environment": {
+      "title": "环境预检",
+      "version": "{name} · 版本 {version}",
+      "missing": "尚未选择不可变环境版本。",
+      "ready": "主机能力已就绪",
+      "blocked": "已阻止：缺少 {capabilities}"
+    },
+    "decisions": {
+      "title": "决策账本",
+      "empty": "暂无约束或提案。",
+      "accept": "接受",
+      "reject": "拒绝",
+      "accepted": "决策已接受。",
+      "rejected": "决策已拒绝。"
+    },
+    "children": {
+      "title": "子会话与人工接管",
+      "noWorkspace": "工作区待创建",
+      "steerPlaceholder": "在下一个安全边界引导该子任务",
+      "steer": "发送引导",
+      "steered": "引导已记录。",
+      "commandsPlaceholder": "人工命令，每行一条",
+      "diffPlaceholder": "人工 diff 或编辑摘要",
+      "openEditor": "打开编辑器",
+      "takeover": "开始接管",
+      "takeoverStarted": "子任务已暂停，可人工接管。",
+      "resume": "创建检查点并恢复",
+      "takeoverCompleted": "人工接管已创建检查点。",
+      "openTerminal": "打开终端",
+      "openBrowser": "打开浏览器"
+    },
+    "evidence": {
+      "title": "证据包",
+      "empty": "尚未收集证据。"
+    },
+    "delivery": {
+      "title": "交付图",
+      "empty": "尚未准备交付栈。",
+      "approveMerge": "批准并合并交付栈",
+      "merged": "交付栈已合并。"
+    },
+    "retrospective": {
+      "title": "复盘学习",
+      "empty": "尚未生成复盘。",
+      "approve": "批准并应用",
+      "reject": "拒绝",
+      "approved": "提案已应用。",
+      "rejected": "提案已拒绝。"
+    },
+    "migration": {
+      "preview": "预览 durable-v2 迁移",
+      "summary": "迁移只影响未来运行；现有定义和运行记录仍可读取。",
+      "runtime": "使用基于检查点的 durable-v2 执行。",
+      "writer": "默认串行化仓库写入。",
+      "environment": "每次运行冻结所选环境版本。",
+      "retention": "本地轨迹保留到显式清理。",
+      "blocked": "迁移已阻止：{reason}",
+      "primaryRepository": "必须且只能配置一个主仓库",
+      "accept": "接受迁移",
+      "migrated": "团队已迁移到 durable-v2。"
+    }
   }
 }

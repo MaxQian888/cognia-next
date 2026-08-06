@@ -26,6 +26,10 @@
       "matches": "{count} 处匹配"
     },
     "rowAria": "{name} 工具调用 — {status}",
+    "semantic": {
+      "readOnly": "只读",
+      "writeCapable": "可修改"
+    },
     "status": {
       "awaitingApproval": "等待批准",
       "completed": "已完成",
@@ -37,6 +41,10 @@
     },
     "subagents": {
       "summary": "{count, plural, other {# 个子代理}}"
+    },
+    "toolSummary": {
+      "ariaLabel": "前序工具调用摘要",
+      "label": "工具摘要"
     }
   },
   "agentTeamDispatch": {
@@ -156,6 +164,15 @@
     "undo": "撤销压缩",
     "undoFailed": "无法恢复对话",
     "undoSuccess": "对话已恢复"
+  },
+  "checkpoint": {
+    "action": "恢复到此文件检查点",
+    "cancel": "取消",
+    "confirm": "恢复文件",
+    "description": "请先检查试运行结果，再恢复被跟踪的文件。对话历史不会改变。",
+    "previewFailed": "无法预览此检查点。",
+    "restoreFailed": "无法恢复此检查点。",
+    "title": "恢复文件检查点"
   },
   "composer": {
     "ariaAttachImage": "添加文件",
@@ -390,7 +407,8 @@
       "noProviders": "尚未配置任何模型提供商",
       "routingGroup": "路由",
       "searchPlaceholder": "搜索模型…",
-      "switchModelAria": "切换模型"
+      "switchModelAria": "切换模型",
+      "title": "选择模型"
     },
     "paramForm": {
       "cancel": "取消",
@@ -792,6 +810,43 @@
     "providerUndoTooltip": "运行提供商声明的 /undo 命令",
     "providerUndoWarningDescription": "提供商可能会还原对话状态和文件更改。这是提供商原生撤销，并非恢复压缩前上下文。系统会针对当前外部智能体配置记住此确认。",
     "providerUndoWarningTitle": "提供商撤销可能会更改文件",
+    "execution": {
+      "addEnv": "添加变量",
+      "effort": "执行思考强度",
+      "effortValues": {
+        "high": "高",
+        "low": "低",
+        "max": "最高",
+        "medium": "中",
+        "xhigh": "超高"
+      },
+      "envDescription": "会话变量会覆盖 Agent 中的同名变量；密钥值仅保存在安全钥匙串中。",
+      "envKind": "类型",
+      "envName": "环境变量名称",
+      "envNameDuplicate": "环境变量 {name} 重复。",
+      "envNameInvalid": "环境变量 {name} 的名称无效。",
+      "envNamePlaceholder": "API_BASE_URL",
+      "envPlain": "明文",
+      "envPlainPlaceholder": "值",
+      "envSecret": "密钥",
+      "envSecretPlaceholder": "安全存储；留空以保留当前值",
+      "envSecretRequired": "请输入 {name} 的密钥值。",
+      "envSecretSaveFailed": "无法安全保存 {name}。",
+      "envTitle": "环境变量",
+      "envValue": "环境变量值",
+      "inherit": "继承 Agent 或应用默认值",
+      "maxTurns": "最大轮次",
+      "maxTurnsHint": "留空以继承 Agent 限制；允许范围为 1–100。",
+      "maxTurnsInvalid": "最大轮次必须是 1 到 100 之间的整数。",
+      "maxTurnsPlaceholder": "继承",
+      "removeEnv": "移除环境变量 {name}",
+      "summaryDefault": "默认",
+      "summaryEffort": "强度",
+      "summaryExecute": "执行",
+      "summaryMaxTurns": "轮次",
+      "summaryPlan": "规划",
+      "summaryUtility": "辅助"
+    },
     "save": "保存",
     "sheet": {
       "sections": {
@@ -799,6 +854,7 @@
         "actions": "会话操作",
         "behavior": "行为",
         "display": "显示",
+        "execution": "执行覆盖",
         "memory": "记忆",
         "role": "角色与能力",
         "status": "状态"
@@ -845,12 +901,15 @@
   },
   "inlineError": {
     "dismiss": "忽略",
+    "environmentSetupFailed": "项目环境初始化失败。请重试，或仅为当前交互回合明确绕过初始化。",
+    "environmentUnavailable": "所选项目环境不可用。",
     "noSession": "当前没有打开的会话，请先新建一个再发送。",
     "openSettings": "打开设置",
     "pendingPromptPiiBlocked": "自动提示词可能包含隐私或凭据类数据，已阻止发送。请新建普通对话，并只提供你明确希望发送的内容。",
     "retry": "重试",
     "sidecarExited": "AI 进程意外停止，本轮已中断。点击重试可继续。",
     "title": "发送失败",
+    "managedWorktreeUnavailable": "托管 Worktree 不可用。此任务未在本地目录中运行。",
     "unflushedEditorBuffers": "本回合开始前有 {count} 个打开的文件未能保存，agent 可能读到过期内容：{files}"
   },
   "jump": {
@@ -1158,6 +1217,7 @@
       "failedToLoad": "音频加载失败",
       "loop": "循环",
       "mute": "静音",
+      "playPause": "播放或暂停音频",
       "skipBack": "-10 秒",
       "skipForward": "+10 秒",
       "unmute": "取消静音"
@@ -1362,10 +1422,12 @@
     "ranSlashCommand": "执行了斜杠命令"
   },
   "sourcesPart": {
+    "agentKnowledgeHeader": "Agent 知识库片段（{count}）",
     "citationsLabel": "{count, plural, other {# 个网页来源}}",
     "degradedNotice": "数字分身检索不可用 — 本次回复未使用其资料。",
     "originLabel": {
       "anthropic": "网络",
+      "agentKnowledgeBase": "Agent 知识库",
       "footnote": "脚注",
       "memory": "记忆",
       "twinRag": "数字分身",
@@ -1439,6 +1501,7 @@
     "yesterday": "昨天"
   },
   "toolApproval": {
+    "actionsTitle": "审批操作",
     "allowAlways": "始终允许",
     "allowOnce": "仅本次允许",
     "askedBySubagent": "由子代理 {subagent} 请求（运行 {runId}）",
