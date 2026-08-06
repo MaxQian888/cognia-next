@@ -5,6 +5,7 @@ import { isAgentEventEnvelope } from "@cognia/agent-config-types/agent-execution
 
 import {
   canonicalEventFromExternalEvent,
+  redactAgentEventEnvelope,
   captureEventFromCanonical,
   createEnvelopeSequencer,
   isKnownCanonicalAgentEventKind,
@@ -109,6 +110,25 @@ describe("canonicalEventFromExternalEvent", () => {
       runtime: "external",
       payload: { type: "vendor_specific", weird: true },
     })
+  })
+})
+
+describe("redactAgentEventEnvelope", () => {
+  it("preserves ordering metadata while removing sensitive event strings", () => {
+    const envelope = createEnvelopeSequencer({
+      sessionId: "session-1",
+      runId: "run-1",
+      attemptId: "attempt-1",
+      hostRef: "local",
+      runtime: "external",
+      turnId: "turn-1",
+    })({ kind: "text-delta", delta: "Contact alice@example.com" })
+
+    const redacted = redactAgentEventEnvelope(envelope)
+    expect(redacted.eventId).toBe(envelope.eventId)
+    expect(redacted.sequence).toBe(0)
+    expect(JSON.stringify(redacted.event)).not.toContain("alice@example.com")
+    expect(JSON.stringify(redacted.event)).toContain("<EMAIL_001>")
   })
 })
 

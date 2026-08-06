@@ -11,8 +11,10 @@
 import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 
 import { appendEvents, listRunEvents } from "@/lib/workflow/runtime/event-log"
+import { getDb } from "@/lib/db/schema"
 
 const ENVELOPE_KIND = "agent_envelope"
+export const CANONICAL_EVENT_DETAIL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 
 interface EnvelopePayload {
   kind: typeof ENVELOPE_KIND
@@ -79,6 +81,24 @@ export async function readCanonicalEnvelopes(runId: string): Promise<AgentEventE
     .map((row) => row.payload)
     .filter(isEnvelopePayload)
     .map((payload) => payload.envelope)
+}
+
+/**
+ * Remove expired canonical detail while leaving workflow events and the
+ * separate session-summary projection intact. Returns the number deleted.
+ */
+export async function pruneCanonicalEnvelopeDetails(
+  now = Date.now(),
+  retentionMs = CANONICAL_EVENT_DETAIL_RETENTION_MS
+): Promise<number> {
+  const cutoff = now - retentionMs
+  const table = getDb().workflowRunEvents
+  const expired = await table
+    .filter((row) => row.ts < cutoff && isEnvelopePayload(row.payload))
+    .primaryKeys()
+  if (expired.length > 0) await table.bulkDelete(expired)
+  seenByRun.clear()
+  return expired.length
 }
 
 /**

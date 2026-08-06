@@ -13,6 +13,10 @@ jest.mock("./use-fleet-stream", () => ({
 }))
 
 const recordMock = jest.fn()
+const pruneMock = jest.fn()
+jest.mock("@/lib/ai/agent/recovery/canonical-log", () => ({
+  pruneCanonicalEnvelopeDetails: () => pruneMock(),
+}))
 jest.mock("@/lib/db/fleet-sessions", () => ({
   recordFleetHistory: (...args: unknown[]) => recordMock(...args),
   fleetHistoryId: (agent: string, sessionId: string) => `${agent}:${sessionId}`,
@@ -53,6 +57,7 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
 
 beforeEach(() => {
   recordMock.mockReset()
+  pruneMock.mockReset()
   streamState.available = true
   streamState.snapshot = { sessions: [], generatedAt: 0 }
 })
@@ -91,6 +96,10 @@ describe("toHistoryRow", () => {
 })
 
 describe("useFleetHistorySink", () => {
+  it("prunes expired canonical detail when the desktop sink mounts", async () => {
+    renderHook(() => useFleetHistorySink())
+    await waitFor(() => expect(pruneMock).toHaveBeenCalledTimes(1))
+  })
   it("persists every session in the snapshot", async () => {
     streamState.snapshot = {
       generatedAt: 5000,

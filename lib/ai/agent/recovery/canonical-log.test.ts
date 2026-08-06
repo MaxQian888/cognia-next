@@ -9,11 +9,13 @@ import {
   __resetCanonicalLogForTesting,
   appendCanonicalEnvelopes,
   projectCanonicalHeader,
+  pruneCanonicalEnvelopeDetails,
   readCanonicalEnvelopes,
 } from "./canonical-log"
 import { appendEvent, listRunEvents } from "@/lib/workflow/runtime/event-log"
 import { mapWorkflowRunEvent } from "@/lib/execution/sources/workflow"
 import { __resetDbForTesting } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
 
 function envelope(sequence: number, attemptId = "a1"): AgentEventEnvelope {
   return {
@@ -91,5 +93,18 @@ describe("canonical envelope log", () => {
   it("projects an empty stream without optional fields", async () => {
     const header = projectCanonicalHeader("run-e", [])
     expect(header).toEqual({ runId: "run-e", eventCount: 0, lastSequenceByAttempt: {} })
+  })
+
+  it("prunes only canonical detail older than the 30-day retention window", async () => {
+    await appendCanonicalEnvelopes("run-old", [envelope(0)])
+    await appendEvent({ runId: "run-old", type: "run_started" })
+    const rows = await listRunEvents("run-old")
+    await getDb().workflowRunEvents.update(rows[0].id, { ts: 1 })
+    await getDb().workflowRunEvents.update(rows[1].id, { ts: 1 })
+
+    expect(await pruneCanonicalEnvelopeDetails(31 * 24 * 60 * 60 * 1000)).toBe(1)
+    const remaining = await listRunEvents("run-old")
+    expect(remaining).toHaveLength(1)
+    expect(remaining[0].type).toBe("run_started")
   })
 })

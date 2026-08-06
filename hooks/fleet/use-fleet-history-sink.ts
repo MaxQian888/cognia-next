@@ -16,6 +16,7 @@ import { useFleetStream } from "./use-fleet-stream"
 import { recordFleetHistory, type FleetSessionHistoryRow } from "@/lib/db/fleet-sessions"
 import type { FleetSession } from "@/lib/fleet/types"
 import { fleetHistoryId } from "@/lib/db/fleet-sessions"
+import { pruneCanonicalEnvelopeDetails } from "@/lib/ai/agent/recovery/canonical-log"
 
 /** Project one live session into a persistable history row. Pure. */
 export function toHistoryRow(session: FleetSession, updatedAt: number): FleetSessionHistoryRow {
@@ -38,6 +39,10 @@ export function toHistoryRow(session: FleetSession, updatedAt: number): FleetSes
 
 export function useFleetHistorySink(): void {
   const { snapshot, available } = useFleetStream()
+
+  useEffect(() => {
+    if (available) void pruneCanonicalEnvelopeDetails()
+  }, [available])
 
   useEffect(() => {
     if (!available || snapshot.sessions.length === 0) return
