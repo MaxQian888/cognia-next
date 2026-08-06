@@ -9634,6 +9634,10 @@
         "desc": "Fires when the working directory changes.",
         "label": "Directory changed"
       },
+      "DirectoryAdded": {
+        "desc": "Fires when a directory is added to the session workspace.",
+        "label": "Directory added"
+      },
       "Elicitation": {
         "desc": "Fires when the agent prompts you for structured input.",
         "label": "Elicitation"
@@ -9649,6 +9653,10 @@
       "InstructionsLoaded": {
         "desc": "Fires when CLAUDE.md / instructions are loaded.",
         "label": "Instructions loaded"
+      },
+      "MessageDisplay": {
+        "desc": "Fires when the runtime displays a message to the user.",
+        "label": "Message displayed"
       },
       "Notification": {
         "desc": "Fires on a runtime notification (idle, awaiting input).",
@@ -9686,6 +9694,10 @@
         "desc": "Fires before a tool runs; a hook can block or rewrite the call.",
         "label": "Before tool"
       },
+      "Setup": {
+        "desc": "Fires while a repository or worktree environment is being set up.",
+        "label": "Setup"
+      },
       "SessionEnd": {
         "desc": "Fires when a session ends; run cleanup or logging.",
         "label": "Session end"
@@ -9701,6 +9713,10 @@
       "StopFailure": {
         "desc": "Fires when a turn ends because of an error.",
         "label": "Stop (failed)"
+      },
+      "SubagentStart": {
+        "desc": "Fires when a native subagent begins its run.",
+        "label": "Subagent start"
       },
       "SubagentStop": {
         "desc": "Fires when a subagent finishes its run.",
