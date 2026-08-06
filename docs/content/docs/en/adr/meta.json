@@ -105,6 +105,7 @@
     "0102-unified-observability-crash-diagnostics",
     "0104-provider-diagnostics-control-plane",
     "0106-end-to-end-skill-recorder",
-    "0107-coding-agent-migration"
+    "0107-coding-agent-migration",
+    "0108-codex-inspired-desktop-workflows"
   ]
 }
