@@ -30,6 +30,14 @@ import {
   handleTeamTaskCreate,
   handleTeamTaskMove,
 } from "@/lib/companion/agent-team-write-handlers"
+import {
+  handleAgentTaskCancel,
+  handleAgentTaskComment,
+  handleAgentTaskMove,
+  handleAgentTaskPause,
+  handleAgentTaskResume,
+  handleAgentTaskStart,
+} from "@/lib/companion/agent-task-write-handlers"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { getDb } from "@/lib/db/schema"
 import { getSettings, saveSettings } from "@/lib/db/settings"
@@ -274,6 +282,20 @@ export async function dispatchCommand(
       return handleTeamRunResume(payload)
     case "team_run_stop":
       return handleTeamRunStop(payload)
+    // Single-Agent task board control. Task ownership is revalidated against
+    // the live Dexie row before every Scheduler or state-machine action.
+    case "agent_task_start":
+      return handleAgentTaskStart(payload)
+    case "agent_task_pause":
+      return handleAgentTaskPause(payload)
+    case "agent_task_resume":
+      return handleAgentTaskResume(payload)
+    case "agent_task_cancel":
+      return handleAgentTaskCancel(payload)
+    case "agent_task_comment":
+      return handleAgentTaskComment(payload)
+    case "agent_task_move":
+      return handleAgentTaskMove(payload)
     // Workflow CRUD (ADR-0027 Wave 4.1). Definitions live in Dexie; these
     // mirror the desktop editor's create/update/delete + schedule pause/resume
     // and a run listing + remote cancel.

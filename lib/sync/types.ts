@@ -61,6 +61,8 @@ export type SyncableTable =
   // render the kanban offline. Mobile is a viewer; edits travel back as
   // Companion RPC commands (`team_task_*`), never as data-level writes.
   | "agentTeamBoard"
+  | "agentTasks"
+  | "agentTaskAttempts"
   // Unified template platform portable projections. Device bindings,
   // credentials, local Twin preferences, and migration rollback snapshots
   // deliberately have no sync table.

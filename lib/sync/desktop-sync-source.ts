@@ -35,6 +35,7 @@ import { invoke } from "@tauri-apps/api/core"
 
 import { readTombstonesSince } from "./tombstones"
 import type { SyncDelta, SyncableTable } from "./types"
+import { portableExecutionContext } from "@/lib/task-workspace/managed-workspace"
 
 /** Page size for paged tables (messages). One round-trip pulls at most this many rows. */
 const MESSAGES_PAGE_SIZE = 500
@@ -159,6 +160,10 @@ export async function readDexieDelta(
       return readMemoriesDelta(since)
     case "agentTeamBoard":
       return readAgentTeamBoardDelta(since)
+    case "agentTasks":
+      return readAgentTasksDelta(since)
+    case "agentTaskAttempts":
+      return readAgentTaskAttemptsDelta(since)
     case "templateDefinitions":
       return readTemplateDefinitionsDelta(since)
     case "templatePackages":
@@ -187,7 +192,11 @@ async function readSkillsDelta(since: number): Promise<SyncDelta<Skill>> {
 }
 
 async function readSessionsDelta(since: number): Promise<SyncDelta<ChatSession>> {
-  const rows = await getDb().sessions.where("updatedAt").above(since).toArray()
+  const rows = (await getDb().sessions.where("updatedAt").above(since).toArray()).map((row) =>
+    row.executionContext
+      ? { ...row, executionContext: portableExecutionContext(row.executionContext) }
+      : row
+  )
   return finalizeDelta("sessions", rows, since)
 }
 
@@ -356,6 +365,16 @@ async function readAgentTeamBoardDelta(since: number): Promise<SyncDelta<unknown
   // desktop projector (`lib/db/agent-team-projection.ts`) — cursor directly.
   const rows = await getDb().agentTeamBoard.where("updatedAt").above(since).toArray()
   return finalizeDelta("agentTeamBoard", rows as UpdatedAtRow[], since)
+}
+
+async function readAgentTasksDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().agentTasks.where("updatedAt").above(since).toArray()
+  return finalizeDelta("agentTasks", rows, since)
+}
+
+async function readAgentTaskAttemptsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().agentTaskAttempts.where("updatedAt").above(since).toArray()
+  return finalizeDelta("agentTaskAttempts", rows, since)
 }
 
 /**

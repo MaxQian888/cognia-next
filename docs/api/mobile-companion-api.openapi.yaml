@@ -1158,6 +1158,101 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/agent_task_start:
+    post:
+      operationId: rpcAgentTaskStart
+      tags: [rpc-remote-control]
+      summary: Start or retry a single-Agent board task through Scheduler.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentTaskCommandArgs" }
+      responses: { "200": { $ref: "#/components/responses/AgentTaskCommandResult" }, "401": { $ref: "#/components/responses/JwtRejected" }, "403": { $ref: "#/components/responses/RemoteControlForbidden" } }
+
+  /api/v1/_rpc/agent_task_pause:
+    post:
+      operationId: rpcAgentTaskPause
+      tags: [rpc-remote-control]
+      summary: Pause a running single-Agent board task.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentTaskCommandArgs" }
+      responses: { "200": { $ref: "#/components/responses/AgentTaskCommandResult" }, "401": { $ref: "#/components/responses/JwtRejected" }, "403": { $ref: "#/components/responses/RemoteControlForbidden" } }
+
+  /api/v1/_rpc/agent_task_resume:
+    post:
+      operationId: rpcAgentTaskResume
+      tags: [rpc-remote-control]
+      summary: Resume a paused single-Agent board task.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentTaskCommandArgs" }
+      responses: { "200": { $ref: "#/components/responses/AgentTaskCommandResult" }, "401": { $ref: "#/components/responses/JwtRejected" }, "403": { $ref: "#/components/responses/RemoteControlForbidden" } }
+
+  /api/v1/_rpc/agent_task_cancel:
+    post:
+      operationId: rpcAgentTaskCancel
+      tags: [rpc-remote-control]
+      summary: Cancel a single-Agent board task and its Scheduler entry.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentTaskCommandArgs" }
+      responses: { "200": { $ref: "#/components/responses/AgentTaskCommandResult" }, "401": { $ref: "#/components/responses/JwtRejected" }, "403": { $ref: "#/components/responses/RemoteControlForbidden" } }
+
+  /api/v1/_rpc/agent_task_comment:
+    post:
+      operationId: rpcAgentTaskComment
+      tags: [rpc-remote-control]
+      summary: Add a user comment to a single-Agent board task.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/AgentTaskCommandArgs"
+                - type: object
+                  required: [text]
+                  properties: { text: { type: string, minLength: 1, maxLength: 4000 } }
+      responses: { "200": { $ref: "#/components/responses/AgentTaskCommandResult" }, "401": { $ref: "#/components/responses/JwtRejected" }, "403": { $ref: "#/components/responses/RemoteControlForbidden" } }
+
+  /api/v1/_rpc/agent_task_move:
+    post:
+      operationId: rpcAgentTaskMove
+      tags: [rpc-remote-control]
+      summary: Apply a guarded human transition to a single-Agent board task.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/AgentTaskCommandArgs"
+                - type: object
+                  required: [to]
+                  properties:
+                    to: { type: string, enum: [pending, paused, completed, failed, cancelled] }
+      responses: { "200": { $ref: "#/components/responses/AgentTaskCommandResult" }, "401": { $ref: "#/components/responses/JwtRejected" }, "403": { $ref: "#/components/responses/RemoteControlForbidden" } }
+
   /api/v1/_rpc/goal_create:
     post:
       operationId: rpcGoalCreate
@@ -12417,6 +12512,11 @@ components:
           - sync_pull
 
   responses:
+    AgentTaskCommandResult:
+      description: A live single-Agent task command verdict.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/AgentTaskCommandResult" }
     JwtRejected:
       description: |
         JWT missing, malformed, expired, wrong scope, or wrong signature.
@@ -12481,6 +12581,24 @@ components:
                 }
 
   schemas:
+    AgentTaskCommandArgs:
+      type: object
+      required: [agentId, taskId]
+      properties:
+        agentId: { type: string, minLength: 1 }
+        taskId: { type: string, minLength: 1 }
+
+    AgentTaskCommandResult:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        reason:
+          type: string
+          enum: [invalid-payload, invalid-status, task-not-found, transition-denied]
+        executionId: { type: string }
+        commentId: { type: string }
+
     # ── Auth wire shapes ─────────────────────────────────────────────────────
 
     IssueResponse:

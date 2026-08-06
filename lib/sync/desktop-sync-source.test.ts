@@ -83,6 +83,38 @@ describe("readDexieDelta", () => {
     expect(delta.next_since).toBe(10)
   })
 
+  it("never syncs a managed workspace's device-local filesystem paths", async () => {
+    const db = getDb()
+    await db.sessions.put({
+      id: "s-managed",
+      title: "Managed",
+      kind: "direct",
+      createdAt: 0,
+      updatedAt: 10,
+      executionContext: {
+        location: "managedWorktree",
+        workspaceBinding: { kind: "managed", workspaceId: "managed-workspace:s-managed" },
+        managedWorkspace: { availability: "available", localRoot: "/Users/a/private" },
+        projectId: "",
+        projectRoot: "/Users/a/private",
+        worktreePath: "/Users/a/private/.run",
+        branch: "codex/private",
+        taskWorkspace: { taskId: "task-workspace:s-managed", workspaceKey: "s-managed" },
+      },
+    } as never)
+
+    const delta = await readDexieDelta("sessions", 0)
+    const row = delta.rows[0] as Record<string, unknown>
+    expect(row.executionContext).toEqual(
+      expect.objectContaining({
+        projectRoot: "",
+        managedWorkspace: { availability: "missing-on-device" },
+      })
+    )
+    expect(JSON.stringify(row)).not.toContain("/Users/a/private")
+    expect(JSON.stringify(row)).not.toContain("codex/private")
+  })
+
   it("includes embedded resource sessions in authenticated device sync without changing visibility", async () => {
     const db = getDb()
     await db.sessions.put({

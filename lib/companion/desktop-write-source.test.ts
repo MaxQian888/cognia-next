@@ -40,6 +40,21 @@ jest.mock("@/lib/goal/runtime", () => {
   return { getGoalRuntime: () => ({ pauseGoal, resumeGoal, stopGoal }) }
 })
 
+const mockAgentTaskStart = jest.fn().mockResolvedValue({ ok: true, executionId: "execution-1" })
+const mockAgentTaskPause = jest.fn().mockResolvedValue({ ok: true })
+const mockAgentTaskResume = jest.fn().mockResolvedValue({ ok: true })
+const mockAgentTaskCancel = jest.fn().mockResolvedValue({ ok: true })
+const mockAgentTaskComment = jest.fn().mockResolvedValue({ ok: true, commentId: "comment-1" })
+const mockAgentTaskMove = jest.fn().mockResolvedValue({ ok: true })
+jest.mock("@/lib/companion/agent-task-write-handlers", () => ({
+  handleAgentTaskStart: (...args: unknown[]) => mockAgentTaskStart(...args),
+  handleAgentTaskPause: (...args: unknown[]) => mockAgentTaskPause(...args),
+  handleAgentTaskResume: (...args: unknown[]) => mockAgentTaskResume(...args),
+  handleAgentTaskCancel: (...args: unknown[]) => mockAgentTaskCancel(...args),
+  handleAgentTaskComment: (...args: unknown[]) => mockAgentTaskComment(...args),
+  handleAgentTaskMove: (...args: unknown[]) => mockAgentTaskMove(...args),
+}))
+
 // Stub the plugin runtime store so plugin_set_enabled exercises the live
 // enable/disable wiring without spinning up a real PluginManager.
 const mockEnablePlugin = jest.fn().mockResolvedValue(undefined)
@@ -97,6 +112,21 @@ beforeEach(async () => {
   await db.connectorDrafts.clear().catch(() => undefined)
   await db.outboundQueue.clear().catch(() => undefined)
   await db.plugins.clear().catch(() => undefined)
+})
+
+describe("dispatchCommand: Agent task board", () => {
+  it.each([
+    ["agent_task_start", mockAgentTaskStart],
+    ["agent_task_pause", mockAgentTaskPause],
+    ["agent_task_resume", mockAgentTaskResume],
+    ["agent_task_cancel", mockAgentTaskCancel],
+    ["agent_task_comment", mockAgentTaskComment],
+    ["agent_task_move", mockAgentTaskMove],
+  ] as const)("dispatches %s to the single-Agent task handler", async (command, handler) => {
+    const payload = { agentId: "agent-1", taskId: "task-1" }
+    await dispatchCommand(command, payload)
+    expect(handler).toHaveBeenCalledWith(payload)
+  })
 })
 
 describe("dispatchCommand: connector_send", () => {

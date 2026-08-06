@@ -18,6 +18,7 @@ import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 import { APP_VERSION } from "@/lib/app-version"
 import { snapshotSyncStates } from "@/lib/sync/companion-sync"
 import { useCopy } from "@/hooks/ui/use-copy"
+import { SupportFeedbackDialog } from "@/components/support/support-feedback-dialog"
 
 const ISSUES_URL = "https://github.com/anthropics/claude-code/issues/new"
 
@@ -74,6 +75,7 @@ export default function MobileFeedbackPage() {
             onClick={() => void copyDiagnostics()}
             testid="feedback-row-copy"
           />
+          <SupportFeedbackDialog />
         </MeSection>
         <MeSection title={tFeedback("diagnosticsTitle")} testid="feedback-section-diagnostics">
           <MeRow
