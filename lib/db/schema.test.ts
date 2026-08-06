@@ -616,6 +616,235 @@ describe("getDb", () => {
     await Dexie.delete(name)
   }, 30_000)
 
+  it("v144 adds device-local project environment and CDP metadata indexes", async () => {
+    const name = `cognia-v144-codex-workflows-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(143).stores({ projects: "&id, lastAccessedAt" })
+    await legacy.open()
+    await legacy.table("projects").put({ id: "project-1", lastAccessedAt: new Date(1) })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBeGreaterThanOrEqual(144)
+    expect((await upgraded.projects.get("project-1"))?.id).toBe("project-1")
+
+    await upgraded.projectEnvironments.put({
+      id: "env-1",
+      projectId: "project-1",
+      name: "Development",
+      isEnabled: true,
+      setupScript: { default: "pnpm install" },
+      actions: [],
+      variables: {},
+      keyringReferences: [],
+      createdAt: 1,
+      updatedAt: 2,
+    })
+    await upgraded.cdpGrants.put({
+      id: "grant-1",
+      sessionId: "session-1",
+      browserSessionId: "browser-1",
+      origin: "http://localhost:3000",
+      capabilities: ["dom"],
+      grantedAt: 1,
+      expiresAt: 10,
+    })
+    await upgraded.cdpAuditEvents.put({
+      id: "audit-1",
+      grantId: "grant-1",
+      sessionId: "session-1",
+      browserSessionId: "browser-1",
+      origin: "http://localhost:3000",
+      outcome: "granted",
+      createdAt: 2,
+    })
+
+    expect(await upgraded.projectEnvironments.where("projectId").equals("project-1").count()).toBe(
+      1
+    )
+    expect(
+      await upgraded.cdpGrants
+        .where("[sessionId+expiresAt]")
+        .between(["session-1", Dexie.minKey], ["session-1", Dexie.maxKey])
+        .count()
+    ).toBe(1)
+    expect(
+      await upgraded.cdpAuditEvents
+        .where("[sessionId+createdAt]")
+        .between(["session-1", Dexie.minKey], ["session-1", Dexie.maxKey])
+        .count()
+    ).toBe(1)
+
+    upgraded.close()
+    await Dexie.delete(name)
+  }, 30_000)
+
+  it("v145 adds device-local durable AgentTeam runtime tables", async () => {
+    const name = `cognia-v145-agent-team-runtime-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(144).stores({ projects: "&id, lastAccessedAt" })
+    await legacy.open()
+    await legacy.table("projects").put({ id: "project-1", lastAccessedAt: new Date(1) })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBeGreaterThanOrEqual(145)
+    expect((await upgraded.projects.get("project-1"))?.id).toBe("project-1")
+
+    await upgraded.agentTeamRuns.put({
+      id: "run-1",
+      teamId: "team-1",
+      projectId: "project-1",
+      objective: "Recover",
+      status: "recovering",
+      priority: 1,
+      decisionVersion: 0,
+      createdAt: 1,
+      updatedAt: 2,
+    })
+    await upgraded.agentTeamTrajectory.put({
+      id: "run-1:1",
+      runId: "run-1",
+      sequence: 1,
+      kind: "checkpoint",
+      correlationId: "checkpoint-1",
+      createdAt: 2,
+    })
+
+    expect(await upgraded.agentTeamRuns.where("status").equals("recovering").count()).toBe(1)
+    expect(
+      await upgraded.agentTeamTrajectory
+        .where("[runId+sequence]")
+        .between(["run-1", Dexie.minKey], ["run-1", Dexie.maxKey])
+        .count()
+    ).toBe(1)
+
+    upgraded.close()
+    await Dexie.delete(name)
+  }, 30_000)
+
+  it("v146 adds reusable Knowledge Base ownership and ingest tables", async () => {
+    const name = `cognia-v146-knowledge-bases-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(145).stores({ characters: "&id, name, updatedAt" })
+    await legacy.open()
+    await legacy.table("characters").put({
+      id: "agent-1",
+      name: "Research Agent",
+      updatedAt: 1,
+    })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    expect(upgraded.verno).toBeGreaterThanOrEqual(146)
+    expect((await upgraded.characters.get("agent-1"))?.name).toBe("Research Agent")
+    await upgraded.knowledgeBases.put({
+      id: "kb-1",
+      name: "Product",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await upgraded.knowledgeBaseSources.put({
+      id: "source-1",
+      knowledgeBaseId: "kb-1",
+      kind: "document",
+      format: "markdown",
+      title: "Guide",
+      content: "hello",
+      bytes: 5,
+      fingerprint: "sha256:one",
+      status: "ready",
+      chunkCount: 1,
+      createdAt: 1,
+      updatedAt: 2,
+    })
+    await upgraded.knowledgeBaseIngestJobs.put({
+      id: "job-1",
+      knowledgeBaseId: "kb-1",
+      sourceId: "source-1",
+      status: "completed",
+      phase: "completed",
+      progress: 100,
+      attempts: 1,
+      queuedAt: 1,
+      completedAt: 2,
+      updatedAt: 2,
+    })
+
+    expect(
+      await upgraded.knowledgeBaseSources
+        .where("[knowledgeBaseId+updatedAt]")
+        .between(["kb-1", Dexie.minKey], ["kb-1", Dexie.maxKey])
+        .count()
+    ).toBe(1)
+    expect(
+      await upgraded.knowledgeBaseIngestJobs
+        .where("[knowledgeBaseId+status]")
+        .equals(["kb-1", "completed"])
+        .count()
+    ).toBe(1)
+
+    upgraded.close()
+    await Dexie.delete(name)
+  }, 30_000)
+
+  it("v147 adds portable single-Agent tasks and append-only attempts", async () => {
+    const name = `cognia-v147-agent-tasks-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(146).stores({ characters: "&id, name, updatedAt" })
+    await legacy.open()
+    await legacy.table("characters").put({ id: "agent-1", name: "Agent", updatedAt: 1 })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    expect(upgraded.verno).toBeGreaterThanOrEqual(147)
+    expect((await upgraded.characters.get("agent-1"))?.name).toBe("Agent")
+    await upgraded.agentTasks.put({
+      id: "task-1",
+      agentId: "agent-1",
+      title: "Ship",
+      description: "Ship safely",
+      status: "pending",
+      priority: "high",
+      dependencies: [],
+      tags: [],
+      order: 0,
+      approvalPolicy: "on-risk",
+      latestAttemptNo: 1,
+      comments: [],
+      createdAt: 1,
+      updatedAt: 2,
+      revision: 1,
+    })
+    await upgraded.agentTaskAttempts.put({
+      id: "attempt-1",
+      taskId: "task-1",
+      agentId: "agent-1",
+      attemptNo: 1,
+      status: "failed",
+      errorCode: "provider_unavailable",
+      createdAt: 2,
+      completedAt: 3,
+      updatedAt: 3,
+    })
+
+    expect(
+      await upgraded.agentTasks.where("[agentId+status]").equals(["agent-1", "pending"]).count()
+    ).toBe(1)
+    expect(
+      await upgraded.agentTaskAttempts.where("[taskId+attemptNo]").equals(["task-1", 1]).count()
+    ).toBe(1)
+
+    upgraded.close()
+    await Dexie.delete(name)
+  }, 30_000)
+
   it("v135 upgrades v1 deployment model references and profile metadata", async () => {
     const name = `cognia-v135-provider-catalog-${Date.now()}`
     const legacy = new Dexie(name)

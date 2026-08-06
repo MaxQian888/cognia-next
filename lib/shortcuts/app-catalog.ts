@@ -32,6 +32,14 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
     when: "platform.tauri",
   },
   {
+    id: "terminal.aiShell.toggle",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.terminalAiShellToggle",
+    category: "app.terminal",
+    defaultChord: "ctrl+shift+i",
+    when: "platform.tauri",
+  },
+  {
     id: "zoom.in",
     scope: "app",
     labelKey: "settings.shortcuts.catalog.zoomIn",
@@ -243,6 +251,13 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
     labelKey: "settings.shortcuts.catalog.workbenchActivityTemplates",
     category: "app.panels",
     defaultChord: "ctrl+7",
+  },
+  {
+    id: "workbench.quickSwitch",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.workbenchQuickSwitch",
+    category: "app.panels",
+    defaultChord: "ctrl+shift+e",
   },
   {
     id: "canvasLayout.toggleLeft",

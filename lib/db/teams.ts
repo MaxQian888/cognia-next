@@ -28,6 +28,7 @@ export type TeamDraft = Pick<Team, "name" | "members"> &
       | "avatarColor"
       | "avatarEmoji"
       | "orchestration"
+      | "maxResponses"
       | "supervisorCharacterId"
       | "mcpServerIds"
     >
@@ -47,6 +48,15 @@ function validateOrchestration(
   }
 }
 
+function validateMaxResponses(maxResponses: number | undefined): void {
+  if (
+    maxResponses !== undefined &&
+    (!Number.isInteger(maxResponses) || maxResponses < 1 || maxResponses > 12)
+  ) {
+    throw new Error("Team response cap must be an integer from 1 through 12.")
+  }
+}
+
 export async function createTeam(draft: TeamDraft): Promise<Team> {
   if (!draft.members || draft.members.length === 0) {
     throw new Error("A team needs at least one member.")
@@ -54,6 +64,7 @@ export async function createTeam(draft: TeamDraft): Promise<Team> {
   const orchestration = draft.orchestration ?? "mention_round_robin"
   const members = draft.members.map((m) => ({ ...m }))
   validateOrchestration(orchestration, members, draft.supervisorCharacterId)
+  validateMaxResponses(draft.maxResponses)
   const now = Date.now()
   const team: Team = {
     id: newId(),
@@ -63,6 +74,7 @@ export async function createTeam(draft: TeamDraft): Promise<Team> {
     avatarEmoji: draft.avatarEmoji,
     members,
     orchestration,
+    maxResponses: draft.maxResponses,
     supervisorCharacterId: draft.supervisorCharacterId,
     mcpServerIds: draft.mcpServerIds,
     createdAt: now,
@@ -89,6 +101,7 @@ export async function updateTeam(
   const nextSupervisor =
     "supervisorCharacterId" in patch ? patch.supervisorCharacterId : existing.supervisorCharacterId
   validateOrchestration(nextOrchestration, nextMembers, nextSupervisor)
+  validateMaxResponses("maxResponses" in patch ? patch.maxResponses : existing.maxResponses)
   await getDb().teams.update(id, { ...patch, updatedAt: Date.now() })
 }
 

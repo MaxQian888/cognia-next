@@ -218,6 +218,106 @@ describe("project-scope helper", () => {
       await expect(deleteProjectCascade("empty")).resolves.toBeUndefined()
     }, 30000)
 
+    it("purges durable AgentTeam runs, environments, children, and orphaned content", async () => {
+      const db = getDb()
+      await db.agentTeamRuns.bulkPut([
+        {
+          id: "runA",
+          teamId: "teamA",
+          projectId: "A",
+          objective: "a",
+          status: "completed",
+          priority: 1,
+          decisionVersion: 0,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: "runB",
+          teamId: "teamB",
+          projectId: "B",
+          objective: "b",
+          status: "completed",
+          priority: 1,
+          decisionVersion: 0,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ] as never)
+      await db.agentTeamTrajectory.bulkPut([
+        {
+          id: "runA:1",
+          runId: "runA",
+          sequence: 1,
+          kind: "model_turn_completed",
+          correlationId: "a",
+          contentHash: "hashA",
+          createdAt: 1,
+        },
+        {
+          id: "runB:1",
+          runId: "runB",
+          sequence: 1,
+          kind: "model_turn_completed",
+          correlationId: "b",
+          contentHash: "hashB",
+          createdAt: 1,
+        },
+      ] as never)
+      await db.agentTeamContentObjects.bulkPut([
+        {
+          hash: "hashA",
+          mimeType: "text/plain",
+          byteLength: 1,
+          data: new Uint8Array([1]),
+          createdAt: 1,
+        },
+        {
+          hash: "hashB",
+          mimeType: "text/plain",
+          byteLength: 1,
+          data: new Uint8Array([2]),
+          createdAt: 1,
+        },
+      ])
+      await db.projectEnvironments.bulkPut([
+        {
+          id: "envA",
+          projectId: "A",
+          name: "A",
+          isEnabled: true,
+          setupScript: { default: "" },
+          actions: [],
+          variables: {},
+          keyringReferences: [],
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: "envB",
+          projectId: "B",
+          name: "B",
+          isEnabled: true,
+          setupScript: { default: "" },
+          actions: [],
+          variables: {},
+          keyringReferences: [],
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ])
+
+      await deleteProjectCascade("A")
+
+      expect(await db.agentTeamRuns.get("runA")).toBeUndefined()
+      expect(await db.agentTeamTrajectory.get("runA:1")).toBeUndefined()
+      expect(await db.agentTeamContentObjects.get("hashA")).toBeUndefined()
+      expect(await db.projectEnvironments.get("envA")).toBeUndefined()
+      expect(await db.agentTeamRuns.get("runB")).toBeDefined()
+      expect(await db.agentTeamContentObjects.get("hashB")).toBeDefined()
+      expect(await db.projectEnvironments.get("envB")).toBeDefined()
+    }, 30000)
+
     it("drops the remote vector collection best-effort when a backend exists", async () => {
       const deleteCollection = jest.fn(async () => undefined)
       projectDepsMock.mockResolvedValueOnce({ store: { deleteCollection } })

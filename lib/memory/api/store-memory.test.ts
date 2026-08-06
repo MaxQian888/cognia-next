@@ -28,6 +28,16 @@ jest.mock("@/lib/db/memory-governance", () => ({
   appendMemoryAuditEvent: (...args: unknown[]) => mockAppendAudit(...(args as [])),
 }))
 
+const mockResolvePolicy = jest.fn()
+jest.mock("@/lib/memory/agent-policy", () => ({
+  resolvePersistedAgentMemoryPolicy: (...args: unknown[]) => mockResolvePolicy(...args),
+  scopeAllowedByAgentMemoryPolicy: (
+    policy: { canCreate: boolean; writableScopes: string[] },
+    _operation: string,
+    scope: string
+  ) => policy.canCreate && policy.writableScopes.includes(scope),
+}))
+
 const PII_TEXT = "reach me at bob@example.com"
 const ATTRIBUTION = { channel: "plugin" as const, pluginId: "com.example.notes" }
 
@@ -44,6 +54,10 @@ beforeEach(() => {
   // `mockRejectedValue` set by an earlier case, and a bare jest.fn() returns
   // undefined — which the `.catch(...)` on the audit call would blow up on.
   mockAppendAudit.mockResolvedValue(undefined)
+  mockResolvePolicy.mockResolvedValue({
+    canCreate: true,
+    writableScopes: ["global", "workspace", "character", "agent"],
+  })
 })
 
 describe("clampImportance", () => {
@@ -86,6 +100,27 @@ describe("storeMemoryCore", () => {
       provenance: "explicit",
     })
     expect(result.ok).toBe(true)
+  })
+
+  it("enforces the acting Agent create permission and writable scopes", async () => {
+    mockResolvePolicy.mockResolvedValue({ canCreate: false, writableScopes: ["global"] })
+    await expect(
+      storeMemoryCore({
+        text: "safe fact",
+        provenance: "explicit",
+        policyCharacterId: "agent-1",
+      })
+    ).resolves.toEqual({ ok: false, reason: "policy_denied" })
+
+    mockResolvePolicy.mockResolvedValue({ canCreate: true, writableScopes: ["character"] })
+    await expect(
+      storeMemoryCore({
+        text: "safe fact",
+        provenance: "explicit",
+        policyCharacterId: "agent-1",
+        scope: "global",
+      })
+    ).resolves.toEqual({ ok: false, reason: "scope_denied" })
   })
 
   it("returns policy results for disabled / temporary / PII", async () => {

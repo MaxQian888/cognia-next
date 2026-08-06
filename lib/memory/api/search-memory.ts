@@ -26,6 +26,9 @@ export interface SearchMemoriesExternalInput {
   path?: string
   /** Default true; false = don't bump lastAccessedAt/accessCount. */
   touch?: boolean
+  /** Agent whose policy governs this call; defaults to agentId/characterId. */
+  policyCharacterId?: string
+  sessionId?: string
 }
 
 export interface ExternalMemoryHit {
@@ -38,7 +41,10 @@ export interface ExternalMemoryHit {
 
 export type SearchMemoriesExternalResult =
   | { ok: true; hits: ExternalMemoryHit[] }
-  | { ok: false; reason: "disabled" | "temporary" | "backend_unavailable" }
+  | {
+      ok: false
+      reason: "disabled" | "temporary" | "backend_unavailable" | "policy_denied"
+    }
 
 export async function searchMemoriesExternal(
   input: SearchMemoriesExternalInput
@@ -55,9 +61,26 @@ export async function searchMemoriesExternal(
   if (!config.enabled) return { ok: false, reason: "disabled" }
   if (config.temporary) return { ok: false, reason: "temporary" }
 
+  const { resolvePersistedAgentMemoryPolicy } = await import("@/lib/memory/agent-policy")
+  const policy = await resolvePersistedAgentMemoryPolicy({
+    config,
+    characterId: input.policyCharacterId ?? input.agentId ?? input.characterId,
+    sessionId: input.sessionId,
+  })
+  if (!policy.canRecall) return { ok: false, reason: "policy_denied" }
+
   const { tryBuildMemoryDeps } = await import("@/lib/memory/runtime/build-deps")
   let deps = await tryBuildMemoryDeps(config)
   if (!deps) return { ok: false, reason: "backend_unavailable" }
+  const readableScopes = new Set(policy.readableScopes)
+  const baseDeps = deps
+  deps = {
+    ...baseDeps,
+    loadCandidates: async (reader) =>
+      (await baseDeps.loadCandidates(reader)).filter((memory) => readableScopes.has(memory.scope)),
+    loadProcedural: async (reader) =>
+      (await baseDeps.loadProcedural(reader)).filter((memory) => readableScopes.has(memory.scope)),
+  }
   if (input.touch === false) deps = { ...deps, touch: undefined }
 
   const { retrieveMemories } = await import("@/lib/memory/retrieve/retriever")

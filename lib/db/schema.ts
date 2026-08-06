@@ -24,6 +24,12 @@ import type {
 } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 import type { ProjectChunk } from "@/types/project-knowledge"
+import type {
+  KnowledgeBase,
+  KnowledgeBaseChunk,
+  KnowledgeBaseIngestJob,
+  KnowledgeBaseSource,
+} from "@/types/knowledge-base"
 import type { TrustedWorkspace } from "./trusted-workspaces"
 import type {
   DeploymentProfile,
@@ -373,6 +379,14 @@ export class CogniaDB extends Dexie {
   twinProfile!: Table<TwinProfile, string>
   twinDrafts!: Table<TwinDraft, string>
   twinJobs!: Table<TwinJob, string>
+  // v146 — reusable Knowledge Bases independent of Project and Twin ownership.
+  knowledgeBases!: Table<KnowledgeBase, string>
+  knowledgeBaseSources!: Table<KnowledgeBaseSource, string>
+  knowledgeBaseChunks!: Table<KnowledgeBaseChunk, string>
+  knowledgeBaseIngestJobs!: Table<KnowledgeBaseIngestJob, string>
+  // v147 — portable single-Agent board metadata and immutable run attempts.
+  agentTasks!: Table<import("@/types/agent/agent-task").AgentTask, string>
+  agentTaskAttempts!: Table<import("@/types/agent/agent-task").AgentTaskAttempt, string>
   // §A-Schema (v15) — plugin tables. Indexed columns are declared in the v15
   // .stores block below; the per-row types live in `./plugin-types.ts`.
   plugins!: Table<PluginRow, string>
@@ -659,6 +673,43 @@ export class CogniaDB extends Dexie {
   // v104 — Agent-Team board projection (one-way store→Dexie mirror for mobile
   // sync). See `lib/db/agent-team-board.ts`.
   agentTeamBoard!: Table<AgentTeamBoardRow, string>
+  // v145 — durable local AgentTeam runtime. Never registered for sync/export.
+  agentTeamRuns!: Table<import("@/types/agent/agent-team-runtime").AgentTeamRunRecord, string>
+  agentTeamChildRuns!: Table<import("@/types/agent/agent-team-runtime").AgentTeamChildRun, string>
+  agentTeamTrajectory!: Table<
+    import("@/types/agent/agent-team-runtime").AgentTeamTrajectoryEvent,
+    string
+  >
+  agentTeamCheckpoints!: Table<
+    import("@/types/agent/agent-team-runtime").AgentTeamCheckpoint,
+    string
+  >
+  agentTeamDecisions!: Table<import("@/types/agent/agent-team-runtime").AgentTeamDecision, string>
+  agentTeamSteeringReceipts!: Table<
+    import("@/types/agent/agent-team-runtime").AgentTeamSteeringReceipt,
+    string
+  >
+  agentTeamEvidence!: Table<import("@/types/agent/agent-team-runtime").AgentTeamEvidence, string>
+  agentTeamDeliveryGraphs!: Table<
+    import("@/types/agent/agent-team-runtime").AgentTeamDeliveryGraph,
+    string
+  >
+  agentTeamDeliveryNodes!: Table<
+    import("@/types/agent/agent-team-runtime").AgentTeamDeliveryNode,
+    string
+  >
+  agentTeamRetrospectives!: Table<
+    import("@/types/agent/agent-team-runtime").AgentTeamRetrospective,
+    string
+  >
+  agentTeamContentObjects!: Table<
+    import("@/types/agent/agent-team-runtime").AgentTeamContentObject,
+    string
+  >
+  projectEnvironmentVersions!: Table<
+    import("@/types/project-environment").ProjectEnvironmentVersion,
+    string
+  >
   // v132 — Unified Template Platform. Definitions/packages/instance provenance
   // are portable; device bindings and migration journals are intentionally
   // local-only and never registered in `lib/sync`.
@@ -3366,6 +3417,65 @@ export class CogniaDB extends Dexie {
         await table.bulkPut(migrated)
       })
 
+    // v144 — Codex-inspired desktop workflow metadata. Project environments
+    // and CDP authority are device-local by contract: none of these tables is
+    // included in sync, backup, export, or Companion allow-lists. CDP audit
+    // rows contain metadata only and are append-only through browser-cdp.ts.
+    this.version(144).stores({
+      projectEnvironments: "&id, projectId, isEnabled, updatedAt, [projectId+updatedAt]",
+      cdpGrants:
+        "&id, sessionId, browserSessionId, origin, expiresAt, revokedAt, [sessionId+expiresAt]",
+      cdpAuditEvents:
+        "&id, grantId, sessionId, browserSessionId, origin, outcome, createdAt, [sessionId+createdAt]",
+    })
+
+    // v145 — durable local AgentTeam execution. These tables are deliberately
+    // device-local: trajectories can contain repository content and may only be
+    // removed through explicit run/team/project cleanup.
+    this.version(145).stores({
+      agentTeamRuns: "&id, teamId, projectId, status, priority, updatedAt, [teamId+updatedAt]",
+      agentTeamChildRuns:
+        "&id, runId, teamId, teammateId, taskId, repositoryId, status, sessionId, updatedAt, [runId+updatedAt]",
+      agentTeamTrajectory:
+        "&id, runId, childRunId, sequence, kind, createdAt, [runId+sequence], [childRunId+sequence]",
+      agentTeamCheckpoints:
+        "&id, runId, childRunId, createdAt, [runId+createdAt], [childRunId+createdAt]",
+      agentTeamDecisions: "&id, runId, version, status, createdAt, [runId+version]",
+      agentTeamSteeringReceipts:
+        "&id, runId, childRunId, status, updatedAt, [childRunId+updatedAt]",
+      agentTeamEvidence:
+        "&id, runId, childRunId, taskId, kind, createdAt, [runId+createdAt], [taskId+createdAt]",
+      agentTeamDeliveryGraphs: "&id, runId, status, updatedAt",
+      agentTeamDeliveryNodes:
+        "&id, graphId, runId, repositoryId, order, status, updatedAt, [graphId+order]",
+      agentTeamRetrospectives: "&id, runId, status, createdAt, updatedAt",
+      agentTeamContentObjects: "&hash, mimeType, byteLength, createdAt",
+      projectEnvironmentVersions:
+        "&id, environmentId, projectId, version, createdAt, [environmentId+version]",
+    })
+
+    // v146 — reusable Agent Knowledge Bases. Sources are portable originals;
+    // chunks are derived vector pointers; ingest jobs provide crash-visible
+    // lifecycle state. Ownership is always explicit through knowledgeBaseId.
+    this.version(146).stores({
+      knowledgeBases: "&id, name, updatedAt",
+      knowledgeBaseSources:
+        "&id, knowledgeBaseId, status, fingerprint, updatedAt, [knowledgeBaseId+updatedAt], &[knowledgeBaseId+fingerprint]",
+      knowledgeBaseChunks:
+        "&id, knowledgeBaseId, sourceId, vectorDocId, [knowledgeBaseId+sourceId], [knowledgeBaseId+createdAt]",
+      knowledgeBaseIngestJobs:
+        "&id, knowledgeBaseId, sourceId, status, updatedAt, [knowledgeBaseId+status], [knowledgeBaseId+updatedAt]",
+    })
+
+    // v147 — single-Agent task board. Task metadata is portable; each retry
+    // appends a separate attempt so results are never overwritten.
+    this.version(147).stores({
+      agentTasks:
+        "&id, agentId, projectId, status, priority, scheduledFor, updatedAt, [agentId+status], [agentId+updatedAt]",
+      agentTaskAttempts:
+        "&id, taskId, agentId, status, attemptNo, schedulerExecutionId, updatedAt, [taskId+attemptNo], [taskId+updatedAt]",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -3480,6 +3590,10 @@ export class CogniaDB extends Dexie {
   // v117 — host-local remote browser profile and public-domain grants.
   browserProfiles!: Table<import("./browser-profiles").BrowserProfileRow, string>
   browserDomainGrants!: Table<import("./browser-profiles").BrowserDomainGrantRow, string>
+  // v144 — device-local project environments and controlled CDP metadata.
+  projectEnvironments!: Table<import("@/types/project-environment").ProjectEnvironment, string>
+  cdpGrants!: Table<import("@/types/browser-developer").CdpGrant, string>
+  cdpAuditEvents!: Table<import("@/types/browser-developer").CdpAuditEvent, string>
 
   override close(closeOptions?: { disableAutoOpen: boolean }): void {
     if (this.isOpen()) this.logConnectionEvent("close")

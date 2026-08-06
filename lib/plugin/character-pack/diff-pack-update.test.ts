@@ -46,6 +46,22 @@ function makeRow(overrides: Partial<Character> = {}): Character {
 describe("buildPristineSnapshot", () => {
   it("captures every pack-managed field listed in PACK_MANAGED_FIELD_LIST", () => {
     const overlay = makeOverlay({
+      modelRouting: {
+        plan: "planner-alias",
+        execute: "executor-alias",
+        utility: "utility-alias",
+      },
+      executionPolicy: {
+        effort: "high",
+        maxTurns: 12,
+        envBindings: [{ name: "MODE", kind: "plain", value: "safe" }],
+      },
+      memoryPolicy: {
+        operations: { recall: true, create: false, update: false, forget: false },
+        readableScopes: ["global"],
+        writableScopes: [],
+        autoLearn: false,
+      },
       avatarImage: { webDataUrl: "data:image/png;base64,AAAA" },
       persona: { tone: "warm" },
       voiceProfile: { provider: "openai", voiceId: "alloy" },
@@ -57,6 +73,11 @@ describe("buildPristineSnapshot", () => {
       expect(Object.prototype.hasOwnProperty.call(snap, field)).toBe(true)
     }
     expect(snap.systemPrompt).toBe("v2 prompt")
+    expect(snap.modelRouting?.plan).toBe("planner-alias")
+    expect(snap.executionPolicy?.envBindings).toEqual([
+      { name: "MODE", kind: "plain", value: "safe" },
+    ])
+    expect(snap.memoryPolicy?.operations.recall).toBe(true)
     expect(snap.avatarImage?.webDataUrl).toBe("data:image/png;base64,AAAA")
     expect(snap.voiceProfile?.voiceId).toBe("alloy")
   })

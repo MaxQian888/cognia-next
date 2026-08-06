@@ -56,6 +56,9 @@ export function projectOverlayCharacter(
     avatarEmoji: ch.avatarEmoji,
     systemPrompt: ch.systemPrompt,
     model: ch.model,
+    modelRouting: ch.modelRouting,
+    executionPolicy: ch.executionPolicy,
+    memoryPolicy: ch.memoryPolicy,
     providerId: ch.providerId,
     permissionMode: ch.permissionMode,
     allowedTools: ch.allowedTools,
@@ -178,6 +181,10 @@ export type CharacterDraft = Pick<Character, "name" | "systemPrompt"> &
       | "avatarColor"
       | "avatarEmoji"
       | "model"
+      | "modelRouting"
+      | "executionPolicy"
+      | "knowledgeBaseIds"
+      | "memoryPolicy"
       | "permissionMode"
       | "allowedTools"
       | "disallowedTools"
@@ -211,6 +218,10 @@ export async function createCharacter(draft: CharacterDraft): Promise<Character>
     avatarEmoji: draft.avatarEmoji,
     systemPrompt: draft.systemPrompt,
     model: draft.model,
+    modelRouting: draft.modelRouting,
+    executionPolicy: draft.executionPolicy,
+    knowledgeBaseIds: draft.knowledgeBaseIds,
+    memoryPolicy: draft.memoryPolicy,
     permissionMode: draft.permissionMode,
     allowedTools: draft.allowedTools,
     disallowedTools: draft.disallowedTools,
@@ -246,6 +257,9 @@ export async function updateCharacter(
     throw new Error(
       "Plugin-overlay characters are read-only. Duplicate the character first to create an editable copy."
     )
+  }
+  if (id === "char_builtin_support") {
+    throw new Error("The built-in Cognia Support Agent is immutable. Duplicate it first.")
   }
   await getDb().characters.update(id, { ...patch, updatedAt: Date.now() })
 }

@@ -231,6 +231,7 @@ export function McpServerEditor({ initial, onCancel, onSave }: EditorProps) {
           </div>
           <KvEditor
             label={t("env")}
+            maskValues
             rows={envRows}
             onChange={setEnvRows}
             keyPlaceholder={t("placeholderEnvKey")}

@@ -220,6 +220,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "sidebarSide",
     "workbenchRail",
     "workbenchRailPersistent",
+    "workbenchRailPerProject",
     "titleBarLayout",
     "statusBarLayout",
   ],

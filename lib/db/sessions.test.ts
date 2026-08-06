@@ -118,6 +118,24 @@ describe("createSession — without default preset", () => {
     expect(session.platformBinding).toBeUndefined()
     await expect(getSession(session.id)).resolves.toMatchObject({ integrationBinding })
   })
+
+  it("round-trips the durable execution context used by chat and scheduler runs", async () => {
+    const executionContext = {
+      location: "managedWorktree" as const,
+      projectId: "project-1",
+      projectRoot: "/repo",
+      environmentId: "env-1",
+      taskWorkspace: {
+        taskId: "task-workspace:session-1",
+        workspaceKey: "session-1",
+      },
+      baseRef: "main",
+    }
+    const session = await createSession({ title: "Managed", executionContext })
+
+    expect(session.executionContext).toEqual(executionContext)
+    await expect(getSession(session.id)).resolves.toMatchObject({ executionContext })
+  })
 })
 
 describe("setSessionOrder", () => {

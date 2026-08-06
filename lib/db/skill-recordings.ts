@@ -41,6 +41,10 @@ export interface SkillRecordingGeneration {
   promptHash: string
 }
 
+export type SkillRecordingSource =
+  | { kind: "session"; sessionId: string }
+  | { kind: "run"; runId: string; sessionId?: string }
+
 export interface SkillRecordingRow {
   id: RecordingId
   /** Set once the recording is promoted to a Skill. Indexed for the detail tab. */
@@ -48,6 +52,8 @@ export interface SkillRecordingRow {
   status: SkillRecordingStatus
   /** The native bundle. Same value as `id` for a first-generation recording. */
   bundleId: RecordingId
+  /** Conversation/run provenance. Content is stored only as a redacted edit timeline. */
+  source?: SkillRecordingSource
   /** The user's review edits, replayable over the bundle's captured steps. */
   edits: StepEdits
   inputVariables: InputVariable[]
@@ -86,6 +92,7 @@ export interface SkillRecordingDraftInput {
   inputVariables?: InputVariable[]
   selectedAssetIds?: AssetId[]
   versionNumber?: number
+  source?: SkillRecordingSource
 }
 
 export async function createRecording(input: SkillRecordingDraftInput): Promise<SkillRecordingRow> {
@@ -102,6 +109,7 @@ export async function createRecording(input: SkillRecordingDraftInput): Promise<
     includedCount: 0,
     bundleBytes: 0,
     versionNumber: input.versionNumber ?? 1,
+    ...(input.source ? { source: input.source } : {}),
     createdAt: ts,
     updatedAt: ts,
   }
@@ -170,6 +178,7 @@ export async function deleteRecording(
   const row = await getRecording(id)
   await getDb().skillRecordings.delete(id)
   if (!options.deleteBundle || !row) return
+  if (row.source) return
   // Other rows may reference the same bundle (a duplicated version). Only the
   // last reference may destroy it.
   const remaining = await getDb()
@@ -212,7 +221,7 @@ export async function listRecordingsMissingBundles(
 ): Promise<SkillRecordingRow[]> {
   const present = new Set(presentBundleIds)
   const rows = await getDb().skillRecordings.toArray()
-  return rows.filter((row) => row.status !== "saved" && !present.has(row.bundleId))
+  return rows.filter((row) => !row.source && row.status !== "saved" && !present.has(row.bundleId))
 }
 
 /**

@@ -31,6 +31,10 @@ import type {
   SkillTaskPayload,
   TaskExecution,
 } from "@/types/scheduler"
+import { openTaskWorkspaceRunLease } from "@/lib/task-workspace/run-lease"
+import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
+import { getProjectEnvironment } from "@/lib/db/project-environments"
+import { executeProjectEnvironment } from "@/lib/project-environment/executor"
 import { registerTaskExecutor } from "../task-scheduler"
 import { executePluginTask } from "./plugin-executor"
 import { executeBackupTask } from "./backup-executor"
@@ -52,6 +56,11 @@ import type {
   SendOptions,
 } from "@cognia/agent-config-types"
 import { createSession, getSession } from "@/lib/db/sessions"
+import {
+  beginAgentTaskAttempt,
+  linkAgentTaskAttemptExecution,
+  settleAgentTaskAttempt,
+} from "@/lib/db/agent-tasks"
 import { getSettings } from "@/lib/db/settings"
 import { listEnabledMcpServers, buildMcpServerMap } from "@/lib/db/mcp-servers"
 import { resolveSendOptions } from "@/lib/claude/build-options"
@@ -300,6 +309,7 @@ async function resolveOrCreateSession(
     characterId: options.characterId,
     teamId: payload.teamId,
     model: payload.model,
+    executionContext: payload.executionContext,
   })
   return { session, created: true }
 }
@@ -408,6 +418,68 @@ async function runChatPrompt(
   // 4. Skill-task ad-hoc skill: splice into system prompt + allowedTools.
   finalOptions = await applyAdHocSkill(finalOptions, options.skillId)
 
+  // Scheduled managed-worktree runs fail closed: unlike an interactive run,
+  // there is nobody present to approve bypassing failed isolation/setup. The
+  // durable workspaceKey binds subsequent schedule fires to the same chat
+  // worktree while each execution still gets its own versioned TaskRun.
+  const executionContext = payload.executionContext
+  const boundWorkspaceRoot = executionContext
+    ? resolveSessionWorkspaceRoot(executionContext)
+    : undefined
+  if (executionContext?.location === "managedWorktree" && !boundWorkspaceRoot) {
+    return { success: false, error: "Managed workspace is missing on this device" }
+  }
+  const taskLease =
+    executionContext?.location === "managedWorktree"
+      ? await openTaskWorkspaceRunLease({
+          taskId: executionContext.taskWorkspace.taskId,
+          sessionId,
+          runId: `scheduled:${execution.id}`,
+          agentId: "scheduler",
+          agentKind: "scheduled-chat",
+          workspaceRoot: boundWorkspaceRoot!,
+          workspaceKey: executionContext.taskWorkspace.workspaceKey,
+          executionRunId: execution.id,
+          surface: "scheduler",
+        })
+      : null
+  if (executionContext?.location === "managedWorktree" && !taskLease) {
+    return { success: false, error: "Managed worktree is unavailable for scheduled execution" }
+  }
+  if (taskLease) {
+    finalOptions = {
+      ...finalOptions,
+      cwd: taskLease.run.executionRoot,
+      taskWorkspace: {
+        taskId: executionContext!.taskWorkspace.taskId,
+        runId: taskLease.run.runId,
+        workspaceRoot: boundWorkspaceRoot!,
+        agentId: "scheduler",
+        agentKind: "scheduled-chat",
+      },
+    }
+  } else if (executionContext?.location === "local") {
+    finalOptions = { ...finalOptions, cwd: executionContext.projectRoot }
+  }
+
+  if (executionContext?.environmentId) {
+    const environment = await getProjectEnvironment(executionContext.environmentId)
+    if (!environment || environment.projectId !== executionContext.projectId) {
+      if (taskLease) await taskLease.settle("failed").catch(() => undefined)
+      return { success: false, error: "Scheduled project environment is unavailable" }
+    }
+    const setup = await executeProjectEnvironment({
+      environment,
+      executionRoot: finalOptions.cwd ?? executionContext.projectRoot,
+      scope: executionContext.location,
+      surface: "scheduled",
+    })
+    if (!setup.success) {
+      if (taskLease) await taskLease.settle("failed").catch(() => undefined)
+      return { success: false, error: setup.error ?? "Scheduled project environment setup failed" }
+    }
+  }
+
   // 5. Subscribe FIRST, then send. The sidecar may emit `result` before the
   // returned promise is awaited if we don't.
   const collected: unknown[] = []
@@ -484,8 +556,13 @@ async function runChatPrompt(
       agentModeId: payload.agentModeId,
     })
     await sendPrompt(sessionId, payload.prompt, finalOptions)
-    return await finished
+    const result = await finished
+    if (taskLease) {
+      await taskLease.settle(result.success ? "ready" : "failed").catch(() => undefined)
+    }
+    return result
   } catch (err) {
+    if (taskLease) await taskLease.settle("failed").catch(() => undefined)
     return { success: false, error: err instanceof Error ? err.message : String(err) }
   } finally {
     signal?.removeEventListener("abort", abortHandler)
@@ -522,10 +599,43 @@ async function executeAgentTask(
   if (!payload.prompt) return { success: false, error: "agent task requires `prompt` in payload" }
   if (!payload.characterId)
     return { success: false, error: "agent task requires `characterId` in payload" }
-  return runChatPrompt(task, execution, payload as AgentTaskPayload, {
-    characterId: payload.characterId,
-    signal,
-  })
+  let attemptId: string | undefined
+  if (payload.agentTaskId) {
+    try {
+      const attempt = await beginAgentTaskAttempt(payload.agentTaskId, {
+        sessionId: payload.sessionId,
+        runId: execution.id,
+      })
+      attemptId = attempt.id
+      await linkAgentTaskAttemptExecution(attempt.id, execution.id)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+  try {
+    const result = await runChatPrompt(task, execution, payload as AgentTaskPayload, {
+      characterId: payload.characterId,
+      signal,
+    })
+    if (attemptId) {
+      await settleAgentTaskAttempt(attemptId, {
+        status: result.success ? "completed" : "failed",
+        result: result.output ? JSON.stringify(result.output) : undefined,
+        errorCode: result.success ? undefined : "agent_execution_failed",
+        errorMessage: result.error,
+      })
+    }
+    return result
+  } catch (error) {
+    if (attemptId) {
+      await settleAgentTaskAttempt(attemptId, {
+        status: signal.aborted ? "cancelled" : "failed",
+        errorCode: signal.aborted ? "agent_execution_cancelled" : "agent_execution_error",
+        errorMessage: error instanceof Error ? error.message : String(error),
+      }).catch(() => undefined)
+    }
+    throw error
+  }
 }
 
 async function executeSkillTask(

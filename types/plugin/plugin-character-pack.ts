@@ -95,6 +95,9 @@ export interface PluginCharacterDef {
 
   // ---- Optional Character subset (mirrors `lib/claude/types.ts:Character`) ----
   model?: string
+  modelRouting?: Character["modelRouting"]
+  executionPolicy?: Character["executionPolicy"]
+  memoryPolicy?: Character["memoryPolicy"]
   providerId?: string
   permissionMode?: SendOptions["permissionMode"]
   allowedTools?: string[]

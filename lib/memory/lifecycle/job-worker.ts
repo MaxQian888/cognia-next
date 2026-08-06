@@ -1,6 +1,7 @@
 import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 import { getSettings } from "@/lib/db/settings"
 import { getSession } from "@/lib/db/sessions"
+import { resolveCharacterById } from "@/lib/db/characters"
 import { listMessages } from "@/lib/db/messages"
 import {
   appendMemoryAuditEvent,
@@ -16,8 +17,8 @@ import type { MemoryJob } from "@/types/memory/governance"
 import { detectMemoryExternalContext } from "@/lib/memory/control-plane/contamination"
 import {
   hasUntrustedMemoryContext,
-  resolveMemoryTurnPolicy,
 } from "@/lib/memory/control-plane/policy"
+import { resolveAgentMemoryPolicy } from "@/lib/memory/agent-policy"
 import type { ConsolidationOp } from "@/lib/memory/consolidate/consolidator"
 import { hasNoLeakingPii } from "@cognia/redact"
 
@@ -91,11 +92,8 @@ class MemoryJobProcessingError extends Error {
 
 class MemoryJobTerminalError extends Error {}
 
-function effectiveConfig(settings: AppSettings, session: ChatSession): MemoryConfig {
-  const config = resolveMemoryConfig(settings.memory)
-  return session.memoryLearn === true
-    ? { ...config, learnFromChats: true, autoExtract: true }
-    : config
+function effectiveConfig(settings: AppSettings): MemoryConfig {
+  return resolveMemoryConfig(settings.memory)
 }
 
 async function loadJobContext(job: MemoryJob): Promise<{
@@ -112,7 +110,10 @@ async function loadJobContext(job: MemoryJob): Promise<{
     listMessages(job.sessionId),
   ])
   if (!settings || !session) throw new MemoryJobTerminalError("session_unavailable")
-  const config = effectiveConfig(settings, session)
+  const config = effectiveConfig(settings)
+  const character = session.characterId
+    ? await resolveCharacterById(session.characterId).catch(() => undefined)
+    : undefined
   const fullTranscript = messages.map((message) => ({
     id: message.id,
     role: message.role,
@@ -125,8 +126,13 @@ async function loadJobContext(job: MemoryJob): Promise<{
   }
   const transcript = fullTranscript.slice(0, checkpointLength)
   const externalContext = detectMemoryExternalContext(transcript)
-  const policy = resolveMemoryTurnPolicy({ config, session, externalContext })
-  if (!policy.canLearn) {
+  const policy = resolveAgentMemoryPolicy({
+    config,
+    session,
+    agentPolicy: character?.memoryPolicy,
+    externalContext,
+  })
+  if (!policy.canAutoLearn || !policy.writableScopes.includes(job.scope)) {
     await appendMemoryAuditEvent({
       action: "learn-denied",
       sessionId: job.sessionId,
@@ -236,6 +242,7 @@ async function processTurnExtraction(job: MemoryJob): Promise<void> {
       scope: job.scope,
       characterId: job.characterId,
       projectId: job.projectId,
+      agentId: job.agentId,
       provenance: job.provenance,
       source: { sessionId: job.sessionId, messageId: pair.assistantMessageId },
       config: context.config,
@@ -261,6 +268,7 @@ async function processSessionDistill(job: MemoryJob): Promise<void> {
       scope: job.scope,
       characterId: job.characterId,
       projectId: job.projectId,
+      agentId: job.agentId,
       provenance: job.provenance,
       contaminationState: context.contaminationState,
       source: { sessionId: job.sessionId },

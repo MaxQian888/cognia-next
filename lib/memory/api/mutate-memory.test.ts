@@ -24,14 +24,37 @@ jest.mock("@/lib/db/memory-governance", () => ({
   appendMemoryAuditEvent: (...args: unknown[]) => mockAppendAudit(...args),
 }))
 
+const mockResolvePolicy = jest.fn()
+jest.mock("@/lib/memory/agent-policy", () => ({
+  resolvePersistedAgentMemoryPolicy: (...args: unknown[]) => mockResolvePolicy(...args),
+  scopeAllowedByAgentMemoryPolicy: (
+    policy: { canUpdate: boolean; canForget: boolean; writableScopes: string[] },
+    operation: "update" | "forget",
+    scope: string
+  ) =>
+    (operation === "update" ? policy.canUpdate : policy.canForget) &&
+    policy.writableScopes.includes(scope),
+}))
+
 const PII_TEXT = "reach me at bob@example.com"
 
 beforeEach(() => {
   jest.clearAllMocks()
   mockGetSettings.mockResolvedValue({ memory: { enabled: true } })
-  mockGetMemory.mockResolvedValue({ id: "m1", text: "old", vectorDocId: "m1", pinned: false })
+  mockGetMemory.mockResolvedValue({
+    id: "m1",
+    text: "old",
+    scope: "global",
+    vectorDocId: "m1",
+    pinned: false,
+  })
   mockVectorSink.mockResolvedValue(undefined)
   mockAppendAudit.mockResolvedValue(undefined)
+  mockResolvePolicy.mockResolvedValue({
+    canUpdate: true,
+    canForget: true,
+    writableScopes: ["global", "workspace", "character", "agent"],
+  })
 })
 
 describe("updateExternalMemory", () => {
@@ -84,6 +107,27 @@ describe("updateExternalMemory", () => {
     )
   })
 
+  it("enforces Agent update permission and writable scope", async () => {
+    mockResolvePolicy.mockResolvedValue({
+      canUpdate: false,
+      canForget: true,
+      writableScopes: ["global"],
+    })
+    await expect(
+      updateExternalMemory("m1", { importance: 5 }, { characterId: "agent-1" })
+    ).resolves.toEqual({ ok: false, reason: "policy_denied" })
+
+    mockResolvePolicy.mockResolvedValue({
+      canUpdate: true,
+      canForget: true,
+      writableScopes: ["character"],
+    })
+    await expect(updateExternalMemory("m1", { importance: 5 })).resolves.toEqual({
+      ok: false,
+      reason: "scope_denied",
+    })
+  })
+
   it("supports pinning and records the governance action", async () => {
     expect(await updateExternalMemory("m1", { pinned: true })).toEqual({ ok: true })
     expect(mockUpdateMemory).toHaveBeenCalledWith("m1", { pinned: true })
@@ -116,6 +160,19 @@ describe("updateExternalMemory", () => {
 })
 
 describe("forgetExternalMemory", () => {
+  it("enforces the Agent forget permission", async () => {
+    mockResolvePolicy.mockResolvedValue({
+      canUpdate: true,
+      canForget: false,
+      writableScopes: ["global"],
+    })
+    await expect(forgetExternalMemory("m1", { characterId: "agent-1" })).resolves.toEqual({
+      ok: false,
+      reason: "policy_denied",
+    })
+    expect(mockInvalidateMemory).not.toHaveBeenCalled()
+  })
+
   it("soft-invalidates an existing row", async () => {
     const deleteDocuments = jest.fn().mockResolvedValue(undefined)
     mockVectorSink.mockResolvedValue({ delete: deleteDocuments })

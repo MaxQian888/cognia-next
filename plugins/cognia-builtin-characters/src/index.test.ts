@@ -26,20 +26,21 @@ describe("cognia-builtin-characters plugin", () => {
     expect(BUILTIN_PACK.version).toMatch(/^\d+\.\d+\.\d+/)
   })
 
-  it("ships exactly six characters that mirror the legacy-id map", () => {
-    expect(BUILTIN_PACK.characters).toHaveLength(6)
+  it("ships exactly seven characters that mirror the stable-id map", () => {
+    expect(BUILTIN_PACK.characters).toHaveLength(7)
     const localIds = BUILTIN_PACK.characters.map((c) => c.localId).sort()
     const mapLocalIds = Object.values(BUILTIN_LEGACY_ID_TO_LOCAL_ID).sort()
     expect(localIds).toEqual(mapLocalIds)
   })
 
-  it("legacy-id map keys cover the canonical six built-in row ids", () => {
+  it("stable-id map keys cover every canonical built-in row id", () => {
     expect(Object.keys(BUILTIN_LEGACY_ID_TO_LOCAL_ID).sort()).toEqual(
       [
         "char_builtin_brainstorm",
         "char_builtin_coding",
         "char_builtin_goal_tracker",
         "char_builtin_research",
+        "char_builtin_support",
         "char_builtin_translator",
         "char_builtin_writer",
       ].sort()
@@ -72,7 +73,7 @@ describe("cognia-builtin-characters plugin", () => {
     expect(parsed.ok).toBe(true)
     if (parsed.ok) {
       expect(parsed.file.pack.id).toBe(BUILTIN_PACK.id)
-      expect(parsed.file.pack.characters).toHaveLength(6)
+      expect(parsed.file.pack.characters).toHaveLength(7)
     }
   })
 

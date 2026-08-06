@@ -96,7 +96,9 @@ export function SkillRecordingsSection({ skillId }: Props) {
             recording={row}
             // Unknown means "we could not ask", and a fork that is offered and
             // works beats one that fails silently — so unknown allows it.
-            bundlePresent={presentBundles === null || presentBundles.has(row.bundleId)}
+            bundlePresent={
+              Boolean(row.source) || presentBundles === null || presentBundles.has(row.bundleId)
+            }
             onDuplicate={(id) => void handleDuplicate(id)}
             onDelete={(id) => void handleDelete(id)}
           />

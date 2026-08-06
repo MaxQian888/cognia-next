@@ -21,6 +21,10 @@ jest.mock("@/components/settings/speech/test-tts-button", () => ({
   TestTtsButton: () => null,
 }))
 
+jest.mock("@/components/settings/knowledge-base-manager", () => ({
+  KnowledgeBaseManager: () => null,
+}))
+
 jest.mock("@/lib/plugin/registries/native-anthropic-tool-registry", () => ({
   listNativeAnthropicToolEntries: () => [],
   listNativeAnthropicToolIds: () => [],
@@ -30,12 +34,26 @@ jest.mock("@/lib/subscription/core/transport", () => ({
   listAccounts: jest.fn(async () => []),
 }))
 
+const mockSaveAgentEnvSecret = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/agent/agent-env-keyring", () => ({
+  createAgentEnvSecretRef: (agentId: string, name: string) => `${agentId}:${name}:new`,
+  saveAgentEnvSecret: (...args: unknown[]) => mockSaveAgentEnvSecret(...args),
+}))
+
 // --- Mounting <CharactersSection> needs the data layer stubbed. -------------
 // `mock`-prefixed names are the only out-of-scope refs jest allows inside a
 // hoisted factory.
 let mockCharacterList: Character[] = []
 const mockDeleteCharacter = jest.fn(async (_id: string) => undefined)
 const mockDownloadBlob = jest.fn()
+let mockKnowledgeBases: Array<{
+  id: string
+  name: string
+  createdAt: number
+  updatedAt: number
+}> = []
+const mockCreateKnowledgeBase = jest.fn(async (..._args: unknown[]) => undefined)
+const mockDeleteKnowledgeBase = jest.fn(async (..._args: unknown[]) => undefined)
 
 jest.mock("dexie-react-hooks", () => ({
   // The three useLiveQuery calls (characters/skills/mcp) read synchronous
@@ -56,6 +74,18 @@ jest.mock("@/lib/db/characters", () => ({
 
 jest.mock("@/lib/db/skills", () => ({ listSkills: () => [] }))
 jest.mock("@/lib/db/mcp-servers", () => ({ listMcpServers: () => [] }))
+jest.mock("@/lib/db/knowledge-bases", () => ({
+  listKnowledgeBases: () => mockKnowledgeBases,
+  createKnowledgeBase: (...args: unknown[]) => mockCreateKnowledgeBase(...args),
+  deleteKnowledgeBase: (...args: unknown[]) => mockDeleteKnowledgeBase(...args),
+  getKnowledgeBaseReferences: jest.fn(async () => []),
+}))
+jest.mock("@/lib/knowledge-base/ingest/ingest-source", () => ({
+  removeKnowledgeBase: (...args: unknown[]) => mockDeleteKnowledgeBase(...args),
+}))
+jest.mock("@/lib/project-knowledge/runtime/build-deps", () => ({
+  tryBuildProjectKnowledgeDeps: jest.fn(async () => undefined),
+}))
 jest.mock("@/hooks/plugins/use-plugin-metadata", () => ({ usePluginMetadata: () => undefined }))
 jest.mock("@/stores/ui/ui-store", () => ({
   useUIStore: (
@@ -80,14 +110,23 @@ import { __resetSkillsForTesting, registerSkill } from "@/lib/plugin/registries/
 afterEach(() => {
   __resetCharacterPacksForTesting()
   __resetSkillsForTesting()
+  mockSaveAgentEnvSecret.mockClear()
+  mockKnowledgeBases = []
+  mockCreateKnowledgeBase.mockClear()
+  mockDeleteKnowledgeBase.mockClear()
 })
 
 // Narrow view of the EditorOutput payload the assertions read.
 type SavePayload = {
+  model?: string
+  modelRouting?: Character["modelRouting"]
+  executionPolicy?: Character["executionPolicy"]
   persona?: unknown
   voiceProfile?: unknown
   avatarImage?: { webDataUrl?: string }
   availableOnPlatforms?: unknown
+  knowledgeBaseIds?: string[]
+  memoryPolicy?: Character["memoryPolicy"]
 }
 
 function baseInitial(overrides: Partial<EditorState> = {}): EditorState {
@@ -98,12 +137,25 @@ function baseInitial(overrides: Partial<EditorState> = {}): EditorState {
     avatarEmoji: "🐙",
     systemPrompt: "You are a tutor.",
     model: "",
+    planModel: "",
+    utilityModel: "",
+    executionEffort: "inherit",
+    executionMaxTurns: "",
+    executionEnvBindings: undefined,
     computerUseTarget: "local",
     permissionMode: undefined,
     allowedTools: [],
     disallowedTools: [],
     mcpServerIds: undefined,
     skillIds: [],
+    knowledgeBaseIds: [],
+    memoryRecall: true,
+    memoryCreate: true,
+    memoryUpdate: true,
+    memoryForget: true,
+    memoryAutoLearn: true,
+    memoryReadableScopes: ["global", "workspace", "character", "agent"],
+    memoryWritableScopes: ["global", "workspace", "character", "agent"],
     workingDir: "",
     bareMode: false,
     debugMode: false,
@@ -131,13 +183,23 @@ function baseInitial(overrides: Partial<EditorState> = {}): EditorState {
   }
 }
 
-function renderEditor(initial: EditorState) {
+function renderEditor(
+  initial: EditorState,
+  knowledgeBaseCatalog: Array<{
+    id: string
+    name: string
+    description?: string
+    createdAt: number
+    updatedAt: number
+  }> = []
+) {
   const onSave = jest.fn(async (_data: SavePayload) => undefined)
   render(
     <CharacterEditor
       initial={initial}
       skillsCatalog={[]}
       mcpCatalog={[]}
+      knowledgeBaseCatalog={knowledgeBaseCatalog}
       submitLabel="Save"
       onCancel={() => undefined}
       onSave={onSave}
@@ -243,6 +305,133 @@ describe("CharacterEditor — v2 fields", () => {
   })
 })
 
+describe("CharacterEditor — Agent profile", () => {
+  it("persists Agent memory operations, scopes, and automatic learning", async () => {
+    const { onSave } = renderEditor(baseInitial())
+
+    fireEvent.click(screen.getByRole("switch", { name: "operations.recall" }))
+    fireEvent.click(screen.getByRole("switch", { name: "operations.autoLearn" }))
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "readableScopes: scopes.global" })
+    )
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "writableScopes: scopes.workspace" })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0].memoryPolicy).toEqual({
+      operations: {
+        recall: false,
+        create: true,
+        update: true,
+        forget: true,
+      },
+      readableScopes: ["workspace", "character", "agent"],
+      writableScopes: ["global", "character", "agent"],
+      autoLearn: false,
+    })
+  })
+
+  it("binds multiple reusable Knowledge Bases to the Agent", async () => {
+    const { onSave } = renderEditor(baseInitial(), [
+      { id: "kb-product", name: "Product docs", createdAt: 1, updatedAt: 1 },
+      { id: "kb-support", name: "Support notes", createdAt: 1, updatedAt: 1 },
+    ])
+
+    fireEvent.click(screen.getByRole("button", { name: "Product docs" }))
+    fireEvent.click(screen.getByRole("button", { name: "Support notes" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0].knowledgeBaseIds).toEqual(["kb-product", "kb-support"])
+  })
+
+  it("saves semantic model targets and Agent execution defaults", async () => {
+    const { onSave } = renderEditor(
+      baseInitial({
+        planModel: "planner-alias",
+        model: "executor-alias",
+        utilityModel: "fast-alias",
+        executionEffort: "high",
+        executionMaxTurns: "24",
+      })
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        model: "executor-alias",
+        modelRouting: {
+          plan: "planner-alias",
+          execute: "executor-alias",
+          utility: "fast-alias",
+        },
+        executionPolicy: { effort: "high", maxTurns: 24, envBindings: undefined },
+      })
+    )
+  })
+
+  it("preserves existing secure environment references when editing other defaults", async () => {
+    const envBindings = [{ name: "TOKEN", kind: "secret" as const, secretRef: "agent-1:TOKEN" }]
+    const { onSave } = renderEditor(
+      baseInitial({ executionMaxTurns: "8", executionEnvBindings: envBindings })
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0].executionPolicy).toEqual({
+      effort: undefined,
+      maxTurns: 8,
+      envBindings,
+    })
+  })
+
+  it("saves plain environment bindings with the Agent profile", async () => {
+    const { onSave } = renderEditor(baseInitial({ executionMaxTurns: "8" }))
+
+    fireEvent.click(screen.getByRole("button", { name: "execution.addEnv" }))
+    fireEvent.change(screen.getByLabelText("execution.envName"), {
+      target: { value: "API_BASE_URL" },
+    })
+    fireEvent.change(screen.getByLabelText("execution.envValue"), {
+      target: { value: "https://example.test" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0].executionPolicy?.envBindings).toEqual([
+      { name: "API_BASE_URL", kind: "plain", value: "https://example.test" },
+    ])
+    expect(mockSaveAgentEnvSecret).not.toHaveBeenCalled()
+  })
+
+  it("updates a secure environment value in the keyring without persisting the value", async () => {
+    const envBindings = [{ name: "TOKEN", kind: "secret" as const, secretRef: "agent-1:TOKEN" }]
+    const { onSave } = renderEditor(baseInitial({ executionEnvBindings: envBindings }))
+
+    fireEvent.change(screen.getByLabelText("execution.envValue"), {
+      target: { value: "super-secret" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(mockSaveAgentEnvSecret).toHaveBeenCalledWith("agent-1:TOKEN", "super-secret")
+    expect(onSave.mock.calls[0][0].executionPolicy?.envBindings).toEqual(envBindings)
+    expect(JSON.stringify(onSave.mock.calls[0][0])).not.toContain("super-secret")
+  })
+
+  it("rejects a max-turn value outside the runtime range", async () => {
+    const { onSave } = renderEditor(baseInitial({ executionMaxTurns: "101" }))
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(onSave).not.toHaveBeenCalled())
+  })
+})
+
 describe("CharactersSection — list, search & bulk (C2/C3)", () => {
   beforeEach(() => {
     mockCharacterList = [
@@ -275,6 +464,19 @@ describe("CharactersSection — list, search & bulk (C2/C3)", () => {
     ] as Character[]
     mockDeleteCharacter.mockReset().mockResolvedValue(undefined)
     mockDownloadBlob.mockReset()
+  })
+
+  it("creates a reusable Knowledge Base from the Agent settings surface", async () => {
+    render(<CharactersSection />)
+
+    fireEvent.change(screen.getByLabelText("name"), {
+      target: { value: "Product docs" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "create" }))
+
+    await waitFor(() =>
+      expect(mockCreateKnowledgeBase).toHaveBeenCalledWith({ name: "Product docs" })
+    )
   })
 
   it("renders all characters and filters by search query (name + description)", () => {

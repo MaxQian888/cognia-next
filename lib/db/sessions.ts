@@ -112,6 +112,7 @@ export async function createSession(
   const session: ChatSession = {
     id: newId(),
     projectId,
+    executionContext: partial?.executionContext,
     title: partial?.title ?? "New chat",
     kind: partial?.kind ?? "direct",
     characterId: partial?.characterId,

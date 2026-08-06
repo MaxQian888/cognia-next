@@ -33,6 +33,43 @@ jest.mock("@/lib/db/sessions", () => ({
   createSession: (input: unknown) => createSessionMock(input),
   getSession: (id: string) => getSessionMock(id),
 }))
+const beginAgentTaskAttemptMock = jest.fn()
+const linkAgentTaskAttemptExecutionMock = jest.fn()
+const settleAgentTaskAttemptMock = jest.fn()
+jest.mock("@/lib/db/agent-tasks", () => ({
+  beginAgentTaskAttempt: (...args: unknown[]) => beginAgentTaskAttemptMock(...args),
+  linkAgentTaskAttemptExecution: (...args: unknown[]) =>
+    linkAgentTaskAttemptExecutionMock(...args),
+  settleAgentTaskAttempt: (...args: unknown[]) => settleAgentTaskAttemptMock(...args),
+}))
+
+const settleTaskWorkspaceMock = jest.fn(async () => [])
+const openTaskWorkspaceRunLeaseMock = jest.fn(
+  async (
+    _input: unknown
+  ): Promise<{
+    run: { runId: string; executionRoot: string }
+    settle: typeof settleTaskWorkspaceMock
+  } | null> => ({
+    run: {
+      runId: "task-run-1",
+      executionRoot: "/managed/session-1",
+    },
+    settle: settleTaskWorkspaceMock,
+  })
+)
+jest.mock("@/lib/task-workspace/run-lease", () => ({
+  openTaskWorkspaceRunLease: (input: unknown) => openTaskWorkspaceRunLeaseMock(input),
+}))
+
+const getProjectEnvironmentMock = jest.fn()
+jest.mock("@/lib/db/project-environments", () => ({
+  getProjectEnvironment: (id: string) => getProjectEnvironmentMock(id),
+}))
+const executeProjectEnvironmentMock = jest.fn()
+jest.mock("@/lib/project-environment/executor", () => ({
+  executeProjectEnvironment: (input: unknown) => executeProjectEnvironmentMock(input),
+}))
 
 const getSettingsMock = jest.fn(async () => ({
   id: "singleton",
@@ -177,6 +214,17 @@ beforeEach(() => {
   onClaudeMessageMock.mockReset()
   interruptSessionMock.mockClear()
   createSessionMock.mockClear()
+  beginAgentTaskAttemptMock.mockReset().mockResolvedValue({ id: "attempt-1" })
+  linkAgentTaskAttemptExecutionMock.mockReset().mockResolvedValue(undefined)
+  settleAgentTaskAttemptMock.mockReset().mockResolvedValue(undefined)
+  openTaskWorkspaceRunLeaseMock.mockClear()
+  openTaskWorkspaceRunLeaseMock.mockResolvedValue({
+    run: { runId: "task-run-1", executionRoot: "/managed/session-1" },
+    settle: settleTaskWorkspaceMock,
+  })
+  settleTaskWorkspaceMock.mockClear()
+  getProjectEnvironmentMock.mockReset().mockResolvedValue(undefined)
+  executeProjectEnvironmentMock.mockReset().mockResolvedValue({ success: true, bypassed: false })
   getSessionMock.mockReset()
   getSessionMock.mockResolvedValue(undefined)
   getSettingsMock.mockClear()
@@ -517,6 +565,104 @@ describe("executeChatTask", () => {
       expect.objectContaining({ kind: "team", teamId: "team-1" })
     )
   })
+  it("persists and executes a scheduled chat in its durable managed worktree", async () => {
+    const executionContext = {
+      location: "managedWorktree" as const,
+      projectId: "project-1",
+      projectRoot: "/repo",
+      taskWorkspace: { taskId: "task-workspace:session-1", workspaceKey: "session-1" },
+      baseRef: "main",
+    }
+    emitTerminalResult()
+    const result = await executeChatTask(
+      makeTask({ payload: { prompt: "hi", executionContext } }),
+      { ...makeExecution(), id: "execution-1" },
+      makeSignal()
+    )
+
+    expect(createSessionMock).toHaveBeenCalledWith(expect.objectContaining({ executionContext }))
+    expect(openTaskWorkspaceRunLeaseMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-workspace:session-1",
+        workspaceKey: "session-1",
+        workspaceRoot: "/repo",
+      })
+    )
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      "session-created",
+      "hi",
+      expect.objectContaining({ cwd: "/managed/session-1" })
+    )
+    expect(settleTaskWorkspaceMock).toHaveBeenCalledWith("ready")
+    expect(result.success).toBe(true)
+  })
+
+  it("fails closed when a scheduled managed worktree cannot be acquired", async () => {
+    openTaskWorkspaceRunLeaseMock.mockResolvedValueOnce(null)
+    const result = await executeChatTask(
+      makeTask({
+        payload: {
+          prompt: "hi",
+          executionContext: {
+            location: "managedWorktree",
+            projectId: "project-1",
+            projectRoot: "/repo",
+            taskWorkspace: { taskId: "task-1", workspaceKey: "session-1" },
+          },
+        },
+      }),
+      makeExecution(),
+      makeSignal()
+    )
+    expect(result).toEqual({
+      success: false,
+      error: "Managed worktree is unavailable for scheduled execution",
+    })
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("runs project setup in the selected execution root before scheduled chat", async () => {
+    const environment = {
+      id: "env-1",
+      projectId: "project-1",
+      name: "Development",
+      isEnabled: true,
+      setupScript: { default: "pnpm install" },
+      actions: [],
+      variables: {},
+      keyringReferences: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    getProjectEnvironmentMock.mockResolvedValue(environment)
+    emitTerminalResult()
+
+    const result = await executeChatTask(
+      makeTask({
+        payload: {
+          prompt: "hi",
+          executionContext: {
+            location: "local",
+            projectId: "project-1",
+            projectRoot: "/repo",
+            environmentId: "env-1",
+            taskWorkspace: { taskId: "task-1", workspaceKey: "session-1" },
+          },
+        },
+      }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    expect(executeProjectEnvironmentMock).toHaveBeenCalledWith({
+      environment,
+      executionRoot: "/repo",
+      scope: "local",
+      surface: "scheduled",
+    })
+    expect(sendPromptMock).toHaveBeenCalled()
+    expect(result.success).toBe(true)
+  })
   it("layers payload.allowedTools on top of resolved allowedTools", async () => {
     resolveSendOptionsMock.mockResolvedValueOnce({ allowedTools: ["Read"] } as Record<
       string,
@@ -725,6 +871,26 @@ describe("executeAgentTask", () => {
     )
     expect(r.success).toBe(true)
     expect(sendPromptMock.mock.calls[0]?.[1]).toBe("do work")
+  })
+  it("journals each board execution as an independent Agent task attempt", async () => {
+    emitTerminalResult()
+    const execution = makeExecution()
+    const result = await executeAgentTask(
+      makeTask({ payload: { prompt: "do work", characterId: "c", agentTaskId: "board-1" } }),
+      execution,
+      makeSignal()
+    )
+
+    expect(result.success).toBe(true)
+    expect(beginAgentTaskAttemptMock).toHaveBeenCalledWith(
+      "board-1",
+      expect.objectContaining({ runId: execution.id })
+    )
+    expect(linkAgentTaskAttemptExecutionMock).toHaveBeenCalledWith("attempt-1", execution.id)
+    expect(settleAgentTaskAttemptMock).toHaveBeenCalledWith(
+      "attempt-1",
+      expect.objectContaining({ status: "completed" })
+    )
   })
   it("rejects undefined payload", async () => {
     const r = await executeAgentTask(

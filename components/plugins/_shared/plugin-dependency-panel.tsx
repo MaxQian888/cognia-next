@@ -11,6 +11,12 @@ import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CheckCircle2Icon, CircleHelpIcon, XCircleIcon } from "lucide-react"
 import { Card } from "@/components/ui/card"
+import {
+  PackageInfo,
+  PackageInfoHeader,
+  PackageInfoName,
+  PackageInfoVersion,
+} from "@/components/ai-elements/package-info"
 import { Badge } from "@/components/ui/badge"
 import { listPlugins } from "@/lib/db/plugins"
 import { detectCli, satisfiesMinVersion } from "@/lib/cli-bridge/detect-cli"
@@ -184,27 +190,34 @@ function DepRow({
   t: ReturnType<typeof useTranslations>
 }) {
   return (
-    <div className="flex items-center justify-between gap-2 text-xs" data-testid={`dep-${name}`}>
-      <div className="flex items-center gap-1.5 min-w-0">
-        <code className="font-mono truncate">{name}</code>
-        <span className="text-muted-foreground">{version}</span>
-        {optional && (
-          <Badge variant="outline" className="text-[10px]">
-            {t("optional")}
-          </Badge>
+    <PackageInfo
+      className="rounded-md p-2"
+      currentVersion={version}
+      data-testid={`dep-${name}`}
+      name={name}
+    >
+      <PackageInfoHeader>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <PackageInfoName className="min-w-0 [&>span]:truncate" />
+          {optional && (
+            <Badge variant="outline" className="text-[10px]">
+              {t("optional")}
+            </Badge>
+          )}
+        </div>
+        {installed ? (
+          <span className="flex items-center gap-1 text-xs text-emerald-600">
+            <CheckCircle2Icon className="size-3" />
+            {t("installed")}
+          </span>
+        ) : (
+          <span className="flex items-center gap-1 text-xs text-amber-600">
+            <XCircleIcon className="size-3" />
+            {t("missing")}
+          </span>
         )}
-      </div>
-      {installed ? (
-        <span className="flex items-center gap-1 text-emerald-600">
-          <CheckCircle2Icon className="size-3" />
-          {t("installed")}
-        </span>
-      ) : (
-        <span className="flex items-center gap-1 text-amber-600">
-          <XCircleIcon className="size-3" />
-          {t("missing")}
-        </span>
-      )}
-    </div>
+      </PackageInfoHeader>
+      <PackageInfoVersion className="mt-1" />
+    </PackageInfo>
   )
 }

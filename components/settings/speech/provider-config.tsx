@@ -46,6 +46,7 @@ import {
   XIAOMI_TTS_STYLES,
 } from "@cognia/tts/types"
 import { ApiKeyInput } from "./api-key-input"
+import { TtsVoiceSelector } from "./tts-voice-selector"
 
 // -- Generic helper for a labelled slider value ------------------------------
 
@@ -103,22 +104,17 @@ export function SystemConfig() {
     <div className="space-y-3">
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
-        <Select
+        <TtsVoiceSelector
           value={value || "auto"}
           onValueChange={(v) => void save({ systemVoice: v === "auto" ? "" : v })}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder={t("voiceAutoPlaceholder")} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="auto">{t("voiceAuto")}</SelectItem>
-            {voices.map((v) => (
-              <SelectItem key={v.voiceURI} value={v.voiceURI}>
-                {v.name} ({v.lang})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          autoOption={{ id: "auto", name: t("voiceAuto") }}
+          options={voices.map((voice) => ({
+            id: voice.voiceURI,
+            name: voice.name,
+            language: voice.lang,
+          }))}
+          getVoiceOverlay={(voiceId) => ({ ttsProvider: "system", systemVoice: voiceId })}
+        />
         {voices.length === 0 && (
           <p className="text-xs text-muted-foreground">{t("voicesLoading")}</p>
         )}
@@ -157,18 +153,12 @@ export function OpenAiConfig() {
       />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
-        <Select value={voice} onValueChange={(v) => void save({ openaiVoice: v })}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {OPENAI_TTS_VOICES.map((v) => (
-              <SelectItem key={v.id} value={v.id}>
-                {v.name} — {v.description}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <TtsVoiceSelector
+          value={voice}
+          options={OPENAI_TTS_VOICES}
+          onValueChange={(v) => void save({ openaiVoice: v })}
+          getVoiceOverlay={(voiceId) => ({ ttsProvider: "openai", openaiVoice: voiceId })}
+        />
       </div>
       <div className="space-y-2">
         <Label className="text-xs">{t("model")}</Label>
@@ -260,18 +250,12 @@ export function GeminiConfig() {
       </div>
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
-        <Select value={voice} onValueChange={(v) => void save({ geminiVoice: v })}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="max-h-72">
-            {GEMINI_TTS_VOICES.map((v) => (
-              <SelectItem key={v.id} value={v.id}>
-                {v.name} — {v.description}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <TtsVoiceSelector
+          value={voice}
+          options={GEMINI_TTS_VOICES}
+          onValueChange={(v) => void save({ geminiVoice: v })}
+          getVoiceOverlay={(voiceId) => ({ ttsProvider: "gemini", geminiVoice: voiceId })}
+        />
       </div>
     </div>
   )
@@ -356,18 +340,12 @@ export function EdgeConfig() {
       <p className="text-xs text-muted-foreground">{t("edgeIntro")}</p>
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
-        <Select value={voice} onValueChange={(v) => void save({ edgeVoice: v })}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="max-h-72">
-            {list.map((v) => (
-              <SelectItem key={v.id} value={v.id}>
-                {v.name} — {v.language} ({v.gender})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <TtsVoiceSelector
+          value={voice}
+          options={list}
+          onValueChange={(v) => void save({ edgeVoice: v })}
+          getVoiceOverlay={(voiceId) => ({ ttsProvider: "edge", edgeVoice: voiceId })}
+        />
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
@@ -420,18 +398,15 @@ export function ElevenLabsConfig() {
       />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
-        <Select value={voice} onValueChange={(v) => void save({ elevenlabsVoice: v })}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {ELEVENLABS_TTS_VOICES.map((v) => (
-              <SelectItem key={v.id} value={v.id}>
-                {v.name} — {v.description}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <TtsVoiceSelector
+          value={voice}
+          options={ELEVENLABS_TTS_VOICES}
+          onValueChange={(v) => void save({ elevenlabsVoice: v })}
+          getVoiceOverlay={(voiceId) => ({
+            ttsProvider: "elevenlabs",
+            elevenlabsVoice: voiceId,
+          })}
+        />
       </div>
       <div className="space-y-2">
         <Label className="text-xs">{t("model")}</Label>
@@ -482,18 +457,12 @@ export function LmntConfig() {
       <ApiKeyInput provider="lmnt" label={t("label.lmnt")} />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
-        <Select value={voice} onValueChange={(v) => void save({ lmntVoice: v })}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {LMNT_TTS_VOICES.map((v) => (
-              <SelectItem key={v.id} value={v.id}>
-                {v.name} — {v.description}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <TtsVoiceSelector
+          value={voice}
+          options={LMNT_TTS_VOICES}
+          onValueChange={(v) => void save({ lmntVoice: v })}
+          getVoiceOverlay={(voiceId) => ({ ttsProvider: "lmnt", lmntVoice: voiceId })}
+        />
       </div>
       <NumberSlider
         label={t("speed")}
@@ -521,18 +490,12 @@ export function HumeConfig() {
       <ApiKeyInput provider="hume" label={t("label.hume")} />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
-        <Select value={voice} onValueChange={(v) => void save({ humeVoice: v })}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {HUME_TTS_VOICES.map((v) => (
-              <SelectItem key={v.id} value={v.id}>
-                {v.name} — {v.description}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <TtsVoiceSelector
+          value={voice}
+          options={HUME_TTS_VOICES}
+          onValueChange={(v) => void save({ humeVoice: v })}
+          getVoiceOverlay={(voiceId) => ({ ttsProvider: "hume", humeVoice: voiceId })}
+        />
       </div>
     </div>
   )
@@ -566,18 +529,12 @@ export function CartesiaConfig() {
       <ApiKeyInput provider="cartesia" label={t("label.cartesia")} />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
-        <Select value={voice} onValueChange={(v) => void save({ cartesiaVoice: v })}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {CARTESIA_TTS_VOICES.map((v) => (
-              <SelectItem key={v.id} value={v.id}>
-                {v.name} — {v.description}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <TtsVoiceSelector
+          value={voice}
+          options={CARTESIA_TTS_VOICES}
+          onValueChange={(v) => void save({ cartesiaVoice: v })}
+          getVoiceOverlay={(voiceId) => ({ ttsProvider: "cartesia", cartesiaVoice: voiceId })}
+        />
       </div>
       <div className="space-y-2">
         <Label className="text-xs">{t("model")}</Label>
@@ -648,18 +605,12 @@ export function DeepgramConfig() {
       <ApiKeyInput provider="deepgram" label={t("label.deepgram")} />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
-        <Select value={voice} onValueChange={(v) => void save({ deepgramVoice: v })}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {DEEPGRAM_TTS_VOICES.map((v) => (
-              <SelectItem key={v.id} value={v.id}>
-                {v.name} — {v.description}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <TtsVoiceSelector
+          value={voice}
+          options={DEEPGRAM_TTS_VOICES}
+          onValueChange={(v) => void save({ deepgramVoice: v })}
+          getVoiceOverlay={(voiceId) => ({ ttsProvider: "deepgram", deepgramVoice: voiceId })}
+        />
       </div>
     </div>
   )
@@ -686,18 +637,12 @@ export function XiaomiConfig() {
       />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
-        <Select value={voice} onValueChange={(v) => void save({ xiaomiVoice: v })}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {XIAOMI_TTS_VOICES.map((v) => (
-              <SelectItem key={v.id} value={v.id}>
-                {v.name} — {v.description}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <TtsVoiceSelector
+          value={voice}
+          options={XIAOMI_TTS_VOICES}
+          onValueChange={(v) => void save({ xiaomiVoice: v })}
+          getVoiceOverlay={(voiceId) => ({ ttsProvider: "xiaomi", xiaomiVoice: voiceId })}
+        />
       </div>
       <div className="space-y-2">
         <Label className="text-xs">{t("model")}</Label>
@@ -765,18 +710,15 @@ export function OpenAiRealtimeConfig() {
       />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
-        <Select value={voice} onValueChange={(v) => void save({ realtimeVoice: v })}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="max-h-72">
-            {REALTIME_TTS_VOICES.map((v) => (
-              <SelectItem key={v.id} value={v.id}>
-                {v.name} — {v.description}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <TtsVoiceSelector
+          value={voice}
+          options={REALTIME_TTS_VOICES}
+          onValueChange={(v) => void save({ realtimeVoice: v })}
+          getVoiceOverlay={(voiceId) => ({
+            ttsProvider: "openai-realtime",
+            realtimeVoice: voiceId,
+          })}
+        />
       </div>
       <div className="space-y-2">
         <Label className="text-xs">{t("model")}</Label>

@@ -218,6 +218,12 @@ export interface ChatLikeTaskPayload extends Record<string, unknown> {
   sessionTitle?: string
   /** When set, the scheduler creates a `kind: "team"` session bound to this team. */
   teamId?: string
+  /**
+   * Uses the same durable execution identity as an interactive chat. A
+   * managed-worktree request is mandatory for unattended setup: scheduled
+   * runs may retry initialization, but never bypass a failed setup script.
+   */
+  executionContext?: import("@/types/execution-context").SessionExecutionContext
 
   /** Override the model picked by character / mode / app default. */
   model?: string
@@ -254,6 +260,8 @@ export interface ChatLikeTaskPayload extends Record<string, unknown> {
 export interface AgentTaskPayload extends ChatLikeTaskPayload {
   /** Required. The character (a.k.a. agent persona) that drives the reply. */
   characterId: string
+  /** Optional durable single-Agent board card owning this execution attempt. */
+  agentTaskId?: string
 }
 
 /**

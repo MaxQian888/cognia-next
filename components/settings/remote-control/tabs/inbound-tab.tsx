@@ -18,6 +18,13 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Snippet,
+  SnippetAddon,
+  SnippetCopyButton,
+  SnippetInput,
+  SnippetText,
+} from "@/components/ai-elements/snippet"
 import { DomainListInput } from "@/components/settings/search/_shared/domain-list-input"
 import { isTauri } from "@/lib/tauri"
 import { remoteControlGetToken, remoteControlRotateToken } from "@/lib/tauri/remote-control"
@@ -81,11 +88,6 @@ export function InboundTab() {
   // token so copying to a shared terminal history never leaks the bearer.
   const healthSnippet = `curl -sS ${endpointUrl}/api/v1/health \\\n  -H "Authorization: Bearer $COGNIA_RC_TOKEN"`
   const commandSnippet = `curl -sS -X POST ${endpointUrl}/api/v1/commands/scheduler.task.run \\\n  -H "Authorization: Bearer $COGNIA_RC_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d '{"args":{"taskId":"<task-id>"}}'`
-
-  const onCopySnippet = async (snippet: string) => {
-    await navigator.clipboard.writeText(snippet).catch(() => {})
-    toast.success(t("quickstartCopied"))
-  }
 
   const onRevealToken = async () => {
     try {
@@ -465,16 +467,19 @@ export function InboundTab() {
             ] as const
           ).map(({ label, snippet }) => (
             <div key={label} className="space-y-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-medium text-muted-foreground">{label}</span>
-                <Button size="sm" variant="ghost" onClick={() => onCopySnippet(snippet)}>
-                  <CopyIcon className="mr-1.5 h-3.5 w-3.5" />
-                  {t("quickstartCopy")}
-                </Button>
-              </div>
-              <pre className="overflow-x-auto rounded-md border bg-muted/40 p-2.5 text-[11px] leading-relaxed">
-                <code>{snippet}</code>
-              </pre>
+              <Snippet code={snippet}>
+                <SnippetAddon>
+                  <SnippetText>{label}</SnippetText>
+                </SnippetAddon>
+                <SnippetInput aria-label={label} />
+                <SnippetAddon align="inline-end">
+                  <SnippetCopyButton
+                    aria-label={t("quickstartCopy")}
+                    onCopy={() => toast.success(t("quickstartCopied"))}
+                    title={t("quickstartCopy")}
+                  />
+                </SnippetAddon>
+              </Snippet>
             </div>
           ))}
         </CardContent>

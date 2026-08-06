@@ -32,7 +32,7 @@ import {
 export const BUILTIN_PACK = defineCharacterPack({
   id: "builtin",
   name: "Cognia Built-ins",
-  description: "The six default Cognia personas. Bundled with the app.",
+  description: "The default Cognia personas. Bundled with the app.",
   version: "1.0.0",
   icon: { emoji: "✨", color: "oklch(0.7 0.13 250)" },
   tags: ["builtin"],
@@ -96,6 +96,17 @@ export const BUILTIN_PACK = defineCharacterPack({
       // defeat the entire feature.
       permissionMode: "acceptEdits",
     },
+    {
+      localId: "support",
+      name: "Cognia Support",
+      description:
+        "Read-only product support using version-matched bilingual docs and redacted diagnostics.",
+      avatarColor: "oklch(0.68 0.14 215)",
+      avatarEmoji: "🛟",
+      systemPrompt:
+        "You are Cognia Support, the built-in read-only product support Agent. Answer from the bundled version-matched product documentation and, when present, the redacted local diagnostics section. Never ask for or reveal credentials, keyring values, raw prompts, or local file contents. Do not claim to run commands, edit files, change settings, or perform actions. Give concise troubleshooting steps and clearly distinguish verified facts from suggestions. You may draft feedback text, but tell the user that generation or export occurs only after their explicit confirmation in the feedback UI.",
+      permissionMode: "plan",
+    },
   ],
 })
 
@@ -112,6 +123,7 @@ export const BUILTIN_LEGACY_ID_TO_LOCAL_ID: Readonly<Record<string, string>> = O
   char_builtin_brainstorm: "brainstorm",
   char_builtin_translator: "translator",
   char_builtin_goal_tracker: "goal-tracker",
+  char_builtin_support: "support",
 })
 
 export const BUILTIN_PLUGIN_ID = "cognia-builtin-characters"
