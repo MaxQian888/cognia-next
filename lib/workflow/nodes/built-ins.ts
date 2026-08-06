@@ -3264,6 +3264,10 @@ registerNodeExecutor({
       expectedOutput?: string
       assignedTo?: string
       dependencies?: string[]
+      access?: "read" | "write"
+      taskKind?: "general" | "code" | "ui"
+      repositoryId?: string
+      fileOwnership?: string[]
     }
     if (!params.teamId || !params.taskId) {
       throw nonRetryable("action.team.task.dispatch requires 'teamId' and 'taskId'")
@@ -3326,6 +3330,17 @@ registerNodeExecutor({
       signal: ctx.signal,
       validateOutput: true,
       recordToStore: true,
+      access: params.access === "read" ? "read" : "write",
+      taskKind:
+        params.taskKind === "ui" || params.taskKind === "general" ? params.taskKind : "code",
+      ...(typeof params.repositoryId === "string" ? { repositoryId: params.repositoryId } : {}),
+      ...(Array.isArray(params.fileOwnership)
+        ? {
+            fileOwnership: params.fileOwnership.filter(
+              (path): path is string => typeof path === "string" && path.length > 0
+            ),
+          }
+        : {}),
       // Skill-aware claim: prefer the teammate the task was assigned to.
       ...(params.assignedTo ? { preferTeammateId: params.assignedTo } : {}),
     })
@@ -3471,6 +3486,13 @@ registerNodeExecutor({
         ...(teamCtx.team.config?.workingDir ? { workingDir: teamCtx.team.config.workingDir } : {}),
         taskId,
       })
+      const durableEvidence =
+        teamCtx.team.config?.runtimeVersion === "durable-v2"
+          ? await (await import("@/lib/db/agent-team-runtime")).listAgentTeamEvidence(ctx.runId)
+          : []
+      const durableEvidenceIds = durableEvidence
+        .filter((item) => item.taskId === taskId)
+        .map((item) => item.id)
 
       // Record what was reviewed, so reconcile / the UI can point at the commit
       // the verdict was actually about. `dispatchTeammate` already commits the
@@ -3487,7 +3509,7 @@ registerNodeExecutor({
         verdict = await runLeadReview({
           team: teamCtx.team,
           lead,
-          task,
+          task: durableEvidenceIds.length > 0 ? { ...task, evidenceIds: durableEvidenceIds } : task,
           ...(workerName ? { workerName } : {}),
           workerOutput,
           evidence,

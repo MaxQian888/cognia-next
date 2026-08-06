@@ -19,6 +19,9 @@ const mockRf = {
 
 jest.mock("@xyflow/react", () => ({
   __esModule: true,
+  Controls: ({ children, ...props }: React.ComponentProps<"div">) => (
+    <div {...props}>{children}</div>
+  ),
   useReactFlow: () => mockRf,
   useOnViewportChange: () => undefined,
 }))

@@ -6,6 +6,14 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { NodeFloatingToolbar } from "./node-floating-toolbar"
 
+jest.mock("@xyflow/react", () => ({
+  __esModule: true,
+  NodeToolbar: ({ children, ...props }: React.ComponentProps<"div">) => (
+    <div {...props}>{children}</div>
+  ),
+  Position: { Top: "top", Bottom: "bottom" },
+}))
+
 function renderToolbar(overrides: Partial<React.ComponentProps<typeof NodeFloatingToolbar>> = {}) {
   const onRun = jest.fn()
   const onCopy = jest.fn()

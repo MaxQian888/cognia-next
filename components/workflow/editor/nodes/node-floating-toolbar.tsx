@@ -25,6 +25,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
 import { workflowNodeCategory } from "@/types/workflow/visual"
+import { Toolbar } from "@/components/ai-elements/toolbar"
+import { Position } from "@xyflow/react"
 
 export interface NodeFloatingToolbarProps {
   nodeId: string
@@ -57,12 +59,14 @@ export function NodeFloatingToolbar({
   const moreBtnRef = useRef<HTMLButtonElement | null>(null)
 
   return (
-    <div
+    <Toolbar
+      position={Position.Top}
+      offset={8}
+      isVisible
       data-testid={`wf-node-toolbar-${nodeId}`}
       data-always-visible={alwaysVisible ? "true" : "false"}
       data-motion={motionEnabled ? "on" : "off"}
       className={cn(
-        "absolute -top-9 left-1/2 -translate-x-1/2 z-10",
         "flex items-center gap-0.5 rounded-md border bg-popover/95 px-1 py-0.5 shadow-sm",
         // Motion: when on, opacity transitions for a soft fade. When off,
         // bare CSS visibility toggle via group-hover (no JS animation).
@@ -171,6 +175,6 @@ export function NodeFloatingToolbar({
         </TooltipTrigger>
         <TooltipContent side="top">{t("more")}</TooltipContent>
       </Tooltip>
-    </div>
+    </Toolbar>
   )
 }

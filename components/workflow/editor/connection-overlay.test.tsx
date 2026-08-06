@@ -187,7 +187,7 @@ describe("ConnectionLineGhostFactory", () => {
     expect(g.getAttribute("data-candidate")).toBe(ai)
     const path = g.querySelector("path")!
     // The path should end at the AI input handle (x=100, y=140) — not toX/toY.
-    expect(path.getAttribute("d")).toContain("L 100 140")
+    expect(path.getAttribute("d")).toMatch(/100,140$/)
   })
 
   it("strips strokeDasharray when tier is reduced", () => {

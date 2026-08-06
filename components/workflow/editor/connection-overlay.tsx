@@ -24,6 +24,7 @@ import { useShallow } from "zustand/react/shallow"
 import type { ConnectionCandidate, EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import { validateConnection } from "@/lib/workflow/editor/connection-validator"
 import { useRafThrottle } from "@/hooks/workflow/use-raf-throttle"
+import { Connection } from "@/components/ai-elements/connection"
 
 const SNAP_DISTANCE_SCREEN = 32
 
@@ -160,7 +161,7 @@ export const ConnectionPointerListener = memo(function ConnectionPointerListener
  */
 export function ConnectionLineGhostFactory(store: EditorStore) {
   const Ghost = memo(function ConnectionLineGhost(props: ConnectionLineComponentProps) {
-    const { fromX, fromY, toX, toY } = props
+    const { toX, toY } = props
     const candidate = store((s: EditorState) => s.connectionState?.candidate ?? null)
     const animationsEnabled = store((s: EditorState) => {
       // Mirror the workflow-node tier check so we don't import the resolver
@@ -194,12 +195,12 @@ export function ConnectionLineGhostFactory(store: EditorStore) {
     const stroke = candidate ? "oklch(var(--primary))" : "currentColor"
     return (
       <g data-testid="connection-line-ghost" data-candidate={candidate ? candidate.nodeId : ""}>
-        <path
-          d={`M ${fromX} ${fromY} L ${endX} ${endY}`}
-          fill="none"
+        <Connection
+          {...props}
+          toX={endX}
+          toY={endY}
           stroke={stroke}
           strokeOpacity={candidate ? 0.7 : 0.35}
-          strokeWidth={2}
           strokeDasharray={animationsEnabled ? "4 3" : undefined}
         />
       </g>

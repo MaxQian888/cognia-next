@@ -11,6 +11,11 @@ import { flattenSchema } from "@/lib/workflow/editor/node-io-data"
 import type { PathSegment } from "@/lib/workflow/editor/expr-ref"
 import { cn } from "@/lib/utils"
 import { exprDragProps } from "./drag-props"
+import {
+  SchemaDisplay,
+  SchemaDisplayContent,
+  SchemaDisplayProperty,
+} from "@/components/ai-elements/schema-display"
 
 export function DataSchemaView({
   sourceNodeId,
@@ -29,27 +34,29 @@ export function DataSchemaView({
   }
 
   return (
-    <ul className="space-y-0.5" data-testid="data-schema-view">
-      {rows.map((row) => (
-        <li
-          key={row.path}
-          {...exprDragProps(sourceNodeId, [...basePrefix, ...row.segments])}
-          title={t("dragHint")}
-          data-testid="data-field-row"
-          className={cn(
-            "flex items-center gap-2 rounded px-1.5 py-1 text-xs cursor-grab",
-            "hover:bg-accent/50 active:cursor-grabbing"
-          )}
-        >
-          <span className="font-mono text-foreground/80 break-all">{row.path}</span>
-          <span className="ml-auto shrink-0 text-[10px] uppercase text-muted-foreground">
-            {row.type}
-          </span>
-          <span className="shrink-0 max-w-[40%] truncate font-mono text-muted-foreground">
-            {row.sample}
-          </span>
-        </li>
-      ))}
-    </ul>
+    <SchemaDisplay
+      className="rounded-none border-0 bg-transparent"
+      data-testid="data-schema-view"
+      method="GET"
+      path={sourceNodeId}
+    >
+      <SchemaDisplayContent className="divide-y-0 space-y-0.5">
+        {rows.map((row) => (
+          <SchemaDisplayProperty
+            key={row.path}
+            {...exprDragProps(sourceNodeId, [...basePrefix, ...row.segments])}
+            title={t("dragHint")}
+            data-testid="data-field-row"
+            className={cn(
+              "cursor-grab rounded py-1 pr-1.5 text-xs [&>div]:gap-2 [&>div]:text-xs",
+              "hover:bg-accent/50 active:cursor-grabbing"
+            )}
+            description={row.sample}
+            name={row.path}
+            type={row.type}
+          />
+        ))}
+      </SchemaDisplayContent>
+    </SchemaDisplay>
   )
 }

@@ -488,6 +488,8 @@ export interface VisualWorkflow {
    * valid identifiers so they resolve through the expression tokenizer.
    */
   variables?: Record<string, string>
+  /** Reusable Knowledge Bases queried when this workflow runs. */
+  knowledgeBaseIds?: string[]
   /** UI-only test data pinned per node so the inspector can replay outputs. */
   pinData?: Record<string, unknown>
   /** Cross-run mutable state. Persisted on the workflow row, not snapshots. */

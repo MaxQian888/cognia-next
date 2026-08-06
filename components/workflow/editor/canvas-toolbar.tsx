@@ -46,6 +46,7 @@ import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { Controls } from "@/components/ai-elements/controls"
 import type {
   PerformanceTier,
   ResolvedPerformanceTier,
@@ -275,9 +276,12 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarPro
   const duration = props.motionEnabled ? 200 : 0
 
   return (
-    <div
+    <Controls
+      showZoom={false}
+      showFitView={false}
+      showInteractive={false}
       data-testid="wf-canvas-toolbar"
-      className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-full border bg-popover/95 px-1.5 py-1 shadow-md backdrop-blur"
+      className="absolute! right-auto! bottom-4! left-1/2! top-auto! z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-full border bg-popover/95 px-1.5 py-1 shadow-md backdrop-blur"
     >
       <ToolbarButton
         icon={Plus}
@@ -369,6 +373,6 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarPro
       />
       <VSep />
       <ViewOptionsPopover {...props} />
-    </div>
+    </Controls>
   )
 })
