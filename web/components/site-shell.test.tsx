@@ -32,6 +32,16 @@ describe("SiteShell", () => {
     )
   })
 
+  it("clips horizontal paint without creating a sticky-breaking scroll container", () => {
+    render(
+      <SiteShell locale="en" route="/">
+        <p>body</p>
+      </SiteShell>
+    )
+    expect(screen.getByRole("main")).toHaveClass("overflow-x-clip")
+    expect(screen.getByRole("main")).not.toHaveClass("overflow-x-hidden")
+  })
+
   it("resolves the download wording once, so the nav and the page agree", () => {
     // The committed evidence snapshot has no release, so both surfaces must
     // show the build-from-source wording rather than one of each.

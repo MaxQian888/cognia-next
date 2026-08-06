@@ -658,6 +658,30 @@ export const en: SiteCopy = {
       trust: "Trust",
       start: "Start",
     },
+    contextTrace: {
+      srLabel: "Context signals consumed for this task",
+      items: [
+        { key: "repository", label: "Repository read" },
+        { key: "branch", label: "Branch identified" },
+        { key: "files", label: "Files scanned" },
+        { key: "plan", label: "Plan formed" },
+        { key: "approval", label: "Approval requested" },
+        { key: "tests", label: "Tests run" },
+      ],
+    },
+    lensLabel: "Inspect product interface",
+    fileTreeLabel: "Repository file tree",
+    terminal: {
+      title: "Terminal",
+      playLabel: "Play",
+      pauseLabel: "Pause",
+      restartLabel: "Restart",
+      completeLabel: "Terminal sequence complete",
+    },
+    connectionFlow: {
+      label: "How Cognia connects to external systems",
+      centerNode: "Cognia",
+    },
   },
 
   product: {

@@ -198,13 +198,15 @@ export function SiteNav({ locale, route, copy, releaseState, docsOrigin }: SiteN
             />
             <ThemeToggle copy={copy.nav} />
           </div>
-          <DownloadCta
-            locale={locale}
-            copy={copy.common}
-            state={releaseState}
-            variant="compact"
-            docsOrigin={docsOrigin}
-          />
+          <div className="hidden sm:inline-flex">
+            <DownloadCta
+              locale={locale}
+              copy={copy.common}
+              state={releaseState}
+              variant="compact"
+              docsOrigin={docsOrigin}
+            />
+          </div>
           <button
             ref={sheetTriggerRef}
             type="button"

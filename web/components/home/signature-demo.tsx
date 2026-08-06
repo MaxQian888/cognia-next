@@ -8,10 +8,17 @@ import { format } from "@web/content"
 import type { ReconstructionCopy, SignatureCopy, SignatureStep, StepTone } from "@web/content/types"
 import { usePinnedProgress } from "@web/hooks/use-pinned-progress"
 import { useStepRail } from "@web/hooks/use-step-rail"
+import { DemoActivityList } from "./demo-activity-list"
+import { DemoFileTree } from "./demo-file-tree"
+import { DemoPointer } from "./demo-pointer"
+import { StageLens } from "./stage-lens"
 
 interface SignatureDemoProps {
   copy: SignatureCopy
   reconstruction: ReconstructionCopy
+  lensLabel?: string
+  fileTreeLabel?: string
+  pointerLabel?: string
 }
 
 /** Index of the approval step — where autoplay stops and waits (spec §6.1). */
@@ -62,37 +69,29 @@ const TONE_CLASS: Record<StepTone, string> = {
 function StepPanel({
   step,
   reconstruction,
-  /**
-   * Stretch to the height the parent offers instead of hugging the content.
-   *
-   * Only the pinned mode passes this. Pinned, the panel owns a whole screen,
-   * and a content-height panel left roughly a third of it empty — measured at
-   * 1512×900, 506px of content against 804px of available viewport. Unpinned,
-   * the panel sits in normal page flow and stretching it would invent
-   * whitespace instead of removing it.
-   */
-  fill = false,
+  lensLabel,
+  fileTreeLabel,
+  pointerLabel,
 }: {
   step: SignatureStep
   reconstruction: ReconstructionCopy
-  fill?: boolean
+  lensLabel?: string
+  fileTreeLabel?: string
+  pointerLabel?: string
 }) {
+  const artifact =
+    step.artifact === "context" && fileTreeLabel ? (
+      <DemoFileTree ariaLabel={fileTreeLabel} copy={reconstruction.artifacts.context} />
+    ) : step.artifact === "test" && fileTreeLabel ? (
+      <DemoActivityList copy={reconstruction.artifacts.test} />
+    ) : (
+      <TaskArtifact kind={step.artifact} copy={reconstruction} />
+    )
+
   return (
-    <div
-      className={`overflow-hidden rounded-stage border border-on-stage-hairline bg-graphite ${
-        fill ? "flex h-full min-h-0 flex-col" : ""
-      }`}
-    >
-      <div
-        className={`grid xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] ${
-          fill ? "min-h-0 flex-1" : ""
-        }`}
-      >
-        <div
-          className={`flex flex-col border-on-stage-hairline p-6 md:p-8 xl:border-r ${
-            fill ? "min-h-0" : ""
-          }`}
-        >
+    <div className="border-y border-on-stage-hairline bg-graphite">
+      <div className="grid xl:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
+        <div className="flex flex-col border-on-stage-hairline p-5 md:p-6 xl:border-r">
           <div className="flex items-center gap-2">
             {STEP_ICON[step.key] ? (
               <Icon name={STEP_ICON[step.key]} size={14} className={TONE_CLASS[step.tone]} />
@@ -106,31 +105,20 @@ function StepPanel({
               {step.status}
             </span>
           </div>
-          <h3 className="mt-5 text-balance text-2xl font-medium leading-snug text-on-stage md:text-3xl">
+          <h3 className="mt-4 text-balance text-2xl font-medium leading-snug text-on-stage md:text-3xl">
             {step.headline}
           </h3>
-          <p className="mt-4 leading-relaxed text-on-stage-muted">{step.body}</p>
-          <p
-            className={`border-t border-on-stage-hairline pt-4 font-mono text-xs text-on-stage-muted ${
-              // Pinned, the detail line sits on the panel's floor rather than
-              // wherever the body happens to end, so the two columns share one
-              // baseline at every step regardless of how long the body runs.
-              fill ? "mt-auto" : "mt-8"
-            }`}
-          >
+          <p className="mt-3 leading-relaxed text-on-stage-muted">{step.body}</p>
+          <p className="mt-auto border-t border-on-stage-hairline pt-4 font-mono text-xs text-on-stage-muted">
             {step.detail}
           </p>
         </div>
 
-        <div
-          className={`border-t border-on-stage-hairline p-6 md:p-8 xl:border-t-0 ${
-            // The artifact is the tallest thing here and the one most likely to
-            // outgrow a short window, so it is what scrolls — never the page,
-            // which is already driving the pin.
-            fill ? "min-h-0 overflow-y-auto" : ""
-          }`}
-        >
-          <TaskArtifact kind={step.artifact} copy={reconstruction} />
+        <div className="border-t border-on-stage-hairline p-5 md:p-6 xl:border-t-0">
+          <div className="relative min-w-0">
+            {lensLabel ? <StageLens ariaLabel={lensLabel}>{artifact}</StageLens> : artifact}
+            {pointerLabel ? <DemoPointer label={pointerLabel} /> : null}
+          </div>
         </div>
       </div>
     </div>
@@ -159,7 +147,13 @@ function StepPanel({
  *    Spec §6.3 requires this to be the absence of the effect, not a fast
  *    version of it.
  */
-export function SignatureDemo({ copy, reconstruction }: SignatureDemoProps) {
+export function SignatureDemo({
+  copy,
+  reconstruction,
+  lensLabel,
+  fileTreeLabel,
+  pointerLabel,
+}: SignatureDemoProps) {
   const reduced = useReducedMotion() ?? false
   const rail = useStepRail({
     total: copy.steps.length,
@@ -183,16 +177,11 @@ export function SignatureDemo({ copy, reconstruction }: SignatureDemoProps) {
   const active = copy.steps[activeIndex]
 
   return (
-    <Section id="task" tone="stage">
-      <SectionHeading
-        eyebrow={copy.eyebrow}
-        title={copy.title}
-        subtitle={copy.subtitle}
-        tone="stage"
-      />
+    <Section id="task" tone="surface">
+      <SectionHeading eyebrow={copy.eyebrow} title={copy.title} subtitle={copy.subtitle} />
 
-      <p className="mt-12 border-l-2 border-action pl-4 text-lg leading-relaxed text-on-stage md:text-xl">
-        <span className="mr-3 font-mono text-xs uppercase tracking-widest text-on-stage-muted">
+      <p className="mt-12 border-l-2 border-action pl-4 text-lg leading-relaxed text-ink md:text-xl">
+        <span className="mr-3 font-mono text-xs uppercase tracking-widest text-muted">
           {copy.taskLabel}
         </span>
         {copy.task}
@@ -202,10 +191,16 @@ export function SignatureDemo({ copy, reconstruction }: SignatureDemoProps) {
         <ol className="mt-14 flex flex-col gap-6">
           {copy.steps.map((step) => (
             <li key={step.key}>
-              <p className="mb-3 font-mono text-xs uppercase tracking-widest text-on-stage-muted">
+              <p className="mb-3 font-mono text-xs uppercase tracking-widest text-muted">
                 {step.rail}
               </p>
-              <StepPanel step={step} reconstruction={reconstruction} />
+              <StepPanel
+                step={step}
+                reconstruction={reconstruction}
+                lensLabel={lensLabel}
+                fileTreeLabel={fileTreeLabel}
+                pointerLabel={pointerLabel}
+              />
             </li>
           ))}
         </ol>
@@ -216,11 +211,16 @@ export function SignatureDemo({ copy, reconstruction }: SignatureDemoProps) {
           // put. Only present once pinning is live, so an unpinned page — the
           // server render, a narrow viewport, reduced motion — is exactly as
           // tall as its content.
-          style={pinned ? { height: `${copy.steps.length * 100}vh` } : undefined}
+          // 100dvh for the first step + 65dvh per subsequent step ≈ 425dvh total
+          // for 6 steps, down from 600vh. Shorter travel means less scrolling for
+          // the same number of steps, without making any step feel rushed.
+          style={
+            pinned ? { height: `calc(100dvh + ${(copy.steps.length - 1) * 65}dvh)` } : undefined
+          }
           className="mt-14"
         >
           <div
-            className={`grid gap-10 lg:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] lg:gap-16 ${
+            className={`grid gap-8 lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)] lg:gap-10 ${
               // `dvh`, not `vh`: on a browser whose chrome hides on scroll,
               // `vh` is the *largest* viewport and the panel would be cropped
               // by exactly the chrome's height for the whole scroll. `dvh`
@@ -240,8 +240,8 @@ export function SignatureDemo({ copy, reconstruction }: SignatureDemoProps) {
                         aria-current={current ? "step" : undefined}
                         className={`flex w-full items-baseline gap-3 border-l py-2.5 pl-4 text-left transition-colors ${
                           current
-                            ? "border-action text-on-stage"
-                            : "border-on-stage-hairline text-on-stage-muted hover:text-on-stage"
+                            ? "border-action text-ink"
+                            : "border-hairline text-muted hover:text-ink"
                         }`}
                       >
                         {STEP_ICON[step.key] ? (
@@ -268,7 +268,7 @@ export function SignatureDemo({ copy, reconstruction }: SignatureDemoProps) {
                   type="button"
                   onClick={() => (pinned ? scrollToIndex(activeIndex - 1) : rail.previous())}
                   disabled={activeIndex === 0}
-                  className="inline-flex items-center gap-1.5 rounded-control border border-on-stage-hairline px-3 py-1.5 text-xs text-on-stage-muted transition-colors hover:text-on-stage disabled:opacity-40"
+                  className="inline-flex items-center gap-1.5 rounded-control border border-hairline-strong px-3 py-1.5 text-xs text-muted transition-colors hover:text-ink disabled:opacity-40"
                 >
                   <Icon name="previous" size={14} />
                   {copy.previousLabel}
@@ -280,7 +280,7 @@ export function SignatureDemo({ copy, reconstruction }: SignatureDemoProps) {
                   <button
                     type="button"
                     onClick={rail.toggle}
-                    className="inline-flex items-center gap-1.5 rounded-control border border-on-stage-hairline px-3 py-1.5 text-xs text-on-stage-muted transition-colors hover:text-on-stage"
+                    className="inline-flex items-center gap-1.5 rounded-control border border-hairline-strong px-3 py-1.5 text-xs text-muted transition-colors hover:text-ink"
                   >
                     <Icon name={rail.playing ? "pending" : "play"} size={14} />
                     {rail.playing ? copy.pauseLabel : copy.playLabel}
@@ -290,14 +290,14 @@ export function SignatureDemo({ copy, reconstruction }: SignatureDemoProps) {
                   type="button"
                   onClick={() => (pinned ? scrollToIndex(activeIndex + 1) : rail.next())}
                   disabled={activeIndex === copy.steps.length - 1}
-                  className="inline-flex items-center gap-1.5 rounded-control border border-on-stage-hairline px-3 py-1.5 text-xs text-on-stage-muted transition-colors hover:text-on-stage disabled:opacity-40"
+                  className="inline-flex items-center gap-1.5 rounded-control border border-hairline-strong px-3 py-1.5 text-xs text-muted transition-colors hover:text-ink disabled:opacity-40"
                 >
                   {copy.nextLabel}
                   <Icon name="next" size={14} />
                 </button>
               </div>
 
-              <p aria-live="polite" className="mt-4 font-mono text-xs text-on-stage-muted">
+              <p aria-live="polite" className="mt-4 font-mono text-xs text-muted">
                 {format(copy.stepOf, { current: activeIndex + 1, total: copy.steps.length })}
               </p>
 
@@ -307,12 +307,12 @@ export function SignatureDemo({ copy, reconstruction }: SignatureDemoProps) {
                * view for all six steps. It also gives the rail column something
                * to fill the height with other than air. */}
               {pinned ? (
-                <div className="mt-auto border-t border-on-stage-hairline pt-6">
-                  <p className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-on-stage-muted">
+                <div className="mt-auto border-t border-hairline pt-6">
+                  <p className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-muted">
                     <Icon name="agents" size={14} />
                     {copy.taskLabel}
                   </p>
-                  <p className="mt-3 border-l-2 border-action pl-3 text-sm leading-relaxed text-on-stage">
+                  <p className="mt-3 border-l-2 border-action pl-3 text-sm leading-relaxed text-ink">
                     {copy.task}
                   </p>
                 </div>
@@ -325,7 +325,13 @@ export function SignatureDemo({ copy, reconstruction }: SignatureDemoProps) {
               key={active.key}
               className={`animate-[fade-through_320ms_ease-out] ${pinned ? "min-h-0" : ""}`}
             >
-              <StepPanel step={active} reconstruction={reconstruction} fill={pinned} />
+              <StepPanel
+                step={active}
+                reconstruction={reconstruction}
+                lensLabel={lensLabel}
+                fileTreeLabel={fileTreeLabel}
+                pointerLabel={pointerLabel}
+              />
             </div>
           </div>
         </div>

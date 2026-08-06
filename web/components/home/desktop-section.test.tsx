@@ -5,6 +5,7 @@ import { DesktopSection } from "./desktop-section"
 
 jest.mock("motion/react", () => ({
   useReducedMotion: () => true,
+  useInView: () => true,
   motion: { div: ({ children }: { children: React.ReactNode }) => <div>{children}</div> },
 }))
 
@@ -26,6 +27,12 @@ describe("DesktopSection", () => {
   it("shows a described crop of the real shell", () => {
     render(<DesktopSection copy={en.home.desktop} locale="en" />)
     expect(screen.getByRole("img", { name: en.home.desktop.stageAlt })).toBeInTheDocument()
+  })
+
+  it("adds the controllable terminal as a flat desktop band", () => {
+    render(<DesktopSection copy={en.home.desktop} terminalCopy={en.home.terminal} locale="en" />)
+    expect(screen.getByRole("region", { name: en.home.terminal.title })).toBeInTheDocument()
+    expect(screen.getByText(en.home.terminal.completeLabel)).toBeInTheDocument()
   })
 
   it("localises the capability list", () => {

@@ -104,6 +104,24 @@
 
   /* §7 — desktop content width 1440–1520. */
   --spacing-shell: 1480px;
+  --animate-marquee: marquee var(--duration) infinite linear;
+  --animate-marquee-vertical: marquee-vertical var(--duration) linear infinite;
+  @keyframes marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(calc(-100% - var(--gap)));
+    }
+  }
+  @keyframes marquee-vertical {
+    from {
+      transform: translateY(0);
+    }
+    to {
+      transform: translateY(calc(-100% - var(--gap)));
+    }
+  }
 }
 
 @layer base {
@@ -160,6 +178,14 @@
     opacity: 1;
     transform: none;
   }
+}
+
+/* Magic UI's theme transition animates the new root snapshot with a clip path.
+ * No manual stacking value is required; the browser owns the transition layer. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
 }
 
 @layer utilities {

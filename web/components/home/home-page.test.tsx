@@ -9,6 +9,10 @@ jest.mock("next-themes", () => ({
 
 jest.mock("motion/react", () => ({
   useReducedMotion: () => true,
+  useInView: () => true,
+  useScroll: () => ({ scrollYProgress: 0 }),
+  useMotionValue: (value: number) => ({ get: () => value, set: jest.fn() }),
+  useSpring: () => ({ on: () => jest.fn() }),
   motion: { div: ({ children }: { children: React.ReactNode }) => <div>{children}</div> },
 }))
 
@@ -41,7 +45,7 @@ describe("HomePage", () => {
   })
 
   it("wraps the page in the shared shell", () => {
-    render(<HomePage locale="en" />)
+    const { container } = render(<HomePage locale="en" />)
     // Two navigation landmarks, each named: the site header and the reading
     // position rail. Both are genuinely sets of links for getting somewhere,
     // which is what the role is for — so they are queried by name rather than
@@ -49,6 +53,7 @@ describe("HomePage", () => {
     expect(screen.getByRole("navigation", { name: en.nav.productMenu.label })).toBeInTheDocument()
     expect(screen.getByRole("navigation", { name: en.nav.sectionIndexLabel })).toBeInTheDocument()
     expect(screen.getByRole("contentinfo")).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="scroll-progress"]')).toBeInTheDocument()
   })
 
   it("indexes every section it renders, with a live anchor for each", () => {

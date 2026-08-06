@@ -5,11 +5,15 @@ import { ThemeToggle } from "./theme-toggle"
 
 const setTheme = jest.fn()
 let currentTheme: string | undefined = "system"
+let resolvedTheme: string | undefined = "light"
 let mounted = true
+let reduced = false
 
 jest.mock("next-themes", () => ({
-  useTheme: () => ({ theme: currentTheme, setTheme }),
+  useTheme: () => ({ theme: currentTheme, resolvedTheme, setTheme }),
 }))
+
+jest.mock("motion/react", () => ({ useReducedMotion: () => reduced }))
 
 // A mutable module mock rather than `jest.isolateModules` + `require`: the
 // isolated registry hands the component a *second* React copy, and the moment
@@ -24,8 +28,11 @@ function openMenu() {
 describe("ThemeToggle", () => {
   beforeEach(() => {
     currentTheme = "system"
+    resolvedTheme = "light"
+    reduced = false
     mounted = true
     setTheme.mockClear()
+    Object.assign(document, { startViewTransition: undefined })
   })
 
   it("collapses to a single trigger rather than three always-visible options", () => {
@@ -88,6 +95,35 @@ describe("ThemeToggle", () => {
     fireEvent.click(screen.getByRole("menuitemradio", { name: new RegExp(en.nav.themeDark) }))
     expect(setTheme).toHaveBeenCalledWith("dark")
     expect(screen.queryByRole("menu")).toBeNull()
+  })
+
+  it("uses the installed view transition when choosing a visual theme", () => {
+    const startViewTransition = jest.fn((callback: () => void) => {
+      callback()
+      return { ready: Promise.resolve(), finished: Promise.resolve() }
+    })
+    Object.assign(document, { startViewTransition })
+    Object.assign(document.documentElement, { animate: jest.fn() })
+
+    render(<ThemeToggle copy={en.nav} />)
+    openMenu()
+    fireEvent.click(screen.getByRole("menuitemradio", { name: new RegExp(en.nav.themeDark) }))
+
+    expect(startViewTransition).toHaveBeenCalledTimes(1)
+    expect(setTheme).toHaveBeenCalledWith("dark")
+  })
+
+  it("switches immediately under reduced motion", () => {
+    reduced = true
+    const startViewTransition = jest.fn()
+    Object.assign(document, { startViewTransition })
+
+    render(<ThemeToggle copy={en.nav} />)
+    openMenu()
+    fireEvent.click(screen.getByRole("menuitemradio", { name: new RegExp(en.nav.themeDark) }))
+
+    expect(startViewTransition).not.toHaveBeenCalled()
+    expect(setTheme).toHaveBeenCalledWith("dark")
   })
 
   it("treats an unset theme as system rather than leaving nothing selected", () => {

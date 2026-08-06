@@ -1,7 +1,11 @@
 {
-  "readAt": "2026-08-04T07:17:58.777Z",
-  "lastGoodReadAt": "2026-08-04T07:17:58.777Z",
-  "errors": [],
+  "readAt": "2026-08-06T02:58:49.852Z",
+  "lastGoodReadAt": "2026-08-05T16:40:44.735Z",
+  "errors": [
+    "repo: 403  for https://api.github.com/repos/MaxQian888/cognia-next",
+    "contributors: 403 for contributors",
+    "releases: 403  for https://api.github.com/repos/MaxQian888/cognia-next/releases?per_page=10"
+  ],
   "repo": {
     "stars": 52,
     "license": "AGPL-3.0",
@@ -393,6 +397,12 @@
       "bump": "patch",
       "summary": "`cognia-agent help` and `cognia-agent version` now print usage / the version to stdout and exit 0, instead of falling through to the unknown-command branch that wrote `unknown command \"help\"` to stderr and exited 2. The non-zero exit made every such invocation surface as `ELIFECYCLE Command failed with exit code 2` when run through a package script (e.g. `pnpm cli:dev help`). Both subcommands mirror the existing `-h`/`--help` and `-v`/`--version` flags; they are dispatched after the `-p` shorthand, so `cognia-agent -p help` still sends \"help\" to the agent as a prompt. A bare invocation with no command and a genuinely unknown command keep their exit-2 usage-error contract.",
       "date": "2026-07-25T15:06:07+08:00"
+    },
+    {
+      "id": "cli-x-external-agents",
+      "bump": "minor",
+      "summary": "Add `cognia-agent x <claude|codex>` command to launch external coding agents (Claude Code, OpenAI Codex) through cognia's model gateway. Routes the agent's API calls through the desktop Rust gateway (or a fallback Node.js proxy), enabling credential sharing, provider routing, and model management without modifying the external tools. Includes interactive model picker with preference memory, CLI detection with install hints, and passthrough argument support.",
+      "date": null
     },
     {
       "id": "close-review-gaps-truncate-audit-eval-mdns",

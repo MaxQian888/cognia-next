@@ -59,6 +59,12 @@ describe("TrustSection bento", () => {
       "https://github.com/MaxQian888/cognia-next"
     )
   })
+
+  it("uses shared editorial dividers instead of a large rounded card", () => {
+    const { container } = renderTrust()
+    expect(container.querySelector(".rounded-stage")).toBeNull()
+    expect(container.querySelector(".border-y.bg-hairline")).toBeInTheDocument()
+  })
 })
 
 describe("TrustSection provenance rail", () => {
@@ -75,10 +81,11 @@ describe("TrustSection provenance rail", () => {
 
 describe("TrustSection figures", () => {
   it("reads every figure from the evidence snapshot", () => {
-    renderTrust()
+    const { container } = renderTrust()
     expect(screen.getByText("52")).toBeInTheDocument()
     expect(screen.getByText("2")).toBeInTheDocument()
     expect(screen.getByText("AGPL-3.0")).toBeInTheDocument()
+    expect(container.querySelectorAll('[data-slot="number-ticker"]')).toHaveLength(2)
   })
 
   it("says there is no release rather than printing a zero or a blank", () => {

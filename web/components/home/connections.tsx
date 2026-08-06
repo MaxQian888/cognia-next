@@ -1,11 +1,18 @@
+"use client"
+
+import { useState, type CSSProperties } from "react"
+
 import { AgentMark } from "@web/components/agent-mark"
 import { Icon } from "@web/components/icon"
 import { Reveal } from "@web/components/reveal"
 import { Section, SectionHeading } from "@web/components/section"
-import type { ConnectionsCopy } from "@web/content/types"
+import type { ConnectionFlowCopy, ConnectionsCopy } from "@web/content/types"
+import { cn } from "@web/lib/utils"
+import { ConnectionFlow } from "./connection-flow"
 
 interface ConnectionsProps {
   copy: ConnectionsCopy
+  flowCopy?: ConnectionFlowCopy
 }
 
 /**
@@ -18,17 +25,47 @@ interface ConnectionsProps {
  * The full provider, MCP, plugin and connector catalogs stay in the
  * documentation; a homepage that lists them goes stale the week it ships.
  */
-export function Connections({ copy }: ConnectionsProps) {
+export function Connections({ copy, flowCopy }: ConnectionsProps) {
   const terms = [copy.headings.reads, copy.headings.canAct, copy.headings.requiresApproval]
+  const [activeReceipt, setActiveReceipt] = useState<number | null>(null)
+  const receiptColumns = copy.items
+    .map((_, index) => (activeReceipt === index ? "1.35fr" : "1fr"))
+    .join(" ")
+  const receiptStyle = { "--receipt-columns": receiptColumns } as CSSProperties
 
   return (
-    <Section id="connections" tone="surface">
+    <Section id="connections" tone="surface" density="open">
       <SectionHeading eyebrow={copy.eyebrow} title={copy.title} subtitle={copy.subtitle} />
 
-      <Reveal className="mt-14">
-        <ul className="grid gap-px overflow-hidden rounded-stage border border-hairline bg-hairline md:grid-cols-2 xl:grid-cols-4">
+      {flowCopy ? (
+        <Reveal className="mt-14">
+          <ConnectionFlow
+            copy={flowCopy}
+            nodeLabels={copy.items.map((item) => item.name)}
+            approvalLabel={copy.headings.requiresApproval}
+            activeIndex={activeReceipt}
+            onActiveIndexChange={setActiveReceipt}
+          />
+        </Reveal>
+      ) : null}
+
+      <Reveal className={flowCopy ? "mt-10" : "mt-14"}>
+        <ul
+          data-slot="connection-receipts"
+          style={receiptStyle}
+          className="grid gap-px border-y border-hairline bg-hairline transition-[grid-template-columns] duration-500 ease-out md:grid-cols-2 xl:grid-cols-[var(--receipt-columns)]"
+        >
           {copy.items.map((item, index) => (
-            <li key={item.key} className="flex flex-col bg-surface p-6 md:p-8">
+            <li
+              key={item.key}
+              data-active={activeReceipt === index ? "true" : undefined}
+              onMouseEnter={() => setActiveReceipt(index)}
+              onMouseLeave={() => setActiveReceipt(null)}
+              className={cn(
+                "flex min-w-0 flex-col bg-surface p-6 transition-colors md:p-8",
+                activeReceipt === index && "bg-paper"
+              )}
+            >
               {/* Receipt header: an index mark and the connection's name, so the
                * four read as numbered records rather than as four cards. */}
               <div className="flex items-baseline gap-3 border-b border-hairline pb-4">
@@ -91,7 +128,7 @@ export function Connections({ copy }: ConnectionsProps) {
 
           <ul
             aria-label={copy.agents.label}
-            className="mt-8 grid gap-px overflow-hidden rounded-stage border border-hairline bg-hairline sm:grid-cols-2 xl:grid-cols-5"
+            className="mt-8 grid gap-px border-y border-hairline bg-hairline sm:grid-cols-2 xl:grid-cols-5"
           >
             {copy.agents.items.map((agent) => (
               <li key={agent.id} className="trace flex flex-col gap-3 bg-surface p-5">

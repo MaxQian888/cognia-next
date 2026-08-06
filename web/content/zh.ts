@@ -621,6 +621,30 @@ export const zh: SiteCopy = {
       trust: "信任",
       start: "开始",
     },
+    contextTrace: {
+      srLabel: "本任务消费的上下文信号",
+      items: [
+        { key: "repository", label: "读取仓库" },
+        { key: "branch", label: "识别分支" },
+        { key: "files", label: "扫描文件" },
+        { key: "plan", label: "生成计划" },
+        { key: "approval", label: "请求批准" },
+        { key: "tests", label: "运行测试" },
+      ],
+    },
+    lensLabel: "检视产品界面",
+    fileTreeLabel: "仓库文件树",
+    terminal: {
+      title: "终端",
+      playLabel: "播放",
+      pauseLabel: "暂停",
+      restartLabel: "重新开始",
+      completeLabel: "终端序列已完成",
+    },
+    connectionFlow: {
+      label: "Cognia 如何连接外部系统",
+      centerNode: "Cognia",
+    },
   },
 
   product: {

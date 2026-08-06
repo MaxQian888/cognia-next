@@ -15,8 +15,12 @@ describe("SignatureDemo", () => {
   afterEach(() => jest.useRealTimers())
 
   it("states the single task the whole page follows", () => {
-    render(<SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />)
+    const { container } = render(
+      <SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />
+    )
     expect(screen.getByText(en.home.signature.task)).toBeInTheDocument()
+    expect(container.querySelector("#task")).toHaveClass("bg-surface", "text-ink")
+    expect(container.querySelector("#task")).not.toHaveClass("bg-stage")
   })
 
   it("lists all six rail states", () => {
@@ -171,9 +175,19 @@ describe("SignatureDemo when scroll-pinned", () => {
     const { container } = render(
       <SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />
     )
-    const wrapper = container.querySelector<HTMLElement>("[style*='vh']")
+    const wrapper = container.querySelector<HTMLElement>("[style*='dvh']")
     expect(wrapper).toBeInTheDocument()
-    expect(wrapper?.style.height).toBe(`${en.home.signature.steps.length * 100}vh`)
+    // 100dvh first step + 65dvh × (steps-1) subsequent steps
+    const steps = en.home.signature.steps.length
+    const expectedDvh = 100 + (steps - 1) * 65 // 425 for 6 steps
+    expect(wrapper?.style.height).toBe(`calc(${expectedDvh}dvh)`)
+  })
+
+  it("does not stretch the dark product surface into an empty full-screen slab", () => {
+    const { container } = render(
+      <SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />
+    )
+    expect(container.querySelector("#task .bg-graphite")).not.toHaveClass("h-full")
   })
 
   it("drops autoplay, because the reader is already driving", () => {
@@ -258,6 +272,23 @@ describe("SignatureDemo under reduced motion", () => {
     expect(screen.getByText(en.home.signature.task)).toBeInTheDocument()
     const headings = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)
     expect(headings).toEqual(en.home.signature.steps.map((s) => s.headline))
+  })
+
+  it("integrates the file tree and animated activity as complete static fallbacks", () => {
+    render(
+      <SignatureDemo
+        copy={en.home.signature}
+        reconstruction={en.reconstruction}
+        lensLabel={en.home.lensLabel}
+        fileTreeLabel={en.home.fileTreeLabel}
+        pointerLabel={en.reconstruction.workbench.agentLabel}
+      />
+    )
+
+    expect(screen.getByRole("region", { name: en.home.fileTreeLabel })).toBeInTheDocument()
+    expect(
+      screen.getByRole("list", { name: en.reconstruction.artifacts.test.heading })
+    ).toBeInTheDocument()
   })
 })
 

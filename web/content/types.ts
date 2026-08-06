@@ -363,6 +363,43 @@ export const HOME_SECTIONS = [
 
 export type HomeSectionId = (typeof HOME_SECTIONS)[number]
 
+/* -------------------------------------------------------------------------- */
+/* Magic UI composition copy                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The context-trace marquee between Hero and SignatureDemo. Each item
+ * represents one context signal the agent consumed during the signature task.
+ * Items source from `DEMO_TASK` values — the copy is the *label*, not the value.
+ */
+export interface ContextTraceCopy {
+  items: Array<{ key: string; label: string }>
+  /** Screen-reader heading for the marquee region. */
+  srLabel: string
+}
+
+/**
+ * Copy for the terminal sequence in the desktop section.
+ * The actual command strings come from `DEMO_TASK`.
+ */
+export interface TerminalCopy {
+  title: string
+  playLabel: string
+  pauseLabel: string
+  restartLabel: string
+  completeLabel: string
+}
+
+/**
+ * Copy for the connection-flow animated beam diagram.
+ */
+export interface ConnectionFlowCopy {
+  /** Accessible name for the SVG diagram region. */
+  label: string
+  /** Label for the central node. */
+  centerNode: string
+}
+
 export interface HomeCopy {
   hero: HeroCopy
   signature: SignatureCopy
@@ -379,6 +416,16 @@ export interface HomeCopy {
    * renders and this record are one fact rather than three that can drift.
    */
   sectionIndex: Record<HomeSectionId, string>
+  /** The context-trace marquee between hero and signature task. */
+  contextTrace: ContextTraceCopy
+  /** Accessible name for the Lens inspection mode. */
+  lensLabel: string
+  /** Accessible name for the file-tree in the signature demo. */
+  fileTreeLabel: string
+  /** Copy for the terminal in the desktop section. */
+  terminal: TerminalCopy
+  /** Copy for the connection-flow animated beam diagram. */
+  connectionFlow: ConnectionFlowCopy
 }
 
 /* -------------------------------------------------------------------------- */

@@ -65,6 +65,8 @@ describe("WorkbenchBento", () => {
       />
     )
     expect(container.querySelector(".gap-px.bg-hairline")).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="bento-grid"]')).toBeInTheDocument()
+    expect(container.querySelector(".rounded-stage")).toBeNull()
   })
 
   it("localises every panel", () => {

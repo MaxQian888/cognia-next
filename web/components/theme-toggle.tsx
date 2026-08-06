@@ -1,10 +1,13 @@
 "use client"
 
 import { useTheme } from "next-themes"
+import { useReducedMotion } from "motion/react"
 import { Icon, type IconName } from "@web/components/icon"
+import { AnimatedThemeToggler } from "@web/components/ui/animated-theme-toggler"
 import type { NavCopy } from "@web/content/types"
 import { useDismissable } from "@web/hooks/use-dismissable"
 import { useHasMounted } from "@web/hooks/use-has-mounted"
+import { cn } from "@web/lib/utils"
 
 type Mode = "light" | "dark" | "system"
 
@@ -45,8 +48,9 @@ const MODE_ICON: Record<Mode, IconName> = {
  * hydration mismatch; a same-sized placeholder keeps the header from shifting.
  */
 export function ThemeToggle({ copy }: ThemeToggleProps) {
-  const { theme, setTheme } = useTheme()
+  const { theme, resolvedTheme, systemTheme, setTheme } = useTheme()
   const mounted = useHasMounted()
+  const reduced = useReducedMotion() ?? false
   // Destructured rather than kept as one `menu` object: reading `menu.open` in
   // JSX is a member access on a value that also carries refs, which the
   // compiler's lint rule cannot distinguish from a ref read during render.
@@ -70,6 +74,7 @@ export function ThemeToggle({ copy }: ThemeToggleProps) {
   }
 
   const current = (theme ?? "system") as Mode
+  const visualTheme = resolvedTheme === "dark" ? "dark" : "light"
 
   return (
     <div className="relative">
@@ -95,25 +100,33 @@ export function ThemeToggle({ copy }: ThemeToggleProps) {
           className="absolute right-0 top-full z-50 mt-1 w-40 rounded-panel border border-hairline bg-surface p-1 shadow-sm"
         >
           {modes.map((mode) => (
-            <button
+            <AnimatedThemeToggler
               key={mode.value}
-              type="button"
               role="menuitemradio"
               aria-checked={current === mode.value}
-              onClick={() => {
+              theme={visualTheme}
+              targetTheme={
+                mode.value === "system" ? (systemTheme === "dark" ? "dark" : "light") : mode.value
+              }
+              disableTransition={
+                reduced ||
+                (mode.value === "system" ? systemTheme === visualTheme : mode.value === visualTheme)
+              }
+              onThemeChange={() => {
                 setTheme(mode.value)
                 closeMenu()
               }}
-              className={`flex w-full items-center gap-2 rounded-control px-3 py-2 text-left text-sm transition-colors hover:bg-paper ${
+              className={cn(
+                "flex w-full items-center gap-2 rounded-control px-3 py-2 text-left text-sm transition-colors hover:bg-paper",
                 current === mode.value ? "text-ink" : "text-muted"
-              }`}
+              )}
             >
               <Icon name={MODE_ICON[mode.value]} size={14} />
               {mode.label}
               {current === mode.value ? (
                 <Icon name="check" size={14} className="ml-auto text-action" />
               ) : null}
-            </button>
+            </AnimatedThemeToggler>
           ))}
         </div>
       ) : null}

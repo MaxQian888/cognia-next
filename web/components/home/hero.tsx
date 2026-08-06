@@ -4,9 +4,11 @@ import { ProductStage } from "@web/components/product-stage"
 import { Reveal } from "@web/components/reveal"
 import { RevealGroup, RevealItem } from "@web/components/reveal-group"
 import { HeroTaskTicket } from "@web/components/home/hero-task-ticket"
+import { InteractiveGridPattern } from "@web/components/ui/interactive-grid-pattern"
 import type { SiteCopy } from "@web/content/types"
 import type { ReleaseState } from "@web/lib/evidence"
 import type { Locale } from "@web/lib/locale"
+import { StageLens } from "./stage-lens"
 
 interface HeroProps {
   locale: Locale
@@ -38,6 +40,15 @@ export function Hero({ locale, copy, releaseState, docsOrigin }: HeroProps) {
 
   return (
     <section id="hero" className="relative border-b border-hairline bg-paper">
+      <div aria-hidden className="absolute inset-x-0 top-0 h-[48rem] overflow-hidden">
+        <InteractiveGridPattern
+          width={56}
+          height={56}
+          squares={[28, 16]}
+          className="[mask-image:linear-gradient(to_bottom,black,transparent_88%)] opacity-35"
+          squaresClassName="hover:fill-action/15"
+        />
+      </div>
       {/* Vertical rhythm lines (spec §2.3): a twelve-column measure behind the
        * brand band, faint enough to read as a ruled page rather than as a grid
        * overlay. Decorative, so it is masked from assistive technology. */}
@@ -57,7 +68,7 @@ export function Hero({ locale, copy, releaseState, docsOrigin }: HeroProps) {
 
             {/* Two lines maximum on desktop (spec §3.2), which `max-w` enforces
              * more reliably than a character count. */}
-            <h1 className="mt-8 max-w-4xl text-balance text-4xl font-medium leading-[1.08] tracking-tight text-ink md:text-6xl lg:text-7xl">
+            <h1 className="mt-8 max-w-5xl text-balance text-4xl font-medium leading-[1.08] tracking-tight text-ink md:text-6xl lg:text-7xl">
               {hero.title}
             </h1>
 
@@ -107,12 +118,15 @@ export function Hero({ locale, copy, releaseState, docsOrigin }: HeroProps) {
          * trigger would hold the page's largest visual at opacity 0 for anyone
          * who reads the first screen without scrolling. */}
         <Reveal variant="scale" trigger="mount">
-          <ProductStage
-            section="hero"
-            locale={locale}
-            alt={hero.stageAlt}
-            caption={hero.stageCaption}
-          />
+          <StageLens ariaLabel={copy.home.lensLabel}>
+            <ProductStage
+              section="hero"
+              locale={locale}
+              alt={hero.stageAlt}
+              caption={hero.stageCaption}
+              signalBorder
+            />
+          </StageLens>
         </Reveal>
       </div>
     </section>

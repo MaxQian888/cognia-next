@@ -47,33 +47,20 @@ export function DownloadCta({
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-3">
-        {/* The two primary calls to action are what the pointer ring sights.
-         * Marking every link would make the effect noise; marking the decisions
-         * makes it an affordance.
-         *
-         * The attribute goes on a wrapper rather than on `Button asChild`:
-         * `SiteLink` has a closed prop interface and does not spread unknown
-         * props, so an attribute handed to it through Slot is silently dropped
-         * and the feature ships dormant. The wrapper is `inline-flex` so its box
-         * is exactly the button's. */}
-        <span data-magnetic className="inline-flex">
-          <Button asChild size="lg">
-            <SiteLink
-              target={{ label, route: "/download" }}
-              locale={locale}
-              docsOrigin={docsOrigin}
-            />
-          </Button>
-        </span>
-        <span data-magnetic className="inline-flex">
-          <Button asChild variant="outline" size="lg">
-            <SiteLink
-              target={{ label: copy.viewSource, href: REPO_URL }}
-              locale={locale}
-              docsOrigin={docsOrigin}
-            />
-          </Button>
-        </span>
+        <Button asChild size="lg">
+          <SiteLink
+            target={{ label, route: "/download" }}
+            locale={locale}
+            docsOrigin={docsOrigin}
+          />
+        </Button>
+        <Button asChild variant="outline" size="lg">
+          <SiteLink
+            target={{ label: copy.viewSource, href: REPO_URL }}
+            locale={locale}
+            docsOrigin={docsOrigin}
+          />
+        </Button>
       </div>
 
       {state.hasRelease ? (
