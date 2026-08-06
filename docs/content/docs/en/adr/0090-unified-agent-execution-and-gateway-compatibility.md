@@ -477,3 +477,56 @@ and no fallback is permitted after response bytes are committed.
 
 The executable protocol boundary remains OpenAI-compatible and Anthropic.
 Other provider protocols are never silently treated as compatible.
+
+## Addendum (2026-08-06) — Agent Fleet authority, controls, and recovery
+
+Agent Fleet is now explicitly a projection of ADR-0090's canonical execution authority rather than a competing session database. Built-in, Team, Workflow, and external executions project their canonical snapshots into the Fleet registry. Canonical execution history is authoritative; Fleet snapshot rows, counters, status buckets, and the island/mobile views are rebuildable projections.
+
+Canonical detail events use a 30-day retention window. Redacted summary/history rows remain until explicit user deletion. Raw provider payloads are not promoted into durable or remote projections.
+
+### Provider capabilities and native controls
+
+Provider manifests define only an audited capability ceiling. Effective controls require runtime evidence:
+
+- OpenCode's installed plugin probes the bound SDK client for `session.promptAsync`, V2 `session.interrupt` or V1 `session.abort`, and V2/V1 Question reply plus reject APIs. The plugin publishes the proven mode; prompt, interrupt, answer, and reject controls remain disabled while the probe is absent or incomplete.
+- OpenCode Question events are projected into the same pending-question model used by the island and mobile Fleet UI. Both answer and explicit reject are supported.
+- Codex installation probes the local app-server JSON schema and registers only the intersection with Cognia's audited 11-event ceiling. `SessionEnd` and `SubagentStart` are included when proven.
+- Codex script plus `hooks.json` installation is transactional. A failed merge/write restores the previous script, never overwrites external handlers, and reports degraded diagnostics.
+
+No Fleet control uses terminal keystroke injection. Process signaling is restricted to agents for which process identity and per-turn semantics are provable; shared OpenCode servers use only the native SDK interrupt path.
+
+### Durable OpenCode command outbox
+
+OpenCode prompt and interrupt controls use a durable JSON outbox under the Cognia data directory. Commands move through `queued`, `leased`, `acked`, and `failed` states with:
+
+- unique command/idempotency ids;
+- a 30-second lease and at-least-once redelivery after lease expiry;
+- explicit ack and nack routes;
+- idempotent ack handling;
+- a 24-hour command TTL; and
+- 30-day retention for completed command audit rows.
+
+Storage writes are atomic and mode `0600` on Unix. Corrupt or unavailable storage fails closed; it never falls back to an in-memory queue. Status exposes `healthy`, `corrupt`, or `unavailable`. Repair is explicit: a corrupt file is quarantined with a timestamp before a clean outbox is created.
+
+### Detached lifecycle and startup reconciliation
+
+Stopping the monitor is not treated as ending provider sessions. Active rows become `detached`, pending controls are cleared, and effective controls are disabled. A minimal recovery file stores only provider/session identity, safe metadata, process identity, lifecycle timestamps, and counters—never prompts, tool input, pending approvals, or errors.
+
+At startup, Cognia restores rows as detached and reconciles process identity with both PID and process start time:
+
+- a matching live process restores a live-safe state;
+- a dead or reused PID becomes `ended`;
+- a shared OpenCode host or otherwise unprovable identity remains `detached`;
+- a later native event can reattach the row.
+
+Pending approval or question state is never reconstructed across restart. Previous waiting states resume as `working` only when liveness is proven.
+
+### Lifecycle confidence
+
+Fleet sessions and subagents carry `lifecycleConfidence`:
+
+- `native` for canonical provider lifecycle events, including Codex `SubagentStart`;
+- `inferred` for Task-tool heuristics.
+
+Consumers may display both but must not silently present inferred lifecycle as provider-confirmed fact.
+

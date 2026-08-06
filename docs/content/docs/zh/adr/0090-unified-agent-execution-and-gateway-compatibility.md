@@ -432,3 +432,56 @@ renderer 的 `gateway://decide` 往返。旧快照继续按优先级顺序读取
 
 可执行协议边界仍限于 OpenAI-compatible 与 Anthropic；其他 provider 协议不会
 被静默视为兼容协议。
+
+## 附录（2026-08-06）— Agent Fleet 事实来源、控制与恢复
+
+Agent Fleet 现被明确为 ADR-0090 规范执行事实的投影，而不是另一套竞争性的会话数据库。内置、Team、Workflow 与外部执行都会把规范快照投影到 Fleet registry。规范执行历史是事实来源；Fleet 快照行、计数器、状态分组以及 island/mobile 视图都可重建。
+
+规范明细事件保留 30 天。脱敏后的摘要/历史行保留到用户明确删除。原始 provider payload 不会升级为持久或远程投影。
+
+### Provider 能力与原生控制
+
+Provider manifest 只定义审计过的能力上限。有效控制必须有运行时证据：
+
+- 已安装的 OpenCode plugin 会检查 bound SDK client 的 `session.promptAsync`、V2 `session.interrupt` 或 V1 `session.abort`，以及 V2/V1 Question reply 与 reject API。Plugin 上报实际证明的模式；探测缺失或不完整时，prompt、interrupt、answer 和 reject 控制保持禁用。
+- OpenCode Question 事件投影到 island 与 mobile Fleet UI 共用的 pending-question 模型，同时支持回答和显式拒绝。
+- Codex 安装会探测本机 app-server JSON schema，只注册与 Cognia 审计过的 11 事件上限的交集；证明存在时包含 `SessionEnd` 与 `SubagentStart`。
+- Codex 脚本与 `hooks.json` 事务性安装。合并/写入失败会恢复旧脚本，不覆盖外部 handlers，并报告 degraded 诊断。
+
+Fleet 控制不使用终端按键注入。进程信号仅用于能够证明进程身份和逐 turn 语义的 Agent；共享 OpenCode server 只使用原生 SDK interrupt 路径。
+
+### 持久 OpenCode 命令 outbox
+
+OpenCode prompt 与 interrupt 控制通过 Cognia 数据目录中的持久 JSON outbox 发送。命令状态为 `queued`、`leased`、`acked`、`failed`，并具有：
+
+- 唯一命令/幂等 id；
+- 30 秒 lease，过期后至少一次重新投递；
+- 显式 ack 与 nack routes；
+- 幂等 ack；
+- 24 小时命令 TTL；
+- 已完成命令审计行保留 30 天。
+
+存储采用原子写入，Unix 下权限为 `0600`。文件损坏或不可用时 fail-closed，绝不回退到内存队列。状态显式报告 `healthy`、`corrupt` 或 `unavailable`。修复必须由用户触发：损坏文件先按时间戳隔离，再创建干净 outbox。
+
+### Detached 生命周期与启动恢复
+
+停止监控不等于 provider 会话结束。活动行转为 `detached`，清除 pending controls，并禁用有效控制。最小恢复文件只保存 provider/session 身份、安全元数据、进程身份、生命周期时间与计数器；绝不保存 prompt、tool input、pending approval 或 error。
+
+启动时 Cognia 先把记录恢复为 detached，再用 PID 与进程启动时间共同核对身份：
+
+- 进程仍存活且启动时间匹配时，恢复为安全的 live 状态；
+- PID 已死亡或被复用时标为 `ended`；
+- 共享 OpenCode host 或其他无法证明身份的情况保持 `detached`；
+- 后续原生事件可以重新附着该记录。
+
+Pending approval 或 question 不会跨重启重建。只有证明存活时，之前的等待状态才恢复为 `working`。
+
+### 生命周期置信度
+
+Fleet session 与 subagent 携带 `lifecycleConfidence`：
+
+- provider 规范原生生命周期事件标为 `native`，包括 Codex `SubagentStart`；
+- Task-tool 启发式结果标为 `inferred`。
+
+消费者可以同时展示两者，但不能把推断生命周期静默呈现为 provider 已确认事实。
+
