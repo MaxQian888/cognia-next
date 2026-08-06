@@ -1,8 +1,13 @@
-export interface PagedReadable<T> {
-  toCollection(): {
-    offset(offset: number): {
-      limit(limit: number): { toArray(): Promise<T[]> }
-    }
+interface CursorPage<T, TKey> {
+  limit(limit: number): {
+    each(callback: (row: T, cursor: { primaryKey: TKey }) => void): Promise<void>
+  }
+}
+
+export interface PagedReadable<T, TKey = unknown> {
+  orderBy(index: string): CursorPage<T, TKey>
+  where(index: string): {
+    above(key: TKey): CursorPage<T, TKey>
   }
 }
 
@@ -39,16 +44,23 @@ export function createPagedTableReader(options: PagedTableReaderOptions = {}) {
     }
   }
 
-  return async function readTablePaged<T>(table: PagedReadable<T>): Promise<T[]> {
+  return async function readTablePaged<T, TKey>(table: PagedReadable<T, TKey>): Promise<T[]> {
     const rows: T[] = []
-    let offset = 0
+    let lastPrimaryKey: TKey | undefined
     for (;;) {
-      const page = await withPermit(() =>
-        table.toCollection().offset(offset).limit(pageSize).toArray()
-      )
+      const page: T[] = []
+      await withPermit(async () => {
+        const collection =
+          lastPrimaryKey === undefined
+            ? table.orderBy(":id")
+            : table.where(":id").above(lastPrimaryKey)
+        await collection.limit(pageSize).each((row, cursor) => {
+          page.push(row)
+          lastPrimaryKey = cursor.primaryKey
+        })
+      })
       rows.push(...page)
       if (page.length < pageSize) return rows
-      offset += page.length
     }
   }
 }
