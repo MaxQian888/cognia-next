@@ -32,6 +32,14 @@ pub fn monitor_config_path() -> Option<PathBuf> {
     crate::agents::paths::cognia_home().map(|home| home.join("agent-monitor.json"))
 }
 
+pub fn opencode_outbox_path() -> Option<PathBuf> {
+    crate::agents::paths::cognia_home().map(|home| home.join("fleet-opencode-outbox.json"))
+}
+
+pub fn fleet_recovery_path() -> Option<PathBuf> {
+    crate::agents::paths::cognia_home().map(|home| home.join("fleet-sessions-recovery.json"))
+}
+
 fn monitor_config_path_at(base: &Path) -> PathBuf {
     base.join("agent-monitor.json")
 }

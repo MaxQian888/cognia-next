@@ -15,9 +15,11 @@ const toastError = jest.fn()
 jest.mock("sonner", () => ({ toast: { error: (m: string) => toastError(m) } }))
 
 const respondMock = jest.fn()
+const rejectMock = jest.fn()
 const forbiddenMock = jest.fn()
 jest.mock("@/lib/fleet/fleet-remote-actions", () => ({
   fleetRemoteQuestionRespond: (...args: unknown[]) => respondMock(...args),
+  fleetRemoteQuestionReject: (...args: unknown[]) => rejectMock(...args),
   isControlForbidden: (...args: unknown[]) => forbiddenMock(...args),
 }))
 
@@ -48,6 +50,7 @@ function renderCard(questions: PendingQuestion[] = [single], requestedAt = NOW) 
 beforeEach(() => {
   jest.clearAllMocks()
   respondMock.mockResolvedValue(true)
+  rejectMock.mockResolvedValue(true)
   forbiddenMock.mockReturnValue(false)
 })
 
@@ -102,6 +105,13 @@ describe("MobileFleetQuestionActions", () => {
     fireEvent.click(screen.getByTestId("mobile-question-option-0-0"))
     fireEvent.click(screen.getByTestId("mobile-question-submit"))
     await waitFor(() => expect(screen.getByTestId("mobile-question-answered")).toBeInTheDocument())
+  })
+
+  it("rejects without requiring an option selection", async () => {
+    renderCard()
+    fireEvent.click(screen.getByTestId("mobile-question-reject"))
+    await waitFor(() => expect(rejectMock).toHaveBeenCalledWith("q-1"))
+    expect(screen.getByTestId("mobile-question-rejected")).toBeInTheDocument()
   })
 
   it("reports a lapsed answer window rather than claiming success", async () => {

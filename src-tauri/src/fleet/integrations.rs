@@ -37,6 +37,10 @@ use super::registry::{FleetAgent, FleetCapabilities};
 /// vendor-specific string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NormalizedEvent {
+    /// Runtime SDK feature probe. Unlike lifecycle events this is agent-wide
+    /// and carries no session id; the registry intersects it with the static
+    /// manifest ceiling before enabling native controls.
+    Capabilities,
     SessionStart,
     UserPromptSubmit,
     PreToolUse,
@@ -46,6 +50,7 @@ pub enum NormalizedEvent {
     PermissionDenied,
     Stop,
     StopFailure,
+    SubagentStart,
     SubagentStop,
     PreCompact,
     PostCompact,
@@ -95,9 +100,9 @@ pub struct AgentManifest {
     /// a new session id inside the same pid for single-session agents, so
     /// their stale rows must be evicted; an OpenCode server's rows must not.)
     pub multi_session_host: bool,
-    /// True when the agent fires a wait-mode `PermissionRequest` for
-    /// AskUserQuestion, which is what makes a parked question answerable from
-    /// the island rather than display-only.
+    /// True when the integration has an answer channel for AskUserQuestion.
+    /// Hook-based agents park a wait-mode `PermissionRequest`; OpenCode bridges
+    /// its native Question API through the same normalized event contract.
     pub answers_questions: bool,
 }
 
@@ -147,10 +152,9 @@ impl AgentManifest {
     ///
     /// `None` means "this agent has no answer channel", which is a guard rather
     /// than a comment: the registry only emits `QuestionRequested` for a
-    /// manifest with [`Self::answers_questions`], and a bare
-    /// [`DecisionShape::OpencodeStatus`] reply has no slot for `updatedInput`.
-    /// A `None` at the ingress therefore fails open (empty `204`) instead of
-    /// shipping an envelope the agent cannot parse.
+    /// manifest with [`Self::answers_questions`]. A `None` at the ingress
+    /// therefore fails open (empty `204`) instead of shipping an envelope the
+    /// agent cannot parse.
     pub fn question_decision(&self, updated_input: serde_json::Value) -> Option<serde_json::Value> {
         if !self.answers_questions {
             return None;
@@ -165,7 +169,10 @@ impl AgentManifest {
                     }
                 }
             })),
-            DecisionShape::OpencodeStatus => None,
+            DecisionShape::OpencodeStatus => Some(serde_json::json!({
+                "status": "allow",
+                "updatedInput": updated_input
+            })),
         }
     }
 }
@@ -185,6 +192,7 @@ const CLAUDE_CODE: AgentManifest = AgentManifest {
         ("PermissionDenied", NormalizedEvent::PermissionDenied),
         ("Stop", NormalizedEvent::Stop),
         ("StopFailure", NormalizedEvent::StopFailure),
+        ("SubagentStart", NormalizedEvent::SubagentStart),
         ("SubagentStop", NormalizedEvent::SubagentStop),
         ("PreCompact", NormalizedEvent::PreCompact),
         ("PostCompact", NormalizedEvent::PostCompact),
@@ -227,6 +235,8 @@ const CODEX: AgentManifest = AgentManifest {
         ("PostToolUse", NormalizedEvent::PostToolUse),
         ("PermissionRequest", NormalizedEvent::PermissionRequest),
         ("Stop", NormalizedEvent::Stop),
+        ("SessionEnd", NormalizedEvent::SessionEnd),
+        ("SubagentStart", NormalizedEvent::SubagentStart),
         ("SubagentStop", NormalizedEvent::SubagentStop),
         ("PreCompact", NormalizedEvent::PreCompact),
         ("PostCompact", NormalizedEvent::PostCompact),
@@ -254,6 +264,7 @@ const OPENCODE: AgentManifest = AgentManifest {
     agent: FleetAgent::Opencode,
     session_id_keys: &["session_id", "session-id"],
     event_map: &[
+        ("Capabilities", NormalizedEvent::Capabilities),
         ("session-active", NormalizedEvent::SessionActive),
         ("session-idle", NormalizedEvent::SessionIdle),
         ("PermissionRequest", NormalizedEvent::PermissionRequest),
@@ -263,15 +274,11 @@ const OPENCODE: AgentManifest = AgentManifest {
         send_message: true,
         focus_terminal: false,
         open_transcript: false,
-        // One OpenCode server process hosts every session, so a SIGINT aimed at
-        // "this session's turn" would take down all of them. Interrupting a
-        // single OpenCode session needs the reverse command channel to grow an
-        // abort verb; declaring `false` keeps the button off until it does.
-        interrupt: false,
+        interrupt: true,
     },
     decision_shape: DecisionShape::OpencodeStatus,
     multi_session_host: true,
-    answers_questions: false,
+    answers_questions: true,
 };
 
 /// Every manifest, in display order.
@@ -393,11 +400,11 @@ mod tests {
 
     /// The two flags that used to be `agent != FleetAgent::Opencode` tests.
     #[test]
-    fn opencode_is_the_only_multi_session_host_and_cannot_answer_questions() {
+    fn opencode_is_the_only_multi_session_host_and_all_agents_answer_questions() {
         for m in MANIFESTS {
             let is_opencode = m.agent == FleetAgent::Opencode;
             assert_eq!(m.multi_session_host, is_opencode, "{:?}", m.agent);
-            assert_eq!(m.answers_questions, !is_opencode, "{:?}", m.agent);
+            assert!(m.answers_questions, "{:?}", m.agent);
         }
     }
 
@@ -469,9 +476,11 @@ mod tests {
                 "a"
             );
         }
-        assert!(manifest_for(FleetAgent::Opencode)
+        let opencode = manifest_for(FleetAgent::Opencode)
             .question_decision(updated)
-            .is_none());
+            .expect("OpenCode native Question API is answerable");
+        assert_eq!(opencode["status"], "allow");
+        assert_eq!(opencode["updatedInput"]["answers"]["q"], "a");
     }
 
     /// Capabilities the fold can never satisfy must not be declared: an agent

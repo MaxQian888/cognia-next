@@ -21,7 +21,11 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { useNowTicker } from "@/hooks/fleet/use-now-ticker"
-import { fleetRemoteQuestionRespond, isControlForbidden } from "@/lib/fleet/fleet-remote-actions"
+import {
+  fleetRemoteQuestionReject,
+  fleetRemoteQuestionRespond,
+  isControlForbidden,
+} from "@/lib/fleet/fleet-remote-actions"
 import {
   FLEET_PERMISSION_WAIT_MS,
   type PendingQuestion,
@@ -40,6 +44,7 @@ export function MobileFleetQuestionActions({
   const nowMs = useNowTicker()
   const [answering, setAnswering] = useState(false)
   const [answered, setAnswered] = useState(false)
+  const [rejected, setRejected] = useState(false)
   // One selection set per question; multi-select questions keep several.
   const [selected, setSelected] = useState<ReadonlySet<number>[]>(() => questions.map(() => new Set()))
 
@@ -66,7 +71,7 @@ export function MobileFleetQuestionActions({
   }
 
   const submit = async () => {
-    if (answering || answered || expired || !complete) return
+    if (answering || answered || rejected || expired || !complete) return
     setAnswering(true)
     try {
       const ok = await fleetRemoteQuestionRespond(
@@ -82,10 +87,31 @@ export function MobileFleetQuestionActions({
     }
   }
 
+  const reject = async () => {
+    if (answering || answered || rejected || expired) return
+    setAnswering(true)
+    try {
+      const ok = await fleetRemoteQuestionReject(request.requestId)
+      if (ok) setRejected(true)
+      else toast.error(t("expired"))
+    } catch (err) {
+      toast.error(isControlForbidden(err) ? t("controlLost") : t("failed"))
+    } finally {
+      setAnswering(false)
+    }
+  }
+
   if (answered) {
     return (
       <p className="text-xs text-muted-foreground" data-testid="mobile-question-answered">
         {t("answered")}
+      </p>
+    )
+  }
+  if (rejected) {
+    return (
+      <p className="text-xs text-muted-foreground" data-testid="mobile-question-rejected">
+        {t("rejected")}
       </p>
     )
   }
@@ -140,6 +166,15 @@ export function MobileFleetQuestionActions({
         >
           {t("countdown", { seconds: remainingSec })}
         </span>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={answering}
+          onClick={() => void reject()}
+          data-testid="mobile-question-reject"
+        >
+          {t("reject")}
+        </Button>
         <Button
           size="sm"
           disabled={answering || !complete}

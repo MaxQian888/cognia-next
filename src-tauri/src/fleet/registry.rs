@@ -48,7 +48,7 @@ impl FleetAgent {
 }
 
 /// Lifecycle state of one monitored session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FleetStatus {
     Idle,
@@ -56,7 +56,15 @@ pub enum FleetStatus {
     WaitingInput,
     WaitingPermission,
     PlanPending,
+    Detached,
     Ended,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LifecycleConfidence {
+    Native,
+    Inferred,
 }
 
 /// What the island may do with a session — drives which row buttons render
@@ -73,6 +81,24 @@ pub struct FleetCapabilities {
     /// turn" (see `control::interrupt_session`), so it is narrowed hard at
     /// runtime rather than trusted from the manifest.
     pub interrupt: bool,
+}
+
+/// Agent-wide runtime feature probe, intersected with the integration
+/// manifest before any control is exposed. OpenCode SDK surfaces vary by
+/// installed runtime version, so static provider identity is not proof that a
+/// native API is callable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRuntimeCapabilities {
+    pub agent: FleetAgent,
+    pub send_message: bool,
+    pub interrupt: bool,
+    pub answers_questions: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interrupt_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub question_mode: Option<String>,
+    pub observed_at: u64,
 }
 
 /// A permission request currently parked on this session (Claude
@@ -142,6 +168,7 @@ pub struct FleetSubagent {
     /// True for `run_in_background` tasks, which outlive their tool call.
     pub background: bool,
     pub started_at: u64,
+    pub lifecycle_confidence: LifecycleConfidence,
 }
 
 /// Whether a captured error came from a single tool call or from the turn
@@ -174,6 +201,7 @@ pub struct FleetSession {
     pub agent: FleetAgent,
     pub session_id: String,
     pub status: FleetStatus,
+    pub lifecycle_confidence: LifecycleConfidence,
     pub cwd: Option<String>,
     /// Basename of `cwd` — precomputed so the row never needs path logic.
     pub project_name: Option<String>,
@@ -222,6 +250,14 @@ pub struct FleetSession {
     /// Never serialized — the frontend has no use for it.
     #[serde(skip)]
     pub git_checked: bool,
+    /// Process start time captured with the pid, used to reject PID reuse when
+    /// reconciling a durable session after app restart.
+    #[serde(skip)]
+    pub process_started_at: Option<u64>,
+    /// Live status preserved while monitoring is detached. Never serialized
+    /// to the renderer; the recovery file owns its durable copy.
+    #[serde(skip)]
+    pub status_before_detach: Option<FleetStatus>,
 }
 
 impl FleetSession {
@@ -243,30 +279,40 @@ impl FleetSession {
     /// a button with nothing behind it. Conversely a declared `true` still needs
     /// its evidence: no transcript file means nothing to open, and a terminal
     /// this OS cannot raise means no focus button.
-    fn refresh_capabilities(&mut self) {
+    fn refresh_capabilities(&mut self, runtime: Option<&AgentRuntimeCapabilities>) {
         let declared = super::integrations::manifest_for(self.agent).capabilities;
+        let runtime_send_message = runtime.is_some_and(|probe| probe.send_message);
+        let runtime_interrupt = runtime.is_some_and(|probe| probe.interrupt);
+        let needs_runtime_probe = self.agent == FleetAgent::Opencode;
+        let controllable = !matches!(self.status, FleetStatus::Detached | FleetStatus::Ended);
         self.capabilities = FleetCapabilities {
             // No runtime probe: whether the agent's ingress can carry an
             // approval back is a property of its hook contract, not of any
             // single payload.
-            approve_permission: declared.approve_permission,
+            approve_permission: declared.approve_permission && controllable,
             // Same — the reverse command channel exists (or not) per agent.
-            send_message: declared.send_message,
+            send_message: declared.send_message
+                && (!needs_runtime_probe || runtime_send_message)
+                && controllable,
             focus_terminal: declared.focus_terminal
+                && controllable
                 && self
                     .terminal
                     .as_ref()
                     .is_some_and(|t| super::control::can_focus(t.app)),
             open_transcript: declared.open_transcript && self.transcript_path.is_some(),
-            // An interrupt is a signal to a process this app did not start, so
-            // it needs a target: no observed pid, no button. An ended session
-            // has no turn left to cancel. The platform gate lives in
-            // `control::can_interrupt` (Windows has no reliable cross-console
-            // Ctrl-C delivery, so it is off there).
+            // Process-backed agents need an observed pid and a platform with a
+            // reliable signal path. OpenCode is different: its runtime probe
+            // proves a per-session SDK interrupt, which is platform-neutral and
+            // deliberately never signals the shared server process.
             interrupt: declared.interrupt
-                && self.agent_pid.is_some()
-                && self.status != FleetStatus::Ended
-                && super::control::can_interrupt(),
+                && if needs_runtime_probe {
+                    runtime_interrupt
+                } else {
+                    self.agent_pid.is_some()
+                }
+                && controllable
+                && (needs_runtime_probe || super::control::can_interrupt()),
         };
     }
 }
@@ -280,6 +326,10 @@ pub struct FleetSnapshot {
     /// an event this process lifetime, absent for the rest. See
     /// [`AgentLiveness`].
     pub liveness: Vec<AgentLivenessRow>,
+    /// Runtime-proven native controls. Missing means unproven, never
+    /// "optimistically supported".
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub runtime_capabilities: Vec<AgentRuntimeCapabilities>,
     pub generated_at: u64,
 }
 
@@ -324,6 +374,7 @@ pub enum RegistryEffect {
 pub struct FleetRegistry {
     sessions: HashMap<(FleetAgent, String), FleetSession>,
     liveness: HashMap<FleetAgent, AgentLiveness>,
+    runtime_capabilities: HashMap<FleetAgent, AgentRuntimeCapabilities>,
 }
 
 /// Per-agent ingress liveness, so the settings card can say whether an
@@ -380,10 +431,6 @@ impl FleetRegistry {
             live.last_seen_at = Some(now_ms);
             live.seen_count = live.seen_count.saturating_add(1);
         }
-        let Some(session_id) = extract_session_id(ev) else {
-            return RegistryEffect::Ignored;
-        };
-
         // An event outside this agent's declared vocabulary is dropped at the
         // door. It used to fall through the fold's `_ => {}` arm and still
         // return `Updated`, which *created a session row* out of an
@@ -391,6 +438,27 @@ impl FleetRegistry {
         // POSTing to the ingress would materialize a phantom agent.
         let manifest = super::integrations::manifest_for(ev.agent);
         let Some(event) = manifest.normalize(&ev.event) else {
+            return RegistryEffect::Ignored;
+        };
+
+        if event == NormalizedEvent::Capabilities {
+            let probe = runtime_capability_probe(ev.agent, &ev.payload, now_ms);
+            self.runtime_capabilities.insert(ev.agent, probe);
+            let runtime = self.runtime_capabilities.get(&ev.agent);
+            for session in self
+                .sessions
+                .values_mut()
+                .filter(|session| session.agent == ev.agent)
+            {
+                session.refresh_capabilities(runtime);
+            }
+            let live = self.liveness.entry(ev.agent).or_default();
+            live.last_accepted_at = Some(now_ms);
+            live.accepted_count = live.accepted_count.saturating_add(1);
+            return RegistryEffect::Updated;
+        }
+
+        let Some(session_id) = extract_session_id(ev) else {
             return RegistryEffect::Ignored;
         };
 
@@ -403,6 +471,12 @@ impl FleetRegistry {
         }
 
         let key = (ev.agent, session_id.clone());
+        let answers_questions = manifest.answers_questions
+            && (ev.agent != FleetAgent::Opencode
+                || self
+                    .runtime_capabilities
+                    .get(&ev.agent)
+                    .is_some_and(|probe| probe.answers_questions));
 
         // One Claude Code / Codex process runs one interactive session at a
         // time, but `/clear` (and `--resume`) mint a NEW session id inside the
@@ -427,6 +501,9 @@ impl FleetRegistry {
             .entry(key)
             .or_insert_with(|| new_session(ev.agent, session_id.clone(), ev, now_ms));
 
+        if entry.status == FleetStatus::Detached {
+            entry.status_before_detach = None;
+        }
         entry.last_event_at = now_ms;
         if let Some(ppid) = ev.ppid {
             entry.agent_pid = Some(ppid);
@@ -452,12 +529,13 @@ impl FleetRegistry {
         // now knows (transcript path, focusable terminal). Recomputed here, once,
         // so every arm below — including the ones that return early — sees the
         // same rule and no arm can widen a capability the manifest denies.
-        entry.refresh_capabilities();
+        entry.refresh_capabilities(self.runtime_capabilities.get(&ev.agent));
 
         // The fold matches only on the normalized vocabulary — no vendor
         // event names reach it, and the exhaustive match makes a new
         // `NormalizedEvent` variant a compile error rather than a silent drop.
         match event {
+            NormalizedEvent::Capabilities => unreachable!("handled before session extraction"),
             NormalizedEvent::SessionStart => {
                 entry.status = FleetStatus::Idle;
                 entry.ended_at = None;
@@ -602,11 +680,10 @@ impl FleetRegistry {
                 // user must answer. Park it as an *answerable* question (not a
                 // generic Approve/Deny) so the island shows the options and the
                 // selection rides back as the hook's `allow` + `updatedInput`
-                // answer decision. Scoped by the manifest's `answers_questions`
-                // — OpenCode has no AskUserQuestion tool and no wait-mode gate
-                // that could carry an answer back.
-                if manifest.answers_questions
-                    && tool_name.as_deref().is_some_and(is_ask_user_question_tool)
+                // answer decision. Scoped by the manifest's
+                // `answers_questions`; OpenCode additionally requires its
+                // native Question API capability probe before entering here.
+                if answers_questions && tool_name.as_deref().is_some_and(is_ask_user_question_tool)
                 {
                     entry.status = FleetStatus::WaitingInput;
                     entry.activity = None;
@@ -676,6 +753,30 @@ impl FleetRegistry {
                         .or_else(|| payload_str(&ev.payload, "error")),
                     at: now_ms,
                 });
+            }
+            // Native lifecycle event (Codex/Claude). Unlike the Task-tool
+            // heuristic this fires even when the provider spawns a subagent
+            // without a visible tool call.
+            NormalizedEvent::SubagentStart => {
+                let agent_type = payload_str(&ev.payload, "agent_type");
+                let description = payload_str(&ev.payload, "description")
+                    .or_else(|| agent_type.clone())
+                    .or_else(|| payload_str(&ev.payload, "agent_id"))
+                    .unwrap_or_else(|| "Subagent".to_string());
+                entry.subagents.push(FleetSubagent {
+                    description,
+                    agent_type,
+                    background: ev
+                        .payload
+                        .get("background")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false),
+                    started_at: now_ms,
+                    lifecycle_confidence: LifecycleConfidence::Native,
+                });
+                if entry.subagents.len() > MAX_SUBAGENTS {
+                    entry.subagents.remove(0);
+                }
             }
             // A subagent finished. The payload carries no correlation id, so
             // retire the oldest foreground entry (its PostToolUse follows and
@@ -787,6 +888,7 @@ impl FleetRegistry {
             }
         }
 
+        entry.refresh_capabilities(self.runtime_capabilities.get(&ev.agent));
         RegistryEffect::Updated
     }
 
@@ -803,8 +905,18 @@ impl FleetRegistry {
     pub fn session_agent_pid(&self, agent: FleetAgent, session_id: &str) -> Option<u32> {
         self.sessions
             .get(&(agent, session_id.to_string()))
-            .filter(|s| s.status != FleetStatus::Ended)
+            .filter(|s| !matches!(s.status, FleetStatus::Detached | FleetStatus::Ended))
             .and_then(|s| s.agent_pid)
+    }
+
+    pub fn session_capabilities(
+        &self,
+        agent: FleetAgent,
+        session_id: &str,
+    ) -> Option<FleetCapabilities> {
+        self.sessions
+            .get(&(agent, session_id.to_string()))
+            .map(|session| session.capabilities)
     }
 
     /// Attach a terminal source resolved outside the event fold (the
@@ -826,7 +938,7 @@ impl FleetRegistry {
         // A newly classified terminal is a runtime fact that can only ever
         // narrow the manifest's `focus_terminal` ceiling (this OS may not know
         // how to raise that app).
-        session.refresh_capabilities();
+        session.refresh_capabilities(self.runtime_capabilities.get(&agent));
         true
     }
 
@@ -866,6 +978,155 @@ impl FleetRegistry {
         session.git_branch = branch;
         session.git_checked = true;
         changed
+    }
+
+    pub fn set_process_started_at(
+        &mut self,
+        agent: FleetAgent,
+        session_id: &str,
+        started_at: u64,
+    ) -> bool {
+        let Some(session) = self.sessions.get_mut(&(agent, session_id.to_string())) else {
+            return false;
+        };
+        if session.process_started_at == Some(started_at) {
+            return false;
+        }
+        session.process_started_at = Some(started_at);
+        true
+    }
+
+    /// Detach every non-ended row when monitoring stops. Detached is an
+    /// uncertainty state, not a synthetic completion: pending response
+    /// channels are cleared, controls are disabled, and a future native event
+    /// can make the row live again.
+    pub fn mark_all_detached(&mut self) -> bool {
+        let mut changed = false;
+        for session in self.sessions.values_mut() {
+            if matches!(session.status, FleetStatus::Ended | FleetStatus::Detached) {
+                continue;
+            }
+            session.status_before_detach = Some(session.status);
+            session.status = FleetStatus::Detached;
+            session.activity = None;
+            session.pending_permission = None;
+            session.pending_plan = None;
+            session.clear_questions();
+            let runtime = self.runtime_capabilities.get(&session.agent);
+            session.refresh_capabilities(runtime);
+            changed = true;
+        }
+        changed
+    }
+
+    /// Reconcile detached rows against an OS process identity probe.
+    /// `Some(true)` proves pid + start time still match; `Some(false)` proves
+    /// the process ended or the pid was reused; `None` remains detached.
+    pub fn reconcile_detached(
+        &mut self,
+        now_ms: u64,
+        probe: impl Fn(u32, u64) -> Option<bool>,
+    ) -> bool {
+        let mut changed = false;
+        for session in self
+            .sessions
+            .values_mut()
+            .filter(|session| session.status == FleetStatus::Detached)
+        {
+            if super::integrations::manifest_for(session.agent).multi_session_host {
+                continue;
+            }
+            let outcome = session
+                .agent_pid
+                .zip(session.process_started_at)
+                .and_then(|(pid, started_at)| probe(pid, started_at));
+            match outcome {
+                Some(true) => {
+                    session.status = match session.status_before_detach.take() {
+                        Some(FleetStatus::Idle) => FleetStatus::Idle,
+                        Some(FleetStatus::Ended) => FleetStatus::Ended,
+                        _ => FleetStatus::Working,
+                    };
+                    session.ended_at = (session.status == FleetStatus::Ended).then_some(now_ms);
+                    session.refresh_capabilities(self.runtime_capabilities.get(&session.agent));
+                    changed = true;
+                }
+                Some(false) => {
+                    session.status = FleetStatus::Ended;
+                    session.status_before_detach = None;
+                    session.ended_at = Some(now_ms);
+                    session.refresh_capabilities(self.runtime_capabilities.get(&session.agent));
+                    changed = true;
+                }
+                None => {}
+            }
+        }
+        changed
+    }
+
+    pub fn recovery_sessions(&self) -> Vec<super::recovery::RecoverySession> {
+        self.sessions
+            .values()
+            .filter(|session| session.status != FleetStatus::Ended)
+            .map(|session| super::recovery::RecoverySession {
+                agent: session.agent,
+                session_id: session.session_id.clone(),
+                status: session.status_before_detach.unwrap_or(session.status),
+                cwd: session.cwd.clone(),
+                project_name: session.project_name.clone(),
+                model: session.model.clone(),
+                transcript_path: session.transcript_path.clone(),
+                agent_pid: session.agent_pid,
+                process_started_at: session.process_started_at,
+                started_at: session.started_at,
+                last_event_at: session.last_event_at,
+                tool_use_count: session.tool_use_count,
+                turn_count: session.turn_count,
+            })
+            .collect()
+    }
+
+    pub fn restore_recovery(&mut self, rows: Vec<super::recovery::RecoverySession>) {
+        for row in rows {
+            if row.status == FleetStatus::Ended {
+                continue;
+            }
+            let key = (row.agent, row.session_id.clone());
+            let mut session = FleetSession {
+                agent: row.agent,
+                session_id: row.session_id,
+                status: FleetStatus::Detached,
+                lifecycle_confidence: LifecycleConfidence::Native,
+                cwd: row.cwd,
+                project_name: row.project_name,
+                last_prompt: None,
+                activity: None,
+                permission_mode: None,
+                model: row.model,
+                terminal: None,
+                transcript_path: row.transcript_path,
+                agent_pid: row.agent_pid,
+                pending_permission: None,
+                pending_plan: None,
+                pending_questions: Vec::new(),
+                pending_question_request: None,
+                subagents: Vec::new(),
+                capabilities: super::integrations::manifest_for(row.agent).capabilities,
+                started_at: row.started_at,
+                last_event_at: row.last_event_at,
+                ended_at: None,
+                last_error: None,
+                tool_use_count: row.tool_use_count,
+                turn_count: row.turn_count,
+                start_source: None,
+                git_branch: None,
+                git_checked: false,
+                process_started_at: row.process_started_at,
+                status_before_detach: Some(row.status),
+            };
+            session.refresh_capabilities(self.runtime_capabilities.get(&row.agent));
+            self.sessions.insert(key, session);
+        }
     }
 
     /// Clear a parked permission (answered or timed out). Returns true when
@@ -911,6 +1172,9 @@ impl FleetRegistry {
     pub fn reap(&mut self, now_ms: u64, pid_alive: impl Fn(u32) -> bool) -> bool {
         let before = self.sessions.len();
         self.sessions.retain(|_, s| {
+            if s.status == FleetStatus::Detached {
+                return true;
+            }
             if let Some(ended_at) = s.ended_at {
                 return now_ms.saturating_sub(ended_at) < ENDED_LINGER_MS;
             }
@@ -937,11 +1201,54 @@ impl FleetRegistry {
             })
             .collect();
         liveness.sort_by_key(|row| row.agent as u8);
+        let mut runtime_capabilities: Vec<AgentRuntimeCapabilities> =
+            self.runtime_capabilities.values().cloned().collect();
+        runtime_capabilities.sort_by_key(|probe| probe.agent as u8);
         FleetSnapshot {
             sessions,
             liveness,
+            runtime_capabilities,
             generated_at: now_ms,
         }
+    }
+}
+
+fn runtime_capability_probe(
+    agent: FleetAgent,
+    payload: &serde_json::Value,
+    observed_at: u64,
+) -> AgentRuntimeCapabilities {
+    let declared = super::integrations::manifest_for(agent).capabilities;
+    AgentRuntimeCapabilities {
+        agent,
+        send_message: declared.send_message
+            && payload
+                .get("send_message")
+                .or_else(|| payload.get("sendMessage"))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+        interrupt: declared.interrupt
+            && payload
+                .get("interrupt")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+        answers_questions: super::integrations::manifest_for(agent).answers_questions
+            && payload
+                .get("answers_questions")
+                .or_else(|| payload.get("answersQuestions"))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+        interrupt_mode: payload
+            .get("interrupt_mode")
+            .or_else(|| payload.get("interruptMode"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+        question_mode: payload
+            .get("question_mode")
+            .or_else(|| payload.get("questionMode"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+        observed_at,
     }
 }
 
@@ -955,6 +1262,7 @@ fn new_session(
         agent,
         session_id,
         status: FleetStatus::Idle,
+        lifecycle_confidence: LifecycleConfidence::Native,
         cwd: None,
         project_name: None,
         last_prompt: None,
@@ -981,6 +1289,8 @@ fn new_session(
         start_source: None,
         git_branch: None,
         git_checked: false,
+        process_started_at: None,
+        status_before_detach: None,
     }
 }
 
@@ -1200,6 +1510,7 @@ fn push_subagent(entry: &mut FleetSession, payload: &serde_json::Value, now_ms: 
             .map(|t| truncate_chars(t.trim(), 40)),
         background: subagent_is_background(payload),
         started_at: now_ms,
+        lifecycle_confidence: LifecycleConfidence::Inferred,
     });
 }
 
@@ -1570,20 +1881,158 @@ mod tests {
     }
 
     #[test]
-    fn ask_user_question_permission_stays_generic_for_opencode() {
-        // OpenCode has no AskUserQuestion tool — a same-named permission must
-        // still park as a generic approval, not the answerable-question path.
+    fn opencode_question_is_answerable_only_after_runtime_probe() {
         let mut reg = FleetRegistry::new();
         let mut payload = base_payload();
         payload["session_id"] = serde_json::json!("oc-auq");
         payload["tool_name"] = serde_json::json!("AskUserQuestion");
         payload["tool_input"] = serde_json::json!({ "questions": [{ "question": "Q?" }] });
-        let effect = reg.apply(&ev(FleetAgent::Opencode, "PermissionRequest", payload), 0);
+        let effect = reg.apply(
+            &ev(FleetAgent::Opencode, "PermissionRequest", payload.clone()),
+            0,
+        );
         assert!(matches!(effect, RegistryEffect::PermissionRequested { .. }));
         let s = only_session(&reg);
         assert_eq!(s.status, FleetStatus::WaitingPermission);
         assert!(s.pending_permission.is_some());
         assert!(s.pending_question_request.is_none());
+
+        assert_eq!(
+            reg.apply(
+                &ev(
+                    FleetAgent::Opencode,
+                    "Capabilities",
+                    serde_json::json!({
+                        "sendMessage": true,
+                        "interrupt": true,
+                        "interruptMode": "v2",
+                        "answersQuestions": true,
+                        "questionMode": "v2"
+                    }),
+                ),
+                1,
+            ),
+            RegistryEffect::Updated
+        );
+        let effect = reg.apply(&ev(FleetAgent::Opencode, "PermissionRequest", payload), 2);
+        assert!(matches!(effect, RegistryEffect::QuestionRequested { .. }));
+        assert!(only_session(&reg).pending_question_request.is_some());
+    }
+
+    #[test]
+    fn opencode_controls_are_conservatively_intersected_with_runtime_probe() {
+        let mut reg = FleetRegistry::new();
+        let mut payload = base_payload();
+        payload["session_id"] = serde_json::json!("oc-controls");
+        reg.apply(&ev(FleetAgent::Opencode, "session-active", payload), 1);
+        let before = only_session(&reg);
+        assert!(!before.capabilities.send_message);
+        assert!(!before.capabilities.interrupt);
+
+        reg.apply(
+            &ev(
+                FleetAgent::Opencode,
+                "Capabilities",
+                serde_json::json!({
+                    "sendMessage": true,
+                    "interrupt": true,
+                    "interruptMode": "v1",
+                    "answersQuestions": false
+                }),
+            ),
+            2,
+        );
+        let after = only_session(&reg);
+        assert!(after.capabilities.send_message);
+        assert!(after.capabilities.interrupt);
+        let snapshot = reg.snapshot(3);
+        assert_eq!(snapshot.runtime_capabilities.len(), 1);
+        assert_eq!(
+            snapshot.runtime_capabilities[0].interrupt_mode.as_deref(),
+            Some("v1")
+        );
+        assert!(!snapshot.runtime_capabilities[0].answers_questions);
+    }
+
+    #[test]
+    fn detach_recovery_reconciles_only_matching_process_identity() {
+        let mut reg = FleetRegistry::new();
+        let mut event = claude_ev("UserPromptSubmit", base_payload());
+        event.ppid = Some(4242);
+        reg.apply(&event, 10);
+        assert!(reg.set_process_started_at(FleetAgent::ClaudeCode, SID, 99));
+        assert!(reg.mark_all_detached());
+        let detached = only_session(&reg);
+        assert_eq!(detached.status, FleetStatus::Detached);
+        assert!(!detached.capabilities.approve_permission);
+        assert!(!detached.capabilities.send_message);
+        assert!(!detached.capabilities.focus_terminal);
+        assert!(!detached.capabilities.interrupt);
+
+        let rows = reg.recovery_sessions();
+        assert_eq!(rows[0].status, FleetStatus::Working);
+        let mut restored = FleetRegistry::new();
+        restored.restore_recovery(rows.clone());
+        assert_eq!(only_session(&restored).status, FleetStatus::Detached);
+        assert!(
+            restored.reconcile_detached(20, |pid, started| { Some(pid == 4242 && started == 99) })
+        );
+        assert_eq!(only_session(&restored).status, FleetStatus::Working);
+
+        let mut ended = FleetRegistry::new();
+        ended.restore_recovery(rows);
+        assert!(ended.reconcile_detached(30, |_, _| Some(false)));
+        let session = only_session(&ended);
+        assert_eq!(session.status, FleetStatus::Ended);
+        assert_eq!(session.ended_at, Some(30));
+    }
+
+    #[test]
+    fn multi_session_provider_stays_detached_when_identity_is_unprovable() {
+        let mut reg = FleetRegistry::new();
+        let mut payload = base_payload();
+        payload["session_id"] = serde_json::json!("oc-detached");
+        reg.apply(&ev(FleetAgent::Opencode, "session-active", payload), 1);
+        reg.apply(
+            &ev(
+                FleetAgent::Opencode,
+                "Capabilities",
+                serde_json::json!({
+                    "sendMessage": true,
+                    "interrupt": true,
+                    "answersQuestions": true
+                }),
+            ),
+            2,
+        );
+        assert!(only_session(&reg).capabilities.send_message);
+        reg.mark_all_detached();
+        assert!(!reg.reconcile_detached(3, |_, _| Some(true)));
+        let session = only_session(&reg);
+        assert_eq!(session.status, FleetStatus::Detached);
+        assert!(!session.capabilities.send_message);
+        assert!(!session.capabilities.interrupt);
+    }
+
+    #[test]
+    fn native_and_heuristic_subagents_record_lifecycle_confidence() {
+        let mut reg = FleetRegistry::new();
+        let mut native = base_payload();
+        native["agent_type"] = serde_json::json!("Explore");
+        reg.apply(&claude_ev("SubagentStart", native), 1);
+        assert_eq!(
+            only_session(&reg).subagents[0].lifecycle_confidence,
+            LifecycleConfidence::Native
+        );
+
+        let mut inferred = base_payload();
+        inferred["tool_name"] = serde_json::json!("Task");
+        inferred["tool_input"] = serde_json::json!({"description": "Inspect hooks"});
+        reg.apply(&claude_ev("PreToolUse", inferred), 2);
+        assert_eq!(
+            only_session(&reg).subagents[1].lifecycle_confidence,
+            LifecycleConfidence::Inferred
+        );
     }
 
     #[test]
@@ -2548,9 +2997,20 @@ mod tests {
         assert!(s.terminal.is_some(), "env did classify a terminal");
         assert!(!s.capabilities.open_transcript);
         assert!(!s.capabilities.focus_terminal);
-        // Declared capabilities stand on their own, without payload evidence.
-        assert!(s.capabilities.send_message);
+        // Static provider identity is not runtime evidence for optional SDK
+        // controls; OpenCode stays conservative until its plugin probes them.
+        assert!(!s.capabilities.send_message);
         assert!(s.capabilities.approve_permission);
+
+        reg.apply(
+            &ev(
+                FleetAgent::Opencode,
+                "Capabilities",
+                serde_json::json!({"sendMessage": true}),
+            ),
+            1,
+        );
+        assert!(only_session(&reg).capabilities.send_message);
 
         // The out-of-band terminal attach path (parent-chain fallback) narrows
         // the same way — a row that never saw a terminal env still must not

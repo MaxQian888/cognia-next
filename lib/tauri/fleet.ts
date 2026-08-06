@@ -116,6 +116,17 @@ export async function fleetQuestionRespond(
   }
 }
 
+/** Reject a parked AskUserQuestion through the provider's native gate. */
+export async function fleetQuestionReject(requestId: string): Promise<boolean> {
+  if (!isTauri()) return false
+  try {
+    return await invoke<boolean>("fleet_question_reject", { requestId })
+  } catch (err) {
+    console.warn("fleetQuestionReject failed", err)
+    return false
+  }
+}
+
 /** Install state of the Codex `notify` integration (mirrors `fleet/codex.rs`). */
 export type CodexStatus = "installed" | "conflict" | "not-installed" | "unavailable"
 
@@ -180,6 +191,20 @@ export async function fleetCodexStatus(): Promise<CodexIntegrationStatus> {
  */
 export type CodexHooksStatus = "installed" | "stale" | "not-installed" | "unavailable"
 
+export interface CodexHookCapabilityReport {
+  state: "probed" | "degraded"
+  ceilingEvents: string[]
+  effectiveEvents: string[]
+  diagnostic: string | null
+}
+
+const CODEX_HOOKS_DEGRADED: CodexHookCapabilityReport = {
+  state: "degraded",
+  ceilingEvents: [],
+  effectiveEvents: [],
+  diagnostic: null,
+}
+
 /**
  * Register the fleet forwarder in `~/.codex/hooks.json`.
  *
@@ -208,12 +233,49 @@ export async function fleetCodexHooksStatus(): Promise<CodexHooksStatus> {
   }
 }
 
+export async function fleetCodexHooksCapabilities(): Promise<CodexHookCapabilityReport> {
+  if (!isTauri()) return CODEX_HOOKS_DEGRADED
+  try {
+    return await invoke<CodexHookCapabilityReport>("fleet_codex_hooks_capabilities")
+  } catch (err) {
+    console.warn("fleetCodexHooksCapabilities failed", err)
+    return CODEX_HOOKS_DEGRADED
+  }
+}
+
 /** Install state of the OpenCode plugin (mirrors `fleet/opencode.rs`). */
 export type OpencodeStatus = "installed" | "stale" | "not-installed" | "unavailable"
 
 export interface OpencodeIntegrationStatus {
   status: OpencodeStatus
   pluginPath: string | null
+}
+
+export interface OpencodeOutboxStatus {
+  health: "healthy" | "corrupt" | "unavailable"
+  path: string | null
+  error: string | null
+}
+
+const OPENCODE_OUTBOX_UNAVAILABLE: OpencodeOutboxStatus = {
+  health: "unavailable",
+  path: null,
+  error: null,
+}
+
+export async function fleetOpencodeOutboxStatus(): Promise<OpencodeOutboxStatus> {
+  if (!isTauri()) return OPENCODE_OUTBOX_UNAVAILABLE
+  try {
+    return await invoke<OpencodeOutboxStatus>("fleet_opencode_outbox_status")
+  } catch (err) {
+    console.warn("fleetOpencodeOutboxStatus failed", err)
+    return OPENCODE_OUTBOX_UNAVAILABLE
+  }
+}
+
+export async function fleetOpencodeOutboxRepair(): Promise<OpencodeOutboxStatus> {
+  if (!isTauri()) return OPENCODE_OUTBOX_UNAVAILABLE
+  return invoke<OpencodeOutboxStatus>("fleet_opencode_outbox_repair")
 }
 
 const OPENCODE_UNAVAILABLE: OpencodeIntegrationStatus = {

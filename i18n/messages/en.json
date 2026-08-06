@@ -9217,6 +9217,7 @@
     "island": {
       "empty": "No active agents",
       "legend": {
+        "detached": "{count} detached",
         "done": "{count} done",
         "idle": "{count} idle",
         "needsYou": "{count} waiting",
@@ -9238,6 +9239,8 @@
     },
     "question": {
       "expired": "Answered in terminal",
+      "reject": "Reject",
+      "rejected": "Rejected",
       "submit": "Submit",
       "submitted": "Sent"
     },
@@ -9289,6 +9292,7 @@
       "openTranscript": "Reveal transcript",
       "questionMore": "{count, plural, one {+# more question} other {+# more questions}}",
       "status": {
+        "detached": "Monitoring detached",
         "ended": "Session ended",
         "idle": "Idle",
         "planPending": "Plan awaiting approval in the terminal",
@@ -12572,6 +12576,8 @@
         "countdown": "{seconds}s left",
         "expired": "The answer window closed — answer in the terminal.",
         "failed": "Could not send the answer.",
+        "reject": "Reject",
+        "rejected": "Rejected.",
         "submit": "Submit"
       },
       "reply": {
@@ -12588,6 +12594,7 @@
         "focus": "Focus terminal",
         "focusFailed": "Couldn't focus the terminal.",
         "status": {
+          "detached": "Monitoring detached",
           "ended": "Session ended",
           "idle": "Idle",
           "planPending": "Plan awaiting approval on desktop",
@@ -25588,6 +25595,11 @@
       "triggerAria": "Find a setting"
     },
     "fleet": {
+      "capabilities": {
+        "degraded": "Limited APIs",
+        "proven": "APIs verified",
+        "unproven": "Awaiting probe"
+      },
       "claude": {
         "desc": "Install forwarder hooks into ~/.claude/settings.json so every Claude Code session reports here. Fail-open: with Cognia closed they exit instantly.",
         "label": "Claude Code hooks"
@@ -25648,7 +25660,13 @@
       },
       "opencode": {
         "desc": "Install a plugin into ~/.config/opencode/plugin. Observe sessions and approve/deny permissions from the island.",
-        "label": "OpenCode plugin"
+        "label": "OpenCode plugin",
+        "outbox": {
+          "corrupt": "The durable command queue is corrupt; controls are disabled.",
+          "repair": "Repair queue",
+          "repaired": "OpenCode command queue repaired.",
+          "unavailable": "The durable command queue is unavailable; controls are disabled."
+        }
       },
       "saved": "Fleet settings updated.",
       "status": {

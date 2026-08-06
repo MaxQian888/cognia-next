@@ -161,6 +161,7 @@ describe("IslandRow", () => {
     for (const [status, key] of [
       ["waiting-input", "status.waitingInput"],
       ["plan-pending", "status.planPending"],
+      ["detached", "status.detached"],
       ["ended", "status.ended"],
     ] as const) {
       const { unmount } = render(<IslandRow session={session({ status, activity: null })} />)

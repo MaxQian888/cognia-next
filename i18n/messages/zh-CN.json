@@ -9217,6 +9217,7 @@
     "island": {
       "empty": "暂无活动 Agent",
       "legend": {
+        "detached": "{count} 个已断开监控",
         "done": "{count} 个已结束",
         "idle": "{count} 个空闲",
         "needsYou": "{count} 个待处理",
@@ -9238,6 +9239,8 @@
     },
     "question": {
       "expired": "已在终端中处理",
+      "reject": "拒绝",
+      "rejected": "已拒绝",
       "submit": "提交",
       "submitted": "已发送"
     },
@@ -9289,6 +9292,7 @@
       "openTranscript": "在文件管理器中显示会话记录",
       "questionMore": "还有 {count} 个问题",
       "status": {
+        "detached": "监控已断开",
         "ended": "会话已结束",
         "idle": "空闲",
         "planPending": "计划等待在终端中确认",
@@ -12572,6 +12576,8 @@
         "countdown": "剩余 {seconds} 秒",
         "expired": "回答窗口已关闭，请在终端里回答。",
         "failed": "回答发送失败。",
+        "reject": "拒绝",
+        "rejected": "已拒绝。",
         "submit": "提交"
       },
       "reply": {
@@ -12588,6 +12594,7 @@
         "focus": "聚焦终端",
         "focusFailed": "无法聚焦终端。",
         "status": {
+          "detached": "监控已断开",
           "ended": "会话已结束",
           "idle": "空闲",
           "planPending": "计划等待在桌面确认",
@@ -25588,6 +25595,11 @@
       "triggerAria": "查找设置"
     },
     "fleet": {
+      "capabilities": {
+        "degraded": "API 能力受限",
+        "proven": "API 已验证",
+        "unproven": "等待能力探测"
+      },
       "claude": {
         "desc": "将转发 hooks 安装到 ~/.claude/settings.json，让每个 Claude Code 会话上报到这里。失败即放行：Cognia 关闭时立即退出。",
         "label": "Claude Code hooks"
@@ -25648,7 +25660,13 @@
       },
       "opencode": {
         "desc": "在 ~/.config/opencode/plugin 安装插件。可在灵动岛上观察会话并批准/拒绝权限。",
-        "label": "OpenCode 插件"
+        "label": "OpenCode 插件",
+        "outbox": {
+          "corrupt": "持久化命令队列已损坏，控制功能已停用。",
+          "repair": "修复队列",
+          "repaired": "OpenCode 命令队列已修复。",
+          "unavailable": "持久化命令队列不可用，控制功能已停用。"
+        }
       },
       "saved": "舰队设置已更新。",
       "status": {

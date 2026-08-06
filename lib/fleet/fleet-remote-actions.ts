@@ -47,6 +47,11 @@ export async function fleetRemoteQuestionRespond(
   return transport.call<boolean>("fleet_question_respond", { requestId, selections })
 }
 
+/** Reject a parked AskUserQuestion through the desktop's native provider gate. */
+export async function fleetRemoteQuestionReject(requestId: string): Promise<boolean> {
+  return transport.call<boolean>("fleet_question_reject", { requestId })
+}
+
 /**
  * Interrupt a session's current turn (one SIGINT — see `fleetInterruptSession`).
  * Rejects on refusal so callers can classify a lost-control 403 with

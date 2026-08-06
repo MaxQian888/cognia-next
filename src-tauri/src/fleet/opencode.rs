@@ -6,13 +6,14 @@
 //!   - forwards normalized session activity to the fleet `/api/v1/fleet/hook`
 //!     endpoint (`session-active` / `session-idle`, agent `opencode`), and
 //!   - implements the documented `permission.ask` hook as a long-poll to the
-//!     SAME endpoint (`PermissionRequest`, `wait` mode) and sets
-//!     `output.status` to the island's allow/deny answer.
+//!     same endpoint (`PermissionRequest`, `wait` mode),
+//!   - projects the native Question API into answerable fleet questions, and
+//!   - consumes the durable command outbox for native prompts and interrupts.
 //!
-//! Deliberately uses ONLY documented plugin hooks — no dependence on
-//! OpenCode's internal event-bus schema or its random HTTP port — so the wire
-//! shape is our own contract, defined in the plugin JS. Everything routes
-//! through the existing ingress; no new Rust routes or reqwest control.
+//! The plugin probes the bound SDK client before advertising controls. Static
+//! manifest capabilities are only a ceiling; commands stay disabled until the
+//! installed SDK proves the required methods exist. Cognia never depends on
+//! OpenCode's random HTTP port.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -75,11 +76,11 @@ async function post(cfg, body, timeoutMs) {{
       body: JSON.stringify(body),
       signal: controller.signal,
     }})
-    if (!res.ok) return null
+    if (!res.ok) return undefined
     const text = await res.text()
     return text ? JSON.parse(text) : null
   }} catch {{
-    return null
+    return undefined
   }} finally {{
     clearTimeout(timer)
   }}
@@ -116,13 +117,111 @@ async function pollCommands(cfg, sessionIds) {{
   }}
 }}
 
+async function settleCommand(cfg, command, ok, value) {{
+  const suffix = ok ? "ack" : "nack"
+  const body = ok
+    ? {{ id: command.id, result: value || null }}
+    : {{ id: command.id, error: String(value && value.message ? value.message : value) }}
+  try {{
+    await fetch(`https://127.0.0.1:${{cfg.port}}/api/v1/fleet/opencode/commands/${{suffix}}`, {{
+      method: "POST",
+      headers: {{ "Content-Type": "application/json", "X-Cognia-Fleet-Token": cfg.token }},
+      body: JSON.stringify(body),
+    }})
+  }} catch {{
+    // Lease expiry intentionally causes at-least-once redelivery.
+  }}
+}}
+
+async function interruptSession(client, sessionID) {{
+  try {{
+    if (client.v2 && client.v2.session && client.v2.session.interrupt) {{
+      return await client.v2.session.interrupt({{ sessionID }})
+    }}
+  }} catch (v2Error) {{
+    if (!(client.session && client.session.abort)) throw v2Error
+  }}
+  if (client.session && client.session.abort) {{
+    return await client.session.abort({{ path: {{ id: sessionID }} }})
+  }}
+  throw new Error("OpenCode interrupt API unavailable")
+}}
+
+function nativeQuestionAnswers(questions, updatedInput) {{
+  const byQuestion = (updatedInput && updatedInput.answers) || {{}}
+  return questions.map((question) => {{
+    const answer = byQuestion[question.question]
+    if (Array.isArray(answer)) return answer.map(String)
+    return answer == null ? [] : [String(answer)]
+  }})
+}}
+
+async function replyQuestion(client, sessionID, requestID, questions, updatedInput) {{
+  const answers = nativeQuestionAnswers(questions, updatedInput)
+  if (client.v2 && client.v2.question && client.v2.question.reply) {{
+    return client.v2.question.reply({{
+      sessionID,
+      requestID,
+      questionV2Reply: {{ answers }},
+    }})
+  }}
+  if (client.question && client.question.reply) {{
+    return client.question.reply({{ requestID, answers }})
+  }}
+  throw new Error("OpenCode Question API unavailable")
+}}
+
+async function rejectQuestion(client, sessionID, requestID) {{
+  if (client.v2 && client.v2.question && client.v2.question.reject) {{
+    return client.v2.question.reject({{ sessionID, requestID }})
+  }}
+  if (client.question && client.question.reject) {{
+    return client.question.reject({{ requestID }})
+  }}
+  throw new Error("OpenCode Question reject API unavailable")
+}}
+
+function runtimeCapabilities(client) {{
+  const interruptMode = client.v2 && client.v2.session && typeof client.v2.session.interrupt === "function"
+    ? "v2"
+    : client.session && typeof client.session.abort === "function"
+      ? "v1"
+      : null
+  const questionMode = client.v2 && client.v2.question
+    && typeof client.v2.question.reply === "function"
+    && typeof client.v2.question.reject === "function"
+    ? "v2"
+    : client.question
+      && typeof client.question.reply === "function"
+      && typeof client.question.reject === "function"
+      ? "v1"
+      : null
+  return {{
+    sendMessage: Boolean(client.session && typeof client.session.promptAsync === "function"),
+    interrupt: interruptMode !== null,
+    interruptMode,
+    answersQuestions: questionMode !== null,
+    questionMode,
+  }}
+}}
+
 export const CogniaFleet = async ({{ client, directory }}) => {{
   const cwd = directory || process.cwd()
   const seen = new Set()
+  const capabilities = runtimeCapabilities(client)
+  let announcedCapabilityToken = null
   const fire = (event, payload) => {{
     const cfg = loadConfig()
     if (!cfg) return
     void post(cfg, envelope(event, {{ cwd, ...payload }}), 400)
+  }}
+  fire("Capabilities", capabilities)
+
+  const announceCapabilities = async (cfg) => {{
+    if (!cfg || announcedCapabilityToken === cfg.token) return
+    const accepted = await post(cfg, envelope("Capabilities", {{ cwd, ...capabilities }}), 1000)
+    // A 204 response parses as null; `undefined` means transport/HTTP failure.
+    if (accepted !== undefined) announcedCapabilityToken = cfg.token
   }}
 
   // Deliver queued island prompts into OpenCode via the bound client. Runs a
@@ -131,6 +230,7 @@ export const CogniaFleet = async ({{ client, directory }}) => {{
   const runCommandLoop = async () => {{
     for (;;) {{
       const cfg = loadConfig()
+      if (cfg) await announceCapabilities(cfg)
       if (!cfg || seen.size === 0) {{
         await new Promise((r) => setTimeout(r, 3000))
         continue
@@ -138,13 +238,15 @@ export const CogniaFleet = async ({{ client, directory }}) => {{
       const commands = await pollCommands(cfg, Array.from(seen))
       for (const cmd of commands) {{
         try {{
-          await client.session.promptAsync({{
-            path: {{ id: cmd.sessionId }},
-            body: {{ parts: [{{ type: "text", text: cmd.text }}] }},
-          }})
-        }} catch {{
-          // Ignore — the session may have ended; the command is already
-          // consumed server-side.
+          const result = cmd.kind === "interrupt"
+            ? await interruptSession(client, cmd.sessionId)
+            : await client.session.promptAsync({{
+                path: {{ id: cmd.sessionId }},
+                body: {{ parts: [{{ type: "text", text: cmd.text || "" }}] }},
+              }})
+          await settleCommand(cfg, cmd, true, result)
+        }} catch (error) {{
+          await settleCommand(cfg, cmd, false, error)
         }}
       }}
     }}
@@ -156,6 +258,36 @@ export const CogniaFleet = async ({{ client, directory }}) => {{
     event: async ({{ event }}) => {{
       if (event && event.type === "session.idle" && event.properties && event.properties.sessionID) {{
         fire("session-idle", {{ session_id: event.properties.sessionID }})
+      }}
+      const question = event && (event.data || event.properties)
+      if (event && event.type === "question.asked" && question) {{
+        const cfg = loadConfig()
+        const sid = question.sessionID
+        const requestID = question.id || question.requestID
+        const questions = Array.isArray(question.questions) ? question.questions : []
+        if (!cfg || !capabilities.answersQuestions || !sid || !requestID || questions.length === 0) return
+        seen.add(sid)
+        const normalized = questions.map((item) => ({{
+          question: item.question,
+          header: item.header,
+          multiSelect: item.multiple === true || item.multiSelect === true,
+          options: Array.isArray(item.options) ? item.options : [],
+        }}))
+        const decision = await post(cfg, envelope("PermissionRequest", {{
+          cwd,
+          session_id: sid,
+          tool_name: "AskUserQuestion",
+          tool_input: {{ questions: normalized }},
+        }}), 25000)
+        if (decision && decision.updatedInput) {{
+          await replyQuestion(client, sid, requestID, normalized, decision.updatedInput)
+        }} else if (decision && decision.status === "deny") {{
+          await rejectQuestion(client, sid, requestID)
+        }}
+      }} else if (event && event.type === "question.rejected" && question && question.sessionID) {{
+        fire("PermissionDenied", {{ session_id: question.sessionID }})
+      }} else if (event && event.type === "question.replied" && question && question.sessionID) {{
+        fire("session-active", {{ session_id: question.sessionID }})
       }}
     }},
     // A user message started a turn.
@@ -318,6 +450,19 @@ mod tests {
         // Send-message reverse channel: command poll + client execution.
         assert!(src.contains("/api/v1/fleet/opencode/commands"));
         assert!(src.contains("client.session.promptAsync"));
+        assert!(src.contains("/commands/${suffix}"));
+        assert!(src.contains("ok ? \"ack\" : \"nack\""));
+        assert!(src.contains("cmd.kind === \"interrupt\""));
+        assert!(src.contains("client.v2.session.interrupt"));
+        assert!(src.contains("client.session.abort"));
+        assert!(src.contains("question.asked"));
+        assert!(src.contains("question.replied"));
+        assert!(src.contains("question.rejected"));
+        assert!(src.contains("client.v2.question.reply"));
+        assert!(src.contains("client.v2.question.reject"));
+        assert!(src.contains("runtimeCapabilities(client)"));
+        assert!(src.contains("fire(\"Capabilities\", capabilities)"));
+        assert!(src.contains("answersQuestions: questionMode !== null"));
         assert!(src.contains("runCommandLoop"));
         // Sessions are tracked so commands route to the owning instance.
         assert!(src.contains("seen.add"));

@@ -184,6 +184,7 @@ export function IslandShell() {
     { key: "needsYou", count: summary.attention, dot: "bg-amber-400" },
     { key: "working", count: summary.working, dot: "bg-emerald-400" },
     { key: "idle", count: summary.idle, dot: "bg-white/40" },
+    { key: "detached", count: summary.detached, dot: "bg-slate-400/40" },
     { key: "done", count: summary.ended, dot: "bg-white/20" },
   ].filter((seg) => seg.count > 0)
 

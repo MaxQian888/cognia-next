@@ -21,6 +21,8 @@ pub mod integrations;
 pub mod island_space;
 pub mod island_window;
 pub mod opencode;
+pub mod outbox;
+pub mod recovery;
 pub mod registry;
 pub mod routes;
 pub mod terminal;
@@ -121,22 +123,18 @@ pub enum PermissionBehavior {
     Deny,
 }
 
-/// A queued "send this prompt to an OpenCode session" command. The OpenCode
-/// plugin polls for these and executes them via its bound `client`.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OpencodeCommand {
-    pub id: String,
-    pub session_id: String,
-    pub text: String,
-}
-
 /// A parked AskUserQuestion long-poll: the sender delivers the built
 /// `updatedInput` answer value, and the raw questions are held so
 /// `respond_question` can turn the island's option selections into that value.
 struct PendingQuestionPoll {
-    tx: tokio::sync::oneshot::Sender<serde_json::Value>,
+    tx: tokio::sync::oneshot::Sender<QuestionResponse>,
     raw_questions: serde_json::Value,
+}
+
+#[derive(Debug)]
+pub enum QuestionResponse {
+    Answer(serde_json::Value),
+    Reject,
 }
 
 /// Process-global fleet runtime.
@@ -150,7 +148,7 @@ pub struct FleetRuntime {
     question_pending: Mutex<HashMap<String, PendingQuestionPoll>>,
     /// Outbound send-message commands for OpenCode sessions, drained by the
     /// plugin's command poll (`/api/v1/fleet/opencode/commands`).
-    opencode_commands: Mutex<Vec<OpencodeCommand>>,
+    opencode_commands: Mutex<outbox::DurableCommandOutbox>,
     /// Wakers for parked command polls, so a queued command is delivered
     /// immediately rather than on the next poll tick.
     command_wakers: Mutex<Vec<tokio::sync::oneshot::Sender<()>>>,
@@ -163,11 +161,33 @@ pub struct FleetRuntime {
 }
 
 static RUNTIME: Lazy<Arc<FleetRuntime>> = Lazy::new(|| {
+    let registry = FleetRegistry::new();
+    #[cfg(not(test))]
+    let registry = {
+        let mut registry = registry;
+        if let Some(path) = install::fleet_recovery_path() {
+            match recovery::load(&path) {
+                Ok(rows) => registry.restore_recovery(rows),
+                Err(error) => log::warn!("Fleet recovery unavailable: {error}"),
+            }
+        }
+        registry
+    };
     Arc::new(FleetRuntime {
-        registry: Mutex::new(FleetRegistry::new()),
+        registry: Mutex::new(registry),
         pending: Mutex::new(HashMap::new()),
         question_pending: Mutex::new(HashMap::new()),
-        opencode_commands: Mutex::new(Vec::new()),
+        opencode_commands: Mutex::new(match install::opencode_outbox_path() {
+            Some(path) => {
+                outbox::DurableCommandOutbox::open(path.clone()).unwrap_or_else(|error| {
+                    outbox::DurableCommandOutbox::unavailable(Some(path), error)
+                })
+            }
+            None => outbox::DurableCommandOutbox::unavailable(
+                None,
+                "no Cognia home directory".to_string(),
+            ),
+        }),
         command_wakers: Mutex::new(Vec::new()),
         token: RwLock::new(None),
         enabled: AtomicBool::new(false),
@@ -228,6 +248,14 @@ impl FleetRuntime {
         self.registry.lock().session_agent_pid(agent, session_id)
     }
 
+    pub fn session_capabilities(
+        &self,
+        agent: registry::FleetAgent,
+        session_id: &str,
+    ) -> Option<registry::FleetCapabilities> {
+        self.registry.lock().session_capabilities(agent, session_id)
+    }
+
     /// Fold an event, run the terminal parent-chain fallback if the env
     /// carried no terminal marker, then emit the follow-up events.
     pub fn ingest(&self, event: &registry::FleetEvent) -> registry::RegistryEffect {
@@ -238,6 +266,11 @@ impl FleetRuntime {
         // pure registry) because it does live sysinfo I/O.
         if let Some(session_id) = integrations::manifest_for(event.agent).session_id(&event.payload)
         {
+            if let Some(started_at) = event.ppid.and_then(process_start_time) {
+                self.registry
+                    .lock()
+                    .set_process_started_at(event.agent, &session_id, started_at);
+            }
             let pid = self
                 .registry
                 .lock()
@@ -256,6 +289,9 @@ impl FleetRuntime {
             | registry::RegistryEffect::PermissionRequested { .. }
             | registry::RegistryEffect::QuestionRequested { .. } => self.emit_update(),
             registry::RegistryEffect::Ignored => {}
+        }
+        if !matches!(effect, registry::RegistryEffect::Ignored) {
+            self.persist_recovery();
         }
         effect
     }
@@ -342,7 +378,7 @@ impl FleetRuntime {
         request_id: &str,
         raw_questions: serde_json::Value,
         wait_ms: u64,
-    ) -> Option<serde_json::Value> {
+    ) -> Option<QuestionResponse> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.question_pending.lock().insert(
             request_id.to_string(),
@@ -351,7 +387,7 @@ impl FleetRuntime {
 
         let answer = match tokio::time::timeout(std::time::Duration::from_millis(wait_ms), rx).await
         {
-            Ok(Ok(updated_input)) => Some(updated_input),
+            Ok(Ok(response)) => Some(response),
             // Timeout or dropped sender → fail open.
             _ => None,
         };
@@ -375,43 +411,106 @@ impl FleetRuntime {
             Some(PendingQuestionPoll { tx, raw_questions }) => {
                 let updated_input =
                     registry::build_ask_user_answer_input(&raw_questions, &selections);
-                tx.send(updated_input).is_ok()
+                tx.send(QuestionResponse::Answer(updated_input)).is_ok()
             }
             None => false,
         }
     }
 
+    /// Reject a parked AskUserQuestion through the same wait-mode channel as
+    /// answers. Claude/Codex receive a deny decision; OpenCode's plugin maps it
+    /// onto its native Question reject API.
+    pub fn reject_question(&self, request_id: &str) -> bool {
+        let poll = self.question_pending.lock().remove(request_id);
+        match poll {
+            Some(PendingQuestionPoll { tx, .. }) => tx.send(QuestionResponse::Reject).is_ok(),
+            None => false,
+        }
+    }
+
+    /// Drop every parked response channel when monitoring is disabled. This
+    /// wakes hook requests into their fail-open path immediately and prevents a
+    /// stale island action from resolving a request after its session detached.
+    fn clear_pending_controls(&self) {
+        self.pending.lock().clear();
+        self.question_pending.lock().clear();
+        for waker in self.command_wakers.lock().drain(..) {
+            let _ = waker.send(());
+        }
+    }
+
     /// Queue an OpenCode send-message command and wake any parked poll so the
     /// plugin picks it up immediately.
-    pub fn queue_opencode_command(&self, session_id: String, text: String) -> String {
+    pub fn queue_opencode_command(
+        &self,
+        session_id: String,
+        text: String,
+    ) -> Result<String, String> {
         let id = mint_token();
-        self.opencode_commands.lock().push(OpencodeCommand {
-            id: id.clone(),
+        self.opencode_commands.lock().enqueue(
+            id.clone(),
+            outbox::CommandKind::Prompt,
             session_id,
-            text,
-        });
+            Some(text),
+            now_ms(),
+        )?;
         // Wake every parked poll — they re-check the queue against their own
         // session list, so waking all is safe.
         for waker in self.command_wakers.lock().drain(..) {
             let _ = waker.send(());
         }
-        id
+        Ok(id)
+    }
+
+    pub fn queue_opencode_interrupt(&self, session_id: String) -> Result<String, String> {
+        let id = mint_token();
+        self.opencode_commands.lock().enqueue(
+            id.clone(),
+            outbox::CommandKind::Interrupt,
+            session_id,
+            None,
+            now_ms(),
+        )?;
+        for waker in self.command_wakers.lock().drain(..) {
+            let _ = waker.send(());
+        }
+        Ok(id)
     }
 
     /// Drain commands whose session is in `session_ids`. Non-matching commands
     /// stay queued for the plugin instance that owns those sessions.
-    fn take_opencode_commands(&self, session_ids: &[String]) -> Vec<OpencodeCommand> {
-        let mut queue = self.opencode_commands.lock();
-        let mut taken = Vec::new();
-        queue.retain(|cmd| {
-            if session_ids.iter().any(|s| s == &cmd.session_id) {
-                taken.push(cmd.clone());
-                false
-            } else {
-                true
-            }
-        });
-        taken
+    fn take_opencode_commands(
+        &self,
+        session_ids: &[String],
+    ) -> Result<Vec<outbox::OpencodeCommand>, String> {
+        self.opencode_commands.lock().lease(session_ids, now_ms())
+    }
+
+    pub fn ack_opencode_command(
+        &self,
+        id: &str,
+        result: Option<serde_json::Value>,
+    ) -> Result<bool, String> {
+        self.opencode_commands.lock().ack(id, result, now_ms())
+    }
+
+    pub fn nack_opencode_command(&self, id: &str, error: String) -> Result<bool, String> {
+        self.opencode_commands.lock().nack(id, error, now_ms())
+    }
+
+    pub fn opencode_outbox_status(&self) -> outbox::OutboxStatus {
+        self.opencode_commands.lock().status()
+    }
+
+    pub fn repair_opencode_outbox(&self) -> Result<outbox::OutboxStatus, String> {
+        self.opencode_commands.lock().repair(now_ms())?;
+        Ok(self.opencode_outbox_status())
+    }
+
+    #[cfg(test)]
+    fn replace_opencode_outbox_for_tests(&self, path: std::path::PathBuf) {
+        *self.opencode_commands.lock() =
+            outbox::DurableCommandOutbox::open(path).expect("open test outbox");
     }
 
     /// Long-poll for OpenCode commands: return immediately if any match, else
@@ -420,14 +519,20 @@ impl FleetRuntime {
         &self,
         session_ids: &[String],
         wait_ms: u64,
-    ) -> Vec<OpencodeCommand> {
-        let immediate = self.take_opencode_commands(session_ids);
+    ) -> Result<Vec<outbox::OpencodeCommand>, String> {
+        if !self.is_enabled() {
+            return Ok(Vec::new());
+        }
+        let immediate = self.take_opencode_commands(session_ids)?;
         if !immediate.is_empty() {
-            return immediate;
+            return Ok(immediate);
         }
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.command_wakers.lock().push(tx);
         let _ = tokio::time::timeout(std::time::Duration::from_millis(wait_ms), rx).await;
+        if !self.is_enabled() {
+            return Ok(Vec::new());
+        }
         self.take_opencode_commands(session_ids)
     }
 
@@ -441,6 +546,20 @@ impl FleetRuntime {
             let _ = app.emit(UPDATE_EVENT, &snapshot);
         }
     }
+
+    #[cfg(not(test))]
+    fn persist_recovery(&self) {
+        let Some(path) = install::fleet_recovery_path() else {
+            return;
+        };
+        let rows = self.registry.lock().recovery_sessions();
+        if let Err(error) = recovery::save(&path, rows) {
+            log::warn!("persist Fleet recovery failed: {error}");
+        }
+    }
+
+    #[cfg(test)]
+    fn persist_recovery(&self) {}
 
     fn start_reaper(self: &Arc<Self>) {
         if self.reaper_running.swap(true, Ordering::SeqCst) {
@@ -459,6 +578,7 @@ impl FleetRuntime {
                     reg.reap(now_ms(), pid_alive)
                 };
                 if changed {
+                    runtime.persist_recovery();
                     runtime.emit_update();
                 }
             }
@@ -477,6 +597,26 @@ fn pid_alive(pid: u32) -> bool {
         ProcessRefreshKind::nothing(),
     );
     system.process(target).is_some()
+}
+
+fn process_start_time(pid: u32) -> Option<u64> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let mut system = System::new();
+    let target = Pid::from_u32(pid);
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[target]),
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    system.process(target).map(sysinfo::Process::start_time)
+}
+
+fn process_identity_matches(pid: u32, expected_start: u64) -> Option<bool> {
+    Some(
+        process_start_time(pid)
+            .map(|actual| actual == expected_start)
+            .unwrap_or(false),
+    )
 }
 
 /// Status DTO for the settings card.
@@ -523,6 +663,13 @@ pub async fn fleet_monitor_start(
     let config_path = install::write_monitor_config(port, &token).map_err(|e| e.to_string())?;
 
     runtime.enabled.store(true, Ordering::SeqCst);
+    if runtime
+        .registry
+        .lock()
+        .reconcile_detached(now_ms(), process_identity_matches)
+    {
+        runtime.persist_recovery();
+    }
     runtime.start_reaper();
     runtime.emit_update();
 
@@ -563,6 +710,11 @@ pub async fn fleet_monitor_stop() -> Result<FleetMonitorStatus, String> {
     let runtime = runtime();
     runtime.enabled.store(false, Ordering::SeqCst);
     *runtime.token.write() = None;
+    runtime.clear_pending_controls();
+    if runtime.registry.lock().mark_all_detached() {
+        runtime.persist_recovery();
+        runtime.emit_update();
+    }
     install::remove_monitor_config().map_err(|e| e.to_string())?;
     Ok(FleetMonitorStatus {
         enabled: false,
@@ -608,7 +760,30 @@ pub async fn fleet_opencode_send_message(
     if trimmed.is_empty() {
         return Err("message is empty".to_string());
     }
-    Ok(runtime().queue_opencode_command(session_id, trimmed.to_string()))
+    let runtime = runtime();
+    if !runtime
+        .session_capabilities(registry::FleetAgent::Opencode, &session_id)
+        .is_some_and(|capabilities| capabilities.send_message)
+    {
+        return Err("opencode-send-message-unavailable".to_string());
+    }
+    runtime.queue_opencode_command(session_id, trimmed.to_string())
+}
+
+/// Diagnose the durable OpenCode reverse-command channel. A corrupt store is
+/// reported rather than silently replaced, because doing so would lose queued
+/// controls without an audit trail.
+#[tauri::command]
+pub async fn fleet_opencode_outbox_status() -> Result<outbox::OutboxStatus, String> {
+    Ok(runtime().opencode_outbox_status())
+}
+
+/// Explicitly quarantine a corrupt/unavailable outbox and create a clean one.
+/// This is intentionally separate from status/startup so recovery can never
+/// destroy durable commands without a deliberate operator action.
+#[tauri::command]
+pub async fn fleet_opencode_outbox_repair() -> Result<outbox::OutboxStatus, String> {
+    runtime().repair_opencode_outbox()
 }
 
 /// Island Approve/Deny → resolves the parked hook long-poll.
@@ -630,6 +805,12 @@ pub async fn fleet_question_respond(
     selections: Vec<Vec<u32>>,
 ) -> Result<bool, String> {
     Ok(runtime().respond_question(&request_id, selections))
+}
+
+/// Island question rejection → resolves the parked native question gate.
+#[tauri::command]
+pub async fn fleet_question_reject(request_id: String) -> Result<bool, String> {
+    Ok(runtime().reject_question(&request_id))
 }
 
 fn mint_token() -> String {
@@ -669,6 +850,7 @@ mod tests {
 
     #[tokio::test]
     async fn permission_round_trip_allow() {
+        let _guard = TEST_RUNTIME_LOCK.lock().await;
         let rt = runtime();
         let request_id = "test-perm-allow";
         let waiter = {
@@ -683,11 +865,13 @@ mod tests {
 
     #[tokio::test]
     async fn respond_without_waiter_returns_false() {
+        let _guard = TEST_RUNTIME_LOCK.lock().await;
         assert!(!runtime().respond_permission("ghost-request", PermissionBehavior::Deny));
     }
 
     #[tokio::test]
     async fn question_round_trip_builds_updated_input() {
+        let _guard = TEST_RUNTIME_LOCK.lock().await;
         let rt = runtime();
         let request_id = "test-question-answer";
         let raw = serde_json::json!([
@@ -703,14 +887,74 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert!(rt.respond_question(request_id, vec![vec![1]]));
 
-        let updated = waiter.await.unwrap().expect("answer delivered");
+        let QuestionResponse::Answer(updated) = waiter.await.unwrap().expect("answer delivered")
+        else {
+            panic!("expected answer response");
+        };
         assert_eq!(updated["questions"], raw);
         assert_eq!(updated["answers"]["Which auth method?"], "API key");
     }
 
     #[tokio::test]
+    async fn question_rejection_round_trip() {
+        let _guard = TEST_RUNTIME_LOCK.lock().await;
+        let rt = runtime();
+        let request_id = "test-question-reject";
+        let waiter = {
+            let rt = Arc::clone(&rt);
+            tokio::spawn(async move {
+                rt.wait_for_question(request_id, serde_json::json!([]), 5_000)
+                    .await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(rt.reject_question(request_id));
+        assert!(matches!(
+            waiter.await.unwrap(),
+            Some(QuestionResponse::Reject)
+        ));
+    }
+
+    #[tokio::test]
+    async fn clearing_pending_controls_releases_waiters_without_a_decision() {
+        let _guard = TEST_RUNTIME_LOCK.lock().await;
+        let tmp = tempfile::tempdir().unwrap();
+        let rt = runtime();
+        rt.replace_opencode_outbox_for_tests(tmp.path().join("commands.json"));
+        rt.enabled.store(true, Ordering::SeqCst);
+        let permission = {
+            let rt = Arc::clone(&rt);
+            tokio::spawn(async move { rt.wait_for_permission("clear-permission", 5_000).await })
+        };
+        let question = {
+            let rt = Arc::clone(&rt);
+            tokio::spawn(async move {
+                rt.wait_for_question("clear-question", serde_json::json!([]), 5_000)
+                    .await
+            })
+        };
+        let command_poll = {
+            let rt = Arc::clone(&rt);
+            tokio::spawn(async move {
+                rt.poll_opencode_commands(&["clear-session".into()], 5_000)
+                    .await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        rt.enabled.store(false, Ordering::SeqCst);
+        rt.clear_pending_controls();
+
+        assert_eq!(permission.await.unwrap(), None);
+        assert!(question.await.unwrap().is_none());
+        assert!(command_poll.await.unwrap().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn respond_question_without_waiter_returns_false() {
+        let _guard = TEST_RUNTIME_LOCK.lock().await;
         assert!(!runtime().respond_question("ghost-question", vec![vec![0]]));
+        assert!(!runtime().reject_question("ghost-question"));
     }
 
     #[test]
@@ -772,32 +1016,44 @@ mod tests {
     #[tokio::test]
     async fn opencode_command_queue_routes_by_session() {
         let _guard = TEST_RUNTIME_LOCK.lock().await;
+        let tmp = tempfile::tempdir().unwrap();
         let rt = runtime();
-        // Drain any leftovers from other tests.
-        rt.take_opencode_commands(&["mod-oc-a".into(), "mod-oc-b".into()]);
+        rt.enabled.store(true, Ordering::SeqCst);
+        rt.replace_opencode_outbox_for_tests(tmp.path().join("commands.json"));
 
-        let id = rt.queue_opencode_command("mod-oc-a".into(), "continue".into());
+        let id = rt
+            .queue_opencode_command("mod-oc-a".into(), "continue".into())
+            .unwrap();
         assert!(!id.is_empty());
 
         // A poll listing a different session gets nothing (command stays).
         let none = rt.poll_opencode_commands(&["mod-oc-b".into()], 50).await;
-        assert!(none.is_empty());
+        assert!(none.unwrap().is_empty());
 
         // A poll listing the right session drains it.
-        let got = rt.poll_opencode_commands(&["mod-oc-a".into()], 50).await;
+        let got = rt
+            .poll_opencode_commands(&["mod-oc-a".into()], 50)
+            .await
+            .unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].session_id, "mod-oc-a");
-        assert_eq!(got[0].text, "continue");
+        assert_eq!(got[0].text.as_deref(), Some("continue"));
 
-        // Now empty.
-        assert!(rt.take_opencode_commands(&["mod-oc-a".into()]).is_empty());
+        assert!(rt.ack_opencode_command(&id, None).unwrap());
+        assert!(rt
+            .take_opencode_commands(&["mod-oc-a".into()])
+            .unwrap()
+            .is_empty());
+        rt.enabled.store(false, Ordering::SeqCst);
     }
 
     #[tokio::test]
     async fn parked_command_poll_wakes_on_queue() {
         let _guard = TEST_RUNTIME_LOCK.lock().await;
+        let tmp = tempfile::tempdir().unwrap();
         let rt = runtime();
-        rt.take_opencode_commands(&["mod-oc-wake".into()]);
+        rt.enabled.store(true, Ordering::SeqCst);
+        rt.replace_opencode_outbox_for_tests(tmp.path().join("commands.json"));
 
         let poller = {
             let rt = Arc::clone(&rt);
@@ -807,10 +1063,12 @@ mod tests {
             })
         };
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        rt.queue_opencode_command("mod-oc-wake".into(), "hi".into());
-        let got = poller.await.unwrap();
+        rt.queue_opencode_command("mod-oc-wake".into(), "hi".into())
+            .unwrap();
+        let got = poller.await.unwrap().unwrap();
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].text, "hi");
+        assert_eq!(got[0].text.as_deref(), Some("hi"));
+        rt.enabled.store(false, Ordering::SeqCst);
     }
 
     #[test]
