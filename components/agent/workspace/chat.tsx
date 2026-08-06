@@ -1,12 +1,16 @@
 "use client"
 
-import { forwardRef, memo, useEffect, useRef, useState } from "react"
+import { forwardRef, memo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { STAGGER_CHILD, STAGGER_INTERVAL, mobileTransition } from "@/lib/ui/motion"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Conversation,
+  ConversationContent,
+  ConversationScrollButton,
+} from "@/components/ai-elements/conversation"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { AlertCircleIcon, Loader2Icon, MessageCircleIcon } from "lucide-react"
@@ -306,7 +310,6 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
 ) {
   const t = useTranslations("agentTeamsWorkspace.chat")
   const prefersReducedMotion = useReducedMotion()
-  const bottomRef = useRef<HTMLDivElement>(null)
   const localComposerRef = useRef<ComposerHandle | null>(null)
 
   // Snapshot of where the unread run started, taken once per visit. The
@@ -320,18 +323,6 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
     const start = messages.findIndex((m) => m.id === anchorId)
     return start < 0 ? null : { anchorId, count: messages.length - start }
   })
-
-  // Track total streaming text length so we re-scroll as deltas land. Using a
-  // hash of (count, last-msg content length, last-msg streaming flag) keeps
-  // the dependency cheap to compute and stable when nothing actually changes.
-  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null
-  const scrollHash = `${messages.length}:${lastMsg?.id ?? ""}:${
-    lastMsg?.content.length ?? 0
-  }:${lastMsg ? isStreaming(lastMsg) : 0}`
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
-  }, [scrollHash])
 
   const showComposer = !!onSend && !!mentionables
   const handleChipPick = (target: MentionTarget) => {
@@ -361,8 +352,8 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
           </Empty>
         </div>
       ) : (
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="space-y-2" data-testid="workspace-chat">
+        <Conversation className="min-h-0">
+          <ConversationContent className="gap-2 p-0" data-testid="workspace-chat">
             {/* flatMap, not a Fragment per row: AnimatePresence tracks its
                 direct children via React.Children, which does NOT look inside a
                 Fragment — wrapping each row would silently kill the exit
@@ -404,9 +395,9 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
                 ]
               })}
             </AnimatePresence>
-            <div ref={bottomRef} />
-          </div>
-        </ScrollArea>
+          </ConversationContent>
+          <ConversationScrollButton aria-label={t("scrollToLatest")} />
+        </Conversation>
       )}
       {showComposer && (
         <div className="shrink-0 space-y-2">

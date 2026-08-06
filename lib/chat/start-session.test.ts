@@ -16,9 +16,11 @@ const dbFixture = createDbTestFixture()
 
 beforeAll(dbFixture.initialize)
 beforeEach(async () => {
+  jest.restoreAllMocks()
   await dbFixture.restore()
   emitMock.mockClear()
   useChatStore.getState().clear()
+  useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
 })
 
 afterAll(dbFixture.dispose)
@@ -64,6 +66,67 @@ describe("startNewSession", () => {
     const session = await startNewSession()
 
     expect(addSessionToProject).toHaveBeenCalledWith("p_1", session.id)
+  })
+
+  it("creates Quick Chat as a normal persisted task with project defaults", async () => {
+    const project = {
+      id: "p_quick",
+      name: "Quick",
+      roots: [{ id: "root-1", path: "/repo", isPrimary: true }],
+      knowledgeBase: [],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      isArchived: false,
+      pinned: true,
+      defaultEnvironmentId: "env-1",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastAccessedAt: new Date(),
+    }
+    jest.spyOn(useProjectStore, "getState").mockReturnValue({
+      ...useProjectStore.getState(),
+      projects: [project],
+      activeProjectId: project.id,
+      addSessionToProject: jest.fn(),
+    } as ReturnType<typeof useProjectStore.getState>)
+
+    const session = await startNewSession()
+
+    expect(session.executionContext).toEqual(
+      expect.objectContaining({
+        location: "local",
+        workspaceBinding: { kind: "project", projectId: "p_quick" },
+        projectRoot: "/repo",
+        environmentId: "env-1",
+        taskWorkspace: expect.objectContaining({ workspaceKey: session.id }),
+      })
+    )
+    await expect(getSession(session.id)).resolves.toMatchObject({
+      executionContext: session.executionContext,
+    })
+  })
+
+  it("automatically gives a projectless chat a durable managed workspace identity", async () => {
+    const session = await startNewSession()
+
+    expect(session.executionContext).toEqual(
+      expect.objectContaining({
+        location: "managedWorktree",
+        workspaceBinding: {
+          kind: "managed",
+          workspaceId: `managed-workspace:${session.id}`,
+        },
+        managedWorkspace: { availability: "missing-on-device" },
+        taskWorkspace: {
+          taskId: `task-workspace:${session.id}`,
+          workspaceKey: `managed-workspace:${session.id}`,
+        },
+      })
+    )
+    await expect(getSession(session.id)).resolves.toMatchObject({
+      executionContext: session.executionContext,
+    })
   })
 
   it("skips workspace linking when no workspace is active", async () => {

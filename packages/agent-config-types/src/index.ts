@@ -917,6 +917,40 @@ export interface SendOptions {
     degraded: boolean
   }
 
+  /** Reusable Agent Knowledge Base context injected this turn. */
+  agentKnowledgeContext?: {
+    retrievedChunks: Array<{
+      chunk: {
+        id: string
+        knowledgeBaseId: string
+        sourceId: string
+        content: string
+        vectorDocId: string
+      }
+      score: number
+    }>
+    citations: Array<{
+      scope: "agent-knowledge-base"
+      knowledgeBaseId: string
+      knowledgeBaseName: string
+      sourceId: string
+      sourceTitle: string
+      chunkId: string
+      charStart: number
+      charEnd: number
+      pageNumber?: number
+      filePath?: string
+      score: number
+    }>
+    failures: Array<{
+      knowledgeBaseId: string
+      reason: string
+      rebuildRequired: boolean
+    }>
+    budget: { limit: number; used: number; truncated: boolean }
+    degraded: boolean
+  }
+
   /**
    * Agent-trace correlation identifiers — set by the chat hook before the
    * sidecar call so downstream events (tool spans, sub-agent spans,
@@ -1783,6 +1817,8 @@ export interface ChatSession {
    * `lib/db/project-scope.ts`.
    */
   projectId?: string
+  /** Durable Local/managed-worktree binding reused by subsequent turns. */
+  executionContext?: import("@/types/execution-context").SessionExecutionContext
   title: string
   /**
    * True while the title is auto-derived (instant first-message truncation
@@ -1832,6 +1868,8 @@ export interface ChatSession {
   memoryUse?: boolean
   /** Per-chat automatic learned-memory write override. */
   memoryLearn?: boolean
+  /** Per-session Agent execution overrides; values beat the bound Agent profile. */
+  executionPolicy?: AgentExecutionPolicy
   pinned?: boolean
   /**
    * Manual sort position within this session's ChannelList section — the
@@ -3455,6 +3493,15 @@ export interface AppSettings {
    */
   workbenchRailPersistent?: boolean
   /**
+   * Per-project overrides of the workbench rail layout. Keyed by project id.
+   * When a project-specific layout exists, it takes precedence over the global
+   * `workbenchRail`. Falls back to the global layout when absent.
+   */
+  workbenchRailPerProject?: Record<
+    string,
+    import("@/types/shell/workbench-rail").WorkbenchRailLayout
+  >
+  /**
    * Customization of the desktop title bar (the top window bar): the order of
    * its segments plus the ones the user removed. Lives in settings JSON (same
    * pattern as `sidebarLayout`) so it persists without a Dexie migration and
@@ -4582,6 +4629,46 @@ export interface PendingApproval {
 
 // ---- Characters / Skills / Teams -----------------------------------------
 
+/** Semantic role used when selecting one of an Agent's model targets. */
+export type AgentModelRole = "plan" | "execute" | "utility"
+
+/**
+ * A concrete model id, an existing model alias, or the application's `auto`
+ * route. The provider router resolves capability, health, cost, and fallback;
+ * Agent profiles only select the semantic target.
+ */
+export type ModelTarget = string
+
+export interface AgentModelRouting {
+  plan?: ModelTarget
+  execute?: ModelTarget
+  utility?: ModelTarget
+}
+
+/** Persistable environment binding. Secret values live only in the keyring. */
+export type AgentEnvBinding =
+  | { name: string; kind: "plain"; value: string }
+  | { name: string; kind: "secret"; secretRef: string }
+
+export interface AgentExecutionPolicy {
+  effort?: SendOptions["effort"]
+  /** Hard agentic-turn ceiling. The runtime accepts integers from 1 through 100. */
+  maxTurns?: number
+  envBindings?: AgentEnvBinding[]
+}
+
+export interface AgentMemoryPolicy {
+  operations: {
+    recall: boolean
+    create: boolean
+    update: boolean
+    forget: boolean
+  }
+  readableScopes: import("@/types/memory/memory").MemoryScope[]
+  writableScopes: import("@/types/memory/memory").MemoryScope[]
+  autoLearn: boolean
+}
+
 /**
  * A reusable persona. When a session has `characterId`, the character's config
  * supplies the system prompt, model, tool whitelist, MCP subset, and skills,
@@ -4596,6 +4683,14 @@ export interface Character {
   /** Optional one-glyph icon shown inside the avatar. */
   avatarEmoji?: string
   systemPrompt: string
+  /** Semantic Agent model targets. Legacy `model` remains the execute fallback. */
+  modelRouting?: AgentModelRouting
+  /** Agent-level defaults; a session execution policy overrides these fields. */
+  executionPolicy?: AgentExecutionPolicy
+  /** Independently managed knowledge bases attached to this Agent. */
+  knowledgeBaseIds?: string[]
+  /** Fine-grained memory ceiling below the application-wide memory policy. */
+  memoryPolicy?: AgentMemoryPolicy
   model?: string
   /**
    * Provider id this character prefers. Beats `AppSettings.defaultProvider`
@@ -4885,6 +4980,9 @@ export interface Character {
   updatedAt: number
 }
 
+/** Product-facing name for Character. Kept structurally compatible on purpose. */
+export type AgentProfile = Character
+
 /**
  * Frozen snapshot of every pack-managed field on a character row at the
  * moment of its last clone / apply-update. Lives in `Character.pristineSnapshot`.
@@ -4904,6 +5002,9 @@ export interface PackPristineSnapshot {
   avatarColor?: string
   avatarEmoji?: string
   model?: string
+  modelRouting?: AgentModelRouting
+  executionPolicy?: AgentExecutionPolicy
+  memoryPolicy?: AgentMemoryPolicy
   providerId?: string
   permissionMode?: SendOptions["permissionMode"]
   allowedTools?: string[]
@@ -5091,6 +5192,8 @@ export interface Team {
   /** Ordered member slots. The order determines round-robin reply order. */
   members: TeamMember[]
   orchestration: TeamOrchestration
+  /** Maximum Agent replies produced for one user turn. Legacy rows default to four. */
+  maxResponses?: number
   /** When orchestration === "supervisor", which member acts as the leader. */
   supervisorCharacterId?: string
   /** Team-level MCP override applied to members without their own subset. */

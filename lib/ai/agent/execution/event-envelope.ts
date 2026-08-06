@@ -148,6 +148,12 @@ export function captureEventFromCanonical(event: CanonicalAgentEvent): CaptureSt
         result: event.result,
         isError: event.isError,
       }
+    case "tool-summary":
+      return {
+        type: "tool-summary",
+        summary: event.summary,
+        toolCallIds: event.toolCallIds,
+      }
     case "usage":
       return {
         type: "usage",

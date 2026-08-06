@@ -314,6 +314,11 @@ export const createAgentTeamActionsSlice = (
       get().shutdownAllTeammates(teamId)
     }
     get().cleanupTeam(teamId)
+    if (team.config.runtimeVersion === "durable-v2") {
+      void import("@/lib/db/agent-team-runtime")
+        .then(({ purgeAgentTeam }) => purgeAgentTeam(teamId))
+        .catch(() => undefined)
+    }
   },
 
   purgeProject: (projectId) => {

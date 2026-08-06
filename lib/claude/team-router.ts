@@ -3,6 +3,7 @@
 // IndexedDB, or Tauri.
 
 import type { Character, Team, TeamMember } from "@cognia/agent-config-types"
+import { resolveTeamResponseCap } from "./team-primary-router"
 
 /**
  * Parse `@Name` mentions out of `text`, matched against `members` by name.
@@ -74,9 +75,10 @@ function isDelimiter(ch: string): boolean {
  *   list. Returns an empty list.
  */
 export function routeTurn(
-  team: Pick<Team, "members" | "orchestration">,
+  team: Pick<Team, "members" | "orchestration" | "maxResponses">,
   members: readonly Character[],
-  userText: string
+  userText: string,
+  primaryCharacterId?: string
 ): Character[] {
   // Order members per the team's declared order; drop any whose row no longer
   // exists (a deleted character shouldn't be sent).
@@ -84,8 +86,15 @@ export function routeTurn(
   const ordered: Character[] = []
   for (const slot of team.members) {
     const c = byId.get(slot.characterId)
-    if (c) ordered.push(c)
+    if (c && !ordered.some((candidate) => candidate.id === c.id)) ordered.push(c)
   }
+
+  const cap = resolveTeamResponseCap(team.maxResponses)
+  // An explicit @ always wins, independent of the no-mention policy. This is
+  // what makes a group conversation addressable without changing the team's
+  // default moderator/all/smart-primary behavior.
+  const mentioned = parseMentions(userText, ordered)
+  if (mentioned.length > 0) return mentioned.slice(0, cap)
 
   switch (team.orchestration) {
     case "manual":
@@ -95,12 +104,13 @@ export function routeTurn(
     case "supervisor":
       return []
     case "round_robin":
-      return ordered
+      return ordered.slice(0, cap)
     case "mention_round_robin":
     default: {
-      const mentioned = parseMentions(userText, ordered)
-      if (mentioned.length > 0) return mentioned
-      return ordered
+      const selected = primaryCharacterId
+        ? ordered.find((member) => member.id === primaryCharacterId)
+        : undefined
+      return (selected ? [selected] : ordered.slice(0, 1)).slice(0, cap)
     }
   }
 }

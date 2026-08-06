@@ -4,8 +4,10 @@ import {
   countErroredTools,
   isContextFoldPart,
   normalizeToolName,
+  resolveProvidedToolTitle,
   resolveToolPartName,
   summarizeContextCounts,
+  resolveToolDisplayTitle,
   summarizeToolCall,
   tallyToolNames,
   toolIconKeyForName,
@@ -115,8 +117,70 @@ describe("summarizeToolCall", () => {
     expect(summarizeToolCall(tool("tool-Bash")).target).toBeNull()
   })
 
+  it("falls back to ACP kind when the compatibility tool name is only a title", () => {
+    expect(
+      summarizeToolCall({
+        ...tool("tool-Reading configuration"),
+        toolMetadata: { kind: "file_read" },
+      } as ToolPartLike)
+    ).toMatchObject({ name: "Reading configuration", iconKey: "read" })
+    expect(
+      summarizeToolCall({
+        ...tool("tool-Run checks"),
+        toolMetadata: { kind: "execute" },
+      } as ToolPartLike)
+    ).toMatchObject({ iconKey: "terminal" })
+  })
+
   it("does not throw on a malformed url", () => {
     expect(summarizeToolCall(tool("tool-WebFetch", { url: "not a url" })).target).toBe("not a url")
+  })
+
+  it("supports Codex shell, web_search, and fileChange input shapes", () => {
+    expect(summarizeToolCall(tool("tool-shell", { command: "pnpm test" }))).toMatchObject({
+      target: "pnpm test",
+      iconKey: "terminal",
+    })
+    expect(summarizeToolCall(tool("tool-web_search", { query: "ACP titles" }))).toMatchObject({
+      target: "ACP titles",
+      iconKey: "web",
+    })
+    expect(
+      summarizeToolCall(tool("tool-edit", { changes: [{ path: "/repo/src/a.ts" }] }))
+    ).toMatchObject({ target: "a.ts", iconKey: "edit" })
+  })
+
+  it("prefers an upstream title and otherwise builds a deterministic display title", () => {
+    expect(
+      resolveToolDisplayTitle({
+        ...tool("tool-Read", { file_path: "/repo/a.ts" }),
+        title: "Reading configuration",
+      })
+    ).toBe("Reading configuration")
+    expect(resolveToolDisplayTitle(tool("tool-shell", { command: "pnpm test" }))).toBe(
+      "Shell · pnpm test"
+    )
+    expect(resolveToolDisplayTitle(tool("tool-web_search", {}))).toBe("Web search")
+  })
+
+  it("uses Codex app context after an upstream title and never exposes internal ids", () => {
+    const appContextPart = {
+      ...tool("tool-create_event", {}),
+      toolMetadata: {
+        appContext: {
+          appName: "Calendar",
+          actionName: "create_event",
+          connectorId: "calendar-prod",
+          linkId: "primary-account",
+        },
+      },
+    } as ToolPartLike
+
+    expect(resolveProvidedToolTitle(appContextPart)).toBe("Calendar · Create event")
+    expect(resolveToolDisplayTitle(appContextPart)).toBe("Calendar · Create event")
+    expect(
+      resolveProvidedToolTitle({ ...appContextPart, title: "Create team event" } as ToolPartLike)
+    ).toBe("Create team event")
   })
 })
 

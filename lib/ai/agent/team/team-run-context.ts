@@ -106,6 +106,19 @@ export interface TeamRunContext {
   readonly concurrency: ConcurrencyController
   readonly modelPref: ModelPreferenceController
   /**
+   * Immutable durable-v2 execution environment captured at run start. Each
+   * repository caches its own prepared root while every child receives a
+   * distinct logical environment session/worktree.
+   */
+  readonly durableEnvironment?: {
+    adapter: import("../execution/local-tauri-environment").AgentExecutionEnvironment
+    profile: Readonly<import("@/types/project-environment").ProjectEnvironmentVersion>
+    preparedByRepository: Map<
+      string,
+      import("../execution/local-tauri-environment").PreparedAgentEnvironment
+    >
+  }
+  /**
    * Per-run HITL gate policy resolved from the trigger origin (see
    * `gate-policy.ts`). Optional so tests that hand-build a context keep
    * working — consumers treat absence as the interactive (block) policy.

@@ -202,8 +202,23 @@ jest.mock("@/lib/files/project-editor-bridge", () => ({
   flushProjectEditorEdits: () => flushProjectEditorEdits(),
 }))
 jest.mock("sonner", () => ({ toast: { warning: (msg: string) => toastWarning(msg) } }))
+const resolveSendOptionsMock = jest.fn(async () => ({ model: "sonnet", systemPrompt: "sys" }))
 jest.mock("@/lib/claude/build-options", () => ({
-  resolveSendOptions: jest.fn(async () => ({ model: "sonnet", systemPrompt: "sys" })),
+  resolveSendOptions: (...args: unknown[]) => resolveSendOptionsMock(...(args as [])),
+}))
+
+const openTaskWorkspaceRunLeaseMock = jest.fn()
+jest.mock("@/lib/task-workspace/run-lease", () => ({
+  openTaskWorkspaceRunLease: (input: unknown) => openTaskWorkspaceRunLeaseMock(input),
+}))
+
+const getProjectEnvironmentMock = jest.fn()
+jest.mock("@/lib/db/project-environments", () => ({
+  getProjectEnvironment: (id: string) => getProjectEnvironmentMock(id),
+}))
+const executeProjectEnvironmentMock = jest.fn()
+jest.mock("@/lib/project-environment/executor", () => ({
+  executeProjectEnvironment: (input: unknown) => executeProjectEnvironmentMock(input),
 }))
 
 const dispatchUserPromptSubmitMock = jest.fn(async () => ({ action: "proceed" as const }))
@@ -530,6 +545,10 @@ beforeEach(() => {
   setSdkSessionIdMock.mockClear()
   touchSessionMock.mockClear()
   updateSessionMock.mockReset().mockResolvedValue(undefined)
+  resolveSendOptionsMock.mockReset().mockResolvedValue({ model: "sonnet", systemPrompt: "sys" })
+  openTaskWorkspaceRunLeaseMock.mockReset().mockResolvedValue(null)
+  getProjectEnvironmentMock.mockReset().mockResolvedValue(undefined)
+  executeProjectEnvironmentMock.mockReset().mockResolvedValue({ success: true, bypassed: false })
   chatState.activeSessionId = "sess-1"
   chatState.openSessionIds = ["sess-1"]
   chatState.splitSessionId = null
@@ -648,6 +667,131 @@ describe("useClaudeChat — actions", () => {
     // Plugin bus: the committed send announces MESSAGE_SENT + AGENT_STARTED.
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.MESSAGE_SENT, { sessionId: "sess-1" })
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.AGENT_STARTED, { sessionId: "sess-1" })
+  })
+
+  it("reuses the persisted managed-worktree binding and redirects the turn", async () => {
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Managed",
+      model: "sonnet",
+      executionContext: {
+        location: "managedWorktree",
+        projectId: "project-1",
+        projectRoot: "/repo",
+        taskWorkspace: { taskId: "task-workspace:sess-1", workspaceKey: "sess-1" },
+        lifecycle: { state: "ready", createdAt: 1, updatedAt: 2, pinned: false },
+      },
+    })
+    openTaskWorkspaceRunLeaseMock.mockResolvedValue({
+      run: {
+        runId: "run:sess-1:1",
+        executionRoot: "/managed/sess-1",
+        isolationRef: "codex/sess-1",
+      },
+      settle: jest.fn(),
+    })
+
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+
+    expect(openTaskWorkspaceRunLeaseMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-workspace:sess-1",
+        workspaceKey: "sess-1",
+        workspaceRoot: "/repo",
+      })
+    )
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      "sess-1",
+      expect.anything(),
+      expect.objectContaining({ cwd: "/managed/sess-1" })
+    )
+    expect(updateSessionMock).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({
+        executionContext: expect.objectContaining({
+          worktreePath: "/managed/sess-1",
+          branch: "codex/sess-1",
+          taskWorkspace: expect.objectContaining({ runId: "run:sess-1:1" }),
+          lifecycle: expect.objectContaining({ state: "active" }),
+        }),
+      })
+    )
+  })
+
+  it("fails closed instead of falling back to Local when managed isolation is unavailable", async () => {
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Managed",
+      model: "sonnet",
+      executionContext: {
+        location: "managedWorktree",
+        projectId: "project-1",
+        projectRoot: "/repo",
+        taskWorkspace: { taskId: "task-workspace:sess-1", workspaceKey: "sess-1" },
+        lifecycle: { state: "requested", createdAt: 1, updatedAt: 1, pinned: false },
+      },
+    })
+
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+  })
+
+  it("initializes the selected environment inside the managed execution root", async () => {
+    const environment = {
+      id: "env-1",
+      projectId: "project-1",
+      name: "Development",
+      isEnabled: true,
+      setupScript: { default: "pnpm install" },
+      actions: [],
+      variables: {},
+      keyringReferences: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    getProjectEnvironmentMock.mockResolvedValue(environment)
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Managed",
+      model: "sonnet",
+      executionContext: {
+        location: "managedWorktree",
+        projectId: "project-1",
+        projectRoot: "/repo",
+        environmentId: "env-1",
+        taskWorkspace: { taskId: "task-workspace:sess-1", workspaceKey: "sess-1" },
+        lifecycle: { state: "ready", createdAt: 1, updatedAt: 2, pinned: false },
+      },
+    })
+    openTaskWorkspaceRunLeaseMock.mockResolvedValue({
+      run: { runId: "run-1", executionRoot: "/managed/sess-1", isolationRef: "branch" },
+      settle: jest.fn(),
+    })
+
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+
+    expect(executeProjectEnvironmentMock).toHaveBeenCalledWith({
+      environment,
+      executionRoot: "/managed/sess-1",
+      scope: "managedWorktree",
+      surface: "interactive",
+      bypassOnFailure: undefined,
+    })
+    expect(sendPromptMock).toHaveBeenCalled()
   })
 
   it("preserves attachment provenance on the optimistic user message", async () => {

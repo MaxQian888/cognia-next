@@ -30,6 +30,7 @@ import {
 } from "./protocol-adapters/provider-protocol.mjs"
 import { shouldCompact, estimateTokens, makeSummaryMessage, summaryVersion } from "./compaction.mjs"
 import { planStrategy } from "./compaction-strategies.mjs"
+import { queryPreCompactDecision } from "./pre-compact-hook.mjs"
 import { capToolResults } from "./tool-result-cap.mjs"
 import { sanitizeToolMessagePairs } from "./tool-message-pairing.mjs"
 import { buildMcpLogEvent } from "./mcp-log.mjs"
@@ -756,11 +757,30 @@ export function dispatchAiSdk({
       if (!shouldCompact(args)) return
     }
 
+    // ── PreCompact plugin hook (ADR-0090 Phase 9) ──────────────────────────
+    // Gives plugins a chance to skip compaction, inject context, or override
+    // the strategy. Falls back gracefully when hostRpc is unavailable.
+    const preCompactDecision = await queryPreCompactDecision(
+      hostRpc,
+      {
+        sessionId,
+        messageCount: conversation.length,
+        tokenCount: lastInputTokens ?? estimateTokens(conversation),
+        compressionRatio: undefined,
+      },
+      { log }
+    )
+    if (preCompactDecision.skip) {
+      log("info", "compaction skipped by plugin preCompact decision")
+      return
+    }
+
     const keepRecent =
       typeof comp.keepRecent === "number" ? comp.keepRecent : COMPACT_KEEP_RECENT_MESSAGES
 
     const plan = planStrategy({
-      strategy: comp.strategy,
+      // Plugin strategy override takes precedence, then user-configured strategy
+      strategy: preCompactDecision.strategyOverride ?? comp.strategy,
       conversation,
       keepRecent,
       preserveSystemMessages: comp.preserveSystemMessages,
@@ -776,11 +796,18 @@ export function dispatchAiSdk({
 
     // The renderer-supplied prompt already folds in the app-level focus; a
     // manual `/compact <focus>` arg layers an extra instruction on top.
+    // Plugin-injected context (bounded to 4 KiB by the hook validator) is
+    // prepended as additional retention guidance.
     const basePrompt = comp.summaryPrompt || DEFAULT_SUMMARY_PROMPT
     const manualFocus = typeof focus === "string" ? focus.trim() : ""
-    const systemPrompt = manualFocus
-      ? `${basePrompt}\n\nFocus especially on: ${manualFocus}`
-      : basePrompt
+    const pluginContext = preCompactDecision.contextToInject ?? ""
+    let systemPrompt = basePrompt
+    if (pluginContext) {
+      systemPrompt = `Important context to preserve:\n${pluginContext}\n\n${systemPrompt}`
+    }
+    if (manualFocus) {
+      systemPrompt = `${systemPrompt}\n\nFocus especially on: ${manualFocus}`
+    }
 
     // Summary executor: alternate cheap model + credentials + adapter, with the
     // output token cap. Returns trimmed text, or null on failure/empty. When AI

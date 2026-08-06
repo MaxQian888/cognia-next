@@ -109,6 +109,20 @@ jest.mock("./twin-context", () => ({
   applyTeammateTwinContext: (...a: unknown[]) => applyTeammateTwinContextMock(...a),
 }))
 
+const beginDurableDispatchMock = jest.fn()
+jest.mock("./durable-dispatch", () => ({
+  beginDurableDispatch: (...args: unknown[]) => beginDurableDispatchMock(...args),
+}))
+
+jest.mock("./durable-runtime", () => ({
+  getDurableTeamCoordinator: () => ({ durable: true }),
+}))
+
+const decisionContextMock = jest.fn(async () => "")
+jest.mock("./decision-ledger", () => ({
+  createDecisionLedger: () => ({ context: decisionContextMock }),
+}))
+
 // ── Fixtures ────────────────────────────────────────────────────────────────
 function makeTeammate(overrides: Partial<AgentTeammate> = {}): AgentTeammate {
   return {
@@ -214,6 +228,8 @@ beforeEach(() => {
   settleTaskWorkspaceRunMock.mockResolvedValue([])
   resolveExternalMock.mockResolvedValue(null)
   applyTeammateTwinContextMock.mockResolvedValue({ systemPrompt: "unused-default", applied: false })
+  beginDurableDispatchMock.mockReset()
+  decisionContextMock.mockResolvedValue("")
   resolveProviderAttemptOptionsMock.mockResolvedValue({
     providerCredentials: { apiKey: "fallback-key", protocol: "openai" },
   })
@@ -391,6 +407,79 @@ describe("dispatchTeammate — text-only fallback", () => {
     const { ctx } = makeCtx(makeTeammate())
     await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
     expect(executeAgentMock.mock.calls[0][1]).not.toHaveProperty("maxSteps")
+  })
+})
+
+describe("dispatchTeammate — durable execution environment", () => {
+  it("opens, settles, and disposes the child through the run-scoped environment adapter", async () => {
+    executeAgentMock.mockResolvedValue({ text: "durable answer" })
+    const setWorkspace = jest.fn(async () => undefined)
+    const complete = jest.fn(async () => undefined)
+    const attachEnvironment = jest.fn()
+    beginDurableDispatchMock.mockResolvedValue({
+      childRunId: "child-1",
+      capture: jest.fn(),
+      attachControl: jest.fn(),
+      attachEnvironment,
+      prepareTurnContext: jest.fn(async () => ""),
+      setWorkspace,
+      run: (operation: () => Promise<unknown>) => operation(),
+      complete,
+      fail: jest.fn(async () => undefined),
+    })
+    const settle = jest.fn(async () => [{ path: "src/index.ts", kind: "modified" }])
+    const openChild = jest.fn(async () => ({
+      childRunId: "child-1",
+      executionRoot: "/repo/.worktrees/child-1",
+      branch: "codex/child-1",
+      state: "running" as const,
+      openedAt: 1,
+      settle,
+    }))
+    const collectEvidence = jest.fn(async () => [
+      { kind: "test" as const, title: "pnpm test", content: "passed" },
+    ])
+    const dispose = jest.fn(async () => undefined)
+    const { ctx } = makeCtx(makeTeammate(), {
+      runtimeVersion: "durable-v2",
+      repositories: [{ id: "primary", role: "primary", path: "/repo", writable: true }],
+    })
+    Object.assign(ctx, {
+      durableEnvironment: {
+        adapter: { openChild, collectEvidence, dispose },
+        profile: { id: "env-v1" },
+        preparedByRepository: new Map([["primary", { executionRoot: "/repo" }]]),
+      },
+    })
+
+    await dispatchTeammate(ctx, {
+      taskId: "task-1",
+      prompt: "do durable work",
+      repositoryId: "primary",
+    })
+
+    expect(openChild).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run1",
+        childRunId: "child-1",
+        repositoryPath: "/repo",
+      })
+    )
+    expect(beginTaskWorkspaceTurnMock).not.toHaveBeenCalled()
+    expect(attachEnvironment).toHaveBeenCalledWith(expect.objectContaining({ openChild }))
+    expect(setWorkspace).toHaveBeenCalledWith({
+      workspacePath: "/repo/.worktrees/child-1",
+      branch: "codex/child-1",
+    })
+    expect(settle).toHaveBeenCalledWith("ready")
+    expect(collectEvidence).toHaveBeenCalledWith("child-1")
+    expect(dispose).toHaveBeenCalledWith("child-1")
+    expect(complete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        diffContent: JSON.stringify([{ path: "src/index.ts", kind: "modified" }]),
+        environmentEvidence: [{ kind: "test", title: "pnpm test", content: "passed" }],
+      })
+    )
   })
 })
 

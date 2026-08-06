@@ -4,6 +4,7 @@ import {
   applySdkEvent,
   contentPreview,
   makeUserMessage,
+  mergeAgentKnowledgeSourcesIntoLastAssistant,
   mergeMemorySourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
   resetStreamingToolInputs,
@@ -289,6 +290,87 @@ describe("applySdkEvent — assistant", () => {
     const { messages } = applySdkEvent([], evt)
     expect((messages[0].parts[0] as { text: string }).text).toBe("")
     expect((messages[0].parts[1] as { text: string }).text).toBe("")
+  })
+})
+
+describe("applySdkEvent — tool_use_summary", () => {
+  const base = (): UIMessage[] => [
+    {
+      id: "a1",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-Read",
+          toolCallId: "t1",
+          state: "output-available",
+          input: { file_path: "a.ts" },
+          output: "a",
+        } as never,
+        { type: "text", text: "intermediate" },
+        {
+          type: "tool-Grep",
+          toolCallId: "t2",
+          state: "output-available",
+          input: { pattern: "x" },
+          output: "b",
+        } as never,
+        { type: "text", text: "after" },
+      ],
+    },
+  ]
+
+  it("inserts an aggregate summary after the last correlated tool call", () => {
+    const next = applySdkEvent(base(), {
+      type: "tool_use_summary",
+      summary: "Read one file and found one match",
+      preceding_tool_use_ids: ["t1", "t2"],
+    } as never).messages
+
+    expect(next[0].parts.map((part) => (part as { type: string }).type)).toEqual([
+      "tool-Read",
+      "text",
+      "tool-Grep",
+      "data-tool-summary",
+      "text",
+    ])
+    expect(next[0].parts[3]).toMatchObject({
+      type: "data-tool-summary",
+      data: {
+        summary: "Read one file and found one match",
+        toolCallIds: ["t1", "t2"],
+      },
+    })
+  })
+
+  it("updates the same correlated summary instead of adding a duplicate", () => {
+    const first = applySdkEvent(base(), {
+      type: "tool_use_summary",
+      summary: "Initial summary",
+      preceding_tool_use_ids: ["t1", "t2"],
+    } as never).messages
+    const second = applySdkEvent(first, {
+      type: "tool_use_summary",
+      summary: "Final summary",
+      preceding_tool_use_ids: ["t1", "t2"],
+    } as never).messages
+
+    const summaries = second[0].parts.filter(
+      (part) => (part as { type?: string }).type === "data-tool-summary"
+    )
+    expect(summaries).toHaveLength(1)
+    expect(summaries[0]).toMatchObject({ data: { summary: "Final summary" } })
+  })
+
+  it("appends an uncorrelated summary to the most recent assistant message", () => {
+    const next = applySdkEvent(base(), {
+      type: "tool_use_summary",
+      summary: "Completed the requested checks",
+      preceding_tool_use_ids: ["missing"],
+    } as never).messages
+    expect(next[0].parts.at(-1)).toMatchObject({
+      type: "data-tool-summary",
+      data: { summary: "Completed the requested checks", toolCallIds: ["missing"] },
+    })
   })
 })
 
@@ -1313,6 +1395,54 @@ describe("mergeTwinSourcesIntoLastAssistant", () => {
       selectedStyleSamples: [],
     })
     expect(next).toBe(userOnly)
+  })
+})
+
+describe("mergeAgentKnowledgeSourcesIntoLastAssistant", () => {
+  it("attaches reusable-library provenance to the last assistant message", () => {
+    const messages: UIMessage[] = [
+      { id: "a1", role: "assistant", parts: [{ type: "text", text: "answer" } as never] },
+    ]
+    const next = mergeAgentKnowledgeSourcesIntoLastAssistant(messages, {
+      retrievedChunks: [
+        {
+          chunk: {
+            id: "chunk-1",
+            knowledgeBaseId: "kb-1",
+            sourceId: "source-1",
+            content: "grounded context",
+            vectorDocId: "vector-1",
+          },
+          score: 0.88,
+        },
+      ],
+      citations: [
+        {
+          knowledgeBaseId: "kb-1",
+          knowledgeBaseName: "Product",
+          sourceId: "source-1",
+          sourceTitle: "Guide",
+          chunkId: "chunk-1",
+          score: 0.88,
+        },
+      ],
+    })
+
+    const part = next[0].parts.find(
+      (candidate) => (candidate as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(part.sources).toEqual([
+      expect.objectContaining({
+        title: "Product / Guide",
+        origin: "agent-knowledge-base",
+        knowledgeBaseRef: {
+          knowledgeBaseId: "kb-1",
+          sourceId: "source-1",
+          chunkId: "chunk-1",
+        },
+      }),
+    ])
+    expect(mergeAgentKnowledgeSourcesIntoLastAssistant(next, null)).toBe(next)
   })
 })
 

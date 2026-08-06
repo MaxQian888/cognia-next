@@ -24,6 +24,7 @@ import type {
   McpResultBlock,
   SourcesPart,
   SourcesPartItem,
+  ToolUseSummaryPart,
 } from "./parts-extensions"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import type { HookNoticePartData } from "./hooks"
@@ -449,17 +450,29 @@ export function applySdkEvent(
       }
     }
 
-    // Mapped to canonical events by `sidecar/dispatch/sdk-canonical-events.mjs`
-    // and carried on the envelope stream; they render no transcript row of
-    // their own, so the UI reducer is a pass-through. Listed explicitly rather
-    // than folded into `default` — that is what makes the union exhaustive, so
-    // a member the SDK adds later fails `tsc` instead of vanishing.
+    // Mapped to canonical events by `sidecar/dispatch/sdk-canonical-events.mjs`.
+    // These lifecycle/status messages render no transcript row of their own.
     case "tool_progress":
-    case "tool_use_summary":
     case "auth_status":
     case "prompt_suggestion":
     case "conversation_reset":
       return { messages, turnComplete: false }
+
+    case "tool_use_summary": {
+      const summaryEvent = evt as unknown as {
+        summary?: unknown
+        preceding_tool_use_ids?: unknown
+      }
+      return {
+        messages: applyToolUseSummary(messages, {
+          summary: typeof summaryEvent.summary === "string" ? summaryEvent.summary : "",
+          toolCallIds: Array.isArray(summaryEvent.preceding_tool_use_ids)
+            ? summaryEvent.preceding_tool_use_ids.map(String)
+            : [],
+        }),
+        turnComplete: false,
+      }
+    }
 
     default:
       // A message type this build predates. Tolerated at runtime — dropping a
@@ -467,6 +480,72 @@ export function applySdkEvent(
       // below makes it a compile error to leave a KNOWN type here.
       return { messages, turnComplete: false }
   }
+}
+
+function sameToolCallIds(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index])
+}
+
+/** Insert or update a persisted aggregate tool summary in the relevant assistant turn. */
+export function applyToolUseSummary(
+  messages: UIMessage[],
+  input: ToolUseSummaryPart["data"]
+): UIMessage[] {
+  const summary = input.summary.trim()
+  if (!summary) return messages
+  const part: ToolUseSummaryPart = {
+    type: "data-tool-summary",
+    data: { summary, toolCallIds: [...input.toolCallIds] },
+  }
+
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
+    const existingIndex = messages[messageIndex].parts.findIndex((candidate) => {
+      if ((candidate as { type?: string }).type !== "data-tool-summary") return false
+      const ids = (candidate as unknown as ToolUseSummaryPart).data?.toolCallIds
+      return Array.isArray(ids) && sameToolCallIds(ids, input.toolCallIds)
+    })
+    if (existingIndex >= 0) {
+      const message = messages[messageIndex]
+      const parts = [...message.parts]
+      parts[existingIndex] = part as unknown as Part
+      return messages.map((candidate, index) =>
+        index === messageIndex ? { ...message, parts } : candidate
+      )
+    }
+  }
+
+  const correlatedIds = new Set(input.toolCallIds)
+  let targetMessageIndex = -1
+  let insertAt = -1
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
+    if (messages[messageIndex].role !== "assistant") continue
+    for (let partIndex = messages[messageIndex].parts.length - 1; partIndex >= 0; partIndex--) {
+      const toolCallId = (messages[messageIndex].parts[partIndex] as { toolCallId?: unknown })
+        .toolCallId
+      if (typeof toolCallId === "string" && correlatedIds.has(toolCallId)) {
+        targetMessageIndex = messageIndex
+        insertAt = partIndex + 1
+        break
+      }
+    }
+    if (targetMessageIndex >= 0) break
+  }
+
+  if (targetMessageIndex < 0) {
+    targetMessageIndex = messages.findLastIndex((message) => message.role === "assistant")
+    if (targetMessageIndex < 0) return messages
+    insertAt = messages[targetMessageIndex].parts.length
+  }
+
+  const message = messages[targetMessageIndex]
+  const parts = [
+    ...message.parts.slice(0, insertAt),
+    part as unknown as Part,
+    ...message.parts.slice(insertAt),
+  ]
+  return messages.map((candidate, index) =>
+    index === targetMessageIndex ? { ...message, parts } : candidate
+  )
 }
 
 /**
@@ -1518,4 +1597,55 @@ export function mergeMemorySourcesIntoLastAssistant(
     memoryBudget: memorySources.length > 0 ? memoryContext.budget : undefined,
     memoryDegraded: memoryContext.degraded,
   })
+}
+
+export interface AgentKnowledgeSourcesContext {
+  retrievedChunks: Array<{
+    chunk: {
+      id: string
+      knowledgeBaseId: string
+      sourceId: string
+      content: string
+      vectorDocId: string
+    }
+    score: number
+  }>
+  citations: Array<{
+    knowledgeBaseId: string
+    knowledgeBaseName: string
+    sourceId: string
+    sourceTitle: string
+    chunkId: string
+    score: number
+  }>
+}
+
+/** Merge reusable Agent Knowledge Base citations into the assistant SourcesPart. */
+export function mergeAgentKnowledgeSourcesIntoLastAssistant(
+  messages: UIMessage[],
+  context: AgentKnowledgeSourcesContext | undefined | null
+): UIMessage[] {
+  if (!context || context.retrievedChunks.length === 0) return messages
+  const citationByChunkId = new Map(
+    context.citations.map((citation) => [citation.chunkId, citation])
+  )
+  const sources: SourcesPartItem[] = context.retrievedChunks.map(({ chunk, score }) => {
+    const citation = citationByChunkId.get(chunk.id)
+    const knowledgeBaseName = citation?.knowledgeBaseName ?? chunk.knowledgeBaseId
+    const sourceTitle = citation?.sourceTitle ?? chunk.sourceId
+    return {
+      id: `agent-kb-${chunk.id}`,
+      title: `${knowledgeBaseName} / ${sourceTitle}`,
+      snippet:
+        chunk.content.length > 200 ? chunk.content.slice(0, 199).trimEnd() + "…" : chunk.content,
+      origin: "agent-knowledge-base",
+      score,
+      knowledgeBaseRef: {
+        knowledgeBaseId: chunk.knowledgeBaseId,
+        sourceId: chunk.sourceId,
+        chunkId: chunk.id,
+      },
+    }
+  })
+  return appendSourcesToLastAssistant(messages, sources)
 }

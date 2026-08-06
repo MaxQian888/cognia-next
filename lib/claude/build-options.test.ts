@@ -96,6 +96,11 @@ jest.mock("@/lib/claude/env-resolver", () => ({
   resolveProxyEnv: jest.fn(),
 }))
 
+const mockGetAgentEnvSecret = jest.fn()
+jest.mock("@/lib/agent/agent-env-keyring", () => ({
+  loadAgentEnvSecret: (...args: unknown[]) => mockGetAgentEnvSecret(...args),
+}))
+
 // Twin runtime is dynamically imported by resolveSendOptions; the mock only
 // kicks in when a test supplies twinId + twinDeps + twinUserMessage.
 const mApplyTwinContext = jest.fn()
@@ -117,6 +122,11 @@ jest.mock("@/lib/twin/runtime", () => ({
 const mApplyProjectKnowledge = jest.fn()
 jest.mock("@/lib/project-knowledge/runtime/apply-project-context", () => ({
   applyProjectKnowledgeContext: (...args: unknown[]) => mApplyProjectKnowledge(...args),
+}))
+
+const mApplyAgentKnowledge = jest.fn()
+jest.mock("@/lib/knowledge-base/runtime/apply-agent-knowledge-context", () => ({
+  applyAgentKnowledgeContextFromDb: (...args: unknown[]) => mApplyAgentKnowledge(...args),
 }))
 
 // skills-bridge is dynamically imported by resolveSendOptions when a character
@@ -151,6 +161,16 @@ jest.mock("@/lib/platform/detect", () => ({
   ...jest.requireActual("@/lib/platform/detect"),
   isNativeMobile: jest.fn(() => false),
 }))
+
+const mockBuildSupportContext = jest.fn(async () => "SUPPORT_CONTEXT")
+jest.mock("@/lib/support-agent/context", () => {
+  const actual = jest.requireActual("@/lib/support-agent/context")
+  return {
+    ...actual,
+    buildSupportAgentContext: (...args: unknown[]) => mockBuildSupportContext(...args),
+    isSupportDiagnosticsEnabled: () => true,
+  }
+})
 
 import { isTauri } from "@/lib/tauri"
 import { isNativeMobile } from "@/lib/platform/detect"
@@ -308,6 +328,44 @@ describe("resolveSendOptions — editor workspace tool", () => {
       activeProject: makeProject([{ path: "/work/project", isPrimary: true }]),
     })
     expect(toolNames(withoutBackend)).not.toContain("read_active_editor")
+  })
+})
+
+describe("resolveSendOptions — Cognia Support safety", () => {
+  it("replaces normal Agent overlays with read-only docs and redacted diagnostics context", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        id: "char_builtin_support",
+        systemPrompt: "SUPPORT_IDENTITY",
+        permissionMode: "bypassPermissions",
+        allowedTools: ["Bash", "Write"],
+        mcpServerIds: ["unsafe"],
+        executionPolicy: {
+          envBindings: [{ name: "TOKEN", kind: "secret", secretRef: "secret-ref" }],
+        },
+      }),
+      activeProject: makeProject([{ path: "/private/project", isPrimary: true }]),
+      trustedWorkspaceRoots: ["/private/project"],
+      preloadedMcpServers: [],
+      preloadedEnv: { SECRET: "value" },
+      twinUserMessage: "diagnose this runtime error",
+      appSettings: { id: "singleton", language: "en" } as AppSettings,
+    })
+
+    expect(mockGetAgentEnvSecret).not.toHaveBeenCalled()
+    expect(mockBuildSupportContext).toHaveBeenCalledWith(
+      expect.objectContaining({ userText: "diagnose this runtime error", diagnosticsEnabled: true })
+    )
+    expect(opts).toMatchObject({
+      permissionMode: "plan",
+      allowedTools: [],
+      mcpServers: {},
+      systemPrompt: "SUPPORT_IDENTITY\n\nSUPPORT_CONTEXT",
+    })
+    expect(opts).not.toHaveProperty("cwd")
+    expect(opts).not.toHaveProperty("env")
+    expect(opts).not.toHaveProperty("agents")
+    expect(opts).not.toHaveProperty("builtinTools")
   })
 })
 
@@ -4837,6 +4895,77 @@ describe("resolveSendOptions — project knowledge base (project-scoped RAG)", (
   })
 })
 
+describe("resolveSendOptions — reusable Agent Knowledge Bases", () => {
+  const deps = {
+    store: {},
+    embedding: {},
+    vectorBackend: "native",
+  } as never
+
+  it("appends bound-library context and preserves citation metadata", async () => {
+    mApplyAgentKnowledge.mockResolvedValue({
+      systemPromptSection: "## Agent knowledge bases\nanswer context",
+      retrievedChunks: [
+        {
+          chunk: {
+            id: "chunk-1",
+            knowledgeBaseId: "kb-1",
+            sourceId: "source-1",
+            content: "answer context",
+            vectorDocId: "vector-1",
+          },
+          score: 0.9,
+        },
+      ],
+      citations: [
+        {
+          scope: "agent-knowledge-base",
+          knowledgeBaseId: "kb-1",
+          knowledgeBaseName: "Product",
+          sourceId: "source-1",
+          sourceTitle: "Guide",
+          chunkId: "chunk-1",
+          charStart: 0,
+          charEnd: 14,
+          score: 0.9,
+        },
+      ],
+      failures: [],
+      degraded: false,
+      budget: { limit: 2000, used: 4, truncated: false },
+    })
+
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        id: "agent-1",
+        systemPrompt: "base prompt",
+        knowledgeBaseIds: ["kb-1", "kb-2"],
+      }),
+      appSettings: { cacheOptimizationEnabled: false } as never,
+      projectKnowledgeDeps: deps,
+      projectKnowledgeUserMessage: "question",
+    })
+
+    expect(opts.systemPrompt).toContain("base prompt")
+    expect(opts.systemPrompt).toContain("## Agent knowledge bases")
+    expect(mApplyAgentKnowledge).toHaveBeenCalledWith(
+      expect.objectContaining({ knowledgeBaseIds: ["kb-1", "kb-2"], tokenBudget: 2000 })
+    )
+    expect(opts.agentKnowledgeContext?.citations[0]).toEqual(
+      expect.objectContaining({ knowledgeBaseId: "kb-1", sourceId: "source-1" })
+    )
+  })
+
+  it("skips unbound Agents", async () => {
+    await resolveSendOptions({
+      character: makeChar({ knowledgeBaseIds: [] }),
+      projectKnowledgeDeps: deps,
+      projectKnowledgeUserMessage: "question",
+    })
+    expect(mApplyAgentKnowledge).not.toHaveBeenCalled()
+  })
+})
+
 describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
   afterEach(() => {
     delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
@@ -4895,5 +5024,84 @@ describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
     // Legacy routing fields survive for rollback; no secret shapes in the spec.
     expect(opts.provider).toBeDefined()
     expect(JSON.stringify(execution)).not.toMatch(/sk-|api[_-]?key|bearer|token/i)
+  })
+})
+
+describe("resolveSendOptions — Agent profile routing and execution policy", () => {
+  it("uses execute by default and selects plan only when the caller requests it", async () => {
+    const character = makeChar({
+      model: "legacy-execute",
+      modelRouting: {
+        plan: "planner-alias",
+        execute: "executor-alias",
+        utility: "fast-alias",
+      },
+    })
+
+    const execute = await resolveSendOptions({ character })
+    const plan = await resolveSendOptions({ character, modelRole: "plan" })
+
+    expect(execute.model).toBe("executor-alias")
+    expect(plan.model).toBe("planner-alias")
+  })
+
+  it("keeps an explicit session model above the Agent semantic target", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ modelRouting: { execute: "agent-model" } }),
+      session: makeSession({ model: "session-model" }),
+    })
+
+    expect(opts.model).toBe("session-model")
+  })
+
+  it("applies session execution overrides and materializes keyring secrets only into env", async () => {
+    mockGetAgentEnvSecret.mockResolvedValue("secret-value")
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        executionPolicy: {
+          effort: "medium",
+          maxTurns: 20,
+          envBindings: [
+            { name: "SHARED", kind: "plain", value: "agent" },
+            { name: "TOKEN", kind: "secret", secretRef: "agent-1:TOKEN" },
+          ],
+        },
+      }),
+      session: makeSession({
+        executionPolicy: {
+          effort: "high",
+          maxTurns: 8,
+          envBindings: [{ name: "SHARED", kind: "plain", value: "session" }],
+        },
+      }),
+    })
+
+    expect(opts).toEqual(
+      expect.objectContaining({
+        effort: "high",
+        maxTurns: 8,
+        env: { SHARED: "session", TOKEN: "secret-value" },
+      })
+    )
+    expect(mockGetAgentEnvSecret).toHaveBeenCalledWith("agent-1:TOKEN")
+  })
+
+  it("fails before dispatch when a referenced secret is missing", async () => {
+    mockGetAgentEnvSecret.mockResolvedValue(null)
+
+    await expect(
+      resolveSendOptions({
+        character: makeChar({
+          executionPolicy: {
+            envBindings: [
+              { name: "MISSING_TOKEN", kind: "secret", secretRef: "agent-1:MISSING_TOKEN" },
+            ],
+          },
+        }),
+      })
+    ).rejects.toMatchObject({
+      code: "secret_missing",
+      variableName: "MISSING_TOKEN",
+    })
   })
 })

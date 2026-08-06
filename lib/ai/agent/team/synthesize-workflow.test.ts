@@ -1,4 +1,9 @@
-import { synthesizeTeamWorkflow, SynthesizeError, resolveRetryPolicy } from "./synthesize-workflow"
+import {
+  classifyTeamTaskAccess,
+  synthesizeTeamWorkflow,
+  SynthesizeError,
+  resolveRetryPolicy,
+} from "./synthesize-workflow"
 import { DEFAULT_RETRY_POLICY } from "@/types/workflow/visual"
 import type { AgentTeam, AgentTeamConfig, AgentTeamTask } from "@/types/agent/agent-team"
 
@@ -45,6 +50,45 @@ const reviewTeam = (maxRevisions?: number): AgentTeam =>
       taskReview: { enabled: true, ...(maxRevisions === undefined ? {} : { maxRevisions }) },
     },
   }) as AgentTeam
+
+describe("synthesizeTeamWorkflow — durable task routing", () => {
+  it("classifies explicit and tagged read-only work without serializing it as a writer", () => {
+    expect(classifyTeamTaskAccess({ ...task("research"), tags: ["Research"] })).toBe("read")
+    expect(
+      classifyTeamTaskAccess({
+        ...task("explicit"),
+        metadata: { access: "read" },
+      })
+    ).toBe("read")
+    expect(classifyTeamTaskAccess(task("code"))).toBe("write")
+  })
+
+  it("projects repository ownership and forces integration review in isolated parallel mode", () => {
+    const isolated = {
+      ...team,
+      config: { ...team.config, runtimeVersion: "durable-v2", writeMode: "isolated-parallel" },
+    } as AgentTeam
+    const routed = {
+      ...task("code"),
+      tags: ["ui"],
+      metadata: { repositoryId: "dependency", fileOwnership: ["src/feature"] },
+    }
+
+    const { workflow } = synthesizeTeamWorkflow({
+      team: isolated,
+      tasks: [routed],
+      initialConcurrency: 2,
+    })
+
+    expect(workflow.nodes.find((node) => node.id === "code")?.data.params).toMatchObject({
+      access: "write",
+      taskKind: "ui",
+      repositoryId: "dependency",
+      fileOwnership: ["src/feature"],
+    })
+    expect(workflow.nodes.some((node) => node.id === "review:code")).toBe(true)
+  })
+})
 
 describe("synthesizeTeamWorkflow — blocking lead review (ADR-0071)", () => {
   it("emits no review nodes when review is off", () => {

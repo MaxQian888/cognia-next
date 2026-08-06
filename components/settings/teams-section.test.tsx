@@ -150,9 +150,28 @@ describe("TeamsSection — create flow", () => {
 
     await waitFor(async () => {
       const rows = await listTeams()
-      expect(rows.find((t) => t.name === "Squad-A")).toBeDefined()
+      expect(rows.find((t) => t.name === "Squad-A")?.maxResponses).toBe(4)
     })
     expect(toast.success).toHaveBeenCalled()
+  })
+
+  it("persists a custom group response cap", async () => {
+    const user = userEvent.setup()
+    render(<TeamsSection />)
+    const newBtn = await screen.findByRole("button", { name: /settings\.teams\.newTeam/ })
+    await waitFor(() => expect(newBtn).not.toBeDisabled())
+    await user.click(newBtn)
+
+    await user.type(screen.getByPlaceholderText("settings.teams.editor.namePlaceholder"), "Capped")
+    await user.click(screen.getByRole("button", { name: /Coding Assistant/ }))
+    const responseCap = screen.getByLabelText("settings.teams.editor.responseCap")
+    await user.clear(responseCap)
+    await user.type(responseCap, "2")
+    await user.click(screen.getByRole("button", { name: /settings\.teams\.create/ }))
+
+    await waitFor(async () => {
+      expect((await listTeams()).find((team) => team.name === "Capped")?.maxResponses).toBe(2)
+    })
   })
 })
 

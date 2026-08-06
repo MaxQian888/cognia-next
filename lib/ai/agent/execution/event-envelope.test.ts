@@ -137,6 +137,13 @@ describe("captureEventFromCanonical", () => {
       messageId: "c1",
       done: true,
     })
+    expect(
+      captureEventFromCanonical({
+        kind: "tool-summary",
+        summary: "Read two files",
+        toolCallIds: ["t1", "t2"],
+      })
+    ).toEqual({ type: "tool-summary", summary: "Read two files", toolCallIds: ["t1", "t2"] })
   })
 
   it("returns null for envelope-only kinds", () => {

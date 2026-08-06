@@ -104,6 +104,63 @@ describe("resolveSendOptions memory injection", () => {
     expect(opts.memoryContext).toBeUndefined()
   })
 
+  it("enforces Agent recall permission and readable scopes", async () => {
+    const policyCharacter: Character = {
+      ...baseCharacter,
+      memoryPolicy: {
+        operations: { recall: true, create: true, update: true, forget: true },
+        readableScopes: ["character"],
+        writableScopes: ["character"],
+        autoLearn: true,
+      },
+    }
+    const opts = await resolveSendOptions({
+      character: policyCharacter,
+      appSettings: { memory: {}, cacheOptimizationEnabled: false } as unknown as AppSettings,
+      memoryDeps: deps({
+        loadCandidates: async () => [
+          mem("global pnpm preference", { id: "global", scope: "global" }),
+          mem("character pnpm preference", {
+            id: "character",
+            scope: "character",
+            characterId: "char_1",
+          }),
+        ],
+      }),
+      memoryUserMessage: "pnpm",
+    })
+    expect(opts.systemPrompt).not.toContain("global pnpm preference")
+    expect(opts.systemPrompt).toContain("character pnpm preference")
+  })
+
+  it("lets a session recall override beat the Agent default but not the global master switch", async () => {
+    const character = {
+      ...baseCharacter,
+      memoryPolicy: {
+        operations: { recall: false, create: true, update: true, forget: true },
+        readableScopes: ["global"],
+        writableScopes: ["global"],
+        autoLearn: true,
+      },
+    } satisfies Character
+    const common = {
+      character,
+      appSettings: { memory: {}, cacheOptimizationEnabled: false } as unknown as AppSettings,
+      session: { id: "s1", memoryUse: true } as never,
+      memoryDeps: deps({ loadCandidates: async () => [mem("pnpm fact")] }),
+      memoryUserMessage: "pnpm",
+    }
+    expect((await resolveSendOptions(common)).systemPrompt).toContain("pnpm fact")
+    expect(
+      (
+        await resolveSendOptions({
+          ...common,
+          appSettings: { memory: { enabled: false } } as unknown as AppSettings,
+        })
+      ).systemPrompt
+    ).not.toContain("pnpm fact")
+  })
+
   it("passes workspace, character, agent, branch, and path reader context to retrieval", async () => {
     const loadCandidates = jest.fn(async () => [mem("pnpm fact")])
     await resolveSendOptions({

@@ -2771,9 +2771,14 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           timestamp,
           toolUseId: update.toolCallId,
           toolName: update.title,
+          title: update.title,
           kind: update.kind,
           rawInput: update.rawInput,
           locations: update.locations,
+          toolMetadata: {
+            kind: update.kind,
+            ...(update.locations ? { locations: update.locations } : {}),
+          },
         }
 
       case "tool_call_update": {
@@ -2800,16 +2805,28 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
             result: extractToolCallText(),
             isError: update.status === "error" || update.status === "failed",
             toolName: update.title,
+            title: update.title,
             kind: update.kind,
             rawInput: update.rawInput,
             rawOutput: update.rawOutput,
             locations: update.locations,
             status: update.status,
+            toolMetadata: {
+              ...(update.kind ? { kind: update.kind } : {}),
+              ...(update.locations ? { locations: update.locations } : {}),
+            },
           }
         }
 
         // Emit enhanced tool_call_update event with all fields
-        if (update.content || update.locations) {
+        if (
+          update.title ||
+          update.kind ||
+          update.content ||
+          update.locations ||
+          update.rawInput ||
+          update.rawOutput
+        ) {
           return {
             type: "tool_call_update" as const,
             sessionId,

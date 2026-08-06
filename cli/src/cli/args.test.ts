@@ -110,4 +110,39 @@ describe("parseArgv", () => {
     expect(stringFlag(args, "from")).toBe("journal")
     expect(stringFlag(args, "generation")).toBe("gen-0002")
   })
+
+  it("treats -- as a stop-parsing sentinel (tokens after go to rest)", () => {
+    const args = parseArgv([
+      "x",
+      "claude",
+      "--model",
+      "test",
+      "--",
+      "--verbose",
+      "--cwd",
+      "/my/dir",
+    ])
+    expect(args.command).toBe("x")
+    expect(stringFlag(args, "model")).toBe("test")
+    expect(args.rest).toEqual(["--verbose", "--cwd", "/my/dir"])
+    // Tokens after -- should NOT be in positionals or flags
+    expect(args.positionals).toEqual(["claude"])
+    expect(boolFlag(args, "verbose")).toBe(false)
+  })
+
+  it("rest is empty when no -- is present", () => {
+    const args = parseArgv(["run", "hello", "--yes"])
+    expect(args.rest).toEqual([])
+  })
+
+  it("-- at the end yields empty rest", () => {
+    const args = parseArgv(["x", "codex", "--"])
+    expect(args.rest).toEqual([])
+    expect(args.positionals).toEqual(["codex"])
+  })
+
+  it("treats --verbose as boolean flag", () => {
+    const args = parseArgv(["x", "claude", "--verbose"])
+    expect(boolFlag(args, "verbose")).toBe(true)
+  })
 })

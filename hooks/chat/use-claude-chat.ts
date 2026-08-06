@@ -5,9 +5,9 @@ import { useTranslations } from "next-intl"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import {
   applySdkEvent,
-  contentPreview,
   extractUsage,
   makeUserMessage,
+  mergeAgentKnowledgeSourcesIntoLastAssistant,
   mergeMemorySourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
 } from "@/lib/claude/adapter"
@@ -31,6 +31,8 @@ import {
   shouldGenerateTitle,
   isPlaceholderTitle,
 } from "@/lib/ai/generation/run-title-task"
+import { markTitleFailed, clearTitleRetry } from "@/lib/ai/generation/title-retry"
+import { smartContentPreview } from "@/lib/ai/generation/smart-preview"
 import { generateTurnLabel } from "@/lib/ai/generation/turn-label"
 import { gateContinuation } from "@/lib/goal/pacing"
 import { parseSuggestedDelay } from "@/lib/goal/prompts"
@@ -121,6 +123,13 @@ import { beginCodeAdoptionTurn } from "@/lib/code-adoption/client"
 import { markTaskWorkspaceTurnCancelled } from "@/lib/code-adoption/turn-tracker"
 import { runIdForTurn, taskIdForMessage } from "@/lib/task-workspace/client"
 import { openTaskWorkspaceRunLease } from "@/lib/task-workspace/run-lease"
+import {
+  bindExecutionRun,
+  resolveSessionWorkspaceRoot,
+  transitionManagedWorktree,
+} from "@/lib/task-workspace/session-execution-context"
+import { getProjectEnvironment } from "@/lib/db/project-environments"
+import { executeProjectEnvironment } from "@/lib/project-environment/executor"
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
@@ -283,7 +292,7 @@ const SIDECAR_EXITED_TRACE_MESSAGE =
  * stale snapshot. Shared by both the external-agent and SDK send paths.
  */
 async function applyInstantTitle(sessionId: string, content: SendContent): Promise<void> {
-  const preview = contentPreview(content, 40)
+  const preview = smartContentPreview(content, 40)
   if (!preview) return
   const fresh = await getSession(sessionId).catch(() => undefined)
   if (fresh && !isPlaceholderTitle(fresh.title)) return
@@ -319,15 +328,18 @@ function runUtilityModelTasks(sessionId: string, messages: UIMessage[]): void {
       ) {
         const firstUser = messages.find((m) => m.role === "user")
         const firstAssistant = messages.find((m) => m.role === "assistant")
-        await runTitleTask({
+        const sourceText = extractPlainText(firstUser)
+        const resultText = extractAssistantText(firstAssistant)
+        const titleResult = await runTitleTask({
           session: sessionRow,
           appSettings: settings,
           override: titleCfg,
           featureId: "conversation-title",
-          sourceText: extractPlainText(firstUser),
-          resultText: extractAssistantText(firstAssistant),
+          sourceText,
+          resultText,
           locale,
           currentTitle: sessionRow.title,
+          dedupKey: sessionId,
           // Re-read titleAuto before writing — the user may have renamed the
           // session while the model call was in flight.
           isStillAuto: async () => {
@@ -336,6 +348,12 @@ function runUtilityModelTasks(sessionId: string, messages: UIMessage[]): void {
           },
           persist: (title) => updateSession(sessionId, { title, titleAuto: true }),
         })
+        if (titleResult) {
+          clearTitleRetry(sessionId)
+        } else {
+          // Title generation failed — mark for retry on next session focus / app resume.
+          markTitleFailed(sessionId, { sourceText, resultText, locale })
+        }
       }
 
       // ── Timeline minimap label for the latest user turn (opt-in) ──
@@ -866,6 +884,9 @@ export function useClaudeChat() {
          *  `buildSendContent`. Lets the optimistic user message render file
          *  cards (with filenames) instead of raw extracted text. */
         attachmentManifest?: readonly AttachmentManifestEntry[]
+        /** Explicit user choice after a failed interactive setup. Scheduled
+         * runs never expose or honor this bypass. */
+        bypassEnvironmentSetup?: boolean
         /** Stamp the optimistic USER message into a branch group.
          *
          *  Set by `editAndResend`, which keeps the original question as a
@@ -1297,20 +1318,38 @@ export function useClaudeChat() {
         })
       }
 
-      // Experimental task workspace: snapshot the live workspace and redirect
-      // this turn into an isolated worktree/shadow root before any agent starts.
-      // Regenerate/continuation keeps the same user-message task id while the
-      // chat run id creates a distinct TaskRun version.
+      // A persisted execution context owns the chat's Task Workspace identity.
+      // Repeated turns create versioned TaskRuns inside that same managed
+      // worktree. The developer flag remains a compatibility path for sessions
+      // created before execution contexts existed.
       const chatRunId = store.getState().sessions[sessionId]?.runId ?? 0
-      if (
+      const executionContext = session?.executionContext
+      if (executionContext?.location === "local") {
+        sendOptions = { ...sendOptions, cwd: executionContext.projectRoot }
+      }
+      const boundWorkspaceRoot = executionContext
+        ? resolveSessionWorkspaceRoot(executionContext)
+        : undefined
+      const legacyWorkspaceEnabled =
+        !executionContext &&
         useSettingsStore.getState().settings?.developer?.taskWorkspace === true &&
-        sendOptions.cwd
-      ) {
+        Boolean(sendOptions.cwd)
+      if (executionContext?.location === "managedWorktree" || legacyWorkspaceEnabled) {
+        if (executionContext?.location === "managedWorktree" && !boundWorkspaceRoot) {
+          const message = tInlineErr("managedWorktreeUnavailable")
+          store.getState().setSessionStatus(sessionId, "idle")
+          store.getState().setSessionError(sessionId, message)
+          chatTurnPerformance.finish(sessionId, "failed")
+          return
+        }
         const anchorMessage = skipAppend
           ? [...previousMessages].reverse().find((message) => message.role === "user")
           : userMsg
+        const workspaceRoot = boundWorkspaceRoot ?? sendOptions.cwd!
         const taskEnvelope = {
-          taskId: taskIdForMessage(anchorMessage?.id ?? userMsg.id),
+          taskId:
+            executionContext?.taskWorkspace.taskId ??
+            taskIdForMessage(anchorMessage?.id ?? userMsg.id),
           sessionId,
           runId: runIdForTurn(sessionId, chatRunId),
           executionRunId: runIdForTurn(sessionId, chatRunId),
@@ -1319,12 +1358,57 @@ export function useClaudeChat() {
           surface: "chat",
           agentId: "built-in",
           agentKind: "in-app",
-          workspaceRoot: sendOptions.cwd,
+          workspaceRoot,
+          ...(executionContext?.taskWorkspace.workspaceKey
+            ? { workspaceKey: executionContext.taskWorkspace.workspaceKey }
+            : {}),
         }
         const taskLease = await openTaskWorkspaceRunLease(taskEnvelope)
+        if (!taskLease && executionContext?.location === "managedWorktree") {
+          const message = tInlineErr("managedWorktreeUnavailable")
+          store.getState().setSessionStatus(sessionId, "idle")
+          store.getState().setSessionError(sessionId, message)
+          chatTurnPerformance.finish(sessionId, "failed")
+          return
+        }
         sendOptions = { ...sendOptions, taskWorkspace: taskEnvelope }
         if (taskLease) {
           sendOptions = { ...sendOptions, cwd: taskLease.run.executionRoot }
+          if (executionContext?.location === "managedWorktree") {
+            const bound = bindExecutionRun(executionContext, taskLease.run.runId)
+            const active = transitionManagedWorktree(bound, "active", Date.now(), {
+              worktreePath: taskLease.run.executionRoot,
+              ...(taskLease.run.isolationRef ? { branch: taskLease.run.isolationRef } : {}),
+            })
+            void updateSession(sessionId, { executionContext: active }).catch((error) =>
+              console.error("persist execution context failed", error)
+            )
+          }
+        }
+      }
+
+      if (executionContext?.environmentId) {
+        const environment = await getProjectEnvironment(executionContext.environmentId)
+        if (!environment || environment.projectId !== executionContext.projectId) {
+          store.getState().setSessionStatus(sessionId, "idle")
+          store.getState().setSessionError(sessionId, tInlineErr("environmentUnavailable"))
+          chatTurnPerformance.finish(sessionId, "failed")
+          return
+        }
+        const setup = await executeProjectEnvironment({
+          environment,
+          executionRoot: sendOptions.cwd ?? executionContext.projectRoot,
+          scope: executionContext.location,
+          surface: "interactive",
+          bypassOnFailure: callOptions?.bypassEnvironmentSetup,
+        })
+        if (!setup.success) {
+          store.getState().setSessionStatus(sessionId, "idle")
+          store
+            .getState()
+            .setSessionError(sessionId, setup.error || tInlineErr("environmentSetupFailed"))
+          chatTurnPerformance.finish(sessionId, "failed")
+          return
         }
       }
 
@@ -2959,6 +3043,14 @@ async function handleEvent(
           if (withMemory !== nextMessages) {
             nextMessages = withMemory
           }
+        }
+        const agentKnowledgeCtx = last?.options.agentKnowledgeContext
+        if (agentKnowledgeCtx) {
+          const withAgentKnowledge = mergeAgentKnowledgeSourcesIntoLastAssistant(
+            nextMessages,
+            agentKnowledgeCtx
+          )
+          if (withAgentKnowledge !== nextMessages) nextMessages = withAgentKnowledge
         }
       }
 

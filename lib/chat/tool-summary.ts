@@ -116,11 +116,13 @@ const ICON_BY_NAME: Record<string, ToolIconKey> = {
   multiedit: "edit",
   notebookedit: "notebook",
   bash: "terminal",
+  shell: "terminal",
   grep: "search",
   glob: "glob",
   ls: "folder",
   webfetch: "web",
   websearch: "web",
+  web_search: "web",
   todowrite: "task",
   // Aliases a third-party MCP server is as likely to use as the canonical
   // names above. Mirrors the CLI's `CONTEXT_TOOLS` set so the two surfaces
@@ -133,6 +135,29 @@ const ICON_BY_NAME: Record<string, ToolIconKey> = {
 
 function iconFor(name: string): ToolIconKey {
   return ICON_BY_NAME[name.toLowerCase()] ?? "generic"
+}
+
+function iconForKind(part: ToolPartLike): ToolIconKey {
+  const presentation = part as ToolPartLike & {
+    kind?: unknown
+    toolMetadata?: { kind?: unknown }
+  }
+  const kind = asString(presentation.toolMetadata?.kind) ?? asString(presentation.kind)
+  switch (kind) {
+    case "file_read":
+    case "read":
+      return "read"
+    case "file_write":
+    case "write":
+      return "write"
+    case "execute":
+    case "terminal":
+      return "terminal"
+    case "browser":
+      return "web"
+    default:
+      return "generic"
+  }
 }
 
 /** Resolve the canonical icon bucket from a raw tool name without constructing a UI part. */
@@ -181,7 +206,8 @@ export function isContextFoldPart(part: ToolNamedPartLike | undefined): boolean 
  */
 export function summarizeToolCall(part: ToolPartLike): ToolSummary {
   const name = normalizeToolName(part)
-  const iconKey = iconFor(name)
+  const nameIcon = iconFor(name)
+  const iconKey = nameIcon === "generic" ? iconForKind(part) : nameIcon
   const input = (part.input ?? undefined) as Record<string, unknown> | undefined
 
   let target: string | null = null
@@ -190,10 +216,14 @@ export function summarizeToolCall(part: ToolPartLike): ToolSummary {
     if (lower === "read" || lower === "write" || lower === "edit" || lower === "multiedit") {
       const fp = asString(input.file_path)
       if (fp) target = basename(fp)
+      if (!target && (lower === "edit" || lower === "multiedit") && Array.isArray(input.changes)) {
+        const firstPath = asString((input.changes[0] as { path?: unknown } | undefined)?.path)
+        if (firstPath) target = basename(firstPath)
+      }
     } else if (lower === "notebookedit") {
       const fp = asString(input.notebook_path) ?? asString(input.file_path)
       if (fp) target = basename(fp)
-    } else if (lower === "bash") {
+    } else if (lower === "bash" || lower === "shell") {
       const cmd = asString(input.command)
       if (cmd) target = cmd
     } else if (lower === "grep") {
@@ -206,7 +236,7 @@ export function summarizeToolCall(part: ToolPartLike): ToolSummary {
     } else if (lower === "webfetch") {
       const u = asString(input.url)
       if (u) target = urlHost(u)
-    } else if (lower === "websearch") {
+    } else if (lower === "websearch" || lower === "web_search") {
       target = asString(input.query) ?? null
     } else {
       // Generic best-effort: first string-valued field that looks like a target.
@@ -221,6 +251,44 @@ export function summarizeToolCall(part: ToolPartLike): ToolSummary {
   }
 
   return { name, target: target ? clampTarget(target) : null, iconKey }
+}
+
+/** Humanize a stable machine tool name without losing its identity elsewhere. */
+export function humanizeToolName(name: string): string {
+  const words = name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[._-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  if (!words) return "Tool"
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/** Resolve protocol-supplied presentation text without exposing internal app identifiers. */
+export function resolveProvidedToolTitle(part: ToolPartLike): string | undefined {
+  const presentation = part as ToolPartLike & {
+    title?: unknown
+    toolMetadata?: {
+      appContext?: { appName?: unknown; actionName?: unknown } | null
+    }
+  }
+  const upstreamTitle = asString(presentation.title)
+  if (upstreamTitle) return upstreamTitle
+
+  const appName = asString(presentation.toolMetadata?.appContext?.appName)
+  const actionName = asString(presentation.toolMetadata?.appContext?.actionName)
+  const actionTitle = actionName ? humanizeToolName(actionName) : undefined
+  if (appName && actionTitle) return `${appName} · ${actionTitle}`
+  return appName ?? actionTitle
+}
+
+/** Resolve the user-facing title while keeping upstream titles authoritative. */
+export function resolveToolDisplayTitle(part: ToolPartLike): string {
+  const providedTitle = resolveProvidedToolTitle(part)
+  if (providedTitle) return providedTitle
+  const summary = summarizeToolCall(part)
+  const name = humanizeToolName(summary.name)
+  return summary.target ? `${name} · ${summary.target}` : name
 }
 
 /** One tool-name bucket for the activity-group's collapsed-state preview. */

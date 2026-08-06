@@ -255,6 +255,7 @@ export type CaptureStreamEvent =
   | { type: "text-delta"; delta: string }
   | { type: "thinking-delta"; delta: string }
   | { type: "commentary-delta"; delta: string; messageId?: string; done?: boolean }
+  | { type: "tool-summary"; summary: string; toolCallIds: string[] }
   | {
       type: "tool-call"
       toolName: string

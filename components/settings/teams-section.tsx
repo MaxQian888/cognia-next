@@ -162,6 +162,7 @@ export function TeamsSection() {
             avatarEmoji: "🧩",
             members: [],
             orchestration: "mention_round_robin",
+            responseCap: "4",
             supervisorCharacterId: undefined,
             mcpServerIds: undefined,
           }}
@@ -221,6 +222,7 @@ function TeamRow({
           avatarEmoji: team.avatarEmoji ?? "",
           members: team.members.map((m) => ({ ...m })),
           orchestration: team.orchestration,
+          responseCap: (team.maxResponses ?? 4).toString(),
           supervisorCharacterId: team.supervisorCharacterId,
           mcpServerIds: team.mcpServerIds,
         }}
@@ -331,6 +333,7 @@ type EditorState = {
   avatarEmoji: string
   members: TeamMember[]
   orchestration: TeamOrchestration
+  responseCap: string
   supervisorCharacterId: string | undefined
   mcpServerIds: string[] | undefined
 }
@@ -342,6 +345,7 @@ type EditorOutput = {
   avatarEmoji?: string
   members: TeamMember[]
   orchestration: TeamOrchestration
+  maxResponses?: number
   supervisorCharacterId?: string
   mcpServerIds?: string[]
 }
@@ -416,6 +420,11 @@ function TeamEditor({
       toast.error(t("validation.atLeastOneMember"))
       return
     }
+    const responseCap = Number(s.responseCap)
+    if (!Number.isInteger(responseCap) || responseCap < 1 || responseCap > 12) {
+      toast.error(t("validation.responseCapInvalid"))
+      return
+    }
     if (s.orchestration === "supervisor") {
       if (!s.supervisorCharacterId) {
         toast.error(t("validation.supervisorRequired"))
@@ -435,6 +444,7 @@ function TeamEditor({
         avatarEmoji: s.avatarEmoji.trim() || undefined,
         members: s.members,
         orchestration: s.orchestration,
+        maxResponses: responseCap,
         supervisorCharacterId:
           s.orchestration === "supervisor" ? s.supervisorCharacterId : undefined,
         mcpServerIds: s.mcpServerIds,
@@ -522,6 +532,24 @@ function TeamEditor({
             ))}
           </SelectContent>
         </Select>
+      </div>
+
+      <div className="space-y-1">
+        <Label className="text-xs" htmlFor="team-response-cap">
+          {tEditor("responseCap")}
+        </Label>
+        <Input
+          id="team-response-cap"
+          type="number"
+          min={1}
+          max={12}
+          value={s.responseCap}
+          onChange={(event) => setS({ ...s, responseCap: event.target.value })}
+          aria-describedby="team-response-cap-help"
+        />
+        <p id="team-response-cap-help" className="text-[11px] text-muted-foreground">
+          {tEditor("responseCapHelp")}
+        </p>
       </div>
 
       {s.orchestration === "supervisor" && (

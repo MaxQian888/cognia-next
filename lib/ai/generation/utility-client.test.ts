@@ -1,4 +1,4 @@
-import { buildUtilityLlmClient } from "./utility-client"
+import { buildUtilityLlmClient, inferCheapModel } from "./utility-client"
 import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 
 const createLlmClientMock = jest.fn((config: unknown) => ({
@@ -20,6 +20,33 @@ function appSettings(partial: Record<string, unknown> = {}): AppSettings {
 }
 
 beforeEach(() => createLlmClientMock.mockClear())
+
+describe("inferCheapModel", () => {
+  it("returns haiku for anthropic provider", () => {
+    expect(inferCheapModel(null, appSettings({ defaultProvider: "anthropic" }))).toBe(
+      "claude-haiku-4-5-20251001"
+    )
+  })
+
+  it("returns gpt-4o-mini for openai provider", () => {
+    expect(inferCheapModel(null, appSettings({ defaultProvider: "openai" }))).toBe("gpt-4o-mini")
+  })
+
+  it("returns undefined for unknown/custom providers", () => {
+    expect(inferCheapModel(null, appSettings({ defaultProvider: "custom-llm" }))).toBeUndefined()
+  })
+
+  it("uses session providerOverride over appSettings default", () => {
+    const session = { providerOverride: "openai" } as ChatSession
+    expect(inferCheapModel(session, appSettings({ defaultProvider: "anthropic" }))).toBe(
+      "gpt-4o-mini"
+    )
+  })
+
+  it("defaults to anthropic when no provider is set", () => {
+    expect(inferCheapModel(null, appSettings({}))).toBe("claude-haiku-4-5-20251001")
+  })
+})
 
 describe("buildUtilityLlmClient", () => {
   it("returns null when appSettings is missing", () => {
@@ -50,33 +77,22 @@ describe("buildUtilityLlmClient", () => {
     expect(result).toBeNull()
   })
 
-  it("returns null when no model can be determined", () => {
-    const result = buildUtilityLlmClient({
-      session: null,
-      appSettings: appSettings({
-        defaultProvider: "openai",
-        providerSettings: { openai: { apiKey: "sk-1" } },
-      }),
-      featureId: "title",
-    })
-    expect(result).toBeNull()
-  })
-
-  it("builds a client using the provider default model + key", () => {
+  it("builds a client using the cheap model preference when no override", () => {
     buildUtilityLlmClient({
       session: null,
       appSettings: appSettings({
         defaultProvider: "openai",
-        providerSettings: { openai: { apiKey: "sk-1", defaultModel: "gpt-4o-mini" } },
+        providerSettings: { openai: { apiKey: "sk-1", defaultModel: "gpt-4o" } },
       }),
       featureId: "title",
     })
+    // The cheap model preference (gpt-4o-mini) should win over the provider default.
     expect(createLlmClientMock).toHaveBeenCalledWith(
       expect.objectContaining({ provider: "openai", model: "gpt-4o-mini", apiKey: "sk-1" })
     )
   })
 
-  it("override provider/model beats session and app defaults", () => {
+  it("override model beats the cheap preference", () => {
     buildUtilityLlmClient({
       session: { providerOverride: "anthropic", model: "claude-x" } as ChatSession,
       appSettings: appSettings({
@@ -99,32 +115,48 @@ describe("buildUtilityLlmClient", () => {
     )
   })
 
-  it("falls back to the session model when no override model is set", () => {
-    buildUtilityLlmClient({
-      session: { model: "session-model" } as ChatSession,
-      appSettings: appSettings({
-        defaultProvider: "openai",
-        providerSettings: { openai: { apiKey: "sk-1" } },
-      }),
-      featureId: "label",
-    })
-    expect(createLlmClientMock).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "session-model" })
-    )
-  })
-
-  it("falls back to the app default model last", () => {
+  it("does not inject cheap preference when override.model is set", () => {
     buildUtilityLlmClient({
       session: null,
       appSettings: appSettings({
         defaultProvider: "openai",
-        defaultModel: "app-default",
-        providerSettings: { openai: { apiKey: "sk-1" } },
+        providerSettings: { openai: { apiKey: "sk-1", defaultModel: "gpt-4o" } },
+      }),
+      override: { model: "custom-model" },
+      featureId: "title",
+    })
+    expect(createLlmClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "custom-model" })
+    )
+  })
+
+  it("cheap preference beats session model for known providers", () => {
+    buildUtilityLlmClient({
+      session: { model: "expensive-session-model" } as ChatSession,
+      appSettings: appSettings({
+        defaultProvider: "openai",
+        providerSettings: { openai: { apiKey: "sk-1", defaultModel: "gpt-4o" } },
       }),
       featureId: "label",
     })
+    // gpt-4o-mini (cheap preference) wins over expensive-session-model
     expect(createLlmClientMock).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "app-default" })
+      expect.objectContaining({ model: "gpt-4o-mini" })
+    )
+  })
+
+  it("falls back to session model for unknown providers (no cheap preference)", () => {
+    buildUtilityLlmClient({
+      session: { model: "session-model", providerOverride: "custom-llm" } as ChatSession,
+      appSettings: appSettings({
+        defaultProvider: "custom-llm",
+        providerSettings: { "custom-llm": { apiKey: "sk-custom", defaultModel: "llm-v1" } },
+      }),
+      featureId: "label",
+    })
+    // No cheap preference for custom-llm → session model used
+    expect(createLlmClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "session-model" })
     )
   })
 })

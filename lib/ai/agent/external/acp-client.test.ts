@@ -1744,6 +1744,57 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
     expect(ev).toMatchObject({ type: "thinking", thinking: "pondering" })
   })
 
+  it("keeps ACP tool titles separate from presentation metadata and forwards title updates", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+
+    const started = handleUpdate(a, "s1", {
+      sessionUpdate: "tool_call",
+      toolCallId: "tool-1",
+      title: "Reading configuration",
+      kind: "read",
+      status: "pending",
+      rawInput: { path: "config.json" },
+      locations: [{ path: "config.json" }],
+    })
+    expect(started).toMatchObject({
+      type: "tool_use_start",
+      toolUseId: "tool-1",
+      toolName: "Reading configuration",
+      title: "Reading configuration",
+      toolMetadata: { kind: "read", locations: [{ path: "config.json" }] },
+    })
+
+    const updated = handleUpdate(a, "s1", {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "tool-1",
+      title: "Read config.json",
+      kind: "read",
+      status: "in_progress",
+      rawInput: { path: "config.json", line: 1 },
+      locations: [{ path: "config.json", line: 1 }],
+      content: [{ type: "content", content: { type: "text", text: "working" } }],
+    })
+    expect(updated).toMatchObject({
+      type: "tool_call_update",
+      toolCallId: "tool-1",
+      title: "Read config.json",
+      rawInput: { path: "config.json", line: 1 },
+    })
+
+    const titleOnly = handleUpdate(a, "s1", {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "tool-1",
+      title: "Reading config.json",
+      status: "in_progress",
+    })
+    expect(titleOnly).toMatchObject({
+      type: "tool_call_update",
+      toolCallId: "tool-1",
+      title: "Reading config.json",
+    })
+  })
+
   it("still maps the legacy thought_message_chunk alias", () => {
     const a = new AcpClientAdapter()
     seedSession(a, "s1", "default")

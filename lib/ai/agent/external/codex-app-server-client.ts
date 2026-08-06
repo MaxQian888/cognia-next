@@ -230,12 +230,35 @@ interface CodexThreadItem {
   toolName?: string
   arguments?: unknown
   toolInput?: unknown
+  appContext?: {
+    appName?: string | null
+    actionName?: string | null
+    connectorId?: string
+    linkId?: string
+  } | null
+  readOnlyHint?: boolean | null
   result?: unknown
   error?: unknown
   // webSearch
   query?: string
   // imageView
   path?: string
+}
+
+function humanizeToolAction(value: string): string {
+  const words = value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[._-]+/g, " ")
+    .trim()
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : value
+}
+
+function codexMcpTitle(item: CodexThreadItem): string | undefined {
+  const appName = item.appContext?.appName?.trim()
+  const actionName = item.appContext?.actionName?.trim()
+  if (appName && actionName) return `${appName} · ${humanizeToolAction(actionName)}`
+  if (actionName) return humanizeToolAction(actionName)
+  return appName || undefined
 }
 
 interface PendingCompaction {
@@ -1664,8 +1687,14 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
           timestamp: new Date(),
           toolUseId: id,
           toolName: item.tool || item.toolName || "mcp_tool",
+          title: codexMcpTitle(item),
           kind: "mcp",
           rawInput: asRecord(item.arguments ?? item.toolInput),
+          toolMetadata: {
+            kind: "mcp",
+            ...(item.readOnlyHint !== undefined ? { readOnlyHint: item.readOnlyHint } : {}),
+            ...(item.appContext ? { appContext: item.appContext } : {}),
+          },
         })
         return
       case "collabAgentToolCall":
@@ -1829,6 +1858,17 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       case "mcpToolCall":
       case "dynamicToolCall":
       case "collabAgentToolCall": {
+        const presentation =
+          item.type === "collabAgentToolCall"
+            ? {}
+            : {
+                title: codexMcpTitle(item),
+                toolMetadata: {
+                  kind: "mcp" as const,
+                  ...(item.readOnlyHint !== undefined ? { readOnlyHint: item.readOnlyHint } : {}),
+                  ...(item.appContext ? { appContext: item.appContext } : {}),
+                },
+              }
         this.emit(sessionId, {
           type: "tool_use_end",
           sessionId,
@@ -1843,6 +1883,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
           toolUseId: id,
           result: (item.result as string | Record<string, unknown>) ?? "",
           isError: item.error != null,
+          ...presentation,
         })
         return
       }

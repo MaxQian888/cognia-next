@@ -134,16 +134,16 @@ describe("routeTurn", () => {
       expect(routeTurn(team, members, "@Writer @Reviewer pls help")).toEqual([writer, reviewer])
     })
 
-    it("falls back to all members in declared order when no mention", () => {
-      expect(routeTurn(team, members, "what do you all think?")).toEqual([coder, writer, reviewer])
+    it("uses the selected primary member when no Agent is mentioned", () => {
+      expect(routeTurn(team, members, "who should answer?", "c2")).toEqual([writer])
     })
 
-    it("respects the team's declared member order over the members-array order", () => {
+    it("falls back to the first declared member when utility routing is unavailable", () => {
       const reordered = makeTeam({
         members: [{ characterId: "c3" }, { characterId: "c1" }, { characterId: "c2" }],
         orchestration: "mention_round_robin",
       })
-      expect(routeTurn(reordered, members, "anyone?")).toEqual([reviewer, coder, writer])
+      expect(routeTurn(reordered, members, "anyone?")).toEqual([reviewer])
     })
 
     it("drops members that no longer exist in the characters list", () => {
@@ -151,7 +151,7 @@ describe("routeTurn", () => {
         members: [{ characterId: "c1" }, { characterId: "c_ghost" }, { characterId: "c2" }],
         orchestration: "mention_round_robin",
       })
-      expect(routeTurn(teamWithGhost, members, "go")).toEqual([coder, writer])
+      expect(routeTurn(teamWithGhost, members, "go")).toEqual([coder])
     })
   })
 
@@ -161,8 +161,13 @@ describe("routeTurn", () => {
       orchestration: "round_robin",
     })
 
-    it("returns all members regardless of mentions", () => {
-      expect(routeTurn(team, members, "@Writer only please")).toEqual([coder, writer, reviewer])
+    it("lets an explicit mention override the all-response policy", () => {
+      expect(routeTurn(team, members, "@Writer only please")).toEqual([writer])
+    })
+
+    it("caps all-response fan-out", () => {
+      const capped = { ...team, maxResponses: 2 }
+      expect(routeTurn(capped, members, "everyone answer")).toEqual([coder, writer])
     })
   })
 
@@ -172,9 +177,9 @@ describe("routeTurn", () => {
       orchestration: "manual",
     })
 
-    it("returns an empty list — the user picks", () => {
+    it("waits for a user pick unless a member is explicitly mentioned", () => {
       expect(routeTurn(team, members, "anyone?")).toEqual([])
-      expect(routeTurn(team, members, "@Writer go")).toEqual([])
+      expect(routeTurn(team, members, "@Writer go")).toEqual([writer])
     })
   })
 
@@ -184,9 +189,9 @@ describe("routeTurn", () => {
       orchestration: "supervisor",
     })
 
-    it("returns nobody — orchestrator drives supervisor flow separately", () => {
+    it("uses the supervisor flow unless an explicit mention targets a member", () => {
       expect(routeTurn(team, members, "anyone?")).toEqual([])
-      expect(routeTurn(team, members, "@Writer go")).toEqual([])
+      expect(routeTurn(team, members, "@Writer go")).toEqual([writer])
     })
   })
 })

@@ -1950,6 +1950,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
                 timestamp: now,
                 toolUseId: toolPart.callID ?? toolPart.id,
                 toolName: toolPart.tool ?? "unknown",
+                title: readOpenCodeToolTitle(state),
                 rawInput: state.input,
               })
             } else if (state.status === "completed") {
@@ -1961,6 +1962,8 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
                 result: state.output,
                 isError: false,
                 toolName: toolPart.tool,
+                title: readOpenCodeToolTitle(state),
+                rawInput: state.input,
               })
             } else if (state.status === "error") {
               events.push({
@@ -1971,6 +1974,8 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
                 result: state.error,
                 isError: true,
                 toolName: toolPart.tool,
+                title: readOpenCodeToolTitle(state),
+                rawInput: state.input,
               })
             }
             break
@@ -2299,6 +2304,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
             timestamp: now,
             toolUseId: toolPart.callID ?? toolPart.id,
             toolName: toolPart.tool ?? "unknown",
+            title: readOpenCodeToolTitle(toolPart.state),
             rawInput: toolPart.state.input,
           }
 
@@ -2311,6 +2317,8 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
               result: toolPart.state.output,
               isError: false,
               toolName: toolPart.tool,
+              title: readOpenCodeToolTitle(toolPart.state),
+              rawInput: toolPart.state.input,
             }
           } else if (toolPart.state.status === "error") {
             yield {
@@ -2321,6 +2329,8 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
               result: toolPart.state.error,
               isError: true,
               toolName: toolPart.tool,
+              title: readOpenCodeToolTitle(toolPart.state),
+              rawInput: toolPart.state.input,
             }
           }
           break
@@ -2482,6 +2492,11 @@ function asOpenCodeRecord(value: unknown): Record<string, unknown> | undefined {
 
 function asOpenCodeString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined
+}
+
+function readOpenCodeToolTitle(state: unknown): string | undefined {
+  const title = asOpenCodeString(asOpenCodeRecord(state)?.title)?.trim()
+  return title || undefined
 }
 
 function asOpenCodeStringArray(value: unknown): string[] {

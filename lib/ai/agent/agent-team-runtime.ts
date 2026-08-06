@@ -304,6 +304,52 @@ export async function runTeamLifecycle(
 
     // ── Allocate runId early so the onTeamStart hook can carry it ──
     const runId = deps.runId ?? `run_team_${nanoid(12)}`
+    let durableEnvironment:
+      | NonNullable<import("./team/team-run-context").TeamRunContext["durableEnvironment"]>
+      | undefined
+    if (team.config.runtimeVersion === "durable-v2") {
+      try {
+        const { getDurableTeamCoordinator } = await import("./team/durable-runtime")
+        await getDurableTeamCoordinator().prepareRun(team, runId)
+        if (!team.config.environmentRef) {
+          throw new Error("Durable AgentTeam requires an immutable environment version")
+        }
+        const [{ getProjectEnvironmentVersion }, { createLocalTauriExecutionEnvironment }] =
+          await Promise.all([
+            import("@/lib/db/project-environments"),
+            import("./execution/local-tauri-environment"),
+          ])
+        const profile = await getProjectEnvironmentVersion(team.config.environmentRef.versionId)
+        if (!profile || profile.environmentId !== team.config.environmentRef.environmentId) {
+          throw new Error("The selected AgentTeam environment version is unavailable")
+        }
+        const primary = team.config.repositories?.find(
+          (repository) => repository.role === "primary"
+        )
+        const repositoryPath = primary?.path ?? team.config.workingDir
+        if (!repositoryPath) throw new Error("Durable AgentTeam requires a primary repository path")
+        // Capability truth comes from the host adapter, never from the team's
+        // requested policy. Unsupported sandbox/network guarantees therefore
+        // fail closed instead of being treated as capabilities by declaration.
+        const adapter = createLocalTauriExecutionEnvironment()
+        const prepared = await adapter.prepare(profile, repositoryPath)
+        durableEnvironment = {
+          adapter,
+          profile: Object.freeze(structuredClone(profile)),
+          preparedByRepository: new Map([[primary?.id ?? "primary", prepared]]),
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        const { updateAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+        await updateAgentTeamRun(runId, {
+          status: "failed",
+          recoveryReason: reason,
+          completedAt: Date.now(),
+          updatedAt: Date.now(),
+        }).catch(() => false)
+        return { runId, status: "failed", reason }
+      }
+    }
     const hooks = getPluginLifecycleHooks()
     hooks.dispatchOnTeamStart({
       teamId,
@@ -812,6 +858,7 @@ export async function runTeamLifecycle(
       notifier,
       concurrency,
       modelPref,
+      ...(durableEnvironment ? { durableEnvironment } : {}),
       gatePolicy,
       // Blocking task review (ADR-0071). Both only when review is enabled, so a
       // team without it carries no reviewer and the review node is never
@@ -1070,6 +1117,34 @@ export async function runTeamLifecycle(
       finalReason = err instanceof Error ? err.message : String(err)
       throw err
     } finally {
+      if (team.config.runtimeVersion === "durable-v2") {
+        const { getAgentTeamRun, updateAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+        const persistedRun = await getAgentTeamRun(runId)
+        const abortMessage =
+          ac.signal.reason instanceof Error
+            ? ac.signal.reason.message
+            : String(ac.signal.reason ?? "")
+        const durableStatus =
+          persistedRun?.status === "needs_input"
+            ? "needs_input"
+            : finalStatus === "cancelled" && abortMessage === "paused"
+              ? "paused"
+              : finalStatus === "cancelled" && abortMessage === "shutdown"
+                ? "terminated"
+                : finalStatus === "completed"
+                  ? "completed"
+                  : finalStatus === "cancelled"
+                    ? "cancelled"
+                    : "failed"
+        await updateAgentTeamRun(runId, {
+          status: durableStatus,
+          ...(finalReason ? { recoveryReason: finalReason } : {}),
+          ...(["completed", "cancelled", "failed", "terminated"].includes(durableStatus)
+            ? { completedAt: Date.now() }
+            : {}),
+          updatedAt: Date.now(),
+        }).catch(() => false)
+      }
       hooks.dispatchOnTeamComplete({
         teamId,
         runId,

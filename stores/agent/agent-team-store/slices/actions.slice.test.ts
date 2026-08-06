@@ -45,6 +45,11 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: { getState: () => ({ activeProjectId: mockActiveProjectId }) },
 }))
 
+const purgeAgentTeamMock = jest.fn<Promise<void>, [teamId: string]>(async () => undefined)
+jest.mock("@/lib/db/agent-team-runtime", () => ({
+  purgeAgentTeam: (teamId: string) => purgeAgentTeamMock(teamId),
+}))
+
 const reset = () => {
   localStorage.clear()
   useAgentTeamStore.getState().reset()
@@ -129,6 +134,19 @@ describe("useAgentTeamStore deleteTeam", () => {
     useAgentTeamStore.getState().deleteTeam(team.id)
     expect(useAgentTeamStore.getState().teams[team.id]).toBeUndefined()
     expect(useAgentTeamStore.getState().teammates[tm.id]).toBeUndefined()
+  })
+
+  it("purges device-local durable runtime rows when deleting a durable team", async () => {
+    const team = useAgentTeamStore.getState().createTeam({
+      name: "Durable",
+      task: "t",
+      config: { runtimeVersion: "durable-v2" },
+    })
+
+    useAgentTeamStore.getState().deleteTeam(team.id)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(purgeAgentTeamMock).toHaveBeenCalledWith(team.id)
   })
 })
 

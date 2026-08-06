@@ -69,7 +69,7 @@ import type {
 import type { Project } from "@/types"
 import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import { resolveMemoryConfig } from "@/types/memory/memory"
-import { resolveMemoryTurnPolicy } from "@/lib/memory/control-plane/policy"
+import { resolveAgentMemoryPolicy } from "@/lib/memory/agent-policy"
 import { resolveProjectKnowledgeSettings } from "@/types/project-knowledge"
 import type { ConnectorMode } from "@/types/connectors/policy"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
@@ -77,6 +77,12 @@ import { useAgentRuntimeStore } from "@/stores/agent"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import { buildAgentModeSessionUpdate } from "@/lib/agent"
+import {
+  resolveAgentEnvironment,
+  resolveAgentExecutionPolicy,
+  resolveAgentModel,
+} from "@/lib/agent/agent-profile-policy"
+import { loadAgentEnvSecret } from "@/lib/agent/agent-env-keyring"
 import { namespacedA2UIToolNames } from "@/lib/a2ui/mcp-tool-schemas"
 import { A2UI_SYSTEM_PROMPT } from "@/lib/ai/prompts/a2ui-prompts"
 import {
@@ -114,6 +120,12 @@ import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_SNIPPET } from "./plan-mode-prompt"
 import { resolveProviderAttemptOptions } from "./provider-attempt-options"
+import {
+  applySupportAgentSafety,
+  buildSupportAgentContext,
+  isSupportAgentId,
+  isSupportDiagnosticsEnabled,
+} from "@/lib/support-agent/context"
 
 /**
  * Snippet appended to `appendSystemPrompt` when brief mode is on. Exported so
@@ -428,6 +440,8 @@ export interface BuildOptionsContext {
    * affinity, and traces stay attributed to the immutable Agent ticket.
    */
   routingSurface?: import("@cognia/provider-types/auto-router").RoutingSurface
+  /** Semantic Agent model role. Normal chat/dispatch defaults to `execute`. */
+  modelRole?: import("@cognia/agent-config-types").AgentModelRole
   /**
    * Optional long-term memory runtime dependencies (ADR — autonomous memory).
    * When supplied AND `memoryUserMessage` is set AND `appSettings.memory` is
@@ -953,6 +967,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // without a Dexie row.
     character = (await resolveCharacterById(session.characterId)) ?? null
   }
+  const supportAgent = isSupportAgentId(character?.id)
+  const agentExecutionPolicy = resolveAgentExecutionPolicy(
+    character?.executionPolicy,
+    session?.executionPolicy
+  )
+  if (agentExecutionPolicy.maxTurns !== undefined) {
+    opts.maxTurns = agentExecutionPolicy.maxTurns
+  }
 
   // --- Resolve skills: character.skillIds ∪ ephemeralSkillIds, minus session-disables.
   // Honour the per-skill `status` flag — disabled skills don't get appended,
@@ -1064,14 +1086,18 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // persona declares one (D1). Explicit `/model` and per-session choices
   // still win. Alias-valued defaults resolve through the alias engine below
   // like every other source.
+  const agentModel = resolveAgentModel(
+    ctx.modelRole ?? "execute",
+    character,
+    appSettings?.defaultModel
+  )
   let model: string | undefined =
     imModelOverride ??
     session?.model ??
     memberOverride?.modelOverride ??
     modeUpdate?.model ??
     imDefaultModel ??
-    character?.model ??
-    appSettings?.defaultModel
+    agentModel
 
   // --- Provider: IM channel override > per-session override > bot default > character > app default > "anthropic" -----
   // The sidecar uses `provider` to pick which dispatcher (`anthropic` vs the
@@ -1090,7 +1116,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const requestedEffort =
     imOverrideRow?.reasoningOverride ??
     session?.effort ??
+    session?.executionPolicy?.effort ??
     imAdapterRow?.defaultReasoning ??
+    character?.executionPolicy?.effort ??
     appSettings?.defaultEffort
 
   // Rough text of the outgoing prompt (CJK-aware sizing happens later). Only the
@@ -1358,9 +1386,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   let memorySection = ""
   if (ctx.memoryDeps && ctx.memoryUserMessage && ctx.memoryUserMessage.trim()) {
     const memoryConfig = resolveMemoryConfig(appSettings?.memory)
-    const memoryPolicy = resolveMemoryTurnPolicy({
+    const memoryPolicy = resolveAgentMemoryPolicy({
       config: memoryConfig,
       session: session ?? undefined,
+      agentPolicy: character?.memoryPolicy,
     })
     await import("@/lib/db/memory-governance")
       .then(({ appendMemoryAuditEvent }) =>
@@ -1375,6 +1404,22 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       try {
         const { applyMemoryContext } = await import("@/lib/memory/runtime/apply-memory-context")
         const twinChunkTexts = opts.twinContext?.retrievedChunks.map((c) => c.chunk.content) ?? []
+        const readableScopes = new Set(memoryPolicy.readableScopes)
+        const scopedMemoryDeps = {
+          ...ctx.memoryDeps,
+          loadCandidates: async (
+            reader?: Parameters<NonNullable<typeof ctx.memoryDeps>["loadCandidates"]>[0]
+          ) =>
+            (await ctx.memoryDeps!.loadCandidates(reader)).filter((memory) =>
+              readableScopes.has(memory.scope)
+            ),
+          loadProcedural: async (
+            reader?: Parameters<NonNullable<typeof ctx.memoryDeps>["loadProcedural"]>[0]
+          ) =>
+            (await ctx.memoryDeps!.loadProcedural(reader)).filter((memory) =>
+              readableScopes.has(memory.scope)
+            ),
+        }
         const result = await applyMemoryContext({
           userMessage: ctx.memoryUserMessage,
           reader: {
@@ -1393,7 +1438,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           // Reuse the turn's query embedding (memory's vector backend shares the
           // twin embedding model via resolveMemoryBackend) — no re-embed.
           precomputedQueryEmbedding: ctx.precomputedQueryEmbedding,
-          deps: ctx.memoryDeps,
+          deps: scopedMemoryDeps,
         })
         if (result.systemPromptSection) {
           if (cacheOptimizationEnabled) {
@@ -1475,6 +1520,47 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       } catch {
         // Project-knowledge runtime failure is non-fatal — keep the prompt as-is.
       }
+    }
+  }
+
+  // --- Reusable Agent Knowledge Base injection -----------------------------
+  // Bound libraries are independent of Project/Twin ownership and are queried
+  // in parallel. The shared vector backend is reused, while each library keeps
+  // its own collection and failure boundary.
+  let agentKnowledgeSection = ""
+  if (
+    (character?.knowledgeBaseIds?.length ?? 0) > 0 &&
+    ctx.projectKnowledgeDeps?.vectorBackend &&
+    ctx.projectKnowledgeUserMessage?.trim()
+  ) {
+    try {
+      const { applyAgentKnowledgeContextFromDb } =
+        await import("@/lib/knowledge-base/runtime/apply-agent-knowledge-context")
+      const result = await applyAgentKnowledgeContextFromDb({
+        knowledgeBaseIds: character?.knowledgeBaseIds ?? [],
+        userMessage: ctx.projectKnowledgeUserMessage,
+        topKPerBase: 5,
+        tokenBudget: 2_000,
+        precomputedQueryEmbedding: ctx.precomputedQueryEmbedding,
+        runtimeDeps: ctx.projectKnowledgeDeps as Parameters<
+          typeof applyAgentKnowledgeContextFromDb
+        >[0]["runtimeDeps"],
+      })
+      if (result.systemPromptSection) {
+        if (cacheOptimizationEnabled) dynamicTailSections.push(result.systemPromptSection)
+        else agentKnowledgeSection = result.systemPromptSection
+      }
+      if (result.retrievedChunks.length > 0 || result.degraded) {
+        opts.agentKnowledgeContext = {
+          retrievedChunks: result.retrievedChunks,
+          citations: result.citations,
+          failures: result.failures,
+          budget: result.budget,
+          degraded: result.degraded,
+        }
+      }
+    } catch {
+      // Reusable Knowledge Base retrieval is best-effort and never blocks send.
     }
   }
 
@@ -1612,6 +1698,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     instructionSection,
     memorySection,
     projectKnowledgeSection,
+    agentKnowledgeSection,
     modeSection,
     skillSection,
     pluginSkillSection,
@@ -1915,7 +2002,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   try {
     // CLI / headless callers inject `preloadedMcpServers` (incl. `[]`) so the
     // resolver never touches Dexie; desktop leaves it undefined → Dexie lookup.
-    const enabled = ctx.preloadedMcpServers ?? (await listEnabledMcpServers())
+    const enabled = supportAgent
+      ? []
+      : (ctx.preloadedMcpServers ?? (await listEnabledMcpServers()))
     let chosen = enabled
     const memberMcp = memberOverride?.mcpServerIdsOverride
 
@@ -1991,7 +2080,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // `<cwd>/.cognia/lsp.json` for the project layer.
   {
     const lspEnabled = appSettings?.lsp?.enabled ?? appSettings?.builtinTools?.lsp ?? false
-    if (lspEnabled && opts.cwd) {
+    if (!supportAgent && lspEnabled && opts.cwd) {
       const servers = await resolveLspServers({
         rootDir: opts.cwd,
         userServers: appSettings?.lsp?.servers,
@@ -2682,6 +2771,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   //
   // Runs BEFORE the convenience-modes block below so `debugMode` can layer
   // `DEBUG=*` / `CLAUDE_CODE_DEBUG=1` on top.
+  if (!supportAgent && agentExecutionPolicy.envBindings?.length) {
+    const agentEnv = await resolveAgentEnvironment(
+      agentExecutionPolicy.envBindings,
+      loadAgentEnvSecret
+    )
+    opts.env = { ...(opts.env ?? {}), ...agentEnv }
+  }
+
   const accountId = resolveAccountId(session ?? null, character ?? null, appSettings ?? null)
   let accountEnv: Record<string, string>
   let proxyEnv: Record<string, string>
@@ -3467,6 +3564,24 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.trustedWorkspaceRoots = [...new Set(ctx.trustedWorkspaceRoots)]
   } else {
     delete opts.trustedWorkspaceRoots
+  }
+
+  if (supportAgent) {
+    const supportContext = await buildSupportAgentContext({
+      locale: appSettings?.language,
+      userText: ctx.routingContextHint?.promptText ?? ctx.twinUserMessage,
+      diagnosticsEnabled: isSupportDiagnosticsEnabled(),
+    })
+    const safe = applySupportAgentSafety({
+      ...opts,
+      systemPrompt: `${character?.systemPrompt ?? ""}\n\n${supportContext}`.trim(),
+      appendSystemPrompt: undefined,
+      dynamicSystemPrompt: undefined,
+    }) as SendOptions
+    for (const key of Object.keys(opts) as Array<keyof SendOptions>) delete opts[key]
+    Object.assign(opts, safe)
+    delete opts.appendSystemPrompt
+    delete opts.dynamicSystemPrompt
   }
 
   if (opts.claudeAgentSdk) {

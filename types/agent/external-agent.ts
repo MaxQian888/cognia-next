@@ -1737,9 +1737,25 @@ export interface ExternalAgentToolUseStartEvent extends ExternalAgentEventBase {
   type: "tool_use_start"
   toolUseId: string
   toolName: string
+  /** Human-readable per-call title. Kept separate from the stable tool identity. */
+  title?: string
   kind?: AcpToolCallKind
   rawInput?: Record<string, unknown>
   locations?: AcpToolCallLocation[]
+  toolMetadata?: ExternalAgentToolMetadata
+}
+
+/** Presentation and safety metadata shared by external-agent tool adapters. */
+export interface ExternalAgentToolMetadata {
+  kind?: AcpToolCallKind
+  readOnlyHint?: boolean | null
+  locations?: AcpToolCallLocation[]
+  appContext?: {
+    appName?: string | null
+    actionName?: string | null
+    connectorId?: string
+    linkId?: string
+  }
 }
 
 /**
@@ -1769,6 +1785,8 @@ export interface ExternalAgentToolResultEvent extends ExternalAgentEventBase {
   result: string | Record<string, unknown>
   isError?: boolean
   toolName?: string
+  title?: string
+  toolMetadata?: ExternalAgentToolMetadata
   kind?: AcpToolCallKind
   rawInput?: Record<string, unknown>
   rawOutput?: Record<string, unknown>

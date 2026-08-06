@@ -1580,11 +1580,36 @@ describe("CodexAppServerAdapter", () => {
       })
       feed("item/started", {
         threadId: "thr_1",
-        item: { id: "m1", type: "mcpToolCall", tool: "search", arguments: { q: "x" } },
+        item: {
+          id: "m1",
+          type: "mcpToolCall",
+          tool: "calendar.create_event",
+          arguments: { date: "2026-08-07" },
+          readOnlyHint: false,
+          appContext: {
+            connectorId: "calendar",
+            linkId: "primary",
+            appName: "Calendar",
+            actionName: "create_event",
+          },
+        },
       })
       feed("item/completed", {
         threadId: "thr_1",
-        item: { id: "m1", type: "mcpToolCall", tool: "search", result: "ok", error: "boom" },
+        item: {
+          id: "m1",
+          type: "mcpToolCall",
+          tool: "calendar.create_event",
+          result: "ok",
+          error: "boom",
+          readOnlyHint: true,
+          appContext: {
+            connectorId: "calendar",
+            linkId: "primary",
+            appName: "Calendar",
+            actionName: "update_event",
+          },
+        },
       })
       feed("item/reasoning/summaryTextDelta", {
         threadId: "thr_1",
@@ -1612,10 +1637,10 @@ describe("CodexAppServerAdapter", () => {
       })
       feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
 
-      const events: Array<{ type: string }> = []
+      const events: Array<Record<string, unknown>> = []
       let r = await first
       while (!r.done) {
-        events.push(r.value)
+        events.push(r.value as unknown as Record<string, unknown>)
         r = await it.next()
       }
       const types = events.map((e) => e.type)
@@ -1624,6 +1649,40 @@ describe("CodexAppServerAdapter", () => {
       expect(types).toContain("tool_result")
       expect(types).toContain("thinking")
       expect(types).toContain("plan_update")
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "tool_use_start",
+          toolName: "calendar.create_event",
+          title: "Calendar · Create event",
+          toolMetadata: {
+            kind: "mcp",
+            readOnlyHint: false,
+            appContext: {
+              connectorId: "calendar",
+              linkId: "primary",
+              appName: "Calendar",
+              actionName: "create_event",
+            },
+          },
+        })
+      )
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "tool_result",
+          toolUseId: "m1",
+          title: "Calendar · Update event",
+          toolMetadata: {
+            kind: "mcp",
+            readOnlyHint: true,
+            appContext: {
+              connectorId: "calendar",
+              linkId: "primary",
+              appName: "Calendar",
+              actionName: "update_event",
+            },
+          },
+        })
+      )
     })
 
     it("streams item/plan/delta as thinking, dedupes the plan item, and records turn/diff", async () => {

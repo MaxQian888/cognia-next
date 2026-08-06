@@ -148,6 +148,7 @@ export const SETTINGS_SYNC = {
   sidebarSide: { category: "desktop-only" },
   workbenchRail: { category: "desktop-only" },
   workbenchRailPersistent: { category: "desktop-only" },
+  workbenchRailPerProject: { category: "desktop-only" },
   titleBarLayout: { category: "desktop-only" },
   statusBarLayout: { category: "desktop-only" },
   mobileHomeLayout: { category: "desktop-only" },

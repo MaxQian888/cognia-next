@@ -1,9 +1,32 @@
 import {
   hasMcpContent,
   isSubagentPart,
+  isToolUseSummaryPart,
   type McpResultBlock,
   type SubagentPart,
 } from "./parts-extensions"
+
+describe("parts-extensions — isToolUseSummaryPart", () => {
+  it("accepts a persisted aggregate tool summary", () => {
+    expect(
+      isToolUseSummaryPart({
+        type: "data-tool-summary",
+        data: { summary: "Read two files", toolCallIds: ["t1", "t2"] },
+      })
+    ).toBe(true)
+  })
+
+  it("rejects malformed summary parts", () => {
+    expect(isToolUseSummaryPart({ type: "data-tool-summary", data: { summary: 1 } })).toBe(false)
+    expect(
+      isToolUseSummaryPart({
+        type: "data-tool-summary",
+        data: { summary: "ok", toolCallIds: "t1" },
+      })
+    ).toBe(false)
+    expect(isToolUseSummaryPart(null)).toBe(false)
+  })
+})
 
 describe("parts-extensions — hasMcpContent (gap3)", () => {
   it("returns true when mcpContent is a non-empty array", () => {

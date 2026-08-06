@@ -84,14 +84,28 @@ jest.mock("@/lib/memory/runtime/build-deps", () => ({
 
 const buildSupervisorRosterMock = jest.fn((..._a: unknown[]) => "roster")
 const parseDispatchesMock = jest.fn((..._a: unknown[]): unknown[] => [])
+const parseMentionsMock = jest.fn((..._a: unknown[]): unknown[] => [])
 const routeTurnMock = jest.fn((..._a: unknown[]): unknown[] => [])
 const stripDispatchesMock = jest.fn((s: string) => s)
 
 jest.mock("@/lib/claude/team-router", () => ({
   buildSupervisorRoster: (...a: unknown[]) => buildSupervisorRosterMock(...a),
   parseDispatches: (...a: unknown[]) => parseDispatchesMock(...a),
+  parseMentions: (...a: unknown[]) => parseMentionsMock(...a),
   routeTurn: (...a: unknown[]) => routeTurnMock(...a),
   stripDispatches: (s: string) => stripDispatchesMock(s),
+}))
+
+const selectPrimaryResponderMock = jest.fn(async ({ members }: { members: unknown[] }) => members[0])
+jest.mock("@/lib/claude/team-primary-router", () => ({
+  duplicateTeamResponseIds: jest.fn(() => new Set()),
+  resolveTeamResponseCap: jest.fn(() => 4),
+  selectPrimaryResponder: (...args: unknown[]) => selectPrimaryResponderMock(...(args as [{ members: unknown[] }])),
+}))
+
+const buildUtilityLlmClientMock = jest.fn(() => null)
+jest.mock("@/lib/ai/generation/utility-client", () => ({
+  buildUtilityLlmClient: (...args: unknown[]) => buildUtilityLlmClientMock(...args),
 }))
 
 const persistMessagesMock = jest.fn().mockResolvedValue(undefined)
@@ -296,7 +310,10 @@ beforeEach(() => {
   onClaudeMessageMock.mockClear()
   buildSupervisorRosterMock.mockClear()
   parseDispatchesMock.mockClear().mockReturnValue([])
+  parseMentionsMock.mockClear().mockReturnValue([])
   routeTurnMock.mockClear().mockReturnValue([])
+  selectPrimaryResponderMock.mockClear()
+  buildUtilityLlmClientMock.mockClear().mockReturnValue(null)
   stripDispatchesMock.mockClear()
   persistMessagesMock.mockClear()
   truncateAfterMock.mockClear()
@@ -418,6 +435,42 @@ describe("useTeamChat — actions", () => {
     })
     expect(chatState.setStatus).toHaveBeenCalledWith("idle")
     expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("uses the utility router for an unmentioned smart-primary turn", async () => {
+    const alice = { id: "alice", name: "Alice" }
+    getSessionMock.mockResolvedValueOnce({
+      id: "team-1",
+      kind: "team",
+      teamId: "t-1",
+      title: "T",
+    })
+    getTeamMock.mockResolvedValueOnce({
+      id: "t-1",
+      orchestration: "mention_round_robin",
+      members: [{ characterId: "alice" }],
+    })
+    listCharactersByIdsMock.mockResolvedValueOnce([alice])
+    routeTurnMock.mockReturnValueOnce([])
+
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("who should answer?")
+    })
+
+    expect(buildUtilityLlmClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({ featureId: "team-primary-router" })
+    )
+    expect(selectPrimaryResponderMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userText: "who should answer?", members: [alice] })
+    )
+    expect(routeTurnMock).toHaveBeenCalledWith(
+      expect.anything(),
+      [alice],
+      "who should answer?",
+      "alice"
+    )
   })
 
   it("send() supervisor with no supervisor character surfaces an error", async () => {

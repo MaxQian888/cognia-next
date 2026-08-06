@@ -7,7 +7,9 @@
 jest.mock("@/lib/agent/plan/runtime", () => ({ getPlanRuntime: jest.fn() }))
 jest.mock("@/lib/agent/plan/plan-settings", () => ({ loadPlanConfigDefaults: jest.fn() }))
 jest.mock("@/lib/agent/plan/planner", () => ({ decomposeIntoPlan: jest.fn() }))
-jest.mock("@/lib/ai/generation/utility-client", () => ({ buildUtilityLlmClient: jest.fn() }))
+jest.mock("@/lib/ai/generation/agent-role-client", () => ({
+  buildAgentRoleLlmClient: jest.fn(),
+}))
 jest.mock("@/lib/goal/runtime", () => ({ getGoalRuntime: jest.fn() }))
 jest.mock("@/lib/db/sessions", () => ({ getSession: jest.fn() }))
 jest.mock("@/stores/settings", () => ({ useSettingsStore: { getState: jest.fn() } }))
@@ -16,7 +18,7 @@ jest.mock("@/stores/agent/agent-team-store", () => ({ useAgentTeamStore: { getSt
 import { getPlanRuntime } from "@/lib/agent/plan/runtime"
 import { loadPlanConfigDefaults } from "@/lib/agent/plan/plan-settings"
 import { decomposeIntoPlan } from "@/lib/agent/plan/planner"
-import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
+import { buildAgentRoleLlmClient } from "@/lib/ai/generation/agent-role-client"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { getSession } from "@/lib/db/sessions"
 import { useSettingsStore } from "@/stores/settings"
@@ -29,7 +31,7 @@ import type { AgentPlan, CreatePlanInput } from "@/types/agent/plan"
 const getPlanRuntimeMock = getPlanRuntime as jest.Mock
 const loadPlanConfigDefaultsMock = loadPlanConfigDefaults as jest.Mock
 const decomposeIntoPlanMock = decomposeIntoPlan as jest.Mock
-const buildUtilityLlmClientMock = buildUtilityLlmClient as jest.Mock
+const buildAgentRoleLlmClientMock = buildAgentRoleLlmClient as jest.Mock
 const getGoalRuntimeMock = getGoalRuntime as jest.Mock
 const getSessionMock = getSession as jest.Mock
 const settingsStateMock = useSettingsStore.getState as jest.Mock
@@ -95,7 +97,7 @@ beforeEach(() => {
   getSessionMock.mockResolvedValue({ id: "ses_a", characterId: "char_1" })
   settingsStateMock.mockReturnValue({ settings: {} })
   teamStateMock.mockReturnValue({ teams: {}, tasks: {} })
-  buildUtilityLlmClientMock.mockReturnValue({ complete: jest.fn() })
+  buildAgentRoleLlmClientMock.mockResolvedValue({ complete: jest.fn() })
 })
 
 describe("guards", () => {
@@ -225,7 +227,7 @@ describe("/plan <objective> — planner_llm", () => {
   })
 
   it("explains how to proceed when no planner model is configured", async () => {
-    buildUtilityLlmClientMock.mockReturnValue(null)
+    buildAgentRoleLlmClientMock.mockResolvedValue(null)
     const res = await dispatchPlanSubcommand(ctx({ args: "do the thing" }))
     expect(res.system).toMatch(/No planner model available/)
     expect(decomposeIntoPlanMock).not.toHaveBeenCalled()
@@ -251,8 +253,8 @@ describe("/plan <objective> — planner_llm", () => {
       steps: [{ title: "one", kind: "agent_turn" }],
     })
     await dispatchPlanSubcommand(ctx({ args: "do it" }))
-    expect(buildUtilityLlmClientMock).toHaveBeenCalledWith(
-      expect.objectContaining({ session: null, appSettings: null })
+    expect(buildAgentRoleLlmClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "plan", session: null, appSettings: null })
     )
     expect(decomposeIntoPlanMock.mock.calls[0][0]).not.toHaveProperty("characterId")
   })

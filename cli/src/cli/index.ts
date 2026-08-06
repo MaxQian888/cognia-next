@@ -16,6 +16,8 @@ import { evalCommand as defaultEval } from "./eval-command"
 import { durabilityCommand as defaultDurability } from "./durability-command"
 import { sdkCommand as defaultSdk } from "./sdk-command"
 import { serveCommand as defaultServe } from "../serve/serve-command"
+import { xCommand as defaultX } from "./x-command"
+import { rpcCommand as defaultRpc } from "./rpc-command"
 import { realOutput, type OutputSink } from "./output"
 import { VERSION } from "../version"
 
@@ -24,6 +26,8 @@ export { VERSION }
 export const HELP = `cognia-agent — standalone Cognia coding agent
 
 Usage:
+  cognia-agent x <claude|codex> [--model m] [--bypass]  launch an external coding agent
+                    [--resume id] [-- <passthrough args>]   through cognia's gateway
   cognia-agent chat [--continue | --resume [id]]       interactive terminal agent
                     [--backend builtin|codex|claude-code|<preset>]
                     [--plugin-tools] [--dev-plugins] [--bypass]
@@ -52,6 +56,8 @@ Usage:
                       headless persistence: inspect, migrate, recover, roll back
   cognia-agent sdk <capabilities|sessions|info|messages|rename|tag|fork|delete|settings>
                      typed Claude Agent SDK management (never raw option JSON)
+  cognia-agent rpc [--model m] [--provider p] [--backend id]
+                     JSON-RPC 2.0 server on stdin/stdout (for @cognia/agent/rpc)
   cognia-agent serve [--server-url u] [--account id] [--home dir]
                      [--flush-debounce ms]           headless brain for cognia-server
                      (COGNIA_SERVER_URL / COGNIA_SERVICE_TOKEN / COGNIA_BRIDGE_URL /
@@ -93,6 +99,8 @@ const KNOWN_COMMANDS = new Set([
   "eval",
   "durability",
   "sdk",
+  "x",
+  "rpc",
 ])
 
 export interface MainDeps {
@@ -108,6 +116,8 @@ export interface MainDeps {
   eval?: typeof defaultEval
   durability?: typeof defaultDurability
   sdk?: typeof defaultSdk
+  x?: typeof defaultX
+  rpc?: typeof defaultRpc
   out?: OutputSink
 }
 
@@ -177,6 +187,10 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
         out.error(error instanceof Error ? error.message : String(error))
         return 1
       })
+    case "x":
+      return (deps.x ?? defaultX)(args, { out })
+    case "rpc":
+      return (deps.rpc ?? defaultRpc)(args, { out })
     default:
       out.error(`unknown command "${args.command}"\n\n${HELP}`)
       return 2
