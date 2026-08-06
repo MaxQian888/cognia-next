@@ -759,7 +759,7 @@ describe("account store switching, locking, and lifecycle", () => {
     await store.getState().load()
     await store.getState().unlockAccount("acct_alpha", "secret")
 
-    await store.getState().deleteAccount("acct_beta")
+    const result = await store.getState().deleteAccount("acct_beta")
 
     expect(mockDeleteRegistryAccount).toHaveBeenCalledWith("acct_beta", {
       replacementAccountId: undefined,
@@ -768,6 +768,13 @@ describe("account store switching, locking, and lifecycle", () => {
     expect(mockPurgeAccountLocalState).toHaveBeenCalledWith("acct_beta")
     expect(store.getState().accounts.map((item) => item.id)).toEqual(["acct_alpha"])
     expect(store.getState().unlockedAccountId).toBe("acct_alpha")
+    expect(result).toMatchObject({
+      accountId: "acct_beta",
+      wasActive: false,
+      registryDeleted: true,
+      accountDatabaseDeleted: true,
+      localStatePurged: true,
+    })
   })
 
   it("records delete failures before local cascade runs", async () => {
@@ -794,7 +801,9 @@ describe("account store switching, locking, and lifecycle", () => {
     await store.getState().load()
     await store.getState().unlockAccount("acct_alpha", "secret")
 
-    await store.getState().deleteAccount("acct_alpha", { replacementAccountId: "acct_beta" })
+    const result = await store
+      .getState()
+      .deleteAccount("acct_alpha", { replacementAccountId: "acct_beta" })
 
     expect(mockDeleteRegistryAccount).toHaveBeenCalledWith("acct_alpha", {
       replacementAccountId: "acct_beta",
@@ -804,6 +813,7 @@ describe("account store switching, locking, and lifecycle", () => {
     expect(store.getState().activeAccountId).toBe("acct_beta")
     expect(store.getState().unlockedAccountId).toBeNull()
     expect(store.getState().locked).toBe(true)
+    expect(result.wasActive).toBe(true)
   })
 
   it("uses default account-local storage helpers when no dependency override is supplied", async () => {

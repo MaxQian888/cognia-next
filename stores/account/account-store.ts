@@ -81,7 +81,10 @@ export interface AccountStoreState {
     newPassword: string
   ) => Promise<LocalAccountRecord>
   setAccountAvatar: (accountId: string, avatarDataUrl: string | null) => Promise<LocalAccountRecord>
-  deleteAccount: (accountId: string, options?: DeleteLocalAccountOptions) => Promise<void>
+  deleteAccount: (
+    accountId: string,
+    options?: DeleteLocalAccountOptions
+  ) => Promise<LocalAccountDeletionResult>
   lock: () => void
   acknowledgeRecoveryKey: () => void
 }
@@ -95,6 +98,16 @@ export interface AccountStoreDependencies {
   prepareRuntimeTarget: (accountId: string) => Promise<RuntimeTargetRecord>
   prepareDatabase: () => Promise<unknown>
   removeRuntimeTargets: (accountId: string) => Promise<unknown>
+}
+
+export interface LocalAccountDeletionResult {
+  accountId: string
+  wasActive: boolean
+  registryDeleted: true
+  accountDatabaseDeleted: true
+  runtimeTargetsDeleted: boolean
+  localStatePurged: true
+  browserVaultDeleted: boolean
 }
 
 export type AccountStore = UseBoundStore<StoreApi<AccountStoreState>>
@@ -440,12 +453,16 @@ export function createAccountStore(
           const replacementAccountId = options.replacementAccountId
           await dependencies.registry.deleteAccount(accountId, { replacementAccountId })
           await dependencies.dropAccountDatabase(accountId)
+          let runtimeTargetsDeleted = false
           if (shouldUseBrowserVault()) {
             await dependencies.removeRuntimeTargets(accountId)
+            runtimeTargetsDeleted = true
           }
           await dependencies.purgeAccountLocalState(accountId)
+          let browserVaultDeleted = false
           if (shouldUseBrowserVault()) {
             await deleteBrowserVault(accountId)
+            browserVaultDeleted = true
           }
 
           set((state) => {
@@ -469,6 +486,15 @@ export function createAccountStore(
             clearActiveRuntimeTargetContext()
             clearAccountDatabaseSelection()
             dependencies.clearAccountLocalState()
+          }
+          return {
+            accountId,
+            wasActive,
+            registryDeleted: true,
+            accountDatabaseDeleted: true,
+            runtimeTargetsDeleted,
+            localStatePurged: true,
+            browserVaultDeleted,
           }
         } catch (error) {
           throw setFailure(error)
@@ -587,7 +613,11 @@ function assertPasswordProvided(password: string | undefined): asserts password 
 }
 
 async function dropDexieAccountDatabase(accountId: string): Promise<void> {
-  await Dexie.delete(accountDatabaseName(accountId))
+  const databaseName = accountDatabaseName(accountId)
+  await Dexie.delete(databaseName)
+  if (await Dexie.exists(databaseName)) {
+    throw new Error(`Account database deletion could not be verified: ${databaseName}`)
+  }
 }
 
 async function purgeLocalStorageForAccount(accountId: string): Promise<void> {
