@@ -277,48 +277,54 @@ export const CORE_TABLE_NAMES = [
 
 export type CoreTableName = (typeof CORE_TABLE_NAMES)[number]
 
-/** Tables represented by BackupPayloadV3. Secret-bearing tables are
- * deliberately absent; legacy packages remain importable. */
-export const PORTABLE_BACKUP_TABLES = new Set<CoreTableName>([
-  "settings",
-  "characters",
-  "skills",
-  "skillResources",
-  "teams",
-  "promptPresets",
-  "mcpServers",
-  "sessions",
-  "messages",
-  "sessionState",
-  "trustedWorkspaces",
-  "canvasDocuments",
-  "canvasVersions",
-  "contextComments",
-  "canvasSessions",
-  "a2uiApps",
-  "a2uiTemplates",
-  "a2uiEventHistory",
-  "twinSources",
-  "twinChunks",
-  "twinProfile",
-  "twinDrafts",
-  "twinJobs",
-  "memories",
-  "memoryEvidence",
-  "memoryJobs",
-  "memoryAuditEvents",
-  "plugins",
-  "pluginPermissions",
-  "pluginReviews",
-  "pluginAnalytics",
-  "templateDefinitions",
-  "templatePackages",
-  "templateInstances",
-  "providerProfiles",
-  "deploymentProfiles",
-  "transportProfiles",
-  "profileStoreMeta",
-])
+/** BackupPayloadV3 field (or adapter field) that round-trips each portable
+ * table. Several Provider Profile Store tables intentionally share one
+ * validated/redacted document. Secret-bearing tables are deliberately absent;
+ * legacy packages carrying their old optional fields remain importable. */
+export const PORTABLE_BACKUP_BINDINGS = {
+  settings: "settings",
+  characters: "characters",
+  skills: "skills",
+  skillResources: "skillResources",
+  teams: "teams",
+  promptPresets: "promptPresets",
+  mcpServers: "mcpServers",
+  sessions: "sessions",
+  messages: "messages",
+  sessionState: "sessionState",
+  trustedWorkspaces: "trustedWorkspaces",
+  canvasDocuments: "canvasDocuments",
+  canvasVersions: "canvasVersions",
+  contextComments: "contextComments",
+  canvasSessions: "canvasSessions",
+  a2uiApps: "a2uiApps",
+  a2uiTemplates: "a2uiTemplates",
+  a2uiEventHistory: "a2uiEventHistory",
+  twinSources: "twinSources",
+  twinChunks: "twinChunks",
+  twinProfile: "twinProfile",
+  twinDrafts: "twinDrafts",
+  twinJobs: "twinJobs",
+  memories: "memories",
+  memoryEvidence: "memoryEvidence",
+  memoryJobs: "memoryJobs",
+  memoryAuditEvents: "memoryAuditEvents",
+  plugins: "plugins",
+  pluginPermissions: "pluginPermissions",
+  pluginReviews: "pluginReviews",
+  pluginAnalytics: "pluginAnalytics",
+  templateDefinitions: "templateDefinitions",
+  templatePackages: "templatePackages",
+  templateInstances: "templateInstances",
+  providerProfiles: "providerProfileStore",
+  deploymentProfiles: "providerProfileStore",
+  transportProfiles: "providerProfileStore",
+  profileStoreMeta: "providerProfileStore",
+} as const satisfies Partial<Record<CoreTableName, string>>
+
+export const PORTABLE_BACKUP_TABLES = new Set<CoreTableName>(
+  Object.keys(PORTABLE_BACKUP_BINDINGS) as CoreTableName[]
+)
 
 export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   "characters",

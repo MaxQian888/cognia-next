@@ -9,6 +9,7 @@ import { canonicalStringify } from "./migrate"
 import { sha256Hex } from "./crypto"
 import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
 import { saveSettings } from "@/lib/db/settings"
+import { PORTABLE_BACKUP_BINDINGS } from "@/lib/data-governance/table-catalog"
 
 beforeEach(async () => {
   await getDb().delete()
@@ -63,6 +64,43 @@ it("backs up portable template data without device bindings", async () => {
 
   expect(backup.payload.templateDefinitions).toHaveLength(1)
   expect(backup.payload).not.toHaveProperty("templateDeviceBindings")
+})
+
+it("backs up canonical comments for non-canvas resources", async () => {
+  await getDb().contextComments.put({
+    id: "comment-project-file",
+    resourceKind: "project-file",
+    resourceId: "README.md",
+    projectId: "project-1",
+    anchor: { kind: "resource" },
+    authorId: "user-1",
+    authorName: "User",
+    content: "Keep this portable",
+    createdAt: 1,
+    reactions: [],
+  })
+
+  const backup = await buildBackupPackage({ includeSessions: false, includeApiKey: false })
+
+  expect(backup.payload.contextComments).toEqual([
+    expect.objectContaining({ id: "comment-project-file", resourceKind: "project-file" }),
+  ])
+  expect(backup.payload.canvasComments).toEqual([])
+})
+
+it("emits an adapter field for every catalog-declared portable table", async () => {
+  const backup = await buildBackupPackage({
+    includeSessions: true,
+    includeApiKey: false,
+    includeMemories: true,
+    includeSettings: true,
+    includeCoreData: true,
+    includePlugins: true,
+  })
+
+  for (const field of new Set(Object.values(PORTABLE_BACKUP_BINDINGS))) {
+    expect(backup.payload).toHaveProperty(field)
+  }
 })
 
 async function seedAll() {

@@ -5,6 +5,8 @@ import {
   COMPANION_SYNC_TABLES,
   CORE_TABLE_NAMES,
   DATA_TABLE_CATALOG,
+  PORTABLE_BACKUP_BINDINGS,
+  PORTABLE_BACKUP_TABLES,
   policyForTable,
   tableNamesForCategory,
 } from "./table-catalog"
@@ -50,6 +52,13 @@ describe("DataTableCatalog", () => {
     expect(COMPANION_SYNC_TABLES.size).toBe(21)
     expect(tableNamesForCategory("other")).toContain("agentTraces")
     expect(tableNamesForCategory("other")).toContain("workflowRunEvents")
+  })
+
+  it("binds every portable table to a versioned backup field", () => {
+    expect(new Set(Object.keys(PORTABLE_BACKUP_BINDINGS))).toEqual(PORTABLE_BACKUP_TABLES)
+    expect(PORTABLE_BACKUP_BINDINGS.contextComments).toBe("contextComments")
+    expect(PORTABLE_BACKUP_BINDINGS.providerProfiles).toBe("providerProfileStore")
+    expect(policyForTable("tts_provider_keys")?.backupPolicy.mode).not.toBe("portable")
   })
 
   it("fails closed for user history, sync state, and pending work during generic cleanup", () => {
