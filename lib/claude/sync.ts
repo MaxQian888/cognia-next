@@ -13,7 +13,6 @@ import { isTauri } from "@/lib/tauri"
 import {
   bulkImportMcpServers,
   listMcpServers,
-  updateMcpServer,
   type McpBulkImportResult,
   type McpImportDraft,
   type McpImportStrategy,
@@ -25,9 +24,15 @@ import {
   type AgentReadResult,
   type AgentWriteResult,
 } from "./ipc"
-import { CLAUDE_CODE_AGENT, getAgentAdapter, requireAgentAdapter } from "./agents"
+import {
+  CLAUDE_CODE_AGENT,
+  MCP_AGENT_ADAPTERS,
+  getAgentAdapter,
+  requireAgentAdapter,
+} from "./agents"
 import { resolveBuiltinMcpConfig } from "./builtin-mcp/resolve"
 import { getBuiltinMcpRuntimeContext } from "./builtin-mcp/runtime-context"
+import { resolveMcpSecrets } from "@/lib/mcp/credentials"
 
 // ---- Sync (Cognia → Agent) ----------------------------------------------
 
@@ -77,7 +82,11 @@ export async function syncToAgent(
   if (!adapter.writable) return { ok: false, skipped: true, reason: "read-only" }
 
   const all = await listMcpServers()
-  const targets = all.filter((s) => s.appsEnabled?.[agentId] === true)
+  const targets = all.filter(
+    (s) =>
+      s.appsEnabled?.[agentId] === true &&
+      (s.trust?.state === "trusted" || s.trust?.state === "legacy" || !s.trust)
+  )
   const managedNames: ReadonlySet<string> = new Set([...all.map((s) => s.name), ...tombstones])
 
   // Resolve `${COGNIA_SIDECAR_DIR}` placeholders + inject the bridge socket
@@ -90,6 +99,17 @@ export async function syncToAgent(
     if (ctx) {
       resolvedTargets = targets.map((s) => resolveBuiltinMcpConfig(s, ctx))
     }
+  } catch (err) {
+    return { ok: false, skipped: false, error: errMessage(err) }
+  }
+
+  try {
+    resolvedTargets = await Promise.all(
+      resolvedTargets.map(async (server) => ({
+        ...server,
+        config: (await resolveMcpSecrets(server.config)) as never,
+      }))
+    )
   } catch (err) {
     return { ok: false, skipped: false, error: errMessage(err) }
   }
@@ -131,6 +151,26 @@ export async function syncToAgent(
 
   try {
     const result = await writeAgentConfig(agentId, nextTree)
+    const verified = await readAgentConfig(agentId)
+    if (verified.parseError || verified.parsed == null) {
+      return {
+        ok: false,
+        skipped: false,
+        error: `Agent projection verification failed for ${agentId}`,
+      }
+    }
+    const projectedNames = new Set(adapter.parse(verified.parsed).map((draft) => draft.name))
+    const missing = targets.find((server) => !projectedNames.has(server.name))
+    const stale = tombstones.find((name) => projectedNames.has(name))
+    if (missing || stale) {
+      return {
+        ok: false,
+        skipped: false,
+        error: missing
+          ? `Agent projection verification missing namespace ${missing.name}`
+          : `Agent projection verification retained tombstone ${stale}`,
+      }
+    }
     return { ok: true, result, count: targets.length }
   } catch (err) {
     const msg = errMessage(err)
@@ -145,16 +185,9 @@ export async function syncToAgent(
 /** Run `syncToAgent` for every writable agent in parallel. */
 export async function syncAll(): Promise<Record<string, SyncResult>> {
   const out: Record<string, SyncResult> = {}
-  const writable: AgentId[] = [
-    "cognia",
-    "claude-code",
-    "claude-desktop",
-    "cursor",
-    "vscode",
-    "codex",
-    "gemini",
-    "windsurf",
-  ]
+  const writable = MCP_AGENT_ADAPTERS.filter((adapter) => adapter.writable).map(
+    (adapter) => adapter.id
+  )
   const results = await Promise.all(writable.map((id) => syncToAgent(id)))
   writable.forEach((id, i) => {
     out[id] = results[i]
@@ -171,6 +204,11 @@ interface PendingSync {
 
 const pendingSyncs = new Map<AgentId, PendingSync>()
 const SYNC_DEBOUNCE_MS = 250
+
+export function __resetScheduledSyncsForTesting(): void {
+  for (const pending of pendingSyncs.values()) clearTimeout(pending.handle)
+  pendingSyncs.clear()
+}
 
 /**
  * Schedule a sync for the given agent in the near future, coalescing
@@ -256,19 +294,7 @@ export async function importFromAgent(
   strategy: McpImportStrategy = "skip"
 ): Promise<McpBulkImportResult & { previewed: number }> {
   const preview = await previewAgentImport(agentId)
-  const result = await bulkImportMcpServers(preview.drafts, strategy)
-
-  // After import, flip `appsEnabled[agentId]=true` for every successfully
-  // imported / matched name. This is the "is in this agent" pivot.
-  const all = await listMcpServers()
-  const importedNames = new Set(preview.drafts.map((d) => d.name))
-  for (const server of all) {
-    if (!importedNames.has(server.name)) continue
-    const apps = { ...(server.appsEnabled ?? {}) }
-    if (apps[agentId] === true) continue
-    apps[agentId] = true
-    await updateMcpServer(server.id, { appsEnabled: apps })
-  }
+  const result = await bulkImportMcpServers(preview.drafts, strategy, "agent-import")
 
   return { ...result, previewed: preview.drafts.length }
 }
@@ -321,17 +347,7 @@ export async function importFromProjectMcp(
   strategy: McpImportStrategy = "skip"
 ): Promise<McpBulkImportResult & { previewed: number }> {
   const preview = await previewProjectMcpImport(cwd)
-  const result = await bulkImportMcpServers(preview.drafts, strategy)
-
-  const all = await listMcpServers()
-  const importedNames = new Set(preview.drafts.map((d) => d.name))
-  for (const server of all) {
-    if (!importedNames.has(server.name)) continue
-    const apps = { ...(server.appsEnabled ?? {}) }
-    if (apps["claude-code"] === true) continue
-    apps["claude-code"] = true
-    await updateMcpServer(server.id, { appsEnabled: apps })
-  }
+  const result = await bulkImportMcpServers(preview.drafts, strategy, "project-import")
 
   return { ...result, previewed: preview.drafts.length }
 }

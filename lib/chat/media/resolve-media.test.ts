@@ -13,14 +13,15 @@ import {
   releaseAllMedia,
   releaseMedia,
 } from "./resolve-media"
-import { getMessageMedia, mediaRef } from "@/lib/db/message-media"
+import { getMessageMedia, mediaRef, putMessageMedia } from "@/lib/db/message-media"
 
 jest.mock("@/lib/db/message-media", () => {
   const actual = jest.requireActual("@/lib/db/message-media")
-  return { ...actual, getMessageMedia: jest.fn() }
+  return { ...actual, getMessageMedia: jest.fn(), putMessageMedia: jest.fn() }
 })
 
 const getMedia = getMessageMedia as jest.MockedFunction<typeof getMessageMedia>
+const putMedia = putMessageMedia as jest.MockedFunction<typeof putMessageMedia>
 
 let created: string[] = []
 let revoked: string[] = []
@@ -29,6 +30,8 @@ let urlCounter = 0
 beforeEach(() => {
   __TESTING__.reset()
   getMedia.mockReset()
+  putMedia.mockReset()
+  putMedia.mockResolvedValue(mediaRef("h"))
   created = []
   revoked = []
   urlCounter = 0
@@ -82,6 +85,68 @@ describe("acquireMedia", () => {
     getMedia.mockResolvedValue(undefined)
 
     expect(await acquireMedia(mediaRef("gone"))).toBeNull()
+  })
+
+  it("loads a missing remote blob once and caches it in the media store", async () => {
+    getMedia.mockResolvedValue(undefined)
+    const remoteRow = row({ hash: "remote" })!
+    const loadMissing = jest.fn(async () => remoteRow!)
+
+    const resolved = await acquireMedia(mediaRef("remote"), { loadMissing })
+
+    expect(loadMissing).toHaveBeenCalledWith({ hash: "remote", variant: "canonical" })
+    expect(putMedia).toHaveBeenCalledWith(remoteRow)
+    expect(resolved).toMatchObject({ mediaType: "image/jpeg", byteSize: 1_000 })
+  })
+
+  it("requests only the thumbnail variant for a visible gallery tile", async () => {
+    getMedia.mockResolvedValue(undefined)
+    const loadMissing = jest.fn(async () =>
+      row({
+        hash: "remote-thumb",
+        canonicalAvailable: false,
+        thumbBlob: { size: 40 } as Blob,
+      })
+    )
+
+    const resolved = await acquireMedia(mediaRef("remote-thumb"), {
+      thumbnail: true,
+      loadMissing,
+    })
+
+    expect(loadMissing).toHaveBeenCalledWith({ hash: "remote-thumb", variant: "thumbnail" })
+    expect(resolved).toMatchObject({ isThumbnail: true, byteSize: 40 })
+  })
+
+  it("fetches canonical bytes when only a remote thumbnail is cached", async () => {
+    getMedia.mockResolvedValue(
+      row({ hash: "partial", canonicalAvailable: false, thumbBlob: { size: 40 } as Blob })
+    )
+    const loadMissing = jest.fn(async () => row({ hash: "partial", canonicalAvailable: true }))
+
+    await acquireMedia(mediaRef("partial"), { loadMissing })
+
+    expect(loadMissing).toHaveBeenCalledWith({ hash: "partial", variant: "canonical" })
+  })
+
+  it("rejects a remote row whose content address does not match the reference", async () => {
+    getMedia.mockResolvedValue(undefined)
+
+    expect(
+      await acquireMedia(mediaRef("expected"), {
+        loadMissing: async () => row({ hash: "different" })!,
+      })
+    ).toBeNull()
+    expect(putMedia).not.toHaveBeenCalled()
+  })
+
+  it("does not call the remote loader when the blob is already cached", async () => {
+    getMedia.mockResolvedValue(row())
+    const loadMissing = jest.fn()
+
+    await acquireMedia(mediaRef("h"), { loadMissing })
+
+    expect(loadMissing).not.toHaveBeenCalled()
   })
 
   it("mints one URL for repeat holders of the same reference", async () => {

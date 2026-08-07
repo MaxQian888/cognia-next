@@ -34,6 +34,7 @@ import {
   previewProjectMcpImport,
   scheduleSync,
   scheduleSyncForAffectedAgents,
+  __resetScheduledSyncsForTesting,
   syncAll,
   syncToAgent,
 } from "./sync"
@@ -49,6 +50,20 @@ const mBulk = bulkImportMcpServers as jest.Mock
 const mUpdate = updateMcpServer as jest.Mock
 const mCtx = getBuiltinMcpRuntimeContext as jest.Mock
 
+function mockVerifiedWrite(result: AgentWriteResult): void {
+  mWrite.mockImplementationOnce(async (_agentId, tree) => {
+    mRead.mockResolvedValueOnce({
+      path: result.path,
+      exists: true,
+      writable: true,
+      format: "json",
+      raw: "{}",
+      parsed: tree,
+    })
+    return result
+  })
+}
+
 function makeServer(partial: Partial<McpServer> & { name: string }): McpServer {
   return {
     id: partial.id ?? `mcp_${partial.name}`,
@@ -63,10 +78,32 @@ function makeServer(partial: Partial<McpServer> & { name: string }): McpServer {
 }
 
 beforeEach(() => {
+  __resetScheduledSyncsForTesting()
   jest.clearAllMocks()
+  mList.mockReset()
+  mRead.mockReset()
+  mWrite.mockReset()
+  mBulk.mockReset()
+  mUpdate.mockReset()
+  mCtx.mockReset()
   jest.useRealTimers()
   mIsTauri.mockReturnValue(true)
   mCtx.mockResolvedValue(null) // default: skip resolution unless a test opts in
+  mWrite.mockImplementation(async (_agentId, tree) => {
+    mRead.mockResolvedValueOnce({
+      path: "/x.json",
+      exists: true,
+      writable: true,
+      format: "json",
+      raw: "{}",
+      parsed: tree,
+    })
+    return { path: "/x.json" }
+  })
+})
+
+afterEach(() => {
+  __resetScheduledSyncsForTesting()
 })
 
 describe("syncToAgent — gating", () => {
@@ -165,7 +202,7 @@ describe("syncToAgent — happy paths", () => {
     }
     mRead.mockResolvedValueOnce(cfg)
     const writeResult: AgentWriteResult = { path: "/x.json" }
-    mWrite.mockResolvedValueOnce(writeResult)
+    mockVerifiedWrite(writeResult)
 
     const r = await syncToAgent("claude-code")
     expect(r).toEqual({ ok: true, result: writeResult, count: 1 })
@@ -189,7 +226,7 @@ describe("syncToAgent — happy paths", () => {
       parsed: { mcpServers: { tombed: { type: "stdio", command: "old" } } },
     }
     mRead.mockResolvedValueOnce(cfg)
-    mWrite.mockResolvedValueOnce({ path: "/x.json" })
+    mockVerifiedWrite({ path: "/x.json" })
 
     await syncToAgent("claude-code", ["tombed"])
     const tree = mWrite.mock.calls[0][1] as { mcpServers: Record<string, unknown> }
@@ -258,8 +295,11 @@ describe("syncAll", () => {
         "codex",
         "cursor",
         "gemini",
+        "kiro",
+        "opencode",
         "vscode",
         "windsurf",
+        "zed",
       ].sort()
     )
     for (const r of Object.values(out)) {
@@ -309,11 +349,7 @@ describe("scheduleSync (debounced)", () => {
     scheduleSync("claude-code", "tomb-2")
     scheduleSync("claude-code") // no extra tombstone
 
-    jest.advanceTimersByTime(500)
-    // Drain microtasks the timer scheduled.
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
+    await jest.advanceTimersByTimeAsync(500)
 
     expect(mWrite).toHaveBeenCalledTimes(1)
   })
@@ -324,12 +360,7 @@ describe("scheduleSync (debounced)", () => {
     const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
 
     scheduleSync("claude-code")
-    jest.advanceTimersByTime(500)
-    // wait for the chained .catch to run
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
+    await jest.advanceTimersByTimeAsync(500)
 
     expect(errSpy).toHaveBeenCalled()
     errSpy.mockRestore()
@@ -407,7 +438,7 @@ describe("previewAgentImport", () => {
 })
 
 describe("importFromAgent", () => {
-  it("merges drafts via bulkImport and flips appsEnabled[agent]=true on matched names", async () => {
+  it("imports drafts as pending definitions without auto-projecting them", async () => {
     mIsTauri.mockReturnValue(true)
     // preview reads
     mRead.mockResolvedValueOnce({
@@ -429,24 +460,15 @@ describe("importFromAgent", () => {
       duplicated: 0,
       overwritten: 0,
     })
-    // listMcpServers right after import
-    mList.mockResolvedValueOnce([
-      makeServer({ name: "fs", appsEnabled: {} }),
-      makeServer({ name: "api", appsEnabled: { "claude-code": true } }), // already enabled
-      makeServer({ name: "ignored", appsEnabled: {} }), // not in import
-    ])
-
     const r = await importFromAgent("claude-code")
     expect(r.previewed).toBe(2)
     expect(r.created).toBe(1)
-    // updateMcpServer should be called only for `fs` (api already true,
-    // ignored not in import)
-    expect(mUpdate).toHaveBeenCalledTimes(1)
-    const [id, patch] = mUpdate.mock.calls[0]
-    expect(id).toBe("mcp_fs")
-    expect((patch as { appsEnabled: Record<string, boolean> }).appsEnabled["claude-code"]).toBe(
-      true
+    expect(mBulk).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ name: "fs" })]),
+      "skip",
+      "agent-import"
     )
+    expect(mUpdate).not.toHaveBeenCalled()
   })
 
   it("uses the supplied strategy", async () => {
@@ -464,7 +486,8 @@ describe("importFromAgent", () => {
     await importFromAgent("claude-code", "overwrite")
     expect(mBulk).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ name: "fs" })]),
-      "overwrite"
+      "overwrite",
+      "agent-import"
     )
   })
 })
@@ -516,7 +539,7 @@ describe("project-scoped .mcp.json import", () => {
     expect(preview).toEqual({ exists: false, drafts: [], parseError: "permission denied" })
   })
 
-  it("imports and flips appsEnabled['claude-code'] without writing back", async () => {
+  it("imports project definitions as pending without writing back", async () => {
     mIsTauri.mockReturnValue(true)
     mProject.mockResolvedValueOnce(
       projectCfg({ mcpServers: { docs: { type: "stdio", command: "npx" } } })
@@ -531,9 +554,10 @@ describe("project-scoped .mcp.json import", () => {
     expect(r.previewed).toBe(1)
     expect(mBulk).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ name: "docs" })]),
-      "overwrite"
+      "overwrite",
+      "project-import"
     )
-    expect(mUpdate).toHaveBeenCalledTimes(1)
+    expect(mUpdate).not.toHaveBeenCalled()
     // The committed file is never written back to.
     expect(mWrite).not.toHaveBeenCalled()
   })
@@ -563,7 +587,8 @@ describe("syncToAgent — builtin MCP placeholder resolution", () => {
   }
 
   it("rewrites ${COGNIA_SIDECAR_DIR} and stamps COGNIA_BRIDGE_SOCKET on the a2ui-bridge row", async () => {
-    mList.mockResolvedValueOnce([
+    let projectedTree: unknown
+    mList.mockResolvedValue([
       makeServer({
         id: "builtin:a2ui-bridge",
         name: A2UI_BRIDGE_SERVER_NAME,
@@ -576,14 +601,18 @@ describe("syncToAgent — builtin MCP placeholder resolution", () => {
       }),
     ])
     mRead.mockResolvedValueOnce(cfg)
-    mWrite.mockResolvedValueOnce({ path: "/x.json" })
-    mCtx.mockResolvedValueOnce({
+    mWrite.mockImplementationOnce(async (_agentId, tree) => {
+      projectedTree = tree
+      mRead.mockResolvedValueOnce({ ...cfg, parsed: tree })
+      return { path: "/x.json" }
+    })
+    mCtx.mockResolvedValue({
       sidecarDir: "/abs/sidecar",
       socketPath: "/abs/sock",
     })
 
     await syncToAgent("claude-code")
-    const tree = mWrite.mock.calls[0][1] as {
+    const tree = projectedTree as {
       mcpServers: Record<string, { args?: string[]; env?: Record<string, string> }>
     }
     const projected = tree.mcpServers[A2UI_BRIDGE_SERVER_NAME]
@@ -593,7 +622,8 @@ describe("syncToAgent — builtin MCP placeholder resolution", () => {
   })
 
   it("leaves non-builtin rows untouched even when the runtime context is present", async () => {
-    mList.mockResolvedValueOnce([
+    let projectedTree: unknown
+    mList.mockResolvedValue([
       makeServer({
         name: "fs",
         config: { command: "node", args: ["server.js"] },
@@ -601,11 +631,15 @@ describe("syncToAgent — builtin MCP placeholder resolution", () => {
       }),
     ])
     mRead.mockResolvedValueOnce(cfg)
-    mWrite.mockResolvedValueOnce({ path: "/x.json" })
-    mCtx.mockResolvedValueOnce({ sidecarDir: "/abs/sidecar", socketPath: "/abs/sock" })
+    mWrite.mockImplementationOnce(async (_agentId, tree) => {
+      projectedTree = tree
+      mRead.mockResolvedValueOnce({ ...cfg, parsed: tree })
+      return { path: "/x.json" }
+    })
+    mCtx.mockResolvedValue({ sidecarDir: "/abs/sidecar", socketPath: "/abs/sock" })
 
     await syncToAgent("claude-code")
-    const tree = mWrite.mock.calls[0][1] as {
+    const tree = projectedTree as {
       mcpServers: Record<string, { args?: string[]; env?: Record<string, string> }>
     }
     expect(tree.mcpServers.fs.env?.COGNIA_BRIDGE_SOCKET).toBeUndefined()
@@ -613,7 +647,8 @@ describe("syncToAgent — builtin MCP placeholder resolution", () => {
   })
 
   it("projects unresolved placeholders verbatim when the context fetch returns null", async () => {
-    mList.mockResolvedValueOnce([
+    let projectedTree: unknown
+    mList.mockResolvedValue([
       makeServer({
         id: "builtin:a2ui-bridge",
         name: A2UI_BRIDGE_SERVER_NAME,
@@ -625,11 +660,15 @@ describe("syncToAgent — builtin MCP placeholder resolution", () => {
       }),
     ])
     mRead.mockResolvedValueOnce(cfg)
-    mWrite.mockResolvedValueOnce({ path: "/x.json" })
-    mCtx.mockResolvedValueOnce(null)
+    mWrite.mockImplementationOnce(async (_agentId, tree) => {
+      projectedTree = tree
+      mRead.mockResolvedValueOnce({ ...cfg, parsed: tree })
+      return { path: "/x.json" }
+    })
+    mCtx.mockResolvedValue(null)
 
     await syncToAgent("claude-code")
-    const tree = mWrite.mock.calls[0][1] as {
+    const tree = projectedTree as {
       mcpServers: Record<string, { args?: string[] }>
     }
     expect(tree.mcpServers[A2UI_BRIDGE_SERVER_NAME].args).toEqual([
@@ -638,7 +677,7 @@ describe("syncToAgent — builtin MCP placeholder resolution", () => {
   })
 
   it("returns a hard error when the runtime context fetch throws", async () => {
-    mList.mockResolvedValueOnce([])
+    mList.mockResolvedValue([])
     mRead.mockResolvedValueOnce(cfg)
     mCtx.mockRejectedValueOnce(new Error("ipc unavailable"))
     const r = await syncToAgent("claude-code")

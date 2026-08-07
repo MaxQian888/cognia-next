@@ -41,7 +41,7 @@ import {
 import { builtinSkillId, getCatalogSkill } from "@/lib/skills/built-in-catalog"
 import { selectSurfaceSkills, renderSurfaceSkillsSection } from "@/lib/skills/surface-activation"
 import { recordPluginSkillUsage } from "@/lib/db/plugin-skill-usage"
-import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
+import { buildMcpServerMapResolved, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { getTeam } from "@/lib/db/teams"
 import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
@@ -76,7 +76,7 @@ import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
-import { buildAgentModeSessionUpdate } from "@/lib/agent"
+import { buildAgentModeSessionUpdate } from "@/lib/agent/mode-session-update"
 import {
   resolveAgentEnvironment,
   resolveAgentExecutionPolicy,
@@ -2002,9 +2002,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   try {
     // CLI / headless callers inject `preloadedMcpServers` (incl. `[]`) so the
     // resolver never touches Dexie; desktop leaves it undefined → Dexie lookup.
-    const enabled = supportAgent
-      ? []
-      : (ctx.preloadedMcpServers ?? (await listEnabledMcpServers()))
+    const enabled = supportAgent ? [] : (ctx.preloadedMcpServers ?? (await listEnabledMcpServers()))
     let chosen = enabled
     const memberMcp = memberOverride?.mcpServerIdsOverride
 
@@ -2046,10 +2044,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           import("@/lib/mcp/oauth-tauri"),
         ])
         opts.mcpServers = await buildMcpServerMapWithAuth(chosen, {
-          loadEntry: mcpOAuthLoadEntry,
+          loadEntry: (serverId, legacyName) => mcpOAuthLoadEntry(serverId, legacyName),
         })
       } else {
-        opts.mcpServers = buildMcpServerMap(chosen)
+        opts.mcpServers = await buildMcpServerMapResolved(chosen)
       }
     }
   } catch (err) {

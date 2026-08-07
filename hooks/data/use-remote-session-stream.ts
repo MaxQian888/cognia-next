@@ -71,6 +71,16 @@ export interface RemoteSessionStream {
   interrupt: () => Promise<void>
   /** Resolve the pending approval (allow / allow_always / deny). */
   respond: (decision: ApprovalDecision) => Promise<void>
+  /**
+   * Release a completed live turn after the transcript controller has adopted
+   * the host revision that contains it. Active turns are never discarded.
+   */
+  reconcileTranscript: () => void
+}
+
+export interface RemoteSessionStreamOptions {
+  /** Legacy-only: seed the full mirrored history before applying live deltas. */
+  seedHistory?: boolean
 }
 
 function isForSession(evt: ClaudeEvent, sessionId: string): boolean {
@@ -105,7 +115,11 @@ function isNotFound(err: unknown): boolean {
   return /\b404\b/.test(msg) || /not[_\s-]?found/i.test(msg)
 }
 
-export function useRemoteSessionStream(sessionId: string | null): RemoteSessionStream {
+export function useRemoteSessionStream(
+  sessionId: string | null,
+  options: RemoteSessionStreamOptions = {}
+): RemoteSessionStream {
+  const seedHistory = options.seedHistory ?? true
   const t = useTranslations("mobile.remoteSessions")
   const [messages, setMessages] = useState<UIMessage[]>([])
   const [status, setStatus] = useState<RemoteStreamStatus>("loading")
@@ -117,6 +131,7 @@ export function useRemoteSessionStream(sessionId: string | null): RemoteSessionS
   // resubscribing on every token. Seeded in the effect and maintained by the
   // stream handler — never written during render.
   const messagesRef = useRef<UIMessage[]>([])
+  const liveTurnCompleteRef = useRef(false)
   // Mirror of `status` for the control callbacks: their closures must read the
   // live value (e.g. the interrupt guard) without being recreated per token.
   const statusRef = useRef<RemoteStreamStatus>("loading")
@@ -128,6 +143,16 @@ export function useRemoteSessionStream(sessionId: string | null): RemoteSessionS
   useEffect(() => {
     let unsub: (() => void) | null = null
     let cancelled = false
+    let messageCommitFrame: number | null = null
+    let streamedRevision = 0
+
+    const scheduleMessageCommit = () => {
+      if (messageCommitFrame !== null) return
+      messageCommitFrame = requestAnimationFrame(() => {
+        messageCommitFrame = null
+        if (!cancelled) setMessages(messagesRef.current)
+      })
+    }
 
     // Re-seed the scrollback from Dexie. Used both for the initial paint and
     // after a transport `resync_required` (a cursor gap can leave the streamed
@@ -135,14 +160,17 @@ export function useRemoteSessionStream(sessionId: string | null): RemoteSessionS
     // least as complete as the in-memory stream so we never clobber freshly
     // streamed deltas that the sync orchestrator hasn't persisted yet.
     const reseedFromDexie = async () => {
-      if (!sessionId) return
+      if (!sessionId || !seedHistory) return
+      const revisionAtStart = streamedRevision
       try {
+        // A resync frame means the local mirror is not authoritative until the
+        // bounded sync-down completes. Afterwards, accept deletions and
+        // same-length corrections as well as append-only snapshots.
+        await runSyncDown({ only: ["messages"] })
         const history = await listMessages(sessionId)
-        if (cancelled) return
-        if (history.length >= messagesRef.current.length) {
-          messagesRef.current = history
-          setMessages(history)
-        }
+        if (cancelled || streamedRevision !== revisionAtStart) return
+        messagesRef.current = history
+        scheduleMessageCommit()
       } catch {
         // best-effort — keep whatever we already have
       }
@@ -155,20 +183,27 @@ export function useRemoteSessionStream(sessionId: string | null): RemoteSessionS
         return
       }
       const deviceId = loadCompanionConfig()?.deviceId ?? ""
-      try {
-        const history = await listMessages(sessionId)
-        if (!cancelled) {
-          messagesRef.current = history
-          setMessages(history)
-          setStatusBoth("idle")
+      if (seedHistory) {
+        try {
+          const history = await listMessages(sessionId)
+          if (!cancelled) {
+            messagesRef.current = history
+            setMessages(history)
+            setStatusBoth("idle")
+          }
+        } catch {
+          if (!cancelled) setStatusBoth("idle")
         }
-      } catch {
-        if (!cancelled) setStatusBoth("idle")
+        // Background freshness is legacy-only. Transcript-capable clients
+        // reconcile the bounded newest timeline page instead of draining the
+        // sync table into Dexie.
+        void runSyncDown({ only: ["messages"] }).catch(() => {})
+      } else if (!cancelled) {
+        messagesRef.current = []
+        liveTurnCompleteRef.current = false
+        setMessages([])
+        setStatusBoth("idle")
       }
-      // Background freshness: the Dexie seed may be stale if sync hasn't pulled
-      // recent messages. Kick a one-shot pull (cheap, reuses the orchestrator);
-      // the streamed list stays authoritative — sync only refreshes the seed.
-      void runSyncDown({ only: ["messages"] }).catch(() => {})
 
       // Attach as a live watcher. Branch on the failure: a permission denial
       // (403) downgrades to observe-only with a still-valid session; a 404
@@ -212,8 +247,10 @@ export function useRemoteSessionStream(sessionId: string | null): RemoteSessionS
             const { messages: next, turnComplete } = applySdkEvent(messagesRef.current, env.event)
             if (next !== messagesRef.current) {
               messagesRef.current = next
-              setMessages(next)
+              streamedRevision += 1
+              scheduleMessageCommit()
             }
+            liveTurnCompleteRef.current = turnComplete
             setStatusBoth(turnComplete ? "idle" : "streaming")
             // The host blocks the turn on a pending approval; a fresh event
             // means it advanced, so the host already resolved the approval
@@ -250,13 +287,14 @@ export function useRemoteSessionStream(sessionId: string | null): RemoteSessionS
 
     return () => {
       cancelled = true
+      if (messageCommitFrame !== null) cancelAnimationFrame(messageCommitFrame)
       unsub?.()
       if (!sessionId) return
       const did = loadCompanionConfig()?.deviceId ?? ""
       // Best-effort detach so the host stops routing approvals here.
       void transport.call("session_detach", { sessionId, deviceId: did }).catch(() => {})
     }
-  }, [sessionId, setStatusBoth])
+  }, [seedHistory, sessionId, setStatusBoth])
 
   const send = useCallback(
     async (text: string) => {
@@ -322,6 +360,13 @@ export function useRemoteSessionStream(sessionId: string | null): RemoteSessionS
     [pendingApproval, t]
   )
 
+  const reconcileTranscript = useCallback(() => {
+    if (seedHistory || !liveTurnCompleteRef.current) return
+    liveTurnCompleteRef.current = false
+    messagesRef.current = []
+    setMessages([])
+  }, [seedHistory])
+
   return {
     messages,
     status,
@@ -332,5 +377,6 @@ export function useRemoteSessionStream(sessionId: string | null): RemoteSessionS
     send,
     interrupt,
     respond,
+    reconcileTranscript,
   }
 }

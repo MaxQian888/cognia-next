@@ -24,7 +24,7 @@ const mockHooksManager = {
   dispatchPanelClose: jest.fn(),
 }
 
-jest.mock("@/lib/plugin", () => ({
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: jest.fn(() => mockHooksManager),
 }))
 

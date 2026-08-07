@@ -41,7 +41,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useChatStore } from "@/stores/chat"
-import { getPluginEventHooks } from "@/lib/plugin"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import type { Artifact } from "@/types"
 import { ARTIFACT_TYPES, ARTIFACT_TYPE_KEYS, PREVIEWABLE_TYPES } from "@/lib/artifacts"
 import { useArtifactList } from "@/hooks/artifacts/use-artifact-list"

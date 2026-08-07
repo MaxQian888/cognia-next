@@ -15,8 +15,8 @@ import { render, screen } from "@testing-library/react"
 import Home from "./page"
 
 describe("Home", () => {
-  it("renders the desktop chat workspace", () => {
+  it("renders the desktop chat workspace", async () => {
     render(<Home />)
-    expect(screen.getByTestId("desktop-chat-workspace")).toBeInTheDocument()
+    expect(await screen.findByTestId("desktop-chat-workspace")).toBeInTheDocument()
   })
 })

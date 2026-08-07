@@ -746,6 +746,46 @@ describe("useClaudeChat — actions", () => {
     expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
   })
 
+  it("runs an explicit zero-tool turn without a managed workspace", async () => {
+    standaloneFlag.value = true
+    useAgentRuntimeStore.setState({ runtime: "external", externalAgentId: "ext-1" })
+    resolveSendOptionsMock.mockResolvedValue({
+      model: "sonnet",
+      systemPrompt: "sys",
+      toolSurface: "none",
+    })
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Cognia Support",
+      model: "sonnet",
+      executionContext: {
+        location: "managedWorktree",
+        projectId: "project-1",
+        projectRoot: "/repo",
+        taskWorkspace: { taskId: "task-workspace:sess-1", workspaceKey: "sess-1" },
+        lifecycle: { state: "requested", createdAt: 1, updatedAt: 1, pinned: false },
+      },
+    })
+
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("help")
+    })
+
+    expect(openTaskWorkspaceRunLeaseMock).not.toHaveBeenCalled()
+    expect(runStandaloneTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "sess-1",
+        sendOptions: expect.objectContaining({ toolSurface: "none" }),
+      })
+    )
+    expect(chatState.setSessionError).not.toHaveBeenCalledWith(
+      "sess-1",
+      expect.stringContaining("managed")
+    )
+  })
+
   it("initializes the selected environment inside the managed execution root", async () => {
     const environment = {
       id: "env-1",

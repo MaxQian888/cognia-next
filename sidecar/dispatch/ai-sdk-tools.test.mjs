@@ -30,6 +30,22 @@ test("buildAiSdkTools returns no built-in tools when builtinTools is absent", ()
   assert.equal(Object.keys(tools).length, 0)
 })
 
+test("buildAiSdkTools exposes no tools when the runtime tool surface is disabled", () => {
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      toolSurface: "none",
+      builtinTools: { git: true },
+      pluginTools: [
+        { name: "web_search", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
+      ],
+    },
+    emit: () => {},
+    sessionId: "support-session",
+    pendingPluginToolCalls: new Map(),
+  })
+  assert.deepEqual(tools, {})
+})
+
 test("buildAiSdkTools wires plugin tools that round-trip through the renderer", async () => {
   const emitted = []
   const pendingPluginToolCalls = new Map()

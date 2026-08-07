@@ -31,6 +31,7 @@ jest.mock("@/lib/db/skills", () => ({
 jest.mock("@/lib/db/mcp-servers", () => ({
   listEnabledMcpServers: jest.fn(),
   buildMcpServerMap: jest.fn(),
+  buildMcpServerMapResolved: jest.fn(),
 }))
 
 jest.mock("@/lib/db/teams", () => ({
@@ -63,7 +64,7 @@ jest.mock("@/stores/settings", () => ({
   },
 }))
 
-jest.mock("@/lib/agent", () => ({
+jest.mock("@/lib/agent/mode-session-update", () => ({
   buildAgentModeSessionUpdate: jest.fn(),
 }))
 
@@ -162,7 +163,7 @@ jest.mock("@/lib/platform/detect", () => ({
   isNativeMobile: jest.fn(() => false),
 }))
 
-const mockBuildSupportContext = jest.fn(async () => "SUPPORT_CONTEXT")
+const mockBuildSupportContext = jest.fn(async (..._args: unknown[]) => "SUPPORT_CONTEXT")
 jest.mock("@/lib/support-agent/context", () => {
   const actual = jest.requireActual("@/lib/support-agent/context")
   return {
@@ -174,14 +175,14 @@ jest.mock("@/lib/support-agent/context", () => {
 
 import { isTauri } from "@/lib/tauri"
 import { isNativeMobile } from "@/lib/platform/detect"
-import { buildAgentModeSessionUpdate } from "@/lib/agent"
+import { buildAgentModeSessionUpdate } from "@/lib/agent/mode-session-update"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import {
   __resetSandboxConfineStateForTesting,
   getActiveSandboxConfine,
 } from "@/lib/claude/sandbox-confine-state"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
-import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
+import { buildMcpServerMapResolved, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import {
   listEnabledSkillsByIds,
   listSkillsByIds,
@@ -232,7 +233,7 @@ const mRecordUsage = recordSkillUsage as jest.Mock
 const mRender = renderSkillsSection as jest.Mock
 const mRenderCatalog = renderSkillsCatalog as jest.Mock
 const mListMcp = listEnabledMcpServers as jest.Mock
-const mBuildMap = buildMcpServerMap as jest.Mock
+const mBuildMap = buildMcpServerMapResolved as jest.Mock
 const mGetTeam = getTeam as jest.Mock
 const mRuntimeGet = (useAgentRuntimeStore as unknown as { getState: jest.Mock }).getState
 const mCustomGet = (useCustomModeStore as unknown as { getState: jest.Mock }).getState
@@ -358,6 +359,7 @@ describe("resolveSendOptions — Cognia Support safety", () => {
     )
     expect(opts).toMatchObject({
       permissionMode: "plan",
+      toolSurface: "none",
       allowedTools: [],
       mcpServers: {},
       systemPrompt: "SUPPORT_IDENTITY\n\nSUPPORT_CONTEXT",
@@ -366,6 +368,8 @@ describe("resolveSendOptions — Cognia Support safety", () => {
     expect(opts).not.toHaveProperty("env")
     expect(opts).not.toHaveProperty("agents")
     expect(opts).not.toHaveProperty("builtinTools")
+    expect(opts).not.toHaveProperty("pluginTools")
+    expect(opts).not.toHaveProperty("lsp")
   })
 })
 

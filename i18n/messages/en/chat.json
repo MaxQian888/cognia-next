@@ -1261,6 +1261,7 @@
       "titleNamed": "{name} Render Error"
     },
     "image": {
+      "allImagesTitle": "All images",
       "close": "Close",
       "copyUrl": "Copy URL",
       "counter": "{current} of {total}",
@@ -1275,8 +1276,10 @@
       "previewAria": "Preview {name}",
       "previewDescription": "Preview the selected image, zoom or rotate it.",
       "previous": "Previous image",
+      "retry": "Retry",
       "rotate": "Rotate",
       "selectImage": "View {name}",
+      "showAllImages": "Show all {count} images",
       "viewFullscreen": "View fullscreen",
       "zoomIn": "Zoom in",
       "zoomOut": "Zoom out"
@@ -1499,6 +1502,13 @@
     "title": "Timeline",
     "today": "Today",
     "yesterday": "Yesterday"
+  },
+  "transcript": {
+    "collapseTurn": "Collapse turn",
+    "expandTurn": "Expand full turn",
+    "loadOlder": "Load older turns",
+    "loading": "Loading transcript…",
+    "retry": "Retry transcript"
   },
   "toolApproval": {
     "actionsTitle": "Approval actions",

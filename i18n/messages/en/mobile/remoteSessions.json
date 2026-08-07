@@ -13,13 +13,18 @@
   "detail": {
     "composerAria": "Follow-up message",
     "composerPlaceholder": "Send a follow-up…",
+    "collapseTurn": "Collapse turn details",
     "empty": "No messages yet.",
+    "expandTurn": "Expand turn details",
     "ended": "This session has ended.",
     "endedBadge": "Ended",
     "interruptAria": "Interrupt the current turn",
+    "loadOlder": "Load older turns",
+    "loadingTranscript": "Loading transcript…",
     "notFound": "Session not found or no longer available.",
     "observeOnly": "Observe only",
     "offlineHint": "Desktop is offline — reconnect to resume following this session.",
+    "retryTranscript": "Retry transcript",
     "sendAria": "Send",
     "streaming": "Streaming",
     "title": "Live session"

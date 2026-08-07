@@ -70,7 +70,10 @@ jest.mock("@/lib/claude/ipc", () => ({
 const chatStoreState = {
   setActiveSession: jest.fn(),
   setMessages: jest.fn(),
+  setMessagesLoadError: jest.fn(),
+  hydrateSessionActiveBranches: jest.fn(),
   activeSessionId: null as string | null,
+  messagesReloadNonce: 0,
 }
 
 jest.mock("@/stores/chat", () => ({
@@ -113,6 +116,7 @@ jest.mock("@/lib/tauri/transport-instance", () => ({
 const mockProjectState = {
   activeProjectId: null as string | null,
   loaded: false,
+  projects: [],
   addSessionToProject: jest.fn(),
 }
 jest.mock("@/stores/project/project-store", () => ({
@@ -156,11 +160,17 @@ beforeEach(() => {
   closeSessionIpcMock.mockReset().mockResolvedValue(undefined)
   chatStoreState.setActiveSession.mockClear()
   chatStoreState.setMessages.mockClear()
+  chatStoreState.setMessagesLoadError.mockClear()
+  chatStoreState.hydrateSessionActiveBranches.mockClear()
   chatStoreState.activeSessionId = null
   isTauriMock.mockReset().mockReturnValue(true)
   isCapacitorMock.mockReset().mockReturnValue(false)
   hasWebCompanionTargetMock.mockReset().mockReturnValue(false)
-  hydrateSessionHistoryMock.mockReset().mockResolvedValue({ applied: 0, total: 0 })
+  hydrateSessionHistoryMock.mockReset().mockResolvedValue({
+    applied: 0,
+    total: 0,
+    mode: "legacy",
+  })
   mockProjectState.activeProjectId = null
   mockProjectState.loaded = false
   mockProjectState.addSessionToProject.mockReset()
@@ -265,6 +275,7 @@ describe("useSessions", () => {
     listMessagesMock.mockResolvedValueOnce([{ id: "m1" }])
     renderHook(() => useSessions())
     await waitFor(() => expect(chatStoreState.setMessages).toHaveBeenCalledWith([{ id: "m1" }]))
+    expect(chatStoreState.hydrateSessionActiveBranches).toHaveBeenCalledWith("s1", {})
   })
 
   it("unfolds complete cloud history before publishing the active session", async () => {
@@ -284,6 +295,21 @@ describe("useSessions", () => {
       ])
     )
     expect(hydrateSessionHistoryMock).toHaveBeenCalledWith(companionTransportMock, "s1")
+  })
+
+  it("keeps the bounded synced tail when the host supports transcript pages", async () => {
+    chatStoreState.activeSessionId = "s1"
+    isTauriMock.mockReturnValue(false)
+    hasWebCompanionTargetMock.mockReturnValue(true)
+    listMessagesMock.mockResolvedValueOnce([{ id: "recent-tail" }])
+    hydrateSessionHistoryMock.mockResolvedValueOnce({ applied: 0, total: 0, mode: "timeline" })
+
+    renderHook(() => useSessions())
+
+    await waitFor(() =>
+      expect(chatStoreState.setMessages).toHaveBeenCalledWith([{ id: "recent-tail" }])
+    )
+    expect(listMessagesMock).toHaveBeenCalledTimes(1)
   })
 
   it.each([

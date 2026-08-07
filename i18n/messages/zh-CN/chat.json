@@ -1261,6 +1261,7 @@
       "titleNamed": "{name} 渲染错误"
     },
     "image": {
+      "allImagesTitle": "全部图片",
       "close": "关闭",
       "copyUrl": "复制链接",
       "counter": "第 {current} 张，共 {total} 张",
@@ -1275,8 +1276,10 @@
       "previewAria": "预览{name}",
       "previewDescription": "预览所选图片，可缩放或旋转。",
       "previous": "上一张图片",
+      "retry": "重试",
       "rotate": "旋转",
       "selectImage": "查看{name}",
+      "showAllImages": "显示全部 {count} 张图片",
       "viewFullscreen": "全屏查看",
       "zoomIn": "放大",
       "zoomOut": "缩小"
@@ -1499,6 +1502,13 @@
     "title": "时间线",
     "today": "今天",
     "yesterday": "昨天"
+  },
+  "transcript": {
+    "collapseTurn": "收起轮次",
+    "expandTurn": "展开完整轮次",
+    "loadOlder": "加载更早轮次",
+    "loading": "正在加载聊天记录…",
+    "retry": "重试加载聊天记录"
   },
   "toolApproval": {
     "actionsTitle": "审批操作",

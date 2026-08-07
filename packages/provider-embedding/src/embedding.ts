@@ -11,13 +11,8 @@
  */
 
 import { embed, embedMany, cosineSimilarity as aiCosineSimilarity } from "ai"
-import { createOpenAI } from "@ai-sdk/openai"
-import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
 import type { BedrockConnectionSettings } from "@cognia/provider-types"
 import type { EmbeddingModelV3 } from "@ai-sdk/provider"
-import { createGoogle } from "@ai-sdk/google"
-import { createCohere } from "@ai-sdk/cohere"
-import { createMistral } from "@ai-sdk/mistral"
 import type { ProviderName } from "@cognia/provider-types"
 import {
   generateOllamaEmbedding,
@@ -207,13 +202,14 @@ export type CohereInputType = "search_document" | "search_query" | "classificati
 /**
  * Get embedding model instance based on provider
  */
-function getEmbeddingModel(config: EmbeddingConfig) {
+async function getEmbeddingModel(config: EmbeddingConfig) {
   const { provider, model, apiKey, baseURL } = config
 
   // Local OpenAI-compatible engines (lmstudio/llamacpp/vllm/localai/jan) embed
   // through the OpenAI client pointed at their /v1 endpoint. Ollama is handled
   // earlier in generateEmbedding(s) via its native API, so it never reaches here.
   if (isOpenAICompatibleEmbeddingProvider(provider)) {
+    const { createOpenAI } = await import("@ai-sdk/openai")
     const openai = createOpenAI({
       apiKey: apiKey || "local",
       baseURL: resolveLocalEmbeddingBaseURL(provider, baseURL),
@@ -223,27 +219,32 @@ function getEmbeddingModel(config: EmbeddingConfig) {
 
   switch (provider) {
     case "openai": {
+      const { createOpenAI } = await import("@ai-sdk/openai")
       const openai = createOpenAI({ apiKey, baseURL })
       const modelId = model || defaultEmbeddingModels.openai || "text-embedding-3-small"
       return openai.embedding(modelId)
     }
     case "google": {
+      const { createGoogle } = await import("@ai-sdk/google")
       const google = createGoogle({ apiKey, baseURL })
       const modelId = model || defaultEmbeddingModels.google || "text-embedding-004"
       return google.embeddingModel(modelId)
     }
     case "cohere": {
+      const { createCohere } = await import("@ai-sdk/cohere")
       const cohere = createCohere({ apiKey, baseURL })
       const modelId = model || defaultEmbeddingModels.cohere || "embed-english-v3.0"
       return cohere.embedding(modelId)
     }
     case "mistral": {
+      const { createMistral } = await import("@ai-sdk/mistral")
       const mistral = createMistral({ apiKey, baseURL })
       const modelId = model || defaultEmbeddingModels.mistral || "mistral-embed"
       return mistral.embedding(modelId)
     }
     case "voyage": {
       // Voyage exposes an OpenAI-compatible /v1/embeddings endpoint.
+      const { createOpenAI } = await import("@ai-sdk/openai")
       const voyage = createOpenAI({ apiKey, baseURL: baseURL || VOYAGE_EMBEDDING_BASE_URL })
       const modelId = model || defaultEmbeddingModels.voyage || "voyage-3"
       return voyage.embedding(modelId)
@@ -254,6 +255,7 @@ function getEmbeddingModel(config: EmbeddingConfig) {
         if (config.bedrockModel) return config.bedrockModel
         throw new Error("Bedrock default-chain embeddings require an injected sidecar model.")
       }
+      const { createAmazonBedrock } = await import("@ai-sdk/amazon-bedrock")
       const client = createAmazonBedrock({
         ...(bedrock?.authMode === "api-key" || (!bedrock && apiKey)
           ? { apiKey: bedrock?.apiKey ?? apiKey }
@@ -315,7 +317,7 @@ export async function generateEmbedding(
   }
 
   // Standard AI SDK providers
-  const model = getEmbeddingModel(config)
+  const model = await getEmbeddingModel(config)
 
   try {
     const result = await embed({
@@ -407,7 +409,7 @@ export async function generateEmbeddings(
   }
 
   // Generate embeddings for uncached texts using AI SDK
-  const model = getEmbeddingModel(config)
+  const model = await getEmbeddingModel(config)
 
   try {
     const result = await embedMany({

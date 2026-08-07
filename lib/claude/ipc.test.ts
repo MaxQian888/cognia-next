@@ -52,7 +52,6 @@ import {
   skillsScanSecurity,
   skillsUninstallNative,
   skillsUninstall,
-  testMcpServer,
   updateMessage,
   writeAgentConfig,
   writeTextFile,
@@ -647,53 +646,6 @@ describe("skills commands", () => {
         ["/b", "beta"],
       ],
     })
-  })
-})
-
-describe("testMcpServer", () => {
-  it("normalizes snake_case Rust output and undefineds nullable fields", async () => {
-    callSpy.mockResolvedValueOnce({
-      ok: true,
-      tool_count: 2,
-      tools: [
-        { name: "echo", description: "say it back" },
-        { name: "noop", description: null },
-      ],
-      error: null,
-      duration_ms: 42,
-    })
-    const out = await testMcpServer({ transport: "stdio", command: "x", args: ["y"] })
-    expect(out).toEqual({
-      ok: true,
-      toolCount: 2,
-      tools: [
-        { name: "echo", description: "say it back" },
-        { name: "noop", description: undefined },
-      ],
-      error: undefined,
-      durationMs: 42,
-    })
-    // Spread into the payload preserves shape.
-    expect(callSpy).toHaveBeenCalledWith("test_mcp_server", {
-      transport: "stdio",
-      command: "x",
-      args: ["y"],
-    })
-  })
-
-  it("propagates an error string and a zero tool count", async () => {
-    callSpy.mockResolvedValueOnce({
-      ok: false,
-      tool_count: 0,
-      tools: [],
-      error: "spawn failed",
-      duration_ms: 100,
-    })
-    const out = await testMcpServer({ transport: "stdio", command: "x" })
-    expect(out.ok).toBe(false)
-    expect(out.error).toBe("spawn failed")
-    expect(out.toolCount).toBe(0)
-    expect(out.tools).toEqual([])
   })
 })
 

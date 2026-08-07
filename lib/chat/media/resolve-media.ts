@@ -19,7 +19,12 @@
  * megabytes of screenshots or evict thumbnails pointlessly.
  */
 
-import { getMessageMedia, parseMediaRef } from "@/lib/db/message-media"
+import {
+  getMessageMedia,
+  parseMediaRef,
+  putMessageMedia,
+  type MessageMediaRow,
+} from "@/lib/db/message-media"
 
 /**
  * Bytes of idle (no longer displayed) media kept resolved before the oldest is
@@ -62,7 +67,22 @@ export interface AcquireOptions {
    * either way and can tell which from `isThumbnail`.
    */
   thumbnail?: boolean
+  /**
+   * Optional session-scoped fallback used by remote transcript surfaces. It
+   * runs only after the local media store misses, so cached blobs remain fully
+   * offline-capable and no network request is made for already-ingested media.
+   */
+  loadMissing?: MissingMediaLoader
 }
+
+export interface MissingMediaRequest {
+  hash: string
+  variant: "thumbnail" | "canonical"
+}
+
+export type MissingMediaLoader = (
+  request: MissingMediaRequest
+) => Promise<MessageMediaRow | null>
 
 /**
  * Resolve `ref` and register a holder. Every successful call must be paired
@@ -74,7 +94,7 @@ export interface AcquireOptions {
  */
 export async function acquireMedia(
   ref: string,
-  { thumbnail = false }: AcquireOptions = {}
+  { thumbnail = false, loadMissing }: AcquireOptions = {}
 ): Promise<ResolvedMedia | null> {
   const hash = parseMediaRef(ref)
   if (!hash) return null
@@ -103,7 +123,21 @@ export async function acquireMedia(
 
   const task = (async (): Promise<ResolvedMedia | null> => {
     try {
-      const row = await getMessageMedia(hash)
+      let row = await getMessageMedia(hash)
+      const needsRemoteVariant = !row || (!thumbnail && row.canonicalAvailable === false)
+      if (needsRemoteVariant && loadMissing) {
+        row = (await loadMissing({ hash, variant: thumbnail ? "thumbnail" : "canonical" })) ?? undefined
+        if (row && row.hash !== hash) return null
+        if (row) {
+          // Rendering should still succeed if a quota/transient IndexedDB
+          // failure prevents the offline cache write.
+          try {
+            await putMessageMedia(row)
+          } catch {
+            // Best-effort cache; the in-memory row below remains usable.
+          }
+        }
+      }
       if (!row) return null
       const useThumb = thumbnail && row.thumbBlob !== undefined
       const blob = useThumb ? row.thumbBlob! : row.blob

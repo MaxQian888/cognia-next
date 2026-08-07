@@ -52,15 +52,53 @@ test("toMcpTransport builds sse/http config objects and rejects bad entries", ()
   assert.deepEqual(toMcpTransport({ type: "sse", url: "https://x/sse" }), {
     type: "sse",
     url: "https://x/sse",
+    redirect: "error",
   })
   assert.deepEqual(
     toMcpTransport({ type: "http", url: "https://x/mcp", headers: { Authorization: "Bearer t" } }),
-    { type: "http", url: "https://x/mcp", headers: { Authorization: "Bearer t" } }
+    {
+      type: "http",
+      url: "https://x/mcp",
+      headers: { Authorization: "Bearer t" },
+      redirect: "error",
+    }
   )
   assert.equal(toMcpTransport({ type: "stdio" }, { StdioTransport: FakeStdio }), null, "no command")
   assert.equal(toMcpTransport({ type: "sse" }), null, "no url")
   assert.equal(toMcpTransport({ type: "carrier-pigeon", url: "x" }), null, "unknown type")
   assert.equal(toMcpTransport(undefined), null)
+  assert.equal(toMcpTransport({ type: "http", url: "https://127.0.0.1/mcp" }), null)
+  assert.deepEqual(
+    toMcpTransport({
+      type: "http",
+      url: "http://127.0.0.1/mcp",
+      allowPrivateNetwork: true,
+    }),
+    { type: "http", url: "http://127.0.0.1/mcp", redirect: "error" }
+  )
+})
+
+test("buildAiSdkMcpTools wires the guarded fetch and closes its dispatcher", async () => {
+  const guardedFetch = async () => ({ ok: true })
+  let guardClosed = false
+  let transport
+  const built = await buildAiSdkMcpTools({
+    mcpServers: { remote: { type: "http", url: "https://example.com/mcp" } },
+    createEgressGuard: () => ({
+      fetch: guardedFetch,
+      close: async () => {
+        guardClosed = true
+      },
+    }),
+    createClient: async (config) => {
+      transport = config.transport
+      return { tools: async () => ({}), close: async () => undefined }
+    },
+  })
+  assert.equal(transport.fetch, guardedFetch)
+  assert.equal(transport.redirect, "error")
+  await built.close()
+  assert.equal(guardClosed, true)
 })
 
 test("buildAiSdkMcpTools namespaces tools as mcp__<server>__<tool>", async () => {

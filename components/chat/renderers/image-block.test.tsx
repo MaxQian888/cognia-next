@@ -43,6 +43,7 @@ const messages = {
     renderers: {
       image: {
         failedToLoad: "Failed to load image",
+        retry: "Retry",
         openUrl: "Open URL",
         viewFullscreen: "View fullscreen",
         download: "Download",
@@ -379,6 +380,21 @@ describe("ImageBlock — content-addressed references", () => {
     })
     // Local bytes have nowhere to open externally.
     expect(screen.queryByText("Open URL")).toBeNull()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+  })
+
+  it("retries a missing media reference on demand", async () => {
+    mockGetMessageMedia.mockResolvedValueOnce(undefined as never).mockResolvedValue(storedRow as never)
+
+    renderBlock({ src: mediaRef("retry") })
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+
+    await waitFor(() => {
+      expect(screen.getByAltText("a picture")).toHaveAttribute("src", "blob:mock/0")
+    })
+    expect(mockGetMessageMedia).toHaveBeenCalledTimes(2)
   })
 
   it("hides copy-URL for a reference, whose URL means nothing elsewhere", async () => {

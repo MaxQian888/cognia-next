@@ -1324,7 +1324,8 @@ export function useClaudeChat() {
       // created before execution contexts existed.
       const chatRunId = store.getState().sessions[sessionId]?.runId ?? 0
       const executionContext = session?.executionContext
-      if (executionContext?.location === "local") {
+      const hasNoToolSurface = sendOptions.toolSurface === "none"
+      if (!hasNoToolSurface && executionContext?.location === "local") {
         sendOptions = { ...sendOptions, cwd: executionContext.projectRoot }
       }
       const boundWorkspaceRoot = executionContext
@@ -1334,7 +1335,10 @@ export function useClaudeChat() {
         !executionContext &&
         useSettingsStore.getState().settings?.developer?.taskWorkspace === true &&
         Boolean(sendOptions.cwd)
-      if (executionContext?.location === "managedWorktree" || legacyWorkspaceEnabled) {
+      if (
+        !hasNoToolSurface &&
+        (executionContext?.location === "managedWorktree" || legacyWorkspaceEnabled)
+      ) {
         if (executionContext?.location === "managedWorktree" && !boundWorkspaceRoot) {
           const message = tInlineErr("managedWorktreeUnavailable")
           store.getState().setSessionStatus(sessionId, "idle")
@@ -1387,7 +1391,7 @@ export function useClaudeChat() {
         }
       }
 
-      if (executionContext?.environmentId) {
+      if (!hasNoToolSurface && executionContext?.environmentId) {
         const environment = await getProjectEnvironment(executionContext.environmentId)
         if (!environment || environment.projectId !== executionContext.projectId) {
           store.getState().setSessionStatus(sessionId, "idle")
@@ -1415,12 +1419,14 @@ export function useClaudeChat() {
       // Code-adoption tracking (Phase 1): open a per-turn attribution window.
       // Fire-and-forget — must never block or disrupt the turn. `runId` is read
       // back from the store, whose streaming flip above bumped it for this turn.
-      void beginCodeAdoptionTurn(sendOptions.cwd, {
-        sessionId,
-        runId: chatRunId,
-        model: sendOptions.model ?? null,
-        agentKind: "in-app",
-      })
+      if (!hasNoToolSurface) {
+        void beginCodeAdoptionTurn(sendOptions.cwd, {
+          sessionId,
+          runId: chatRunId,
+          model: sendOptions.model ?? null,
+          agentKind: "in-app",
+        })
+      }
 
       // ── External agent branch ──────────────────────────────────────────
       // When the user selected "external" runtime in the composer toolbar,
@@ -1429,7 +1435,7 @@ export function useClaudeChat() {
       // composer reflects the send immediately; the assistant reply is
       // appended from the manager result when it lands.
       const agentRuntime = useAgentRuntimeStore.getState().runtime
-      const manualExternal = agentRuntime === "external"
+      const manualExternal = !hasNoToolSurface && agentRuntime === "external"
 
       // ── Thread B: rule-based delegation ─────────────────────────────────
       // When the user did NOT manually pick the external runtime, evaluate the
@@ -1439,7 +1445,12 @@ export function useClaudeChat() {
       // and a no-op when no external agents are connected (web/mobile).
       let delegation: import("@/lib/ai/agent/external/delegation-router").RoutingDecision | null =
         null
-      if (!manualExternal && !callOptions?.skipUserAppend && !callOptions?.bypassDelegation) {
+      if (
+        !hasNoToolSurface &&
+        !manualExternal &&
+        !callOptions?.skipUserAppend &&
+        !callOptions?.bypassDelegation
+      ) {
         try {
           const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
           const mgr = getExternalAgentManager()

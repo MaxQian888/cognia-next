@@ -3,7 +3,7 @@ import {
   getDefaultTierAliases,
   getTierDisplayName,
 } from "./default-mappings"
-import type { CatalogRepository } from "@cognia/provider-core"
+import type { CatalogRepository } from "@cognia/provider-core/providers/catalog-repository"
 
 const repository: CatalogRepository = {
   listProviders: () => [],

@@ -16,7 +16,7 @@
  * routes through `<MarkdownRenderer>` for the finalised message.
  */
 
-import { memo, useMemo, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 import { Block, parseMarkdownIntoBlocks, type BlockProps } from "streamdown"
 import { MessageResponse, type MessageResponseProps } from "@/components/ai-elements/message"
 import { createSharedMarkdownComponents } from "@/components/chat/markdown/shared-components"
@@ -25,6 +25,7 @@ import { ProjectFileLink } from "@/components/chat/project-file-link"
 import { ExternalLink } from "@/components/shared/external-link"
 import { parseProjectFileReference } from "@/lib/files/project-file-reference"
 import { cn } from "@/lib/utils"
+import { MarkdownRenderer } from "./markdown-renderer"
 import {
   createIncrementalMarkdownBlockParser,
   type MarkdownBlockParser,
@@ -35,6 +36,16 @@ interface Props {
   isStreaming: boolean
   projectRoot?: string | null
 }
+
+interface FinalizedProps {
+  text: string
+  messageId?: string
+  projectRoot?: string | null
+}
+
+export const FINALIZED_MARKDOWN_LAZY_THRESHOLD = 64 * 1024
+const FINALIZED_BLOCKS_PER_SECTION = 8
+const FINALIZED_EAGER_SECTIONS = 3
 
 /** A fence opening at the start of any line, allowing CommonMark's ≤3 spaces of
  *  indentation and the extra indentation a list item or blockquote adds. */
@@ -82,6 +93,87 @@ const ContainedStreamdownBlock = memo(function ContainedStreamdownBlock(props: B
       <Block {...props} />
     </div>
   )
+})
+
+function FinalizedMarkdownSection({
+  content,
+  eager,
+  messageId,
+  projectRoot,
+}: {
+  content: string
+  eager: boolean
+  messageId?: string
+  projectRoot?: string | null
+}) {
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(eager)
+
+  useEffect(() => {
+    if (visible || eager) return
+    const element = rootRef.current
+    if (!element) return
+    if (typeof IntersectionObserver === "undefined") {
+      const frame = requestAnimationFrame(() => setVisible(true))
+      return () => cancelAnimationFrame(frame)
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return
+        setVisible(true)
+        observer.disconnect()
+      },
+      { rootMargin: "1200px 0px" }
+    )
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [eager, visible])
+
+  return (
+    <div
+      ref={rootRef}
+      data-testid={visible ? "finalized-markdown-section" : "finalized-markdown-placeholder"}
+      className="[content-visibility:auto] [contain-intrinsic-size:auto_320px]"
+    >
+      {visible ? (
+        <MarkdownRenderer
+          content={content}
+          messageId={messageId}
+          projectRoot={projectRoot}
+          className="size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+        />
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Finalized long-form Markdown keeps the authoritative sanitized renderer, but
+ * mounts parsed block groups only as they approach the viewport.
+ */
+export const FinalizedLongTextPart = memo(function FinalizedLongTextPart({
+  text,
+  messageId,
+  projectRoot,
+}: FinalizedProps) {
+  const sections = useMemo(() => {
+    const blocks = parseMarkdownIntoBlocks(text)
+    const grouped: string[] = []
+    for (let index = 0; index < blocks.length; index += FINALIZED_BLOCKS_PER_SECTION) {
+      grouped.push(blocks.slice(index, index + FINALIZED_BLOCKS_PER_SECTION).join(""))
+    }
+    return grouped
+  }, [text])
+
+  return sections.map((content, index) => (
+    <FinalizedMarkdownSection
+      key={`${index}:${content.length}`}
+      content={content}
+      eager={index < FINALIZED_EAGER_SECTIONS}
+      messageId={messageId}
+      projectRoot={projectRoot}
+    />
+  ))
 })
 
 type StreamdownComponents = NonNullable<MessageResponseProps["components"]>

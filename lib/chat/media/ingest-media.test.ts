@@ -6,6 +6,7 @@
 
 import {
   CANONICAL_MAX_LONG_EDGE,
+  MAX_IMAGE_INPUT_BYTES,
   THUMBNAIL_MAX_LONG_EDGE,
   ingestImage,
   ingestImageDataUrl,
@@ -64,6 +65,15 @@ describe("sha256Hex", () => {
 })
 
 describe("ingestImage", () => {
+  it("rejects images above the persistence input limit", async () => {
+    const oversized = new Uint8Array(MAX_IMAGE_INPUT_BYTES + 1)
+
+    await expect(
+      ingestImage({ bytes: oversized, mediaType: "image/png" })
+    ).rejects.toThrow(/10 MiB/)
+    expect(await getDb().messageMedia.count()).toBe(0)
+  })
+
   it("stores the bytes and returns a reference plus geometry", async () => {
     const result = await ingestImage({ bytes: bytesOf("frame"), mediaType: "image/png" })
 

@@ -56,11 +56,14 @@ jest.mock("@/lib/db/messages", () => ({
   listMessages: (...a: unknown[]) => listMessagesMock(...a),
 }))
 
-// applySdkEvent — append a synthetic assistant message, mark turn complete.
+let mockAdapterTurnComplete = true
+
+// applySdkEvent — append a synthetic assistant message with a controllable
+// completion marker so revision reconciliation can be tested independently.
 jest.mock("@/lib/claude/adapter", () => ({
   applySdkEvent: (messages: unknown[]) => ({
     messages: [...messages, { id: "a1", role: "assistant", parts: [] }],
-    turnComplete: true,
+    turnComplete: mockAdapterTurnComplete,
     result: undefined,
   }),
 }))
@@ -76,9 +79,59 @@ beforeEach(() => {
   runSyncDownMock.mockClear().mockResolvedValue([])
   toastError.mockClear()
   toastWarning.mockClear()
+  mockAdapterTurnComplete = true
 })
 
 describe("useRemoteSessionStream", () => {
+  it("does not hydrate or sync full history in transcript-capable mode", async () => {
+    renderHook(() => useRemoteSessionStream("sess-1", { seedHistory: false }))
+
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+    expect(listMessagesMock).not.toHaveBeenCalled()
+    expect(runSyncDownMock).not.toHaveBeenCalled()
+  })
+
+  it("releases a completed live turn after the folded timeline adopts it", async () => {
+    const { result } = renderHook(() =>
+      useRemoteSessionStream("sess-1", { seedHistory: false })
+    )
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+
+    act(() => {
+      streamHandler?.({
+        type: "event",
+        sessionId: "sess-1",
+        event: { type: "assistant" },
+      } as unknown as ClaudeEvent)
+    })
+    await waitFor(() => expect(result.current.messages).toHaveLength(1))
+
+    act(() => result.current.reconcileTranscript())
+
+    expect(result.current.messages).toEqual([])
+  })
+
+  it("keeps an active live turn during timeline reconciliation", async () => {
+    mockAdapterTurnComplete = false
+    const { result } = renderHook(() =>
+      useRemoteSessionStream("sess-1", { seedHistory: false })
+    )
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+
+    act(() => {
+      streamHandler?.({
+        type: "event",
+        sessionId: "sess-1",
+        event: { type: "assistant" },
+      } as unknown as ClaudeEvent)
+    })
+    await waitFor(() => expect(result.current.messages).toHaveLength(1))
+
+    act(() => result.current.reconcileTranscript())
+
+    expect(result.current.messages).toHaveLength(1)
+  })
+
   it("seeds history and attaches as a watcher on mount", async () => {
     listMessagesMock.mockResolvedValueOnce([{ id: "u1", role: "user", parts: [] }])
     const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
@@ -116,6 +169,37 @@ describe("useRemoteSessionStream", () => {
     })
     await waitFor(() => expect(result.current.messages).toHaveLength(1))
     expect(result.current.status).toBe("idle")
+  })
+
+  it("coalesces multiple streamed events into one animation-frame UI commit", async () => {
+    const frameCallbacks: FrameRequestCallback[] = []
+    const requestFrame = jest
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        frameCallbacks.push(callback)
+        return frameCallbacks.length
+      })
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+
+    act(() => {
+      streamHandler?.({
+        type: "event",
+        sessionId: "sess-1",
+        event: { type: "assistant" },
+      } as unknown as ClaudeEvent)
+      streamHandler?.({
+        type: "event",
+        sessionId: "sess-1",
+        event: { type: "assistant" },
+      } as unknown as ClaudeEvent)
+    })
+
+    expect(result.current.messages).toHaveLength(0)
+    expect(frameCallbacks).toHaveLength(1)
+    act(() => frameCallbacks[0]?.(0))
+    expect(result.current.messages).toHaveLength(2)
+    requestFrame.mockRestore()
   })
 
   it("ignores events for a different session", async () => {
@@ -206,6 +290,43 @@ describe("useRemoteSessionStream", () => {
       streamHandler?.({ type: "resync_required" } as unknown as ClaudeEvent)
     })
     await waitFor(() => expect(listMessagesMock).toHaveBeenCalledTimes(2))
+  })
+
+  it("adopts an equally-sized corrected snapshot after resync", async () => {
+    listMessagesMock
+      .mockResolvedValueOnce([
+        { id: "a1", role: "assistant", parts: [{ type: "text", text: "stale" }] },
+      ])
+      .mockResolvedValueOnce([
+        { id: "a1", role: "assistant", parts: [{ type: "text", text: "corrected" }] },
+      ])
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(result.current.messages).toHaveLength(1))
+    act(() => {
+      streamHandler?.({ type: "resync_required" } as unknown as ClaudeEvent)
+    })
+
+    await waitFor(() => {
+      expect(
+        (result.current.messages[0]?.parts[0] as { text?: string } | undefined)?.text
+      ).toBe("corrected")
+    })
+  })
+
+  it("adopts authoritative deletions after resync when no newer stream event arrived", async () => {
+    listMessagesMock
+      .mockResolvedValueOnce([
+        { id: "u1", role: "user", parts: [] },
+        { id: "a1", role: "assistant", parts: [] },
+      ])
+      .mockResolvedValueOnce([{ id: "u1", role: "user", parts: [] }])
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(result.current.messages).toHaveLength(2))
+    act(() => {
+      streamHandler?.({ type: "resync_required" } as unknown as ClaudeEvent)
+    })
+
+    await waitFor(() => expect(result.current.messages).toHaveLength(1))
   })
 
   it("clears a pending approval when a later event advances the turn", async () => {

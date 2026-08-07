@@ -10,7 +10,7 @@ import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import type { ThemeId, ThemeTokens } from "@/lib/export/html/syntax-themes"
 import { resolveThemeWallpaper } from "@/lib/export/html/theme-wallpaper"
 import { getDb } from "@/lib/db/schema"
-import { getPluginEventHooks } from "@/lib/plugin"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { saveExport, type SaveExportOutcome } from "@/lib/files/save-export"
 
 interface RunArgs {

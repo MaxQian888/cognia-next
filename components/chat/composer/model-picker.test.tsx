@@ -8,6 +8,7 @@ import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { updateSession } from "@/lib/db/sessions"
+import { isTauri } from "@/lib/tauri"
 import { useSettingsStore } from "@/stores/settings"
 import enMessages from "@/i18n/messages/en.json"
 
@@ -21,11 +22,11 @@ const mockedUpdateSession = updateSession as unknown as jest.Mock
 
 // Live-switch deps. Defaults: web mode (isTauri false) so the existing
 // rendering tests never trip the live path; the live-switch suite flips it on.
-const mockIsTauri = jest.fn(() => false)
 jest.mock("@/lib/tauri", () => {
   const actual = jest.requireActual("@/lib/tauri")
-  return { ...actual, isTauri: () => mockIsTauri() }
+  return { ...actual, isTauri: jest.fn(() => false) }
 })
+const mockIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
 const mockSetSessionModel = jest.fn(async (..._a: unknown[]) => undefined)
 const mockCloseSession = jest.fn(async (..._a: unknown[]) => undefined)
 jest.mock("@/lib/claude/ipc", () => {
@@ -349,6 +350,113 @@ describe("friendly name rendering", () => {
     } finally {
       useSettingsStore.setState({ settings: undefined as never })
     }
+  })
+})
+
+describe("active model positioning", () => {
+  const session: ChatSession = {
+    id: "ses_positioning",
+    title: "t",
+    kind: "direct",
+    model: "model-twenty",
+    providerOverride: "anthropic",
+    createdAt: 0,
+    updatedAt: 0,
+  }
+
+  beforeEach(() => {
+    useSettingsStore.setState({
+      settings: {
+        providerSettings: {
+          anthropic: {
+            enabled: true,
+            defaultModel: "model-one",
+            enabledModels: Array.from({ length: 20 }, (_, index) =>
+              index === 19 ? "model-twenty" : `model-${index + 1}`
+            ),
+          },
+        },
+      } as never,
+    })
+  })
+
+  afterEach(() => {
+    useSettingsStore.setState({ settings: undefined as never })
+    jest.restoreAllMocks()
+  })
+
+  it("aligns the active model once per open without reacting to manual scrolling", () => {
+    const scrollIntoView = jest
+      .spyOn(Element.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined)
+
+    render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <ModelPicker session={session} />
+      </NextIntlClientProvider>
+    )
+
+    const trigger = screen.getByRole("button", { name: /switch model/i })
+    fireEvent.click(trigger)
+
+    const activeItems = () =>
+      screen
+        .getAllByText("model-twenty")
+        .map((element) => element.closest("[cmdk-item]"))
+        .filter((element) => element !== null)
+    const activeItem = activeItems()[0]
+    expect(activeItem).not.toBeNull()
+    const activeCalls = () =>
+      scrollIntoView.mock.contexts.filter(
+        (context) =>
+          context instanceof Element &&
+          context.hasAttribute("cmdk-item") &&
+          context.textContent?.includes("model-twenty")
+      ).length
+
+    expect(activeCalls()).toBe(1)
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "auto", block: "center" })
+
+    fireEvent.scroll(screen.getByRole("listbox"))
+    expect(activeCalls()).toBe(1)
+
+    const searchInput = screen.getByPlaceholderText("Search models…")
+    fireEvent.change(searchInput, { target: { value: "no matching model" } })
+    expect(activeItems()).toHaveLength(0)
+    fireEvent.change(searchInput, { target: { value: "" } })
+    expect(activeItems()).toHaveLength(1)
+    expect(activeCalls()).toBe(1)
+
+    fireEvent.click(trigger)
+    fireEvent.click(trigger)
+    expect(activeCalls()).toBe(2)
+  })
+
+  it("positions the Auto row when Auto is selected", () => {
+    const scrollIntoView = jest
+      .spyOn(Element.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined)
+
+    render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <ModelPicker session={{ ...session, model: "auto", providerOverride: undefined }} />
+      </NextIntlClientProvider>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    const autoItem = screen
+      .getAllByText("Auto")
+      .map((element) => element.closest("[cmdk-item]"))
+      .find((element) => element !== null)
+
+    expect(autoItem).not.toBeNull()
+    const centeredAutoCalls = scrollIntoView.mock.contexts.filter(
+      (context, index) =>
+        context === autoItem &&
+        scrollIntoView.mock.calls[index]?.[0]?.behavior === "auto" &&
+        scrollIntoView.mock.calls[index]?.[0]?.block === "center"
+    )
+    expect(centeredAutoCalls).toHaveLength(1)
   })
 })
 

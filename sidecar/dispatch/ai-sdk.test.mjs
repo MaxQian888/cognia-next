@@ -257,6 +257,37 @@ test("AI SDK dispatch wires ToolSearch into prepareStep and retains discoveries"
   assert.ok(call.prepareStep().activeTools.includes("write"), "discovery persists for later steps")
 })
 
+test("AI SDK dispatch keeps a disabled tool surface empty after MCP and ToolSearch overlays", async () => {
+  const { events, emit } = captureEmit()
+  const captured = capturingStream([{ type: "finish", finishReason: "stop" }])
+  let mcpBuilds = 0
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "zero-tool-session",
+    firstPrompt: "answer from documentation",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      toolSurface: "none",
+      toolSearchEnabled: true,
+      mcpServers: { unsafe: { command: "unsafe-server" } },
+    },
+    emit,
+    log: () => {},
+    streamText: captured.fn,
+    buildMcpTools: async () => {
+      mcpBuilds += 1
+      return { tools: { mcp__unsafe__write: {} }, close: async () => {} }
+    },
+  })
+
+  await waitForEvent(events, (event) => event.type === "session_ended")
+  const call = captured.calls[0]
+  assert.equal(call.tools, undefined)
+  assert.equal(call.prepareStep, undefined)
+  assert.equal(mcpBuilds, 0)
+})
+
 test("refuses to dispatch an OpenRouter key with no base URL (credential-leak guard)", async () => {
   const { events, emit } = captureEmit()
   let streamCalled = false

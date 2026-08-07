@@ -61,8 +61,11 @@ export const ImageBlock = memo(function ImageBlock({
   const boxHeight = height ?? (media.height || undefined)
 
   const items = useMemo<ImageLightboxItem[]>(
-    () => (resolvedSrc ? [{ id: src, src: resolvedSrc, alt, title }] : []),
-    [alt, resolvedSrc, src, title]
+    () =>
+      resolvedSrc
+        ? [{ id: src, src: resolvedSrc, ...(isRef ? { sourceRef: src } : {}), alt, title }]
+        : [],
+    [alt, isRef, resolvedSrc, src, title]
   )
 
   // Inside a chat message every image joins ONE lightbox so the user can page
@@ -74,8 +77,14 @@ export const ImageBlock = memo(function ImageBlock({
     if (!collection || !resolvedSrc) return
     // Registered under the original `src`, so the collection's identity is the
     // stable reference rather than an object URL that changes per resolution.
-    return collection.register({ id: src, src: resolvedSrc, alt, title })
-  }, [collection, src, resolvedSrc, alt, title])
+    return collection.register({
+      id: src,
+      src: resolvedSrc,
+      ...(isRef ? { sourceRef: src } : {}),
+      alt,
+      title,
+    })
+  }, [collection, src, resolvedSrc, isRef, alt, title])
 
   const openViewer = useCallback(
     (trigger: HTMLElement | null) => {
@@ -117,7 +126,11 @@ export const ImageBlock = memo(function ImageBlock({
         {alt ? <p className="mt-1 text-xs text-muted-foreground/70">{alt}</p> : null}
         {/* Only a plain URL can be opened outside the app; a store reference
             names local bytes and has nowhere to point a browser at. */}
-        {isRef ? null : (
+        {isRef ? (
+          <Button variant="ghost" size="sm" className="mt-2" onClick={media.retry}>
+            {t("retry")}
+          </Button>
+        ) : (
           <Button variant="ghost" size="sm" className="mt-2" onClick={() => void openExternal(src)}>
             <ExternalLinkIcon className="mr-1 size-3" />
             {t("openUrl")}

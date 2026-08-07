@@ -1,6 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useRef, type ReactNode, type Ref } from "react"
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useSyncExternalStore,
+  type ReactNode,
+  type Ref,
+} from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangle, MessageCircleMore } from "lucide-react"
 import { Composer, type ComposerHandle, type ComposerWorkflowMention } from "./composer"
@@ -17,6 +24,7 @@ import { WelcomeStats } from "./welcome/welcome-stats"
 import { DiagnosticCard, InlineError } from "@/components/error/diagnostic-card"
 import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 import { MessageList } from "./message-list"
+import { CompanionTranscriptMessages } from "./companion-transcript-messages"
 import { RunStatusBar } from "./run-status-bar"
 import { PlanApprovalDock } from "@/components/agent/plan/plan-approval-dock"
 import { PlanTrackerDock } from "@/components/agent/plan/plan-tracker-dock"
@@ -53,6 +61,15 @@ import { ComputerUsePictureInPicture } from "./computer-use-picture-in-picture"
 import { consumePendingChatPrompt } from "@/lib/chat/pending-prompt"
 import { hasNoLeakingPii } from "@cognia/redact"
 import { useFlowMotion } from "./motion/motion-reveal"
+import { isSupportAgentId } from "@/lib/support-agent/context"
+import { SupportAgentPanel } from "@/components/support/support-agent-panel"
+import { isCapacitor, isTauri } from "@/lib/platform/detect"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import {
+  getSessionHistoryMode,
+  hydrateSessionHistory,
+  subscribeSessionHistoryMode,
+} from "@/lib/sync/session-history"
 
 /**
  * Attach `node` to a (possibly absent) callback or object ref. Defined at
@@ -271,6 +288,16 @@ export function ChatPane({
   // chrome (header, composer, footer) no longer re-renders per token — only
   // the inner `ChatMessages` subtree does.
   const hasMessages = useSessionHasMessages(boundId)
+  const subscribeHistoryMode = useCallback(
+    (listener: () => void) =>
+      boundId ? subscribeSessionHistoryMode(boundId, listener) : () => undefined,
+    [boundId]
+  )
+  const getHistoryMode = useCallback(() => getSessionHistoryMode(boundId), [boundId])
+  const historyMode = useSyncExternalStore(subscribeHistoryMode, getHistoryMode, () => null)
+  const isWebCompanionPane = !isTauri() && !isCapacitor() && hasWebCompanionTarget()
+  const usesCompanionTranscript = historyMode === "timeline" && isWebCompanionPane
+  const hasHistory = hasMessages || usesCompanionTranscript
   // Snapshot each turn into the durable run-records table (Run Panel "second
   // clock") — runs regardless of whether the panel is expanded or rendered.
   useRunRecordPersistence(boundId)
@@ -279,12 +306,35 @@ export function ChatPane({
   const errorDiagnostic = useSessionErrorDiagnostic(boundId)
   const messagesLoading = useSessionMessagesLoading(boundId)
   const messagesLoadError = useSessionMessagesLoadError(boundId)
-  const coldHistoryLoading = !hasMessages && messagesLoading && !messagesLoadError
+  const coldHistoryLoading = !hasHistory && messagesLoading && !messagesLoadError
   const showHistoryLoader = useDeferredLoading(coldHistoryLoading, { key: boundId })
   const showHistorySurface = coldHistoryLoading || showHistoryLoader
   const atCapacity = useIsAtStreamCap(boundId)
   const reduce = useReducedMotion()
   const isMobile = useIsMobile()
+
+  // Split panes, Workflow Chat and Workbench can bind a session without
+  // making it the global activeSessionId. Negotiate per mounted pane so those
+  // production routes publish their own timeline/legacy mode. The history
+  // module coalesces this with an active-session negotiation already in flight.
+  useEffect(() => {
+    if (!boundId || !isWebCompanionPane || historyMode !== null) return
+    let cancelled = false
+    void import("@/lib/tauri/transport-instance")
+      .then(({ transport }) => hydrateSessionHistory(transport, boundId))
+      .catch((error) => {
+        if (cancelled) return
+        useChatStore
+          .getState()
+          .setSessionMessagesLoadError(
+            boundId,
+            error instanceof Error ? error.message : String(error)
+          )
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [boundId, historyMode, isWebCompanionPane])
 
   // ADR-0030 — surface the active character's exemplar prompts as quick-start
   // chips on the empty inline state. `useCharacter` resolves Dexie + overlay
@@ -431,6 +481,9 @@ export function ChatPane({
       onSteerFlush={onSteerFlush ? () => void onSteerFlush() : undefined}
     />
   )
+  const supportPanel = isSupportAgentId(activeSession.characterId) ? (
+    <SupportAgentPanel sessionId={boundId} />
+  ) : null
 
   // Error banner + footer plugin slot — identical in both layouts, sitting
   // just above the composer. Only one layout branch mounts at a time.
@@ -453,7 +506,7 @@ export function ChatPane({
           className="mx-4 mt-2"
           diagnostic={errorDiagnostic}
           handlers={{
-            ...(hasMessages ? { retry: () => void handleRetry() } : {}),
+            ...(hasHistory ? { retry: () => void handleRetry() } : {}),
             "open-settings": (action) =>
               onOpenSettings(
                 action.kind === "open-settings"
@@ -467,7 +520,7 @@ export function ChatPane({
         errorMessage && (
           <InlineError
             message={errorMessage}
-            onRetry={hasMessages ? handleRetry : undefined}
+            onRetry={hasHistory ? handleRetry : undefined}
             onOpenSettings={() => onOpenSettings("providers")}
             onDismiss={() => boundId && useChatStore.getState().setSessionError(boundId, null)}
           />
@@ -506,17 +559,17 @@ export function ChatPane({
           // Skip on mobile viewports: programmatic focus opens the virtual
           // keyboard, which is disruptive when switching sessions from the nav
           // sheet (the left drawer on mobile).
-          if (hasMessages && !isMobile) internalComposerRef.current?.focus()
+          if (hasHistory && !isMobile) internalComposerRef.current?.focus()
         }}
       >
-        {showHistorySurface || !hasMessages ? (
+        {showHistorySurface || !hasHistory ? (
           <motion.div
             key="empty"
             className="flex min-h-0 flex-1 flex-col"
             exit={reduce ? undefined : { opacity: 0, y: -6, scale: 0.995 }}
             transition={mobileTransition("fast")}
           >
-            {messagesLoadError && !hasMessages ? (
+            {messagesLoadError && !hasHistory ? (
               // History load failed — surface it with a retry instead of the
               // welcome layout, which would read as silently lost history.
               <div
@@ -551,6 +604,7 @@ export function ChatPane({
               />
             )}
             {errorAndFooter}
+            {supportPanel}
             {/* Composer is hidden while history is loading / failed — same as
                 the previous layout, where it only mounted with the welcome. */}
             {!messagesLoadError && !showHistorySurface && composerEl}
@@ -571,6 +625,7 @@ export function ChatPane({
                 onCopy={handleCopySuccess}
                 onRegenerate={handleRegenerate}
                 onEditResend={handleEditResend}
+                useCompanionTranscript={usesCompanionTranscript}
               />
               {boundId && <ComputerUsePictureInPicture sessionId={boundId} />}
             </div>
@@ -593,6 +648,7 @@ export function ChatPane({
               <PlanComposerDock sessionId={boundId} characterId={activeSession?.characterId} />
             )}
             <WorkspaceChangesCard session={activeSession} />
+            {supportPanel}
             {runStatusEl}
             {composerEl}
           </motion.div>
@@ -615,6 +671,7 @@ function ChatMessages({
   onCopy,
   onRegenerate,
   onEditResend,
+  useCompanionTranscript,
 }: {
   sessionId: string | null
   directCharacter?: Character | null
@@ -622,9 +679,24 @@ function ChatMessages({
   onCopy: () => void
   onRegenerate: () => void
   onEditResend: (messageId: string, newText: string) => void
+  useCompanionTranscript: boolean
 }) {
   const messages = useSessionMessages(sessionId)
   const status = useSessionStatus(sessionId)
+  if (sessionId && useCompanionTranscript) {
+    return (
+      <CompanionTranscriptMessages
+        sessionId={sessionId}
+        messages={messages}
+        status={status}
+        directCharacter={directCharacter}
+        projectRoot={projectRoot}
+        onCopy={onCopy}
+        onRegenerate={onRegenerate}
+        onEditResend={onEditResend}
+      />
+    )
+  }
   return (
     <MessageList
       messages={messages}

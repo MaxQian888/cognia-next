@@ -228,6 +228,25 @@ test("runWebhookHandler: refuses a PII-bearing lifecycle payload before fetch", 
   assert.deepEqual(out, { block: HOOK_PII_BLOCK_REASON })
 })
 
+test("runGroups: executes the canonical http handler spelling", async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" })
+    res.end(JSON.stringify({ additionalContext: "from-http" }))
+  })
+  await new Promise((resolve) => server.listen(0, resolve))
+  const port = server.address().port
+  try {
+    const decision = await runGroups(
+      [{ hooks: [{ type: "http", url: `http://127.0.0.1:${port}/hook` }] }],
+      "",
+      JSON.stringify({ hook_event_name: "Stop" })
+    )
+    assert.equal(decision.additionalContext, "from-http")
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
+
 // --- runGroups --------------------------------------------------------------
 
 test("runGroups: matcher filters, block short-circuits later handlers", async () => {
@@ -247,14 +266,28 @@ test("runGroups: matcher filters, block short-circuits later handlers", async ()
   assert.equal(dec.additionalContext, undefined)
 })
 
-test("runGroups: unknown handler types are inert", async () => {
+test("runGroups: unsupported handler types emit actionable diagnostics", async () => {
   const dec = await runGroups(
-    [{ hooks: [{ type: "prompt", prompt: "x" }, { type: "mystery" }] }],
+    [
+      {
+        hooks: [
+          { type: "prompt", prompt: "x" },
+          { type: "mcp_tool" },
+          { type: "agent" },
+          { type: "mystery" },
+        ],
+      },
+    ],
     "Bash",
     "{}"
   )
   assert.equal(dec.block, undefined)
-  assert.equal(dec.warnings.length, 0)
+  assert.deepEqual(dec.warnings, [
+    "unsupported hook handler type: prompt",
+    "unsupported hook handler type: mcp_tool",
+    "unsupported hook handler type: agent",
+    "unsupported hook handler type: mystery",
+  ])
 })
 
 // --- mapDecisionToOutput ----------------------------------------------------

@@ -45,6 +45,7 @@ import { createHostBgShellRegistry } from "../builtin-tools/core/bash-host-sessi
 import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
 import { createStderrLogSink, buildMcpLogEvent } from "./mcp-log.mjs"
 import { createMcpAutoReconnector } from "./mcp-auto-reconnect.mjs"
+import { guardAnthropicRemoteMcpServers } from "./anthropic-mcp-relay.mjs"
 import {
   applyClaudeAgentSdkOptions,
   buildSdkInteractionCallbacks,
@@ -67,6 +68,30 @@ function isAskUserTool(toolName) {
   const parts = String(toolName).split("__")
   const bare = parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
   return bare === ASK_USER_TOOL_NAME
+}
+
+/**
+ * Apply the runtime-wide deny-all contract at the final SDK boundary.
+ *
+ * Claude Agent SDK treats `allowedTools: []` as an omitted filter, while its
+ * `tools: []` option emits `--tools ""` and disables native tools. Keeping this
+ * clamp after the nested SDK overlay prevents any renderer, plugin, or future
+ * option merge from reopening a Support session's tool surface.
+ *
+ * @param {Record<string, any>} options
+ * @param {Record<string, any>} sendOptions
+ */
+export function enforceAnthropicToolSurface(options, sendOptions) {
+  if (sendOptions?.toolSurface !== "none") return options
+  return {
+    ...options,
+    tools: [],
+    allowedTools: [],
+    mcpServers: {},
+    agents: undefined,
+    agent: undefined,
+    hooks: undefined,
+  }
 }
 
 /**
@@ -240,7 +265,9 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   })
   // Stamp `alwaysLoad` onto user-configured MCP servers per the tool-search
   // policy (the map is keyed by server name, matching alwaysLoadServers).
-  const baseUserServers = stampUserServersAlwaysLoad(sendOptions.mcpServers, serverAlwaysLoad)
+  const baseUserServers = guardAnthropicRemoteMcpServers(
+    stampUserServersAlwaysLoad(sendOptions.mcpServers, serverAlwaysLoad)
+  )
   const withBuiltins = builtinServer
     ? Object.prototype.hasOwnProperty.call(baseUserServers, BUILTIN_SERVER_NAME)
       ? (() => {
@@ -351,7 +378,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // recognise. They're consumed earlier in `resolveSendOptions` (translated
   // into env / settingSources / appendSystemPrompt / etc.) or in this
   // dispatcher before this object is built (`builtinTools` → `mergedMcpServers`).
-  const options = {
+  let options = {
     cwd: sendOptions.cwd,
     model:
       sendOptions.execution?.modelBindings?.primary &&
@@ -623,6 +650,8 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     const flush = sendOptions.claudeAgentSdk?.sessionStore?.flush
     if (flush) options.sessionStoreFlush = flush
   }
+
+  options = enforceAnthropicToolSurface(options, sendOptions)
 
   // Strip undefined/null so the SDK uses its defaults instead of choking on
   // `null.type` lookups.

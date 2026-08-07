@@ -10,7 +10,7 @@ import { render, screen, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 // Keep the artifact store light: stub plugin hooks + project store.
-jest.mock("@/lib/plugin", () => ({
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => new Proxy({}, { get: () => jest.fn() }),
 }))
 jest.mock("@/stores/project/project-store", () => ({

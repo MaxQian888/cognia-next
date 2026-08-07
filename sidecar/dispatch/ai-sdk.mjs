@@ -1058,99 +1058,108 @@ export function dispatchAiSdk({
       // Build native AI SDK tools (built-in + plugin) once. Lazy-imported so
       // the bridge (and its `ai` dependency) doesn't load for tool-less turns.
       if (toolsCache === undefined) {
-        const { buildAiSdkTools } = await import("./ai-sdk-tools.mjs")
-        const { createDoomLoopGuard } = await import("./doom-loop.mjs")
-        // Own the tool gate's guard here so it can be reset per turn (F1).
-        const toolDoomGuard = createDoomLoopGuard()
-        doomGuards.push(toolDoomGuard)
-        toolsCache = buildAiSdkTools({
-          // A routed `@agent` narrows the built-in tool allowlist to its own
-          // tools and unions its deny-list on top (same allowlist mechanism
-          // characters / skills / modes use). `disallowedTools` (deny /
-          // restricted mode) is checked separately and still wins.
-          sendOptions: agentScopedSendOptions,
-          emit,
-          sessionId,
-          pendingApprovals,
-          pendingPluginToolCalls,
-          lspResolver: lsp.lspResolver,
-          codeGraphResolver: codeGraph.codeGraphResolver,
-          readTracker,
-          bgShells,
-          hostRpc,
-          taskStore,
-          doomGuard: toolDoomGuard,
-          // PostToolUse rewrite at the execute layer (opt-in) — see
-          // `reviewToolOutput` above.
-          ...(toolResultReviewEnabled ? { reviewToolOutput } : {}),
-        })
+        if (agentScopedSendOptions.toolSurface === "none") {
+          // Final dispatcher contract: a disabled tool surface must stay empty
+          // even when stale/global MCP or ToolSearch settings survive upstream.
+          toolsCache = {}
+        } else {
+          const { buildAiSdkTools } = await import("./ai-sdk-tools.mjs")
+          const { createDoomLoopGuard } = await import("./doom-loop.mjs")
+          // Own the tool gate's guard here so it can be reset per turn (F1).
+          const toolDoomGuard = createDoomLoopGuard()
+          doomGuards.push(toolDoomGuard)
+          toolsCache = buildAiSdkTools({
+            // A routed `@agent` narrows the built-in tool allowlist to its own
+            // tools and unions its deny-list on top (same allowlist mechanism
+            // characters / skills / modes use). `disallowedTools` (deny /
+            // restricted mode) is checked separately and still wins.
+            sendOptions: agentScopedSendOptions,
+            emit,
+            sessionId,
+            pendingApprovals,
+            pendingPluginToolCalls,
+            lspResolver: lsp.lspResolver,
+            codeGraphResolver: codeGraph.codeGraphResolver,
+            readTracker,
+            bgShells,
+            hostRpc,
+            taskStore,
+            doomGuard: toolDoomGuard,
+            // PostToolUse rewrite at the execute layer (opt-in) — see
+            // `reviewToolOutput` above.
+            ...(toolResultReviewEnabled ? { reviewToolOutput } : {}),
+          })
 
-        // External MCP servers (parity with the Anthropic path, which passes
-        // `mcpServers` to the agent SDK). `streamText` has no MCP concept, so
-        // we connect the user's servers here and merge their (namespaced,
-        // gated) tools. Connect once per session; close on teardown. A failure
-        // logs and degrades to the built-in/plugin tools rather than breaking
-        // the turn.
-        if (sendOptions.mcpServers && Object.keys(sendOptions.mcpServers).length > 0) {
-          try {
-            const buildAiSdkMcpTools =
-              buildMcpToolsOverride ?? (await import("./ai-sdk-mcp.mjs")).buildAiSdkMcpTools
-            const { createToolPermissionGate } = await import("./ai-sdk-tools.mjs")
-            // Own the MCP gate's guard here too so it resets per turn (F1).
-            const mcpDoomGuard = createDoomLoopGuard()
-            doomGuards.push(mcpDoomGuard)
-            const mcpGate = createToolPermissionGate({
-              emit,
-              sessionId,
-              pendingApprovals,
-              sendOptions: agentScopedSendOptions,
-              doomGuard: mcpDoomGuard,
-            })
-            const mcp = await buildAiSdkMcpTools({
-              mcpServers: sendOptions.mcpServers,
-              gate: mcpGate,
-              ...(toolResultReviewEnabled ? { reviewToolOutput } : {}),
-              // A routed `@agent` narrows the allowlist to its own tools and
-              // unions its deny-list (parity with the built-in tool path above).
-              allowedTools: agentScopedSendOptions.allowedTools,
-              disallowedTools: agentScopedSendOptions.disallowedTools,
-              log,
-              // Surface each server's stderr + connect/tool diagnostics as
-              // `mcp_log` events for the renderer's MCP log panel (the ai-sdk
-              // path previously logged these only to the sidecar's own stderr).
-              emitMcpLog: (entry) =>
-                emit(buildMcpLogEvent({ sessionId, ts: Date.now(), ...entry })),
-            })
-            mcpClose = mcp.close
-            if (Object.keys(mcp.tools).length > 0) {
-              const merged = { ...toolsCache, ...mcp.tools }
-              // Re-sort so the tools map serializes identically across turns
-              // (prompt-cache prefix stability), matching buildAiSdkTools.
-              toolsCache = Object.fromEntries(
-                Object.keys(merged)
-                  .sort()
-                  .map((k) => [k, merged[k]])
+          // External MCP servers (parity with the Anthropic path, which passes
+          // `mcpServers` to the agent SDK). `streamText` has no MCP concept, so
+          // we connect the user's servers here and merge their (namespaced,
+          // gated) tools. Connect once per session; close on teardown. A failure
+          // logs and degrades to the built-in/plugin tools rather than breaking
+          // the turn.
+          if (sendOptions.mcpServers && Object.keys(sendOptions.mcpServers).length > 0) {
+            try {
+              const buildAiSdkMcpTools =
+                buildMcpToolsOverride ?? (await import("./ai-sdk-mcp.mjs")).buildAiSdkMcpTools
+              const { createToolPermissionGate } = await import("./ai-sdk-tools.mjs")
+              // Own the MCP gate's guard here too so it resets per turn (F1).
+              const mcpDoomGuard = createDoomLoopGuard()
+              doomGuards.push(mcpDoomGuard)
+              const mcpGate = createToolPermissionGate({
+                emit,
+                sessionId,
+                pendingApprovals,
+                sendOptions: agentScopedSendOptions,
+                doomGuard: mcpDoomGuard,
+              })
+              const mcp = await buildAiSdkMcpTools({
+                mcpServers: sendOptions.mcpServers,
+                gate: mcpGate,
+                ...(toolResultReviewEnabled ? { reviewToolOutput } : {}),
+                // A routed `@agent` narrows the allowlist to its own tools and
+                // unions its deny-list (parity with the built-in tool path above).
+                allowedTools: agentScopedSendOptions.allowedTools,
+                disallowedTools: agentScopedSendOptions.disallowedTools,
+                log,
+                // Surface each server's stderr + connect/tool diagnostics as
+                // `mcp_log` events for the renderer's MCP log panel (the ai-sdk
+                // path previously logged these only to the sidecar's own stderr).
+                emitMcpLog: (entry) =>
+                  emit(buildMcpLogEvent({ sessionId, ts: Date.now(), ...entry })),
+              })
+              mcpClose = mcp.close
+              if (Object.keys(mcp.tools).length > 0) {
+                const merged = { ...toolsCache, ...mcp.tools }
+                // Re-sort so the tools map serializes identically across turns
+                // (prompt-cache prefix stability), matching buildAiSdkTools.
+                toolsCache = Object.fromEntries(
+                  Object.keys(merged)
+                    .sort()
+                    .map((k) => [k, merged[k]])
+                )
+              }
+            } catch (err) {
+              log(
+                "warn",
+                `external MCP setup failed, continuing without it: ${err?.message ?? err}`
               )
             }
-          } catch (err) {
-            log("warn", `external MCP setup failed, continuing without it: ${err?.message ?? err}`)
           }
-        }
 
-        // Cross-provider deferred loading. The Anthropic Agent SDK handles
-        // ToolSearch/alwaysLoad natively; AI SDK providers need an explicit
-        // ToolSearch tool plus prepareStep(activeTools). Build it only after
-        // built-in, plugin, and external MCP tools have been permission-filtered
-        // and merged, so discovery can only activate tools the session already
-        // owns. The controller persists for this sidecar session, retaining
-        // discovered tools across manual-loop legs and user turns.
-        if (agentScopedSendOptions.toolSearchEnabled === true) {
-          const { createAiSdkToolSearchController } = await import("./ai-sdk-tool-search.mjs")
-          toolSearchController = createAiSdkToolSearchController({
-            tools: toolsCache,
-            sendOptions: agentScopedSendOptions,
-          })
-          if (toolSearchController) toolsCache = toolSearchController.tools
+          // Cross-provider deferred loading. The Anthropic Agent SDK handles
+          // ToolSearch/alwaysLoad natively; AI SDK providers need an explicit
+          // ToolSearch tool plus prepareStep(activeTools). Build it only after
+          // built-in, plugin, and external MCP tools have been permission-filtered
+          // and merged, so discovery can only activate tools the session already
+          // owns. The controller persists for this sidecar session, retaining
+          // discovered tools across manual-loop legs and user turns.
+          if (agentScopedSendOptions.toolSearchEnabled === true) {
+            const { createAiSdkToolSearchController } = await import("./ai-sdk-tool-search.mjs")
+            toolSearchController = createAiSdkToolSearchController({
+              tools: toolsCache,
+              sendOptions: agentScopedSendOptions,
+            })
+            if (toolSearchController) toolsCache = toolSearchController.tools
+          }
         }
       }
 

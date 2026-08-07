@@ -677,6 +677,11 @@ export function buildAiSdkTools({
   doomGuard: providedDoomGuard,
   reviewToolOutput,
 }) {
+  // An empty `allowedTools` array means "no filtering" on this path. Honor the
+  // explicit runtime-wide deny-all contract before collecting any built-in or
+  // plugin definitions so Support sessions cannot inherit a tool accidentally.
+  if (sendOptions.toolSurface === "none") return {}
+
   /** @type {Record<string, ReturnType<typeof tool>>} */
   const tools = {}
   // Accept a caller-owned guard so the session can `reset()` it per turn (the

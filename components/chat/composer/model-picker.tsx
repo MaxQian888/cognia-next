@@ -9,7 +9,7 @@
 // `D:\Project\Cognia\components\chat\dialogs\model-picker-dialog.tsx`,
 // but renders inline (Popover + Command) instead of as a full dialog.
 
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   BrainIcon,
@@ -125,6 +125,7 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
   const saveSettings = useSettingsStore((s) => s.save)
   const autoEnabled = autoRouting?.enabled === true
   const [open, setOpen] = useState(false)
+  const positionedActiveModelRef = useRef(false)
   // Optimistic state so the button label reflects the user's selection
   // immediately, before the parent re-renders with the updated session prop.
   const [optimisticModel, setOptimisticModel] = useState<string | null>(null)
@@ -147,6 +148,25 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
   const activeProvider =
     optimisticProvider ?? session?.providerOverride ?? defaultProvider ?? "anthropic"
   const autoActive = activeModel === "auto"
+
+  // The dialog content is mounted in a portal after the open state changes, so
+  // position from the active item's ref callback instead of an opening effect.
+  // The callback stays stable while open and the guard prevents remounts or
+  // user interaction from pulling the list back after the initial alignment.
+  const positionActiveModelItem = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node || !open || positionedActiveModelRef.current) return
+      positionedActiveModelRef.current = true
+      node.scrollIntoView?.({ behavior: "auto", block: "center" })
+    },
+    [open]
+  )
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (nextOpen) positionedActiveModelRef.current = false
+    setOpen(nextOpen)
+  }
+
   // Friendly label for the active model — prefer the matching option's display
   // name (provider-scoped), else any option with that id, else the raw id.
   const activeModelName = useMemo(() => {
@@ -243,7 +263,7 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
   }
 
   return (
-    <ModelSelector open={open} onOpenChange={setOpen}>
+    <ModelSelector open={open} onOpenChange={handleOpenChange}>
       <ModelSelectorTrigger asChild>
         <Button
           variant="ghost"
@@ -288,6 +308,7 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
         <ModelSelectorList>
           <ModelSelectorGroup heading={t("routingGroup")}>
             <ModelSelectorItem
+              ref={autoActive ? positionActiveModelItem : undefined}
               value={`auto ${t("autoModel")} ${t("autoToggleHint")}`}
               onSelect={handleSelectAuto}
               className="mx-1 rounded-lg"
@@ -323,6 +344,7 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
                     return (
                       <ModelSelectorItem
                         key={`${group.providerId}:${modelId}`}
+                        ref={isActive ? positionActiveModelItem : undefined}
                         // Include both name and id so the command filter matches
                         // either the friendly name or the raw id the user types.
                         value={`${group.providerId} ${modelName} ${modelId}`}

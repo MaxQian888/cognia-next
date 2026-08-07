@@ -315,6 +315,17 @@ describe("text parts", () => {
     )
   })
 
+  it("defers distant finalized Markdown blocks for oversized responses", () => {
+    const text = Array.from(
+      { length: 200 },
+      (_, index) => `paragraph ${index} ${"x".repeat(400)}`
+    ).join("\n\n")
+
+    render(<MessageRenderer message={assistantMsg("long", text)} />)
+
+    expect(screen.getAllByTestId("finalized-markdown-section").length).toBeGreaterThan(0)
+  })
+
   it("renders streaming text via MessageResponse (not MarkdownRenderer)", () => {
     render(<MessageRenderer message={assistantMsg()} isStreaming />)
     expect(document.querySelector("[data-test='markdown']")).toBeNull()

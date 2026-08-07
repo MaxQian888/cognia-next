@@ -30,7 +30,7 @@ export interface HookEventMeta {
 
 /**
  * Authoritative per-event metadata. Typed as a full `Record<HookEvent, …>` so
- * adding a 28th member to the `HookEvent` union without an entry here is a
+ * adding a member to the `HookEvent` union without an entry here is a
  * COMPILE error — this is what permanently prevents the event lists from
  * drifting apart again.
  */
@@ -48,6 +48,7 @@ const EVENT_META: Record<HookEvent, { category: HookEventCategory; dormant?: boo
   Stop: { category: "session" },
   StopFailure: { category: "session" },
   Notification: { category: "session" },
+  MessageDisplay: { category: "session" },
   // permissions
   PermissionRequest: { category: "permissions" },
   PermissionDenied: { category: "permissions" },
@@ -57,6 +58,7 @@ const EVENT_META: Record<HookEvent, { category: HookEventCategory; dormant?: boo
   TaskCreated: { category: "tasks" },
   TaskCompleted: { category: "tasks" },
   SubagentStop: { category: "tasks" },
+  SubagentStart: { category: "tasks" },
   TeammateIdle: { category: "tasks", dormant: true },
   // lifecycle
   PreCompact: { category: "lifecycle" },
@@ -67,6 +69,8 @@ const EVENT_META: Record<HookEvent, { category: HookEventCategory; dormant?: boo
   CwdChanged: { category: "lifecycle" },
   InstructionsLoaded: { category: "lifecycle" },
   ConfigChange: { category: "lifecycle" },
+  Setup: { category: "lifecycle" },
+  DirectoryAdded: { category: "lifecycle" },
 }
 
 /** Stable category order for the settings panel sections. */

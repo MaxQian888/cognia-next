@@ -9,7 +9,11 @@ import {
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning"
 import { Tool, ToolHeader, ToolContent } from "@/components/ai-elements/tool"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
-import { StreamingTextPart } from "@/components/chat/streaming-text-part"
+import {
+  FINALIZED_MARKDOWN_LAZY_THRESHOLD,
+  FinalizedLongTextPart,
+  StreamingTextPart,
+} from "@/components/chat/streaming-text-part"
 import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
 import { InboundA2UIRenderer } from "@/components/chat/message-parts/inbound-a2ui-renderer"
 import { SubagentTree } from "@/components/chat/message-parts/subagent-tree"
@@ -1156,6 +1160,17 @@ function renderPart(
           key={key}
           text={text}
           isStreaming={isStreaming}
+          projectRoot={projectRoot}
+        />
+      )
+    }
+
+    if (text.length >= FINALIZED_MARKDOWN_LAZY_THRESHOLD) {
+      return (
+        <FinalizedLongTextPart
+          key={key}
+          text={text}
+          messageId={messageId}
           projectRoot={projectRoot}
         />
       )

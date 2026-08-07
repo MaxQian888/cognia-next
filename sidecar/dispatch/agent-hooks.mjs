@@ -50,38 +50,46 @@ export const HOOK_MATCH_FIELDS = {
   PermissionRequest: "tool_name",
   PermissionDenied: "tool_name",
   Notification: "notification_type",
-  UserPromptSubmit: "source",
-  UserPromptExpansion: "source",
+  UserPromptExpansion: "command",
   SessionStart: "source",
   SessionEnd: "reason",
+  Setup: "trigger",
+  StopFailure: "error",
   PreCompact: "trigger",
   PostCompact: "trigger",
   SubagentStart: "agent_type",
   SubagentStop: "agent_type",
-  TaskCreated: "task_subject",
-  TaskCompleted: "task_subject",
   FileChanged: "file_path",
-  DirectoryAdded: "directory_path",
-  CwdChanged: "cwd",
-  WorktreeCreate: "worktree_path",
-  WorktreeRemove: "worktree_path",
-  ConfigChange: "config_path",
-  InstructionsLoaded: "source",
+  DirectoryAdded: "source",
+  ConfigChange: "source",
+  InstructionsLoaded: "load_reason",
   Elicitation: "mcp_server_name",
   ElicitationResult: "mcp_server_name",
-  MessageDisplay: "message_type",
 }
+
+export const HOOK_EVENTS_WITHOUT_MATCHERS = new Set([
+  "UserPromptSubmit",
+  "PostToolBatch",
+  "Stop",
+  "TeammateIdle",
+  "TaskCreated",
+  "TaskCompleted",
+  "WorktreeCreate",
+  "WorktreeRemove",
+  "MessageDisplay",
+  "CwdChanged",
+])
 
 /**
  * The value a hook group's `matcher` is compared against for this event.
  *
- * Returns "" when the event has no discriminator, which `matcherMatches` treats
- * as "only an omitted / `*` matcher applies" — a configured matcher on such an
- * event should NOT silently match everything.
+ * Returns `null` when the event does not support matchers. Claude Code ignores
+ * a configured matcher for those events and always runs the group.
  */
 export function hookMatchTarget(eventName, input) {
+  if (HOOK_EVENTS_WITHOUT_MATCHERS.has(eventName)) return null
   const field = HOOK_MATCH_FIELDS[eventName]
-  if (!field) return ""
+  if (!field) return null
   const value = input?.[field]
   return typeof value === "string" ? value : ""
 }
@@ -96,12 +104,14 @@ export function hookMatchTarget(eventName, input) {
  */
 const matcherRegexCache = new Map()
 
-export function matcherMatches(matcher, target) {
+export function matcherMatches(matcher, target, narrowExactSet = false) {
   if (matcher == null) return true
   const m = String(matcher).trim()
   if (m === "" || m === "*") return true
-  if (/^[A-Za-z0-9_|]+$/.test(m)) {
-    return m.split("|").some((alt) => alt === target)
+  const exactPattern = narrowExactSet ? /^[A-Za-z0-9_|]+$/ : /^[A-Za-z0-9_\-, |]+$/
+  if (exactPattern.test(m)) {
+    const separator = narrowExactSet ? /\|/ : /[|,]/
+    return m.split(separator).some((alt) => alt.trim() === target)
   }
   // Compiled once per pattern — this runs for every tool call of the session.
   let re = matcherRegexCache.get(m)
@@ -392,16 +402,20 @@ export async function runWebhookHandler(url, headers, configuredTimeout, payload
 }
 
 function runHandler(handler, payloadJson, signal, cwd) {
-  if (!handler || typeof handler !== "object") return Promise.resolve({})
+  if (!handler || typeof handler !== "object") {
+    return Promise.resolve({ warning: "invalid hook handler configuration" })
+  }
   if (handler.type === "command" && typeof handler.command === "string") {
     return runCommandHandler(handler.command, handler.timeout, payloadJson, signal, cwd)
   }
-  if (handler.type === "webhook" && typeof handler.url === "string") {
+  if (
+    (handler.type === "http" || handler.type === "webhook") &&
+    typeof handler.url === "string"
+  ) {
     return runWebhookHandler(handler.url, handler.headers, handler.timeout, payloadJson, signal)
   }
-  // prompt / mcp_tool / agent / unknown — inert in this phase (round-trips in
-  // settings.json without executing, matching the CLI's tolerant behaviour).
-  return Promise.resolve({})
+  const type = typeof handler.type === "string" && handler.type ? handler.type : "missing"
+  return Promise.resolve({ warning: `unsupported hook handler type: ${type}` })
 }
 
 /**
@@ -427,11 +441,19 @@ function groupsForEvent(hooksConfig, eventName) {
  * outcomes are merged in ARRAY order so the result is deterministic: first
  * block in config order wins, last mutation in config order wins.
  */
-export async function runGroups(groups, target, payloadJson, signal, cwd) {
+export async function runGroups(groups, target, payloadJson, signal, cwd, eventName) {
   const pending = []
   for (const group of groups) {
     if (!group || typeof group !== "object") continue
-    if (!matcherMatches(group.matcher, target)) continue
+    if (
+      target !== null &&
+      !matcherMatches(
+        group.matcher,
+        target,
+        eventName === "FileChanged" || eventName === "StopFailure"
+      )
+    )
+      continue
     for (const handler of Array.isArray(group.hooks) ? group.hooks : []) {
       pending.push(runHandler(handler, payloadJson, signal, cwd))
     }
@@ -554,7 +576,7 @@ function makeEventCallback(eventName, hooksConfig, deps) {
     if (groups.length === 0) return {}
     const target = hookMatchTarget(eventName, input)
     const payloadJson = safeStringify(input)
-    const dec = await runGroups(groups, target, payloadJson, ctx?.signal, deps?.cwd)
+    const dec = await runGroups(groups, target, payloadJson, ctx?.signal, deps?.cwd, eventName)
     if (dec.warnings.length > 0 && typeof deps?.log === "function") {
       // Host log signature: (level, message).
       for (const w of dec.warnings) deps.log("warn", `agent-hook ${eventName}: ${w}`)
