@@ -432,3 +432,17 @@ renderer 的 `gateway://decide` 往返。旧快照继续按优先级顺序读取
 
 可执行协议边界仍限于 OpenAI-compatible 与 Anthropic；其他 provider 协议不会
 被静默视为兼容协议。
+
+## 补充记录（2026-08-06）—— AgentFleet 投影与控制面
+
+AgentFleet 是本 ADR canonical execution 模型的观测与控制投影；它不是第四条 runtime 轨道，
+也不是独立的事件权威。内置、Team、Workflow、Claude Code、Codex 和 OpenCode session 都附着到
+canonical identity 层级，并通过现有 event envelope 发布。Fleet 快照和历史是该 journal 的投影。
+
+外部 adapter 发布版本化 capability descriptor。原生 lifecycle 事件优先于 Task/tool heuristic，
+由推断得到的 lineage 必须标记来源。监控停止时，仍活跃的外部 session 应转为 `detached`，
+而不是伪造 `SessionEnd`。启动时通过 provider identity 和持久 lineage 进行协调，绝不仅依赖 PID。
+
+控制命令使用持久、幂等的 envelope，并支持 lease、acknowledgement、retry、expiry 与脱敏结果审计。
+OpenCode 的 question reply/reject 和单 session interrupt/abort 在能力存在时使用 bound client 的原生 API。
+Claude Code 和 Codex 只暴露 runtime 已验证的控制能力；Fleet 不使用注入终端按键来伪装协议能力。

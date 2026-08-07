@@ -1,97 +1,77 @@
 ---
 title: API Overview
-description: Quick reference for all 15 plugin API namespaces — what each does, required permissions, and common patterns.
+description: How the canonical ctx.* Plugin API contract, permissions, runtimes, and generated reference fit together.
 ---
 
 # API Overview
 
-Plugins access Cognia capabilities through 15 versioned API namespaces. Each namespace lives in `lib/plugin/api/` and is exposed to the Web Worker via the RPC bridge. Every call is guarded by the permission system.
+Plugin authors use the existing `ctx.*` surface. There is no `ctx.api` wrapper and namespace totals are not maintained by hand.
 
-## The 15 namespaces
+The [generated API reference](./api-reference.generated) is produced from the canonical Plugin Interface Catalog at `packages/plugin-sdk/contract/catalog.json`. It lists every callable method, required permission, risk level, runtime support, and data classification. Contract checks reject stale generated TypeScript, Rust, Python, and documentation mirrors.
 
-| Namespace        | File                  | Permission prefix | What it does                                                                     |
-| ---------------- | --------------------- | ----------------- | -------------------------------------------------------------------------------- |
-| `session.*`      | `session-api.ts`      | `chat.*`          | Read sessions/messages, send templated messages                                  |
-| `project.*`      | `project-api.ts`      | `project.*`       | Read project metadata, bound workspaces and characters                           |
-| `vector.*`       | `vector-api.ts`       | `vector.*`        | Query the active vector store (read-only for plugins)                            |
-| `theme.*`        | `theme-api.ts`        | `theme.*`         | Read current theme tokens, register custom themes, toggle light/dark             |
-| `export.*`       | `export-api.ts`       | `export.*`        | Trigger single-session export (Markdown / JSON / Beautiful HTML / Animated HTML) |
-| `i18n.*`         | `i18n-api.ts`         | `i18n.*`          | Read current locale, register translation keys under the plugin namespace        |
-| `canvas.*`       | `canvas-api.ts`       | `canvas.*`        | Read/write canvas documents, register canvas-side tools                          |
-| `artifact.*`     | `artifact-api.ts`     | `artifact.*`      | Register new artifact renderers and preview components                           |
-| `notification.*` | `notification-api.ts` | `notification.*`  | Show toasts, send native notifications, register bindable actions                |
-| `aiProvider.*`   | `ai-provider-api.ts`  | `ai.*`            | Register custom AI providers (OpenAI-compatible protocol or custom impl)         |
-| `extension.*`    | `extension-api.ts`    | `extension.*`     | Mount components to extension points (chat header / sidebar / toolbar / …)       |
-| `permission.*`   | `permission-api.ts`   | —                 | Read current permissions, request additional ones, revoke                        |
-| `media.*`        | `media-api.ts`        | `media.*`         | Register image filters, video effects, transitions, consume media pipeline       |
-| `storage.*`      | `storage-api.ts`      | `storage.*`       | Per-plugin KV storage (small, capped)                                            |
-| `crypto.*`       | `crypto-helpers.ts`   | `crypto.*`        | Limited SubtleCrypto bridge; no raw key handle exposure                          |
+## Usage
 
-Plus two implicit namespaces that don't require an explicit API file:
+```ts title="main.ts"
+export async function activate(ctx) {
+  const sessions = await ctx.session.listSessions({ limit: 10 })
 
-| Namespace       | Permission                          | What it does                                 |
-| --------------- | ----------------------------------- | -------------------------------------------- |
-| `network.fetch` | `network.fetch:<origin>`            | HTTP fetch through the bridge; origin-scoped |
-| `fs.*`          | `fs.read:<path>`, `fs.write:<path>` | File system access; path-scoped              |
+  if (sessions[0]) {
+    await ctx.session.addMessage(sessions[0].id, "Hello from plugin!", {
+      role: "user",
+    })
+  }
 
-## Usage pattern
-
-Inside your plugin entry:
-
-```ts title="main.js"
-export async function onActivate(ctx) {
-  // Read-only: no extra permission beyond what was granted at install
-  const sessions = await ctx.api.session.listRecent({ limit: 10 })
-
-  // Write: guarded by chat.send permission
-  await ctx.api.session.sendMessage(sessionId, {
-    content: "Hello from plugin!",
-  })
-
-  // Storage: per-plugin isolated KV
-  await ctx.api.storage.set("lastRun", Date.now())
+  await ctx.storage.set("lastRun", Date.now())
 }
 ```
 
-## Permission-to-namespace mapping
+## Governance pipeline
 
-| If you request…                  | You can use…                                   |
-| -------------------------------- | ---------------------------------------------- |
-| `chat.read`                      | `session.listRecent`, `session.getMessages`    |
-| `chat.send`                      | `session.sendMessage`                          |
-| `twin.read`                      | `vector.query` (limited)                       |
-| `theme.read` + `theme.write`     | `theme.getTokens`, `theme.registerCustom`      |
-| `storage.read` + `storage.write` | `storage.get`, `storage.set`, `storage.delete` |
-| `network.fetch:api.example.com`  | `fetch("https://api.example.com/...")`         |
-| `fs.read:$DOWNLOADS`             | `fs.readFile("$DOWNLOADS/...")`                |
+Calls registered in the catalog are evaluated in this order:
 
-## Requesting additional permissions at runtime
+1. method descriptor lookup;
+2. runtime and platform support;
+3. permission and consent policy;
+4. data and egress policy;
+5. timeout and cancellation behavior;
+6. runtime adapter and normalized transport result;
+7. redacted audit metadata.
+
+Unknown methods fail closed. Audit records contain plugin ID, method ID, outcome, duration, and data classification—never prompts, secrets, file contents, or arguments.
+
+Renderer permission proxies are not a JavaScript sandbox. Native operations are checked again by the Rust gateway, and third-party frontend or hybrid plugins still require explicit trust.
+
+## Requesting an optional permission
 
 ```ts
-const granted = await ctx.api.permission.request(["network.fetch:api.newservice.com"])
-if (granted.all) {
-  // proceed
-} else {
-  // handle partial grant or denial
+const granted = await ctx.permissions.requestPermission(
+  "network:fetch",
+  "Synchronize the selected account"
+)
+
+if (granted) {
+  await synchronizeAccount(ctx)
 }
 ```
+
+Public APIs remain source- and runtime-compatible for at least two host minor releases after deprecation. Removal is limited to the next SDK major and requires a replacement and migration guide.
 
 ## Related
 
 <Cards>
   <Card
-    title="Permissions"
-    href="./permissions"
-    description="Permission string format and guard behavior."
+    title="Generated API Reference"
+    href="./api-reference.generated"
+    description="Catalog-derived methods, permissions, runtimes, and risk metadata."
   />
   <Card
-    title="Surfaces"
-    href="./surfaces"
-    description="UI extension points and component mounting."
+    title="Permissions"
+    href="./permissions"
+    description="Permission declaration, consent, and native enforcement."
   />
   <Card
     title="Lifecycle Hooks"
     href="./lifecycle-hooks"
-    description="Event subscriptions from onActivate."
+    description="Event subscriptions and automatic disposable cleanup."
   />
 </Cards>

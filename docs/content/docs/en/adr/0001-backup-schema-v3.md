@@ -84,6 +84,28 @@ The export dialog offers three modes:
 The importer detects the encrypted shape, tries the auto-key silently first,
 and falls back to a passphrase prompt only if that fails.
 
+### Additive streaming v4 codec (2026-08-06)
+
+Large databases must not be converted into one `BackupPayloadV3` object before
+they can be written. The additive v4 codec therefore uses newline-delimited
+`header → chunk* → footer` records:
+
+- `buildBackupStream` reads the catalog-bound portable data with a primary-key
+  cursor and releases each IndexedDB page after its record is consumed.
+- Each chunk has an independent SHA-256 checksum. A constant-size SHA-256 hash
+  chain binds the header, chunk order, and required footer without retaining a
+  list of chunk hashes.
+- Encrypted streams use PBKDF2-SHA256 and independent AES-GCM records. An
+  eight-byte random nonce prefix plus the 32-bit record sequence produces a
+  unique 12-byte IV; format, trace id, and sequence are authenticated as AAD.
+- Decoders enforce record-size, ordering, checksum, footer, KDF, and nonce
+  bounds before exposing a verified chunk.
+
+This is an additive format seam. Existing v1/v3 imports remain readable and
+the current UI, scheduler, and WebDAV flows continue writing v3 until their
+streaming sink and resumable-restore adapters are complete. The v4 codec must
+not be routed into those writers before a matching restore path exists.
+
 ### Backup history + reminders + auto-schedule
 
 A new Dexie table `backupHistory` (v10) records every successful or failed
@@ -131,6 +153,8 @@ up whichever format the user drops in.
 | `lib/data/backup-key.ts`                                | Device-stored auto-key + rotation                                                       |
 | `lib/data/migrate.ts`                                   | v1 → v3 boundary; integrity check                                                       |
 | `lib/data/build-package.ts`                             | Reads Dexie tables → `BackupPackageV3`                                                  |
+| `lib/data/build-stream.ts`                              | Reads portable Dexie data as bounded v4 pages                                           |
+| `lib/data/stream-format.ts`                             | Encodes/decodes authenticated v4 NDJSON records                                         |
 | `lib/data/apply-package.ts`                             | Writes `BackupPackageV3` back, respecting built-ins                                     |
 | `lib/data/scheduler.ts`                                 | Pure helpers: `shouldRunScheduledBackup`, `shouldShowReminder`, `pruneScheduledBackups` |
 | `lib/data/import-registry.ts`                           | External-format dispatcher                                                              |

@@ -7,6 +7,8 @@ description: "持久化对话执行上下文、项目环境、统一审查、受
 
 **状态**：已接受（2026-08-06）
 
+> **由 ADR-0111 修订（2026-08-07）。** ADR-0108 继续作为持久化 `SessionExecutionContext`、项目环境、统一审查、Browser Adjust 与隐藏 Agent 线程视图的权威。Worktree 所有权、真实的 `baseRef` 后端输入、跨根原子 Apply、敏感路径授权、`WorktreeCreate` / `WorktreeRemove` hook 激活以及 scheduled 运行 fail-closed 的行为迁移到 ADR-0111。`developer.taskWorkspace` 转为一个发布周期的 rollback kill switch。详见 ADR-0111。
+
 ## 背景
 
 Cognia 已拥有 Guild/DM/Team/Canvas 桌面壳、终端、调度器、浏览器批注、Computer Use、Job Center、skills、plugins、MCP、通知、subagents、Git UI，以及 ADR-0086 定义的任务级资源模型。相较当前 Codex 桌面工作流，缺少的是持久绑定对话的 Worktree、统一的审查到 PR 流程、项目本地初始化环境、临时 Browser Adjust 与受控 CDP、快速任务入口，以及隐藏 Agent 线程的全局视图。

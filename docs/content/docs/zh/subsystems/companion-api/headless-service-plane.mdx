@@ -1,0 +1,81 @@
+---
+title: Headless Service Plane
+description: 不渲染前端即可启动全部 agent runtime、获取本地调试 token，并调用 loopback 内部 API。
+---
+
+# Headless Service Plane
+
+<Status variant="beta">developer surface</Status>
+
+<TLDR>
+  `pnpm dev:headless` 会启动原生 Companion server 与所有已配置 agent runtime，但不启动 Next.js
+  或 WebView。本地 Brain 通过 `/internal/events`、`/internal/bridge` 和
+  `/internal/_rpc/{name}` 连接。加上 `--local-debug` 后，listener 只绑定 loopback，并自动生成
+  仅当前进程有效的 Apifox/Postman 凭据。
+</TLDR>
+
+## 不启动前端
+
+```bash
+pnpm dev:headless --local-debug --data-dir .cache/headless-apifox
+```
+
+启动器会监管原生服务器与启用的 agent runtime 进程、转发日志，并在退出时一起关闭进程组。查看 CLI
+选项：
+
+```bash
+pnpm dev:headless --help
+```
+
+`--data-dir` 同时持有 master key、加密 secret store、SQLite 数据库和 TLS 证书。已有 data dir 如果
+只剩加密 store、却丢失原 master key，将无法恢复并报 `secret-store decrypt failed`。本地 API 调试应
+使用独立目录，不要让启动器为未知的旧 store 生成一把不匹配的新 key。首次构建完成后可加
+`--skip-build` 快速启动。
+
+## 自动本地调试鉴权
+
+启动器会在 data dir 下写出权限为 `0600` 的 Postman 环境文件、输出其路径，并在服务退出时删除。
+进程运行期间，可把它导入 Apifox，或读取其中的 `serviceToken` 变量。该随机 token 仅接受 loopback
+对 `/internal/*` 与 `/ide/content*` 的请求，不能访问 paired-device 路由。
+
+如需直接用 shell 验证，可在另一个 shell 中使用原有的持久 token 备用方案：
+
+```bash
+TOKEN="$(pnpm --silent dev:headless token --data-dir .cache/headless-apifox)"
+curl --insecure \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"limit":20,"offset":0}' \
+  https://127.0.0.1:27890/internal/_rpc/session_list
+```
+
+该 token 具有 service scope，24 小时后过期，并且只在 peer 为 loopback 时接受。它不能用于移动端或
+远程设备鉴权。签发 token 与启动服务必须使用同一个 `--data-dir`，否则二者使用不同的签名 secret。
+
+如需在图形化客户端中调试，请使用 [Apifox 本地调试](./apifox-debugging) 中的导入、证书和环境配置。
+
+## 内部路由
+
+| 路由 | 用途 |
+| --- | --- |
+| `POST /internal/_rpc/{name}` | 调用共享 dispatcher 接受的任意命令 |
+| `GET /internal/events?token=…&since=…` | 带 replay cursor 的 Brain 事件流 |
+| `GET /internal/bridge?token=…` | Rust 与 Brain 间的双向 data-plane bridge |
+| `POST /ide/content` | 通过 loopback broker 发布受管 IDE 内容 |
+| `GET /ide/content/{handle_id}` | 读取 broker content handle |
+
+完整生成契约位于 `docs/api/headless-service-api.openapi.yaml`。它与配对设备 spec 刻意分离，避免
+service-only 命令被误认为公开移动端接口。
+
+## 契约维护
+
+Headless RPC 路径与公开 spec 共享命令 manifest 和 Rust allowlist 作为生成来源：
+
+```bash
+pnpm companion-api:gen
+pnpm companion-api:check
+pnpm companion-api:lint
+```
+
+dispatcher 新增命令后，生成器和 Rust parity test 会要求 Headless spec 同步公开；公开设备暴露仍需
+通过更严格的 target 与 transport 分类。

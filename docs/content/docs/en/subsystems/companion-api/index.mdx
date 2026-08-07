@@ -1,209 +1,72 @@
 ---
-title: External API
-description: The desktop-as-server surface — three independent axum listeners (Companion API, Remote Control, MCP/External Bridge) that expose a curated slice of the Tauri runtime to phones, scripts, and external coding agents over HTTP/WS/WebRTC, each behind its own auth model.
+title: Companion API
+description: Current paired-device and renderer-free service contracts, their authentication boundaries, generated OpenAPI artifacts, and compatibility policy.
 ---
 
-# External API
+# Companion API
 
-<Status variant="beta">beta · companion M2 / WebRTC M-RTC complete</Status>
+<Status variant="beta">beta</Status>
 
 <TLDR>
-  Cognia's desktop is not only an app — it is a **server**. The Tauri shell starts up to
-  **three independent axum listeners**, each a distinct external surface with its own auth model:
-  the **Companion API** (`companion_api/server.rs:199`) is an HTTPS + WebSocket service that paired
-  phones drive through `POST /api/v1/_rpc/<name>` over **110** allowlisted commands; **Remote
-  Control** (`remote_control/server.rs:72`) is a loopback bearer-token webhook receiver for scripts;
-  and the **MCP / External Bridge** (`mcp_server/http_server.rs:67`) forwards JSON-RPC to a Node
-  sidecar that exposes Cognia's knowledge to external coding agents. The Companion API is the only
-  one that binds off-loopback and the only one that uses device JWTs; it also carries a **WebRTC
-  DataChannel tier** (`companion_api/signaling/`) so a phone behind NAT can reach the desktop over a
-  brokered peer connection when LAN and tunnel are both unavailable.
+  Cognia exposes two contracts from the native Rust runtime. Paired devices use the public
+  `/api/*` and `/ws/*` surface with short-lived DPoP credentials. The renderer-free Brain uses a
+  loopback-only `/internal/*` service plane with a 24-hour service token. They share the Rust RPC
+  dispatcher, but they are different trust boundaries and have separate generated OpenAPI files.
 </TLDR>
 
 <StatGrid>
-  <Stat label="axum listeners" value="3" hint="companion_api · remote_control · mcp_server — separate ports" />
-  <Stat label="RPC commands" value="110" hint="KNOWN_COMMANDS allowlist — rpc.rs:163" />
-  <Stat label="HTTP/WS routes" value="8" hint="companion_api router — server.rs:199" />
-  <Stat label="Transport tiers" value="4" hint="ws-lan · ws-tunnel · rtc-direct · rtc-relay" />
-  <Stat label="Default companion port" value="27890" hint="server.rs — DEFAULT_PORT, adjustable" />
-  <Stat label="Device JWT TTL" value="90 d" hint="jwt.rs:29 — pair JWT is 5 min" />
+  <Stat label="Default port" value="27890" hint="TLS listener; configurable" />
+  <Stat label="Public RPC inventory" value="generated" hint="manifest + runtime allowlist" />
+  <Stat label="Headless RPC inventory" value="generated" hint="shared dispatcher allowlist" />
+  <Stat label="Access token" value="5 min" hint="DPoP-bound device token" />
+  <Stat label="Socket ticket" value="60 s" hint="single-use and path-bound" />
 </StatGrid>
 
-## What It Is
+## Two surfaces, one dispatcher
 
-An **external API** in Cognia is any HTTP/WS/WebRTC surface served by the Tauri Rust backend to a
-caller that is *not* the in-process WebView. Because `next.config.ts` forces `output: "export"`,
-`app/api/` does not exist at runtime — every server endpoint is Rust ([axum](https://docs.rs/axum)),
-not a Next.js route. Three listeners cover three audiences:
+| Surface | Routes | Caller | Authentication | Specification |
+| --- | --- | --- | --- | --- |
+| Paired device | `/api/*`, `/ws/*` | Mobile and managed device clients | Device key, DPoP access token, socket ticket | `docs/api/mobile-companion-api.openapi.yaml` |
+| Headless service | `/internal/*`, `/ide/content*` | Local renderer-free Brain and managed IDE | Loopback service token | `docs/api/headless-service-api.openapi.yaml` |
 
-| Server | Lives in | Bind | Port | Auth | Audience |
-| --- | --- | --- | --- | --- | --- |
-| **Companion API** | `src-tauri/src/companion_api/` | `127.0.0.1` **or** `0.0.0.0` (toggle) + TLS | `27890` default | **device JWT** (HS256) | the mobile companion app |
-| **Remote Control** | `src-tauri/src/remote_control/` | `127.0.0.1` only | `47821` default | bearer token + IPv4 CIDR allowlist | local scripts / CI |
-| **MCP / External Bridge** | `src-tauri/src/mcp_server/` | `127.0.0.1` only | OS-assigned | bearer token | external coding agents |
+The public inventory is a subset of `KNOWN_COMMANDS`: the descriptor must target `execution` or
+`host-admin` and declare HTTP transport support. Service commands cannot leak into the public spec.
+The Headless inventory contains every dispatcher command because the Brain is the local execution
+authority.
 
-These are **three independent axum instances on three sockets** — they do not share a router. The
-MCP server additionally opens a fourth, internal-only loopback socket (`automation_proxy.rs:177`) so
-its Node sidecar can call back into desktop automation without contending with the JSON-RPC pipe.
+## Canonical public routes
 
-This section documents the **Companion API** in depth — it is the largest surface, the only
-multi-transport one, and the server half of the [Mobile Companion](../../ui/mobile-architecture)
-client. Remote Control and the MCP bridge have their own pages: [Remote
-Control](../remote-control) and [External Bridge](../external-bridge).
+| Purpose | Route |
+| --- | --- |
+| Health and readiness | `GET /healthz`, `GET /livez`, `GET /readyz` |
+| Device bootstrap | `POST /api/auth/device/challenge`, `POST /api/auth/device/register` |
+| Short-lived credential | `POST /api/auth/token` |
+| WebSocket ticket | `POST /api/auth/socket-ticket` |
+| RPC dispatch | `POST /api/_rpc/{name}` |
+| Identity | `GET /api/whoami` |
+| Event stream | `GET /ws/events?ticket=…&since=…` |
+| Terminal and browser sockets | `/ws/terminal/*`, `/ws/browser/{session_id}` |
 
-## Why It Exists
+`/api/v1/*` and `/ws/v1/*` are explicitly deprecated compatibility routes for released clients.
+New callers must use the canonical routes and DPoP flow.
 
-- **Static export has no server.** Spawning a listener, terminating TLS, signing JWTs, and brokering
-  WebRTC all require a real process; that is the Tauri Rust backend. The phone runs the *same* `out/`
-  bundle as the desktop but connects back to these endpoints instead of calling Tauri IPC.
-- **The allowlist is the API.** Desktop registers 200+ Tauri commands; exposing all of them to a
-  paired phone would be a security regression. `KNOWN_COMMANDS` (`rpc.rs:163`) is a hand-written
-  list of exactly the ~110 a phone may call ([ADR-0013](../../adr/0013-command-manifest)).
-- **One frontend, three transports.** The client's `Transport` abstraction
-  ([ADR-0012](../../adr/0012-transport-abstraction)) lets the *same* `transport.call(name, args)`
-  resolve to Tauri IPC on desktop, HTTPS `_rpc` on mobile-over-LAN, or a WebRTC DataChannel when the
-  phone is on cellular. The server side must therefore answer the same RPC over both HTTP
-  (`rpc.rs:565`) and the DataChannel (`signaling/dispatch.rs:195`).
+## Generated contract
 
-## Architecture at a Glance
+The route catalog, command manifest, and Rust allowlist are the source inputs. Run:
 
-A paired phone reaches the desktop over one of four transport tiers; every tier funnels into the
-same `rpc::dispatch` and the same event bus. Each box is annotated with the file and line where the
-work happens.
-
-```mermaid
-flowchart TB
-  subgraph CLIENT["📱 Mobile client (Capacitor)"]
-    direction LR
-    TX["Transport tri-state<br/>transport-instance.ts:22"]
-  end
-
-  subgraph NET["🌐 Reach paths"]
-    direction LR
-    LAN["LAN + mDNS<br/>mdns.rs:20"]
-    TUN["Cloudflared tunnel<br/>tunnel.rs:87"]
-    REND["WebRTC rendezvous<br/>signaling.cognia.cn"]
-  end
-
-  subgraph SERVER["🦀 Companion API — src-tauri/src/companion_api/"]
-    direction TB
-    ROUTER["build_router<br/>server.rs:199"]
-    MWAUTH["require_device_jwt<br/>middleware.rs:79"]
-    MWLIM["pre_auth_rate_limit<br/>middleware.rs:201"]
-    AUTH["auth.rs:178<br/>POST /auth/pair"]
-    RPC["rpc_handler<br/>rpc.rs:565"]
-    WS["ws_handler<br/>ws.rs:62"]
-    TERM["ws_terminal_handler<br/>ws_terminal.rs:235"]
-    DISP["dispatch — match name<br/>rpc.rs:711"]
-    BUS["EventBus ring+seq<br/>event_bus.rs:117"]
-  end
-
-  subgraph RTC["🔗 WebRTC plane — companion_api/signaling/"]
-    HUB["SignalingHub<br/>signaling/mod.rs:108"]
-    PEER["PeerSession answerer<br/>signaling/peer.rs:64"]
-    DCD["DataChannel→dispatch<br/>signaling/dispatch.rs:195"]
-  end
-
-  subgraph BRIDGE["🌉 WebView bridges → Dexie"]
-    SYNC["sync_bridge.rs:34"]
-    MSGS["desktop_messages_bridge.rs"]
-    WRITES["desktop_writes_bridge.rs:35"]
-  end
-
-  TX -- "HTTPS _rpc / WSS events" --> LAN
-  TX -- "HTTPS / WSS" --> TUN
-  TX -- "DataChannel" --> REND
-  LAN --> ROUTER
-  TUN --> ROUTER
-  REND --> HUB
-  ROUTER --> MWLIM --> AUTH
-  ROUTER --> MWAUTH
-  MWAUTH --> RPC --> DISP
-  MWAUTH --> WS --> BUS
-  MWAUTH --> TERM
-  HUB --> PEER --> DCD --> DISP
-  DCD --> BUS
-  DISP <--> SYNC
-  DISP <--> MSGS
-  DISP <--> WRITES
-
-  classDef client fill:#0f172a,stroke:#38bdf8,color:#e0f2fe
-  classDef net fill:#1e293b,stroke:#94a3b8,color:#e2e8f0
-  classDef server fill:#7c2d12,stroke:#fb923c,color:#fed7aa
-  classDef rtc fill:#312e81,stroke:#818cf8,color:#e0e7ff
-  classDef bridge fill:#334155,stroke:#94a3b8,color:#e2e8f0
-  class TX client
-  class LAN,TUN,REND net
-  class ROUTER,MWAUTH,MWLIM,AUTH,RPC,WS,TERM,DISP,BUS server
-  class HUB,PEER,DCD rtc
-  class SYNC,MSGS,WRITES bridge
+```bash
+pnpm companion-api:gen
+pnpm companion-api:check
+pnpm companion-api:lint
 ```
 
-## The Router
-
-`build_router` (`server.rs:199`) merges three sub-routers, layered so each route gets exactly the
-middleware it needs. The body-limit layer (`RequestBodyLimitLayer`, 64 KiB at `server.rs:47`) and
-`.with_state` wrap the whole tree at `server.rs:250-251`.
-
-| Sub-router | Route | Handler | Where | Guard |
-| --- | --- | --- | --- | --- |
-| metered pre-auth (`server.rs:203`) | `POST /api/v1/auth/pair/issue` | `issue_handler` | `auth.rs:119` | per-IP token bucket |
-| | `POST /api/v1/auth/pair` | `pair_handler` | `auth.rs:178` | per-IP token bucket |
-| | `POST /api/v1/auth/pair/redeem-code` | `redeem_code_handler` | `auth.rs:211` | per-IP token bucket |
-| unmetered public (`server.rs:220`) | `GET /api/v1/healthz` | `healthz_handler` | `healthz.rs:38` | none (discovery) |
-| protected (`server.rs:234`) | `GET /api/v1/whoami` | `whoami_handler` | `auth.rs:389` | device JWT |
-| | `POST /api/v1/_rpc/{name}` | `rpc_handler` | `rpc.rs:565` | device JWT |
-| | `ANY /ws/v1/events` | `ws_handler` | `ws.rs:62` | device JWT (`?token=`) |
-| | `ANY /ws/v1/terminal` | `ws_terminal_handler` | `ws_terminal.rs:235` | device JWT (`?token=`) |
-
-The two middleware layers do not overlap: `pre_auth_rate_limit` (`middleware.rs:201`) guards only the
-three pairing routes (it meters by peer IP because no device exists yet), while `require_device_jwt`
-(`middleware.rs:79`) guards only `whoami` / `_rpc` / both WebSockets. `healthz` is intentionally
-unauthenticated so a scanning phone can confirm "this is a Cognia server" before pairing.
-
-## The Module Map
-
-Read the per-module page for line-accurate internals. Each card is one documentation page.
+The artifact gate runs `companion-api:check`; Rust tests compare both concrete RPC path inventories
+against the dispatcher. A route, descriptor, or allowlist change therefore cannot silently leave the
+committed OpenAPI files stale.
 
 <Cards>
-  <Card title="Server & authentication" href="./server-and-auth" description="The axum bootstrap, the TLS self-signed cert, the middleware stack, and the full pairing pipeline: pair JWT vs device JWT, the 6-digit code path, single-use redemption, deny-list and remote-control allow-list." />
-  <Card title="RPC command manifest" href="./rpc-manifest" description="rpc.rs: the 110-command KNOWN_COMMANDS allowlist, READ_ONLY and CONTROL command sets, the dispatch match, Tauri State injection, idempotency, the per-device rate limiter, and the OpenAPI parity test." />
-  <Card title="Data plane & WebView bridges" href="./data-plane-bridges" description="How a Rust handler reads and writes data that lives in the WebView's Dexie: the three oneshot bridges, the sync-table allowlist, and the headless DataPlane that swaps in a SQLite store when there is no WebView." />
-  <Card title="Events, WebSocket & push" href="./events-ws-push" description="The event bus ring buffer and seq cursor, the /ws/v1/events replay + resync protocol, the resumable remote terminal over /ws/v1/terminal, and FCM/APNs push with WebSocket-active suppression." />
-  <Card title="WebRTC signaling plane" href="./signaling-webrtc" description="The v2-only desktop/headless answerer: role-authenticated encrypted signaling, bounded webrtc-rs peer, durable idempotency, event replay/resync, and recovery FSM (ADR-0021)." />
-  <Card title="Discovery, tunnel & TLS" href="./discovery-tunnel" description="mDNS broadcast of _cognia._tcp.local., the cloudflared quick/named tunnel launcher, the healthz discovery endpoint, the 10-year self-signed certificate, and the SPKI fingerprint that the phone pins." />
+  <Card title="Server and authentication" href="./server-and-auth" description="DPoP registration, access tokens, socket tickets, and legacy compatibility." />
+  <Card title="RPC command manifest" href="./rpc-manifest" description="How the generated public and Headless command inventories are classified." />
+  <Card title="Headless service plane" href="./headless-service-plane" description="Start and debug all agent capabilities without rendering the frontend." />
+  <Card title="Events and WebSockets" href="./events-ws-push" description="Canonical ticket-authenticated sockets and replay semantics." />
 </Cards>
-
-## The Sibling Servers
-
-The Companion API is one of three external surfaces. The other two share the same design DNA
-(loopback axum + constant-time bearer auth + body limit) but serve different callers:
-
-<Cards>
-  <Card title="Remote Control" href="../remote-control" description="A loopback-only webhook receiver: POST a task-run or event from a script/CI, plus HMAC-signed outbound webhooks. Bearer token + IPv4 CIDR allowlist + fixed-window rate limit." />
-  <Card title="External Bridge (MCP)" href="../external-bridge" description="A bearer-authenticated HTTP front door that forwards JSON-RPC to a Node sidecar exposing Cognia's wiki/RAG/runtime/connectors/computer-use to external coding agents over MCP." />
-</Cards>
-
-## Design Invariants
-
-- **The allowlist is the entire write surface.** Nothing reaches a Tauri command unless its name is
-  in `KNOWN_COMMANDS` (`rpc.rs:163`); `CONTROL_COMMANDS` (`rpc.rs:408`) adds a second gate for
-  session-control verbs, enforced again at the top of `dispatch` (`rpc.rs:724`) so the WebRTC path
-  is gated identically to HTTP.
-- **One dispatch, every transport.** HTTP `rpc_handler` (`rpc.rs:565`) and the DataChannel pump
-  (`signaling/dispatch.rs:195`) both call the same `dispatch(name, params, state, app, device_id)`
-  (`rpc.rs:711`). A new command is written once.
-- **The signing key is the identity.** A single 32-byte HS256 secret in the OS keyring
-  (`secret.rs:21`) signs every pair and device JWT; WebRTC uses separate per-role P-256 keys, and the
-  `server_id` published by `healthz` is `SHA-256(secret)[..16]` (`healthz.rs:54`).
-- **Fail toward discovery, not exposure.** Only `healthz` is unauthenticated, and it deliberately
-  reveals just version + fingerprint + server_id so a phone can pin TLS before it ever sends a
-  credential.
-
-## Related ADRs
-
-- [ADR-0012 — Transport Abstraction](../../adr/0012-transport-abstraction)
-- [ADR-0013 — Companion API Command Manifest](../../adr/0013-command-manifest)
-- [ADR-0014 — Capacitor Mobile Shell](../../adr/0014-capacitor-mobile-shell)
-- [ADR-0015 — Mobile V2 Completion](../../adr/0015-mobile-v2-completion)
-- [ADR-0021 — WebRTC DataChannel WAN Transport](../../adr/0021-webrtc-datachannel-wan-transport)

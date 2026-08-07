@@ -3,6 +3,8 @@
   "pages": [
     "index",
     "server-and-auth",
+    "headless-service-plane",
+    "apifox-debugging",
     "rpc-manifest",
     "data-plane-bridges",
     "events-ws-push",

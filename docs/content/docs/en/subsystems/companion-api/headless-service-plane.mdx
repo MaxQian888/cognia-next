@@ -1,0 +1,87 @@
+---
+title: Headless Service Plane
+description: Run every agent runtime without rendering the frontend, mint a local debugging token, and call the loopback internal API.
+---
+
+# Headless Service Plane
+
+<Status variant="beta">developer surface</Status>
+
+<TLDR>
+  `pnpm dev:headless` starts the native Companion server and all configured agent runtimes without
+  launching Next.js or a WebView. The local Brain connects through `/internal/events`,
+  `/internal/bridge`, and `/internal/_rpc/{name}`. Add `--local-debug` for a loopback-only listener
+  and an automatically generated, process-scoped Apifox/Postman credential.
+</TLDR>
+
+## Start without the frontend
+
+```bash
+pnpm dev:headless --local-debug --data-dir .cache/headless-apifox
+```
+
+The launcher supervises the native server and enabled agent runtime processes, forwards their logs,
+and shuts the process group down together. CLI options are available through:
+
+```bash
+pnpm dev:headless --help
+```
+
+`--data-dir` owns the master key, encrypted secret store, SQLite databases, and TLS certificate. An
+existing directory whose encrypted store outlived its original master key cannot be recovered and
+fails with `secret-store decrypt failed`. Use an isolated directory for local API debugging rather
+than generating an unrelated new key beside an unknown old store. After the first build, add
+`--skip-build` for a fast restart.
+
+## Automatic local-debug authentication
+
+The launcher writes a `0600` Postman environment under the data directory, prints its path, and
+deletes it when the server exits. Import it into Apifox or read the `serviceToken` variable from that
+file while the process is running. The random token is accepted only from loopback on
+`/internal/*` and `/ide/content*`; it is not accepted by paired-device routes.
+
+For a direct shell smoke test, use the existing persistent-token fallback in another shell:
+
+```bash
+TOKEN="$(pnpm --silent dev:headless token --data-dir .cache/headless-apifox)"
+curl --insecure \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"limit":20,"offset":0}' \
+  https://127.0.0.1:27890/internal/_rpc/session_list
+```
+
+The token is service-scoped, expires after 24 hours, and is accepted only when the peer is loopback.
+It is intentionally unsuitable for mobile or remote-device authentication. Token issuance and the
+running server must use the same `--data-dir`, or they will use different signing secrets.
+
+For graphical API debugging, follow [Local debugging with Apifox](./apifox-debugging) for import,
+certificate, and environment setup.
+
+## Internal routes
+
+| Route | Purpose |
+| --- | --- |
+| `POST /internal/_rpc/{name}` | Invoke any command accepted by the shared dispatcher |
+| `GET /internal/events?token=…&since=…` | Brain event stream with replay cursor |
+| `GET /internal/bridge?token=…` | Bidirectional Rust-to-Brain data-plane bridge |
+| `POST /ide/content` | Publish managed IDE content through the loopback broker |
+| `GET /ide/content/{handle_id}` | Resolve a brokered content handle |
+
+The full generated contract is `docs/api/headless-service-api.openapi.yaml`. It is deliberately
+separate from the paired-device specification so a service-only command can never be mistaken for a
+public mobile endpoint.
+
+## Contract maintenance
+
+Headless RPC paths are generated from the same command manifest and Rust allowlist as the public
+specification:
+
+```bash
+pnpm companion-api:gen
+pnpm companion-api:check
+pnpm companion-api:lint
+```
+
+When a command is added to the dispatcher, the generator and Rust parity test require the Headless
+spec to expose it. Public exposure still requires the stricter target and transport classification.

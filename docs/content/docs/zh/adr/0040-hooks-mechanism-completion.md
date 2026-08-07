@@ -63,3 +63,19 @@ Rust `external_agent`模块是纯粹的stdio直通：它从不解析ACP/opencode
 - Project/local hook可用，但安全地被工作区信任封锁，Rust强制执行。
 - 没有Dexie模式更改（信任表已经存在）。
 - 局限性：外部代理工具在无`permission_request`的情况下自动执行只能被观察（通过`tool_use_start`），不能被阻挡——这是协议边界，需要文档记录而非绕过。
+
+## 补充记录（2026-08-06）——版本化能力与执行归属
+
+对于内置 Claude Agent SDK 运行轨，上述原始注入模型已被取代。Sidecar 现在负责 SDK 原生
+hook 分发，因为只有该层能完整保留 SDK 按事件区分的输入、输出、并发和中止语义。Rust
+仍负责外部 Agent 与兼容性命令的执行。每个事件实例只能有一个所有者；Rust host 不得先执行
+`UserPromptSubmit`，再将同一 hook 注入 SDK。
+
+Hook 支持被定义为版本化能力矩阵，而不是单一的全局事件或 handler 列表。固定版本的
+Claude Agent SDK 与其 31 个公开事件做一致性校验。Codex 和 OpenCode adapter 只发布从已安装
+runtime/client 中验证过的能力。TypeScript、Rust、CLI、Settings 和 Fleet 共享事件标识与一致性门禁，
+但保留每个 provider 特有的 matcher、超时、并发、阻断和输出语义。
+
+不支持的 handler 和输出必须生成明确诊断，而不能静默忽略。旧的 `webhook` 设置仍可作为 Cognia
+HTTP handler 的兼容形式读取。所有出站 HTTP/模型/MCP 路径都必须经过共享 PII 门禁；持久化 trace
+只保留脱敏后的输入、决策、耗时和错误。

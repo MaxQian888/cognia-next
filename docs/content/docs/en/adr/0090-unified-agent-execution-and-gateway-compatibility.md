@@ -477,3 +477,20 @@ and no fallback is permitted after response bytes are committed.
 
 The executable protocol boundary remains OpenAI-compatible and Anthropic.
 Other provider protocols are never silently treated as compatible.
+
+## Addendum (2026-08-06) — AgentFleet projection and control plane
+
+AgentFleet is the observation and control projection of this ADR's canonical execution model; it
+is not a fourth runtime rail or an independent event authority. Built-in, Team, Workflow, Claude
+Code, Codex, and OpenCode sessions attach to the canonical identity hierarchy and publish through
+the existing event envelope. Fleet snapshots and history are projections over that journal.
+
+External adapters publish a versioned capability descriptor. Native lifecycle events take
+precedence over inferred Task/tool heuristics, and inferred lineage is marked as such. Monitor
+shutdown detaches live external sessions rather than fabricating `SessionEnd`; startup reconciles
+detached sessions from provider identity and durable lineage, never PID alone.
+
+Control commands use durable, idempotent envelopes with leases, acknowledgement, retry, expiry,
+and a sanitized result audit. OpenCode question reply/reject and per-session interrupt/abort use
+the bound client's native APIs when advertised. Claude Code and Codex expose only runtime-proven
+controls; Fleet does not inject terminal keystrokes as a substitute for a protocol capability.

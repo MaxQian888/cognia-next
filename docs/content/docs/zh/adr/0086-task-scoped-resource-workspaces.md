@@ -9,6 +9,8 @@ description: "跨 Cognia 运行时的隔离 Agent 执行、本地权威补丁账
 
 已接受，受 `developer.taskWorkspace` 实验开关控制；完整运行时矩阵通过后才能 GA。
 
+> **由 ADR-0111 修订（2026-08-07）。** Task Workspace 继续作为可逆 patch/snapshot/undo 引擎的权威。ADR-0111 在同一 crate 之上叠加 Managed Workspace Registry，将签名所有权、多根 Bundle 组合、真实的 `WorkspaceBaseSpec` 输入、敏感资源授权、`WorktreeCreate` / `WorktreeRemove` producer 接线与保留策略分离迁移到 Registry。`developer.taskWorkspace` 转为一个发布周期的 rollback kill switch。详见 ADR-0111。
+
 ## 背景
 
 Cognia 已有 Workspace Dock、项目编辑器、Git 审查、Companion transport、外部 Agent 和 Agent Team worktree，但 Agent 写入仍由多套不完整机制观察：工具事件会漏掉 shell、脚本和编译器写入，桌面文件监听无法覆盖 headless，整仓 discard 也无法区分 Agent、用户和未知外部贡献。

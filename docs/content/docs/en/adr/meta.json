@@ -106,6 +106,9 @@
     "0104-provider-diagnostics-control-plane",
     "0106-end-to-end-skill-recorder",
     "0107-coding-agent-migration",
-    "0108-codex-inspired-desktop-workflows"
+    "0108-codex-inspired-desktop-workflows",
+    "0109-plugin-interface-catalog-governance",
+    "0110-mcp-control-plane-governance",
+    "0111-managed-workspace-registry-and-bundle"
   ]
 }

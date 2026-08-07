@@ -9,6 +9,8 @@ description: "Isolated agent execution, an authoritative local patch ledger, and
 
 Accepted behind `developer.taskWorkspace`; GA requires the runtime matrix below.
 
+> **Amended by ADR-0111 (2026-08-07).** Task Workspace remains authoritative for the reversible patch/snapshot/undo engine. ADR-0111 layers a Managed Workspace Registry over the same crate, moves signed ownership, multi-root Bundle composition, real `WorkspaceBaseSpec` input, sensitive-resource authorization, `WorktreeCreate` / `WorktreeRemove` producer wiring, and retention separation on top of it. `developer.taskWorkspace` becomes a one-cycle rollback kill switch. See ADR-0111 for details.
+
 ## Context
 
 Cognia already has a Workspace Dock, project editor, Git review, Companion transport, external agents, and Agent Team worktrees. Agent writes were nevertheless observed through several partial mechanisms: tool events missed shell/compiler writes, desktop file watching did not cover headless hosts, and repository-wide discard could not distinguish agent, user, and external contributions.

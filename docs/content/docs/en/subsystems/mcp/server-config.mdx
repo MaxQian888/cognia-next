@@ -13,8 +13,9 @@ description: The McpServer config model and its Dexie store — the transport un
   blob (stdio → `{ command, args?, env? }`; http/sse → `{ url, headers? }`). `mcp-servers.ts` is the
   CRUD layer: every create/update/delete bumps `updatedAt` and fires a **fire-and-forget**
   `scheduleSyncFor(appsEnabled)` so the change is mirrored to the relevant external-CLI config files.
-  Two pure projections turn rows into other shapes — `buildMcpServerMap` (for the Agent SDK's
-  `mcpServers` option) and `serverToTestRequest` (for the Rust connection probe).
+  `buildMcpServerMap` projects reviewed rows into the Agent SDK namespace. Settings discovery resolves
+  `SecretRef` values only in the trusted host, then uses the sidecar Runtime Gateway; no renderer-owned
+  MCP SDK or native hand-written probe remains.
 </TLDR>
 
 ## The config model
@@ -118,7 +119,7 @@ export async function createMcpServer(
 failure is best-effort and does not roll back the Dexie write. (Full mirror mechanics →
 [Agent sync & health](./agent-sync-and-health).)
 
-## Two pure projections
+## Runtime projections
 
 ### → Agent SDK (`buildMcpServerMap`)
 
@@ -145,25 +146,14 @@ A representative output:
 }
 ```
 
-### → Rust probe (`serverToTestRequest`)
+### → Sidecar discovery (`discoverMcpServerViaSidecar`)
 
-`components/settings/mcp/mcp-server-utils.ts:50` coerces a loosely-typed `config` blob into the strict
-`McpTestRequest` IPC shape, doing explicit `typeof` checks so a malformed row can't reach Rust:
-
-```typescript title="components/settings/mcp/mcp-server-utils.ts:50"
-export function serverToTestRequest(s: McpServer): McpTestRequest {
-  const c = s.config as Record<string, unknown>
-  if (s.transport === "stdio") {
-    return {
-      transport: "stdio",
-      command: typeof c.command === "string" ? c.command : "",
-      args: Array.isArray(c.args) ? c.args.filter((x): x is string => typeof x === "string") : [],
-      env: /* string-coerced env map, or undefined */ undefined,
-    }
-  }
-  return { transport: s.transport, url: typeof c.url === "string" ? c.url : "", headers: undefined }
-}
-```
+The Test button and workflow tool picker pass the stored server to
+`lib/claude/feature-call.ts`. That wrapper evaluates MCP policy, resolves `SecretRef` values in the
+trusted host, and sends the ephemeral definition through the allowlisted `mcp-discover` feature call.
+`sidecar/dispatch/mcp-runtime-gateway.mjs` uses the official client-managed transports, applies the
+same socket-level DNS/redirect guard as AI SDK and OAuth, lists tools/resources/prompts, and guarantees
+client and dispatcher teardown.
 
 ## UI helpers
 
@@ -216,7 +206,7 @@ flowchart LR
 
   Table -->|listEnabledMcpServers| Resolve["build-options<br/>resolveSendOptions"]
   Resolve -->|buildMcpServerMap| SDK["Agent SDK<br/>mcpServers"]
-  Table -->|serverToTestRequest| Probe["mcp_test.rs"]
+  Table -->|discoverMcpServerViaSidecar| Gateway["sidecar Runtime Gateway<br/>mcp-discover"]
 ```
 
 ## Invariants

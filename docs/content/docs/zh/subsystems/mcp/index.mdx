@@ -5,7 +5,7 @@ description: Cognia 完整的 Model Context Protocol 体系——它如何消费
 
 # MCP 系统
 
-<Status variant="stable">Stable · Dexie `mcpServers` (v2+) · 3 transports · 7 agent targets</Status>
+<Status variant="stable">Governed · Dexie schema v151 · 3 transports · scoped runtime</Status>
 
 <TLDR>
   Cognia 拥有 **四张 MCP 面孔**。作为 **client**，它把用户/插件/内置服务器定义存放在
@@ -111,8 +111,9 @@ flowchart TB
     <File name="mcp-my-servers-tab · mcp-preset-grid · mcp-health-tab" />
     <File name="mcp-server-editor · mcp-server-card · kv-editor" />
   </Folder>
-  <Folder name="src-tauri/src/claude/">
-    <File name="mcp_test.rs (connection probe)" />
+  <Folder name="sidecar/dispatch/">
+    <File name="mcp-runtime-gateway.mjs（能力发现）" />
+    <File name="anthropic-mcp-relay.mjs（受防护远程中继）" />
   </Folder>
 </Files>
 
@@ -122,33 +123,36 @@ flowchart TB
 | 预设 + 导入 | `lib/claude/mcp-presets.ts`, `components/settings/mcp-import-dialog.tsx` | [预设与导入](./presets-and-import) |
 | 按轮解析 | `lib/claude/build-options.ts`, `lib/claude/builtin-mcp/` | [会话解析](./session-resolution) |
 | 设置 UI + stores | `components/settings/mcp/`, `stores/mcp/` | [设置面板](./settings-panel) |
-| Agent 镜像 + 健康 | `components/settings/mcp-*`, `mcp_test.rs`, `mcp-audit-log.ts` | [Agent 同步与健康](./agent-sync-and-health) |
+| Agent 镜像 + 健康 | `lib/mcp/sync-coordinator.ts`, `lib/mcp/operations.ts`, `mcp-audit-log.ts` | [Agent 同步与健康](./agent-sync-and-health) |
 | 进程内内置工具 | `sidecar/builtin-tools/` | [内置工具](./builtin-tools) |
 | A2UI MCP 桥接 | `sidecar/a2ui-tools/`, `sidecar/a2ui-mcp.mjs` | [A2UI 桥接](./a2ui-bridge) |
 | 选择器 + 渲染器 | `components/agent/`, `components/scheduler/`, `components/chat/message-parts/` | [消费面](./consumption-surfaces) |
 
-## 单一配置模型
+## 受治理的定义与运行时
 
-每一个 MCP 服务器——无论是手工填写、从预设安装、从 CLI 配置导入，还是
-由插件播种——最终都落入 **同一个** `McpServer` 行结构（`lib/claude/types.ts:1969`）：
+每个 MCP server 都进入同一个版本化 Registry。原始凭证会替换为 `SecretRef`，且只在可信宿主内解析：
 
 ```typescript title="lib/claude/types.ts"
 export interface McpServer {
   id: string
-  name: string
-  transport: McpTransport // "stdio" | "sse" | "http"
-  config: Record<string, unknown> // stdio: { command, args?, env? } · http/sse: { url, headers? }
+  name: string // 大小写不敏感的唯一外部命名空间
+  displayName?: string
+  schemaVersion?: 1
+  revision?: number
+  credentialVersion?: number
+  origin?: McpServerOrigin
+  trust?: { state: "legacy" | "pending" | "trusted" | "blocked" }
+  transport: "stdio" | "sse" | "http"
+  config: McpServerConfig // transport 判别联合；敏感值为 SecretRef
   enabled: boolean
-  appsEnabled?: Partial<Record<AgentId, boolean>> // per-CLI projection matrix
-  pluginId?: string // set only by the plugin manager
-  createdAt: number
-  updatedAt: number
+  appsEnabled?: Partial<Record<AgentId, boolean>>
 }
 ```
 
-`enabled` 控制该服务器是否抵达 Cognia 自己的 chat；`appsEnabled[agent]` 控制它是否
-被镜像进那个外部 agent 的配置文件。两者相互独立——一个服务器可以对
-Claude Code 的 CLI 开启而在 Cognia 中关闭，反之亦然。
+新建、手工导入、插件与 preset 定义都以 pending、禁用、无投射开始；legacy 定义继续可用。
+Registry 变更在一个事务中更新移动端脱敏摘要并入队 durable Agent sync job。Workflow 与 plan
+调用统一经过 `McpRuntimeGateway`：复用仅限单个 session/run，连接并发为 4，能力 TTL 为 5 分钟，
+工具调用绝不自动重试。
 
 ## 何时使用本节
 
@@ -176,3 +180,4 @@ Claude Code 的 CLI 开启而在 Cognia 中关闭，反之亦然。
 
 - [ADR 0008 — External Bridge](../../adr/0008-external-bridge) — 为什么入站 MCP 服务器是与 `a2ui-mcp.mjs` 分离的独立二进制。
 - [ADR 0025 — A2UI ⇄ IM bridge](../../adr/0025-a2ui-im-bridge) — 让 IM 用户驱动 surface 的 `a2ui_handle_connector_action` 工具。
+- [ADR 0110 — MCP 控制面治理](../../adr/0110-mcp-control-plane-governance) — Registry、SecretRef、policy、durable sync、scoped runtime、隐私与审计决策。

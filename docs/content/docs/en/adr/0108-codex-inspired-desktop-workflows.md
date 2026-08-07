@@ -7,6 +7,8 @@ description: "Durable chat execution contexts, project environments, unified rev
 
 **Status**: Accepted (2026-08-06)
 
+> **Amended by ADR-0111 (2026-08-07).** ADR-0108 remains authoritative for durable `SessionExecutionContext`, project environments, unified review, Browser Adjust, and the hidden-agent thread browser. Ownership of worktrees, `baseRef` as a real backend input, cross-root atomic Apply, sensitive-path authorization, `WorktreeCreate` / `WorktreeRemove` hook activation, and scheduled-run fail-closed behavior move to ADR-0111. `developer.taskWorkspace` becomes a one-cycle rollback kill switch. See ADR-0111 for details.
+
 ## Context
 
 Cognia already owns the Guild/DM/Team/Canvas shell, terminal, scheduler, browser annotations, Computer Use, Job Center, skills, plugins, MCP, notifications, subagents, Git UI, and the task-scoped resource model in ADR-0086. Compared with the current Codex desktop workflows, the missing product paths were durable chat-bound worktrees, one review-to-PR flow, project-local setup environments, temporary browser adjustment and controlled CDP access, faster task entry, and a global view of hidden agent threads.

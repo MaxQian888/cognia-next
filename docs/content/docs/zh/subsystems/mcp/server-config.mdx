@@ -13,8 +13,8 @@ description: McpServer 配置模型及其 Dexie 存储——transport 联合类�
   blob（stdio → `{ command, args?, env? }`；http/sse → `{ url, headers? }`）。`mcp-servers.ts` 是
   CRUD 层：每次 create/update/delete 都会刷新 `updatedAt`，并触发一个 **fire-and-forget** 的
   `scheduleSyncFor(appsEnabled)`，使变更被镜像到相关的外部 CLI 配置文件。
-  两个纯投射把行转换成其他形态——`buildMcpServerMap`（供 Agent SDK 的
-  `mcpServers` 选项）和 `serverToTestRequest`（供 Rust 连接探测）。
+  `buildMcpServerMap` 把已评审的行投射到 Agent SDK 命名空间。设置页发现能力时，仅在可信宿主
+  解析 `SecretRef`，随后通过 sidecar Runtime Gateway 执行；渲染器 MCP SDK 与手写原生探针均已移除。
 </TLDR>
 
 ## 配置模型
@@ -118,7 +118,7 @@ export async function createMcpServer(
 失败属于尽力而为，不会回滚 Dexie 写入。（完整镜像机制 →
 [Agent 同步与健康](./agent-sync-and-health)。）
 
-## 两个纯投射
+## 运行时投射
 
 ### → Agent SDK（`buildMcpServerMap`）
 
@@ -145,25 +145,12 @@ export function buildMcpServerMap(servers: McpServer[]): Record<string, Record<s
 }
 ```
 
-### → Rust 探测（`serverToTestRequest`）
+### → Sidecar 能力发现（`discoverMcpServerViaSidecar`）
 
-`components/settings/mcp/mcp-server-utils.ts:50` 把一个松散类型的 `config` blob 强制成严格的
-`McpTestRequest` IPC 形态，做显式的 `typeof` 检查，使一个格式错误的行无法抵达 Rust：
-
-```typescript title="components/settings/mcp/mcp-server-utils.ts:50"
-export function serverToTestRequest(s: McpServer): McpTestRequest {
-  const c = s.config as Record<string, unknown>
-  if (s.transport === "stdio") {
-    return {
-      transport: "stdio",
-      command: typeof c.command === "string" ? c.command : "",
-      args: Array.isArray(c.args) ? c.args.filter((x): x is string => typeof x === "string") : [],
-      env: /* string-coerced env map, or undefined */ undefined,
-    }
-  }
-  return { transport: s.transport, url: typeof c.url === "string" ? c.url : "", headers: undefined }
-}
-```
+Test 按钮和 workflow 工具选择器把已存储的 server 交给 `lib/claude/feature-call.ts`。该封装先执行
+MCP policy，在可信宿主解析 `SecretRef`，再通过 allowlist 中的 `mcp-discover` feature call 发送临时定义。
+`sidecar/dispatch/mcp-runtime-gateway.mjs` 使用官方 client-managed transport，复用 AI SDK/OAuth 的
+socket 级 DNS 与重定向防护，列出 tools/resources/prompts，并保证 client 与 dispatcher 被拆除。
 
 ## UI 辅助函数
 
@@ -216,7 +203,7 @@ flowchart LR
 
   Table -->|listEnabledMcpServers| Resolve["build-options<br/>resolveSendOptions"]
   Resolve -->|buildMcpServerMap| SDK["Agent SDK<br/>mcpServers"]
-  Table -->|serverToTestRequest| Probe["mcp_test.rs"]
+  Table -->|discoverMcpServerViaSidecar| Gateway["sidecar Runtime Gateway<br/>mcp-discover"]
 ```
 
 ## 不变量

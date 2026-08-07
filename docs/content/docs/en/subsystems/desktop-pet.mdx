@@ -1,6 +1,6 @@
 ---
 title: Desktop Pet
-description: A Shimeji-style companion living in transparent overlay windows — five window roles, the two-rAF reveal that avoids a black rectangle on Windows, a needs/care/economy simulation, and two rendering backends (Live2D and sprites).
+description: A Shimeji-style companion living in transparent overlay windows — five window roles, three governed renderers, explicit model compatibility, local gaze tracking, and bounded real-time resources.
 ---
 
 # Desktop Pet
@@ -50,14 +50,15 @@ bug. `lib/pet/reveal.ts` waits two animation frames (layout, then post-commit) b
 `revealPetWindow()` / `revealIslandWindow()`, mirroring the main window's `WindowShowInitializer`
 contract.
 
-## Perchable surfaces are Windows-only, and say so
+## Perchable surfaces degrade by platform
 
 The pet can climb onto and walk along the top edges of other visible top-level windows, Shimeji-style.
 `src-tauri/src/pet_window/surfaces.rs` splits that into three layers so the logic stays testable without a
 live desktop: the `PetSurface` / `PetSurfaces` serde DTO, the pure `filter_and_sort_surfaces` predicate
-over plain `WindowCandidate` records, and the thin `platform::enumerate` `EnumWindows` call. On non-Windows
-platforms `enumerate` returns an empty list and the overlay degrades to normal floor-wander behavior —
-declared inert rather than silently broken.
+over plain `WindowCandidate` records, and thin platform enumeration. Windows uses `EnumWindows`; macOS
+uses Core Graphics window metadata and excludes Cognia's own process. Linux returns an empty list because
+Wayland deliberately does not expose stable cross-application window geometry, so the overlay explicitly
+degrades to normal floor-wander behavior.
 
 <Callout type="warn">
   `PetSurface` is a **named struct, not a tuple**. A bare tuple serializes as a JSON array and the
@@ -87,12 +88,37 @@ lib/pet/
 `bones/prng.ts` seeded from `account-id.ts` is what makes a pet's generated appearance stable for a given
 account instead of re-rolling on every boot.
 
-## Two rendering backends
+## Three governed renderers
 
-`live2d/` is the full Cubism path — model discovery, manifest parsing, zip import with validation, a
-plugin registration step, parameter/emotion mapping, lip-sync, and a URL resolver for model assets.
-`sprite-v2/import.ts` is the lighter sprite-pack path. Which one is active is resolved per character
-through `hooks/pet/use-active-live2d-model.ts` and `use-active-sprite-pack.ts`.
+`types/pet/skin.ts` defines the common contract for built-in SVG, Live2D Cubism 3–5, and Sprite v2:
+typed asset selection, capabilities, render mode, gaze target, and structured diagnostics. Unknown or
+deleted selections normalize to SVG with a diagnostic; they never produce an empty render or a silent
+permanent fallback.
+
+`lib/pet/skin-runtime.ts` is the single expensive-resource owner in each WebView JavaScript realm. It
+arbitrates one live renderer using `configuration > interactive > console > thumbnail` priority, keeps
+neutral snapshots for losing previews, caches Sprite object URLs per asset, counts renderer/WebGL/ticker/
+timer/URL/load/context-loss/fallback resources, and revokes them on invalidation or teardown. Hidden,
+suspended, reduced-motion, and click-through-paused surfaces stop update callbacks. Live2D runs at 60 fps
+normally, 30 fps in low-power mode, and 12 fps while quiescent.
+
+`lib/pet/live2d/` owns Cubism discovery, manifest parsing, import validation, plugin registration,
+parameter/emotion/gaze mapping, lip-sync, and URL replacement. Compatibility is classified as `ready`,
+`degraded`, or `invalid`: required settings, moc, and textures block activation when unusable, while
+missing optional motions, expressions, sounds, physics, or pose are removed and reported. Path traversal,
+normalized duplicates, case-insensitive ambiguity, corrupt images, Cubism 2, and size limits are rejected
+before persistence. The official Hiyori and Haru corpus is revision- and SHA-256-pinned in
+`test-fixtures/pet/live2d-public-corpus.json`; binaries are fetched into `.cache`, not committed.
+
+`lib/pet/sprite-v2/import.ts` validates the fixed atlas contract. Its final two rows provide 16 clockwise
+gaze directions in 22.5° buckets with a dead zone, hysteresis, and stale-input return to idle. SVG moves
+its existing face artwork; Live2D maps standard head/eye/body/mouth parameters. Gaze yields to suspension,
+held pose, one-shots, locomotion, and semantic state. Page-local pointer input works in web mode; Tauri's
+least-privilege cursor command is sampled at no more than 10 Hz and is never persisted or transmitted.
+
+Character bindings may inherit the global selection or choose SVG, a Live2D model, or a Sprite pack.
+Legacy `live2dModelId` rows are interpreted lazily as typed Live2D selections, and deleting an asset clears
+both global and character references transactionally before SVG takes over.
 
 ## Related
 

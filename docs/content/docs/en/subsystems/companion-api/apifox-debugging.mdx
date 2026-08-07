@@ -1,0 +1,235 @@
+---
+title: Local Debugging with Apifox
+description: Debug Cognia Agent APIs in Apifox with an isolated Headless data directory, service token, self-signed CA, and accurate request bodies.
+---
+
+# Local Debugging with Apifox
+
+<Status variant="beta">local development profile</Status>
+
+<TLDR>
+  Start with `pnpm dev:headless --local-debug`, then import the generated Postman environment and
+  `docs/api/headless-service-api.openapi.yaml` into Apifox. The launcher binds the server to
+  `127.0.0.1`, generates a random process-scoped Bearer token, and deletes the environment file when
+  the server exits. This avoids manually issuing or copying a persistent service token without
+  making the internal API unauthenticated.
+</TLDR>
+
+## Verified runtime facts
+
+| Item | Runtime behavior |
+| --- | --- |
+| Local access URL | `https://127.0.0.1:27890` |
+| Socket URL | `wss://127.0.0.1:27890` |
+| `--local-debug` bind | `127.0.0.1:27890`; the listener is not reachable over LAN |
+| TLS | Ten-year self-signed certificate with `localhost`, `127.0.0.1`, and `::1` SANs |
+| Local-debug token | Random on every launch; accepted only on loopback `/internal/*` and `/ide/content*`; expires when the process stops |
+| Master key | Still required for encrypted local secrets; created and managed by the launcher in the isolated data directory |
+| OpenAPI | `docs/api/headless-service-api.openapi.yaml` |
+
+## 1. Start an isolated Headless instance
+
+The first launch builds the required artifacts:
+
+```bash
+pnpm dev:headless --local-debug --data-dir .cache/headless-apifox
+```
+
+Use the fast path after artifacts exist:
+
+```bash
+pnpm dev:headless --local-debug --skip-build --data-dir .cache/headless-apifox
+```
+
+The launcher prints the generated environment path:
+
+```text
+Apifox environment: <repo-root>/.cache/headless-apifox/apifox/cognia-local-debug.postman_environment.json
+The token expires when this server process stops.
+```
+
+Keep the server running while importing and debugging. The environment file is owner-readable only
+(`0600`) and is deleted on shutdown. An environment already imported into Apifox may still contain
+the old value, but that value is no longer accepted after the process exits. The next launch creates
+a different token.
+
+Do not casually reuse an unknown `.cache/headless`. The data directory owns `master.key`, the
+encrypted secret store, databases, and TLS identity. Generating a new key after the original key was
+lost cannot decrypt the old store and fails with:
+
+```text
+secret store init: secret-store decrypt failed: aead::Error
+```
+
+## 2. Import the generated environment
+
+Use Apifox's Postman data import and select the path printed by the launcher. It creates a private
+environment named `Cognia Headless Local Debug` with these variables:
+
+| Variable | Generated value |
+| --- | --- |
+| `baseUrl` | `https://127.0.0.1:27890`, or the selected `--port` |
+| `serviceToken` | The process-scoped random Bearer token |
+| `caCertPath` | The active data directory's `cognia/companion/tls.pem` |
+
+Do not synchronize this imported environment to an Apifox team. On every server restart, import the
+new file again or replace only the local `serviceToken` value.
+
+## 3. Import the Headless OpenAPI file
+
+Use the Apifox desktop client:
+
+1. Open Project Settings and choose Manual Import.
+2. Select OpenAPI.
+3. Select `docs/api/headless-service-api.openapi.yaml`.
+4. On later imports, choose **Overwrite existing APIs** for matching method/path pairs. Otherwise,
+   Apifox can keep the old generic request bodies instead of loading newly generated fields.
+
+Apifox supports OpenAPI file and URL imports. This repository currently commits a local file and does
+not expose a specification URL from the Headless server. See the
+[Apifox import guide](https://apifox.com/help/api-manage/import-api/intro).
+
+## 4. Connect the imported variables
+
+Set the environment's service prefix URL to `{{baseUrl}}`. Set this auth policy on the project root
+or the `headless-rpc` directory:
+
+```text
+Auth: Bearer Token
+Token: {{serviceToken}}
+```
+
+The OpenAPI security scheme supplies the Bearer-auth shape; the environment supplies the temporary
+value. Apifox environments combine service prefix URLs and variables; see [Environment
+management](https://docs.apifox.com/environments-and-services).
+
+## 5. Trust the local self-signed certificate
+
+After startup, the certificate is stored at:
+
+```text
+<data-dir>/cognia/companion/tls.pem
+```
+
+For this profile, the repository-local path is also available as `{{caCertPath}}` and resolves to:
+
+```text
+<repo-root>/.cache/headless-apifox/cognia/companion/tls.pem
+```
+
+Import that PEM under Apifox Settings, Certificate Management, CA Certificate. See
+[CA and client certificates](https://docs.apifox.com/ca-and-client-certificates). Disable SSL
+certificate validation only for temporary local troubleshooting; never carry that setting into a
+remote environment.
+
+## 6. Verify HTTP calls
+
+Start with the unauthenticated health endpoint:
+
+```http
+GET /healthz
+```
+
+Then call a Headless RPC:
+
+```http
+POST /internal/_rpc/session_list
+Authorization: Bearer {{serviceToken}}
+Content-Type: application/json
+
+{
+  "limit": 20,
+  "offset": 0
+}
+```
+
+A fresh data directory returns:
+
+```json
+{
+  "has_more": false,
+  "rows": []
+}
+```
+
+Do not send `{}`: the runtime requires `limit` and `offset`, otherwise it returns
+`400 malformed_request`.
+
+## 7. Configure WebSocket debugging
+
+The OpenAPI `101` GET is protocol documentation. Create a WebSocket API manually in Apifox. The
+desktop client supports handshake Params, Headers, and variables; see
+[WebSocket debugging](https://docs.apifox.com/websocket).
+
+Event stream URL:
+
+```text
+wss://127.0.0.1:27890/internal/events?since=0
+```
+
+Prefer a handshake header so the token does not appear in the URL:
+
+```text
+Authorization: Bearer {{serviceToken}}
+```
+
+If the client cannot attach the handshake header, the local-only fallback is:
+
+```text
+wss://127.0.0.1:27890/internal/events?since=0&token={{serviceToken}}
+```
+
+`/internal/bridge` is the Brain's bidirectional protocol connection. It expects a bridge hello and
+subsequent protocol frames and is not useful as an arbitrary manual WebSocket request.
+
+## 8. Generated request parameters
+
+Every concrete RPC path has an Apifox-ready request schema. Existing detailed contracts live in
+`protocol/companion-request-schemas.json`; delegated and deeply nested contracts use Zod 4 in
+`scripts/build/companion-request-schema-contracts.mjs`; direct Rust dispatch arms provide the
+remaining scalar request shapes. Zod's native JSON Schema conversion recursively emits nested
+objects, array `items`, enums, and required fields.
+
+Known objects are closed, so Apifox does not invent `property1` and `property2`. Truly free-form map
+fields remain maps but carry an empty-object example. Apifox can therefore generate the
+`session_list` body shown above, `browser_set_files.paths` as an array of strings, and
+`scheduled_task_import.data.tasks` as an array of fully described task objects.
+
+Each concrete RPC operation exposes `x-cognia-request-schema-source`:
+
+- `contract`: the checked-in request-schema catalog supplies the shape;
+- `zod-contract`: Zod generated the recursive JSON Schema;
+- `runtime-inferred`: fields were derived from a direct Rust dispatch arm;
+- `manifest`: the command descriptor supplies a non-generic schema.
+
+The root `x-cognia-generated` block reports `generatedRequestSchemaCount`,
+`runtimeInferredRequestSchemaCount`, `contractRequestSchemaCount`, and
+`genericRequestSchemaCount`. Generation fails if any Headless command falls back to generic
+`RpcArgs`, any array lacks `items`, or a schema can generate arbitrary placeholder properties.
+
+## Manual token fallback
+
+Use the existing 24-hour service JWT only when a client cannot import the generated environment or
+must survive a server restart:
+
+```bash
+pnpm dev:headless --skip-build --data-dir .cache/headless-apifox
+pnpm --silent dev:headless token --data-dir .cache/headless-apifox
+```
+
+This fallback binds the normal Headless listener to `0.0.0.0` and requires the issuer and server to
+share the same data directory. The JWT is still accepted only from a loopback peer. Prefer
+`--local-debug` for Apifox because it additionally restricts the listener itself to loopback.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| `ECONNREFUSED` | The Headless process is still running and the environment port matches `--port` |
+| Self-signed certificate error | Import the active data directory's `tls.pem`, or disable validation only for local troubleshooting |
+| `401 missing_authorization` | Root Bearer auth references `{{serviceToken}}` |
+| `401 invalid_signature` after restart | Re-import the newly generated environment; the previous local-debug token expired with the old process |
+| `401` with manual token mode | Token and server use the same `--data-dir`; token is less than 24 hours old |
+| Request body still shows no fields after updating | Re-import the YAML with **Overwrite existing APIs** for matching interfaces |
+| A generated field is missing or stale | Run `pnpm companion-api:gen`; the schema-coverage gate identifies the command |
+| Request is intercepted by a proxy | Bypass `127.0.0.1` and `localhost` in Apifox or system proxy settings |

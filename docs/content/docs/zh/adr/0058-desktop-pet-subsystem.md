@@ -92,8 +92,32 @@ Tauri叠加层的互动更丰富（通过`lib/pet/behavior/ballistics.ts`+`lib/p
 
 导入边界将生成文件视为不可信：它要求合同版本2、文件系统安全的稳定ID、匹配的path/MIME地图集尺寸、唯一ID、有界元数据，以及25 MiB图像上限才能解码。验证过的blobs和manifest元数据存储在加法表中Dexie v119 `petSpritePacks`表中;`PetSettings.activeSpritePackId`只存储选定的ID。反应式查找包含在 `sprite-v2-skin.tsx` 中，因此每个现有渲染器接口都能获得皮肤而不复制持久化逻辑。Cognia将其更丰富的州级词汇映射到合同的idle/run/wave/jump/failed/waiting/running/review行，并尊重pause/reduced-motion偏好。丢失或删除的包会退化到内置的SVG皮肤。
 
+### D7 — 每个 WebView 只有一个受治理渲染边界
+
+设置预览、控制台头像、小部件和浮层过去可以各自初始化 timer、object URL 或 WebGL context。
+同时，皮肤选择是自由字符串，可选 Live2D 资源会被静默丢弃，Sprite v2 的两行视线图元也未使用。
+这些看似不同的症状其实来自同一个所有权问题：没有模块跨 surface 治理渲染器能力、兼容性和资源生命周期。
+
+**决策**：`types/pet/skin.ts` 现在承载类型化选择、能力、渲染模式、视线目标和诊断契约。
+`lib/pet/skin-runtime.ts` 是每个 JavaScript realm 的单例（因此每个 WebView 一个），按
+`configuration > interactive > console > thumbnail` 授予唯一 live lease，为其他预览提供快照或
+占位，缓存并撤销 object URL，并向开发/测试暴露资源计数器。Live2D context loss 自动恢复一次；
+第二次则进入显式、可由用户恢复的 degraded 状态。
+
+三套皮肤统一遵循 `suspended/reduced > held > one-shot > locomotion > semantic state > idle/gaze`。
+Sprite v2 将第 9–10 行映射到顺时针 16 个视线桶；SVG 复用既有面部图元；Live2D 在参数存在时
+使用标准 head/eye/body/mouth 参数。Web 仅使用页内视线。Tauri 新增最小权限、本地 cursor-position
+command，采样不超过 10 Hz，并在视线、可见性或挂起门禁关闭时立即停止。视线样本不会持久化、
+发送给 LLM 或传输到网络。
+
+Live2D 导入现在校验完整引用图，并在非索引模型元数据中持久化带版本的 `ready`/`degraded`/
+`invalid` 兼容摘要。settings、moc 和必要纹理缺失时阻止激活；缺失可选 motion、expression、sound、
+physics 和 pose 时，清理对应引用并报告。路径穿越、归一化重复、大小写歧义、损坏图片、Cubism 2
+和大小上限都会在持久化前失败。官方 Hiyori/Haru 测试数据固定 revision 与 SHA-256，下载到测试缓存，
+而不提交模型二进制。
+
 ## 后果
 
 - 宠物子系统的真实架构现在无需穿越两个陈旧的规格和源树就能发现。
-- D1–D5 各自可逆（设置标志、hook交换、加法Rust模块、加法DTO字段）——都不需要Dexie迁移。D6被第三个皮肤配准和一个添加Dexie table/version分离。
+- D1–D5 各自可逆（设置标志、hook交换、加法Rust模块、加法DTO字段）——都不需要Dexie迁移。D6 被第三个皮肤注册和一个新增 Dexie table/version 隔离。D7 只增加非索引模型元数据和一个渲染所有者，因此不需要 Dexie schema 升版。
 - 文档债务故意未完全关闭：`docs/superpowers/specs/2026-06-0{2,5}-*.md`被标记为原地被取代（非删除——根据项目的“标记，不删除”的惯例保留历史价值），而非重写，因此它们捕获的*决策历史*（为什么是SVG-over-sprite-sheet，为什么是侧信道LLM，是前技术研究）得以保持完整。
