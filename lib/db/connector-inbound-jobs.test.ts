@@ -17,7 +17,10 @@ import {
   stampConnectorInboundJobPrincipal,
   recoverStaleConnectorInboundJobs,
   retryConnectorInboundJobFromStart,
+  sweepTerminalConnectorInboundJobs,
   updateConnectorInboundJobPayload,
+  INBOUND_HISTORY_RETENTION_MS,
+  INBOUND_RECOVERY_RETENTION_MS,
 } from "./connector-inbound-jobs"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 
@@ -272,6 +275,87 @@ describe("connector inbound jobs", () => {
     expect(await getDb().connectorInboundJobs.get(job.id)).toEqual(
       expect.objectContaining({ status: "completed", executionRunId: "execution:run-1" })
     )
+  })
+
+  it("compacts terminal payloads while retaining recovery identity", async () => {
+    const richEvent: NormalizedInboundEvent = {
+      ...event("om-compact", 10),
+      raw: { token: "must-not-survive" },
+      channelData: { dispatchIntent: "queue", recoveryCursor: "cursor-1" },
+      segments: [
+        {
+          type: "image",
+          url: "https://example.test/image.png",
+          dataBase64: "aW5saW5lLWJ5dGVz",
+          mimeType: "image/png",
+          ocrText: "receipt",
+        },
+      ],
+    }
+    const completed = await enqueueConnectorInboundJob(richEvent, "queue", { now: 100 })
+    await completeConnectorInboundJob(completed.id, { now: 200 })
+
+    const storedCompleted = await getDb().connectorInboundJobs.get(completed.id)
+    expect(storedCompleted?.event).toEqual(
+      expect.objectContaining({
+        adapterId: "lk-1",
+        messageId: "om-compact",
+        conversationKey: richEvent.conversationKey,
+      })
+    )
+    expect("raw" in (storedCompleted?.event ?? {})).toBe(false)
+    expect(storedCompleted?.event.channelData).toBeUndefined()
+    expect(storedCompleted?.event.segments[0]).not.toHaveProperty("dataBase64")
+
+    const recovery = await enqueueConnectorInboundJob(
+      { ...richEvent, messageId: "om-recovery" },
+      "queue",
+      { now: 300 }
+    )
+    await markConnectorInboundJobRecoveryRequired(recovery.id, "ambiguous", { now: 400 })
+    const storedRecovery = await getDb().connectorInboundJobs.get(recovery.id)
+    expect("raw" in (storedRecovery?.event ?? {})).toBe(false)
+    expect(storedRecovery?.event.channelData).toEqual(richEvent.channelData)
+  })
+
+  it("applies bounded 7/30-day terminal retention without deleting active leases", async () => {
+    const now = 100 * 24 * 60 * 60 * 1_000
+    const rows = await Promise.all(
+      ["history-old", "history-edge", "recovery-old", "recovery-edge", "running"].map((id, index) =>
+        enqueueConnectorInboundJob(event(id, index + 1), "queue", { now: index })
+      )
+    )
+    await getDb().connectorInboundJobs.update(rows[0].id, {
+      status: "completed",
+      updatedAt: now - INBOUND_HISTORY_RETENTION_MS - 1,
+    })
+    await getDb().connectorInboundJobs.update(rows[1].id, {
+      status: "history_only",
+      updatedAt: now - INBOUND_HISTORY_RETENTION_MS + 1,
+    })
+    await getDb().connectorInboundJobs.update(rows[2].id, {
+      status: "recovery_required",
+      updatedAt: now - INBOUND_RECOVERY_RETENTION_MS - 1,
+    })
+    await getDb().connectorInboundJobs.update(rows[3].id, {
+      status: "failed",
+      updatedAt: now - INBOUND_RECOVERY_RETENTION_MS + 1,
+    })
+    await getDb().connectorInboundJobs.update(rows[4].id, {
+      status: "running",
+      updatedAt: 1,
+      leaseExpiresAt: now + 1_000,
+    })
+
+    await expect(sweepTerminalConnectorInboundJobs({ now, batchLimit: 1 })).resolves.toBe(1)
+    await expect(sweepTerminalConnectorInboundJobs({ now, batchLimit: 10 })).resolves.toBe(1)
+    expect(await getDb().connectorInboundJobs.bulkGet(rows.map((row) => row.id))).toEqual([
+      undefined,
+      expect.objectContaining({ status: "history_only" }),
+      undefined,
+      expect.objectContaining({ status: "failed" }),
+      expect.objectContaining({ status: "running" }),
+    ])
   })
 
   it("stamps the resolved account/principal onto the job row", async () => {

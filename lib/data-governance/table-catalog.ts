@@ -592,6 +592,26 @@ function backupFor(
 }
 
 const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> = {
+  connectorAudit: {
+    mode: "ttl",
+    days: 30,
+    enforcement: "domain",
+    reason:
+      "Connector housekeeping applies 7-day diagnostic, 14-day operational, and 30-day security tiers.",
+  },
+  connectorHeartbeats: {
+    mode: "ttl",
+    days: 2,
+    enforcement: "domain",
+    reason: "Connector housekeeping prunes the dedicated heartbeat table after 48 hours.",
+  },
+  connectorInboundJobs: {
+    mode: "ttl",
+    days: 30,
+    enforcement: "domain",
+    reason:
+      "Terminal inbound jobs are compacted immediately and retained for 7 or 30 days by outcome.",
+  },
   agentTraces: {
     mode: "ttl",
     days: 30,

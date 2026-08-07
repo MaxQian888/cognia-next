@@ -107,8 +107,45 @@ describe("project-scope helper", () => {
       const db = getDb()
       // Project A data.
       await db.sessions.bulkPut([
-        { id: "sA", projectId: "A", title: "a", updatedAt: 1, createdAt: 1 },
+        {
+          id: "sA",
+          projectId: "A",
+          title: "a",
+          updatedAt: 1,
+          createdAt: 1,
+          platformBinding: { conversationKey: "telegram:a:chat-a", platform: "telegram" },
+        },
         { id: "sB", projectId: "B", title: "b", updatedAt: 1, createdAt: 1 },
+      ] as never)
+      await db.connectorInboundJobs.bulkPut([
+        {
+          id: "inA",
+          adapterId: "a",
+          platformMessageId: "m-in-a",
+          sourceMessageId: "m-in-a",
+          conversationKey: "telegram:a:chat-a",
+          event: {},
+          dispatchMode: "fifo",
+          status: "completed",
+          attempts: 1,
+          receivedAt: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: "inB",
+          adapterId: "b",
+          platformMessageId: "m-in-b",
+          sourceMessageId: "m-in-b",
+          conversationKey: "telegram:b:chat-b",
+          event: {},
+          dispatchMode: "fifo",
+          status: "completed",
+          attempts: 1,
+          receivedAt: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        },
       ] as never)
       await db.messages.bulkPut([
         { id: "mA", sessionId: "sA", projectId: "A", role: "user", parts: [], createdAt: 1 },
@@ -204,6 +241,7 @@ describe("project-scope helper", () => {
       expect(await db.canvasDocuments.get("dA")).toBeUndefined()
       expect(await db.canvasVersions.get("vA")).toBeUndefined()
       expect(await db.sessionUsage.get("mA")).toBeUndefined()
+      expect(await db.connectorInboundJobs.get("inA")).toBeUndefined()
       // Project B is untouched.
       expect(await db.sessions.get("sB")).toBeDefined()
       expect(await db.messages.get("mB")).toBeDefined()
@@ -212,6 +250,7 @@ describe("project-scope helper", () => {
       expect(await db.canvasDocuments.get("dB")).toBeDefined()
       expect(await db.canvasVersions.get("vB")).toBeDefined()
       expect(await db.sessionUsage.get("mB")).toBeDefined()
+      expect(await db.connectorInboundJobs.get("inB")).toBeDefined()
     }, 30000)
 
     it("is a no-op for a project with no data", async () => {

@@ -11,6 +11,9 @@
 import { cleanupExpiredCallbackBindings } from "./callback-binding-cleanup"
 import { sweepExecutionRunEventRetention } from "@/lib/db/execution-runs"
 import { sweepTerminalOutboundRows } from "@/lib/db/outbound-jobs"
+import { sweepTerminalConnectorInboundJobs } from "@/lib/db/connector-inbound-jobs"
+import { sweepConnectorAuditRetention } from "@/lib/db/connector-audit"
+import { sweepConnectorHeartbeats } from "@/lib/connectors/health/heartbeat"
 import { getTaskScheduler, registerTaskExecutor } from "@/lib/scheduler/task-scheduler"
 import type { CreateScheduledTaskInput, ScheduledTaskType } from "@/types/scheduler"
 
@@ -23,6 +26,8 @@ export const CALLBACK_BINDING_CLEANUP_TASK_TYPE =
   "connection:housekeeping:callback-bindings" satisfies ScheduledTaskType
 export const EXECUTION_RUN_RETENTION_TASK_TYPE =
   "connection:housekeeping:execution-runs" satisfies ScheduledTaskType
+export const CONNECTOR_RETENTION_TASK_TYPE =
+  "connection:housekeeping:connector-retention" satisfies ScheduledTaskType
 
 const DAILY_INTERVAL_MS = 24 * 60 * 60 * 1_000
 const HOUSEKEEPING_TAG = "system:connector-housekeeping"
@@ -55,6 +60,14 @@ function registerHousekeepingExecutors(): void {
   registerTaskExecutor(EXECUTION_RUN_RETENTION_TASK_TYPE, async () => ({
     success: true,
     output: { deleted: await sweepExecutionRunEventRetention() },
+  }))
+  registerTaskExecutor(CONNECTOR_RETENTION_TASK_TYPE, async () => ({
+    success: true,
+    output: {
+      inboundDeleted: await sweepTerminalConnectorInboundJobs(),
+      auditDeleted: await sweepConnectorAuditRetention(),
+      heartbeatDeleted: await sweepConnectorHeartbeats(),
+    },
   }))
 }
 
@@ -92,6 +105,12 @@ function taskDrafts(): CreateScheduledTaskInput[] {
       ...common,
       name: "Connector execution-run retention",
       type: EXECUTION_RUN_RETENTION_TASK_TYPE,
+      trigger: { type: "event", eventType: CONNECTOR_HOUSEKEEPING_EVENT },
+    },
+    {
+      ...common,
+      name: "Connector inbound, audit and heartbeat retention",
+      type: CONNECTOR_RETENTION_TASK_TYPE,
       trigger: { type: "event", eventType: CONNECTOR_HOUSEKEEPING_EVENT },
     },
   ]
