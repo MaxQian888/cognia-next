@@ -106,6 +106,7 @@ const REGISTRY = [
   // were hand-maintained and had drifted (dead keys, fields writable up but
   // never mirrored down, transport config classified backwards).
   { script: "settings-sync:check", group: "artifacts" },
+  { script: "companion-api:check", group: "artifacts" },
   { script: "plugin-convert:check", group: "artifacts" },
   { script: "plugin:contract:check", group: "artifacts" },
   { script: "ide:check", group: "artifacts" },
@@ -149,6 +150,7 @@ const REGISTRY = [
   { script: "audit:colocated-tests", group: "audit" },
   { script: "audit:loading-states", group: "audit" },
   { script: "audit:unreachable-components", group: "audit" },
+  { script: "audit:root-loading", group: "audit" },
   { script: "lint:static-export", group: "audit" },
   { script: "lint:plugin-sdk-wit", group: "audit" },
   { script: "lint:frozen-wasm-api", group: "audit" },

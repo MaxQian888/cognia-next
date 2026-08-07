@@ -6,7 +6,6 @@ import { compareCommandSets, validateManifest } from "./check-companion-command-
 function descriptor(overrides = {}) {
   return {
     name: "git_status",
-    since: 1,
     target: "execution",
     operation: "read",
     capability: "workspace.read",
@@ -21,12 +20,12 @@ function descriptor(overrides = {}) {
 }
 
 test("accepts a complete descriptor", () => {
-  assert.deepEqual(validateManifest({ schemaVersion: 1, commands: [descriptor()] }), [])
+  assert.deepEqual(validateManifest({ schemaVersion: 2, commands: [descriptor()] }), [])
 })
 
 test("rejects unclassified mutations and device-transportable service commands", () => {
   const errors = validateManifest({
-    schemaVersion: 1,
+    schemaVersion: 2,
     commands: [
       descriptor({
         name: "test_mcp_server",
@@ -44,10 +43,10 @@ test("rejects unclassified mutations and device-transportable service commands",
   assert(errors.some((error) => error.includes("service commands must be internal-only")))
 })
 
-test("requires every registration and v1 RPC to have the correct descriptor", () => {
+test("requires every remote RPC to have a descriptor", () => {
   const manifest = {
-    schemaVersion: 1,
-    commands: [descriptor(), descriptor({ name: "local_only", since: 2, target: "client" })],
+    schemaVersion: 2,
+    commands: [descriptor(), descriptor({ name: "local_only", target: "client" })],
   }
 
   assert.deepEqual(
@@ -59,8 +58,8 @@ test("requires every registration and v1 RPC to have the correct descriptor", ()
     new Set(["git_status", "missing_local"]),
     new Set(["git_status", "missing_rpc"])
   )
-  assert(errors.some((error) => error.includes("missing_local")))
   assert(errors.some((error) => error.includes("missing_rpc")))
+  assert(!errors.some((error) => error.includes("missing_local")))
 })
 
 test("rejects a descriptor whose handler was deleted", () => {
@@ -68,8 +67,8 @@ test("rejects a descriptor whose handler was deleted", () => {
   // kept discovering a command that could only ever fail to dispatch.
   const errors = compareCommandSets(
     {
-      schemaVersion: 1,
-      commands: [descriptor({ name: "record_cancel", since: 2, target: "client" })],
+      schemaVersion: 2,
+      commands: [descriptor({ name: "record_cancel", target: "client" })],
     },
     new Set(),
     new Set()
@@ -85,8 +84,8 @@ test("accepts plugin-dispatched descriptors with no static registration", () => 
   assert.deepEqual(
     compareCommandSets(
       {
-        schemaVersion: 1,
-        commands: [descriptor({ name: "plugin_computer_use_bash", since: 2, target: "client" })],
+        schemaVersion: 2,
+        commands: [descriptor({ name: "plugin_computer_use_bash", target: "client" })],
       },
       new Set(),
       new Set()

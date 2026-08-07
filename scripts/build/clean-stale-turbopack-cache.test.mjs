@@ -15,6 +15,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  cleanAllNextCaches,
+  cleanLegacyWebpackDevArtifacts,
   dirSizeBytes,
   cleanStaleTurbopackCache,
   cleanTurbopackCacheForMode,
@@ -110,5 +112,52 @@ test("cache-off mode purges only the Turbopack directory regardless of size", ()
   assert.equal(result.cleaned, true)
   assert.equal(existsSync(turbopackDir), false)
   assert.equal(existsSync(siblingDir), true)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("legacy Webpack dev output is rebuilt as one unit before Turbopack starts", () => {
+  const root = tmpRoot()
+  const devDir = join(root, ".next", "dev")
+  mkdirSync(join(devDir, "cache", "webpack"), { recursive: true })
+  mkdirSync(join(devDir, "static", "chunks"), { recursive: true })
+  writeFileSync(join(devDir, "cache", "webpack", "index.pack"), Buffer.alloc(20))
+  writeFileSync(join(devDir, "static", "chunks", "legacy.js"), Buffer.alloc(30))
+
+  const result = cleanLegacyWebpackDevArtifacts({ devDir, log: () => {} })
+
+  assert.deepEqual(result, { cleaned: true, sizeBytes: 50 })
+  assert.equal(existsSync(devDir), false)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("current Turbopack dev output is preserved when no Webpack marker exists", () => {
+  const root = tmpRoot()
+  const devDir = join(root, ".next", "dev")
+  mkdirSync(join(devDir, "static", "chunks"), { recursive: true })
+  writeFileSync(join(devDir, "static", "chunks", "current.js"), Buffer.alloc(30))
+
+  const result = cleanLegacyWebpackDevArtifacts({ devDir, log: () => {} })
+
+  assert.deepEqual(result, { cleaned: false, sizeBytes: 0 })
+  assert.equal(existsSync(devDir), true)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("explicit all-cache cleanup removes dev output and production Webpack cache", () => {
+  const root = tmpRoot()
+  const nextDir = join(root, ".next")
+  mkdirSync(join(nextDir, "dev"), { recursive: true })
+  mkdirSync(join(nextDir, "cache", "webpack"), { recursive: true })
+  mkdirSync(join(nextDir, "cache", "swc"), { recursive: true })
+  writeFileSync(join(nextDir, "dev", "chunk.js"), Buffer.alloc(20))
+  writeFileSync(join(nextDir, "cache", "webpack", "index.pack"), Buffer.alloc(30))
+  writeFileSync(join(nextDir, "cache", "swc", "keep"), Buffer.alloc(10))
+
+  const result = cleanAllNextCaches({ nextDir, log: () => {} })
+
+  assert.deepEqual(result, { cleaned: true, sizeBytes: 50 })
+  assert.equal(existsSync(join(nextDir, "dev")), false)
+  assert.equal(existsSync(join(nextDir, "cache", "webpack")), false)
+  assert.equal(existsSync(join(nextDir, "cache", "swc", "keep")), true)
   rmSync(root, { recursive: true, force: true })
 })

@@ -10,16 +10,20 @@
  * to tens of GB. Next exposes only an on/off flag, no max-size knob, so the
  * only mitigation is to purge periodically.
  *
- * This runs from the `predev` hook. The default cache-off mode removes only
- * `.next/dev/cache/turbopack/`; cached mode keeps that directory until it
- * exceeds the threshold (default 10 GB, override with
- * TURBOPACK_CACHE_MAX_GB). Other `.next/dev` artifacts are never removed.
+ * This runs from the `predev` hook. A legacy `.next/dev/cache/webpack`
+ * directory proves the dev output was produced by the retired Webpack mode;
+ * mixing it with current Turbopack output retained several GB of unreachable
+ * chunks, so that one condition rebuilds `.next/dev` from scratch. Otherwise
+ * the default cache-off mode removes only `.next/dev/cache/turbopack/`.
+ * Cached mode keeps that directory until it exceeds the threshold (default
+ * 10 GB, override with TURBOPACK_CACHE_MAX_GB).
  * It must NEVER abort dev startup, so every failure is swallowed and the
  * process always exits 0.
  *
  * Usage:
  *   node scripts/clean-stale-turbopack-cache.mjs
- *   TURBOPACK_CACHE_MAX_GB=5 node scripts/clean-stale-turbopack-cache.mjs
+ *   TURBOPACK_CACHE_MAX_GB=5 node scripts/build/clean-stale-turbopack-cache.mjs
+ *   node scripts/build/clean-stale-turbopack-cache.mjs --all
  */
 
 import { readdirSync, statSync, rmSync, existsSync } from "node:fs"
@@ -96,18 +100,50 @@ export function cleanTurbopackCacheForMode({
   return { cleaned: false, sizeBytes }
 }
 
+/** Remove mixed legacy Webpack dev output before the Turbopack server starts. */
+export function cleanLegacyWebpackDevArtifacts({ devDir, log = console.log }) {
+  const legacyWebpackCache = join(devDir, "cache", "webpack")
+  if (!existsSync(legacyWebpackCache)) return { cleaned: false, sizeBytes: 0 }
+  const sizeBytes = dirSizeBytes(devDir)
+  rmSync(devDir, { recursive: true, force: true })
+  log("[clean-cache] legacy Webpack dev artifacts detected — rebuilt .next/dev for Turbopack.")
+  return { cleaned: true, sizeBytes }
+}
+
+/** Explicit user command: remove both dev output and the production Webpack cache. */
+export function cleanAllNextCaches({ nextDir, log = console.log }) {
+  const targets = [join(nextDir, "dev"), join(nextDir, "cache", "webpack")]
+  let sizeBytes = 0
+  let cleaned = false
+  for (const target of targets) {
+    sizeBytes += dirSizeBytes(target)
+    if (!existsSync(target)) continue
+    rmSync(target, { recursive: true, force: true })
+    cleaned = true
+  }
+  if (cleaned) log("[clean-cache] removed .next/dev and .next/cache/webpack.")
+  return { cleaned, sizeBytes }
+}
+
 const __filename = fileURLToPath(import.meta.url)
 const isDirectRun = process.argv[1] && resolve(process.argv[1]) === __filename
 
 if (isDirectRun) {
   try {
     const repoRoot = resolve(dirname(__filename), "..", "..")
-    const thresholdGb = Number(process.env.TURBOPACK_CACHE_MAX_GB ?? 10)
-    cleanTurbopackCacheForMode({
-      cacheDir: join(repoRoot, ".next", "dev", "cache", "turbopack"),
-      persistentCacheEnabled: process.env.COGNIA_TURBOPACK_CACHE === "1",
-      thresholdBytes: thresholdGb * BYTES_PER_GB,
-    })
+    const nextDir = join(repoRoot, ".next")
+    if (process.argv.includes("--all")) {
+      cleanAllNextCaches({ nextDir })
+    } else {
+      const devDir = join(nextDir, "dev")
+      cleanLegacyWebpackDevArtifacts({ devDir })
+      const thresholdGb = Number(process.env.TURBOPACK_CACHE_MAX_GB ?? 10)
+      cleanTurbopackCacheForMode({
+        cacheDir: join(devDir, "cache", "turbopack"),
+        persistentCacheEnabled: process.env.COGNIA_TURBOPACK_CACHE === "1",
+        thresholdBytes: thresholdGb * BYTES_PER_GB,
+      })
+    }
   } catch (error) {
     // A maintenance helper must never block `pnpm dev`; degrade to a warning.
     console.warn(`[clean-cache] skipped (${error instanceof Error ? error.message : error})`)

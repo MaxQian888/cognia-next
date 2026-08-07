@@ -44,6 +44,10 @@ export type HookEvent =
   | "StopFailure"
   | "TeammateIdle"
   | "UserPromptExpansion"
+  | "Setup"
+  | "SubagentStart"
+  | "DirectoryAdded"
+  | "MessageDisplay"
 
 /** Every recognized {@link HookEvent} name, for runtime validation. */
 export const HOOK_EVENTS: readonly HookEvent[] = [
@@ -74,6 +78,10 @@ export const HOOK_EVENTS: readonly HookEvent[] = [
   "StopFailure",
   "TeammateIdle",
   "UserPromptExpansion",
+  "Setup",
+  "SubagentStart",
+  "DirectoryAdded",
+  "MessageDisplay",
 ]
 
 /**
@@ -87,6 +95,7 @@ export const HOOK_EVENTS: readonly HookEvent[] = [
 export type HookHandler =
   | { type: "command"; command: string; timeout?: number }
   | { type: "webhook"; url: string; headers?: Record<string, string>; timeout?: number }
+  | { type: "http"; url: string; headers?: Record<string, string>; timeout?: number }
   | ({ type: string } & Record<string, unknown>)
 
 /** One hook block in a `settings.json` `hooks.{Event}` array. */
@@ -122,12 +131,22 @@ const webhookHandlerSchema = z
   })
   .passthrough()
 
+const httpHandlerSchema = z
+  .object({
+    type: z.literal("http"),
+    url: z.string(),
+    headers: z.record(z.string(), z.string()).optional(),
+    timeout: z.number().optional(),
+  })
+  .passthrough()
+
 /** Unknown handler `type` — preserved verbatim, inert at run time. */
 const otherHandlerSchema = z.object({ type: z.string() }).passthrough()
 
 const hookHandlerSchema: z.ZodType<HookHandler> = z.union([
   commandHandlerSchema,
   webhookHandlerSchema,
+  httpHandlerSchema,
   otherHandlerSchema,
 ]) as z.ZodType<HookHandler>
 

@@ -76,6 +76,19 @@ review; it is not a general ignore file.
   `node --test` (not Jest).
 - `.ts` scripts run via `ts-node --project scripts/tsconfig.audit.json`; their
   tests are Jest (`*.test.ts`).
+- Treat [`dev/headless.mjs`](./dev/headless.mjs) as the baseline for a
+  user-facing development or operations CLI: use `commander` for help and
+  option parsing, then validate the parsed shape with `zod`. Do not hand-roll
+  flag scanning when either installed library expresses the contract.
+- Use `execa` with an executable plus an argument array for one-shot child
+  processes. Never interpolate user-controlled values into a shell command.
+  Keep `node:child_process` only where its streaming, IPC, or long-lived child
+  lifecycle is the behavior being implemented, and cover that boundary with a
+  co-located test.
+- Preserve each script's operational contract while modernizing it. For
+  example, best-effort dev guards may log and continue on preflight failure;
+  validation must make that outcome explicit rather than turning it into a
+  silent fallback.
 - A script that mutates files should be **idempotent** and offer a `--check`
   mode so it can double as a CI drift gate.
 - Scripts derive the repo root from their own location (`__dirname`); after the

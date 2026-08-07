@@ -56,7 +56,7 @@ export interface ServeDeps {
 }
 
 function deriveBridgeUrl(serverUrl: string): string {
-  return `${serverUrl.replace(/^http/, "ws").replace(/\/$/, "")}/ws/v1/bridge`
+  return `${serverUrl.replace(/^http/, "ws").replace(/\/$/, "")}/internal/bridge`
 }
 
 export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<number> {
@@ -109,7 +109,11 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
     deviceId: `brain-${accountId}`,
     serverVersion: "headless",
   })
-  const transport = new CompanionTransport({ configProvider })
+  const transport = new CompanionTransport({
+    configProvider,
+    rpcPath: "/internal/_rpc",
+    eventsPath: "/internal/events",
+  })
   setTransport(transport)
 
   // ── 5. Data plane: the bridge WS ───────────────────────────────────────────

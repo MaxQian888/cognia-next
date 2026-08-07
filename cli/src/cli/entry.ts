@@ -30,6 +30,11 @@ async function boot(): Promise<number> {
     // The MCP stdin loop keeps the process alive; this return is nominal.
     return 0
   }
+  if (role === "mcp-relay") {
+    const { runMcpRelayRole } = await import("../runtime/mcp-relay-role")
+    await runMcpRelayRole()
+    return 0
+  }
 
   // MUST be first on the CLI path: installs a synchronous IndexedDB on the
   // global before any `@/lib` module (and the eager Dexie databases they

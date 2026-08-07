@@ -9,6 +9,10 @@ describe("HOOK_EVENTS", () => {
     expect(HOOK_EVENTS).toContain("PostCompact")
     expect(HOOK_EVENTS).toContain("StopFailure")
     expect(HOOK_EVENTS).toContain("PostToolUseFailure")
+    expect(HOOK_EVENTS).toEqual(
+      expect.arrayContaining(["Setup", "SubagentStart", "DirectoryAdded", "MessageDisplay"])
+    )
+    expect(HOOK_EVENTS).toHaveLength(31)
     // No duplicates.
     expect(new Set(HOOK_EVENTS).size).toBe(HOOK_EVENTS.length)
   })

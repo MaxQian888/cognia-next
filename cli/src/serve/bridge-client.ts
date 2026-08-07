@@ -1,5 +1,5 @@
 /**
- * BridgeClient — the brain's side of `/ws/v1/bridge` (ADR-0059 W3 / T-B1).
+ * BridgeClient — the brain's side of `/internal/bridge` (ADR-0059 W3 / T-B1).
  *
  * Implements the `RuntimeBridge` shape the three data-plane installers
  * accept (`listen` + `invoke`), so `installDesktopSyncSource({ bridge })`
@@ -42,7 +42,7 @@ export interface WebSocketLike {
 type Handler = (e: { payload: unknown }) => void
 
 export interface BridgeClientOptions {
-  /** `wss://127.0.0.1:<port>/ws/v1/bridge` (no query — the token is appended). */
+  /** `wss://127.0.0.1:<port>/internal/bridge` (no query — the token is appended). */
   url: string
   /** Initial service token; refreshed by `token_refresh` frames. */
   token: string

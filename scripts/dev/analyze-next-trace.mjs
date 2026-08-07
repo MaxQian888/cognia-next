@@ -126,7 +126,7 @@ function main() {
     tracePath,
     events: parseTraceText(fs.readFileSync(tracePath, "utf8")),
     cacheBytes: dirSizeBytes(path.join(path.dirname(tracePath), "cache", "turbopack")),
-    bootProfile: process.env.NEXT_PUBLIC_COGNIA_BOOT_PROFILE === "main" ? "main" : "eager",
+    bootProfile: process.env.NEXT_PUBLIC_COGNIA_BOOT_PROFILE === "eager" ? "eager" : "main",
     persistentCacheEnabled: process.env.COGNIA_TURBOPACK_CACHE === "1",
     browserSnapshot,
   })
