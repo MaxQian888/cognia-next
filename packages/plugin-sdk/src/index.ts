@@ -39,6 +39,7 @@ export { CANONICAL_EXTENSION_POINTS } from "./extensions"
 export {
   AUTHOR_CAPABILITY_CONTRACTS,
   CANONICAL_PLUGIN_CAPABILITIES,
+  CANONICAL_PLUGIN_ERROR_CODES,
   CANONICAL_PLUGIN_PERMISSIONS,
   CANONICAL_PLUGIN_TYPES,
   PLUGIN_CONTRACT_MINIMUM_HOST_VERSION,
@@ -53,9 +54,16 @@ export {
   PLUGIN_MANIFEST_CONTRIBUTIONS,
   PLUGIN_PATH_FIELD_CONTRACTS,
   PLUGIN_RUNTIME_ENTRY_CONTRACTS,
+  type CanonicalPluginErrorCode,
   type PluginApiMethodContract,
   type PluginApiNamespaceContract,
 } from "./contracts/catalog"
+export {
+  PluginAdapterError,
+  pluginAdapterError,
+  isPluginAdapterError,
+} from "./errors/adapter-error"
+export type { PluginAdapterErrorCode, PluginAdapterErrorPayload } from "./errors/adapter-error"
 
 export { definePlugin } from "./manifest"
 export { defineMcpServerPreset } from "./define/define-mcp-server-preset"

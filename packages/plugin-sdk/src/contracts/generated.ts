@@ -118,3 +118,14 @@ export const CANONICAL_PLUGIN_PERMISSION_IDS = [
   "hooks:chat-intercept",
 ] as const
 export type CanonicalPluginPermission = (typeof CANONICAL_PLUGIN_PERMISSION_IDS)[number]
+export const CANONICAL_PLUGIN_ERROR_CODES = [
+  "DEPENDENCY_MISSING",
+  "SECRET_MISSING",
+  "PERMISSION_DENIED",
+  "TARGET_NOT_ALLOWED",
+  "STALE_REVISION",
+  "PROCESS_LIMIT",
+  "TIMEOUT",
+  "OUTPUT_TRUNCATED",
+] as const
+export type CanonicalPluginErrorCode = (typeof CANONICAL_PLUGIN_ERROR_CODES)[number]

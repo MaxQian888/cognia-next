@@ -45,6 +45,7 @@ export type PluginErrorStage =
   | "wasm-preload"
   | "hot-reload"
   | "local-install"
+  | "adapter"
 
 export type PluginErrorSeverity = "error" | "warning"
 

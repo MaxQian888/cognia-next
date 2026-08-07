@@ -1,6 +1,7 @@
 import catalog from "../../contract/catalog.json"
 import pluginPointCatalog from "../../contract/plugin-points.json"
 export {
+  CANONICAL_PLUGIN_ERROR_CODES,
   CANONICAL_PLUGIN_PERMISSION_IDS,
   PLUGIN_CONTRACT_VERSION,
   PLUGIN_GATEWAY_CLIENT_VERSION,
@@ -9,7 +10,7 @@ export {
   PLUGIN_PROTOCOL_VERSION,
   PLUGIN_SDK_VERSION,
 } from "./generated"
-export type { CanonicalPluginPermission } from "./generated"
+export type { CanonicalPluginErrorCode, CanonicalPluginPermission } from "./generated"
 
 export type PluginCapabilitySupport = "supported" | "partial" | "experimental" | "blocked"
 export type PluginRuntimeKind = "javascript" | "python" | "wasm" | "vscode" | "asset"

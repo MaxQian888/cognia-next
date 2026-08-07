@@ -76,6 +76,21 @@ Contract `1.0.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.workflow` | 3 | None | frontend, hybrid | internal |
 | `ctx.workspace` | 3 | None | frontend, hybrid | internal |
 
+## Adapter error codes
+
+Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI integrations, managed processes, desktop automation sessions). Author-facing surface: `PluginAdapterError` from `@cognia/plugin-sdk`.
+
+| Code |
+| --- |
+| `DEPENDENCY_MISSING` |
+| `SECRET_MISSING` |
+| `PERMISSION_DENIED` |
+| `TARGET_NOT_ALLOWED` |
+| `STALE_REVISION` |
+| `PROCESS_LIMIT` |
+| `TIMEOUT` |
+| `OUTPUT_TRUNCATED` |
+
 ## `ctx.a2ui`
 
 | Method | Permissions | Risk | Idempotent |

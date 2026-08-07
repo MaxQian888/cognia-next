@@ -129,6 +129,17 @@ VALID_PERMISSIONS = (
     "hooks:chat-intercept",
 )
 
+VALID_ERROR_CODES = (
+    "DEPENDENCY_MISSING",
+    "SECRET_MISSING",
+    "PERMISSION_DENIED",
+    "TARGET_NOT_ALLOWED",
+    "STALE_REVISION",
+    "PROCESS_LIMIT",
+    "TIMEOUT",
+    "OUTPUT_TRUNCATED",
+)
+
 VALID_CAPABILITIES = (
     "tools",
     "components",

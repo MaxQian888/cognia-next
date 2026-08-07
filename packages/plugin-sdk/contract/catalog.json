@@ -3,6 +3,16 @@
   "schemaVersion": 2,
   "minimumHostVersion": "0.1.0",
   "pluginTypes": ["frontend", "python", "hybrid", "wasm", "vscode-extension"],
+  "errorCodes": [
+    "DEPENDENCY_MISSING",
+    "SECRET_MISSING",
+    "PERMISSION_DENIED",
+    "TARGET_NOT_ALLOWED",
+    "STALE_REVISION",
+    "PROCESS_LIMIT",
+    "TIMEOUT",
+    "OUTPUT_TRUNCATED"
+  ],
   "permissions": [
     "filesystem:read",
     "filesystem:write",
