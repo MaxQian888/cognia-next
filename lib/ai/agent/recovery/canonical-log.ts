@@ -30,10 +30,13 @@ function isEnvelopePayload(payload: unknown): payload is EnvelopePayload {
 
 /** Per-run cache of already-persisted eventIds (idempotency without rescans). */
 const seenByRun = new Map<string, Set<string>>()
+/** Serialize appends per run so concurrent snapshot effects cannot race dedupe. */
+const appendTailByRun = new Map<string, Promise<unknown>>()
 
 /** Test-only: drop the idempotency cache so suites start cold. */
 export function __resetCanonicalLogForTesting(): void {
   seenByRun.clear()
+  appendTailByRun.clear()
 }
 
 async function seenEventIds(runId: string): Promise<Set<string>> {
@@ -59,18 +62,27 @@ export async function appendCanonicalEnvelopes(
   runId: string,
   envelopes: readonly AgentEventEnvelope[]
 ): Promise<number> {
-  const seen = await seenEventIds(runId)
-  const fresh = envelopes.filter((envelope) => !seen.has(envelope.eventId))
-  if (fresh.length === 0) return 0
-  await appendEvents(
-    fresh.map((envelope) => ({
-      runId,
-      type: "run_log" as const,
-      payload: { kind: ENVELOPE_KIND, envelope } satisfies EnvelopePayload,
-    }))
-  )
-  for (const envelope of fresh) seen.add(envelope.eventId)
-  return fresh.length
+  const previous = appendTailByRun.get(runId) ?? Promise.resolve()
+  const pending = previous.catch(() => undefined).then(async () => {
+    const seen = await seenEventIds(runId)
+    const fresh = envelopes.filter((envelope) => !seen.has(envelope.eventId))
+    if (fresh.length === 0) return 0
+    await appendEvents(
+      fresh.map((envelope) => ({
+        runId,
+        type: "run_log" as const,
+        payload: { kind: ENVELOPE_KIND, envelope } satisfies EnvelopePayload,
+      }))
+    )
+    for (const envelope of fresh) seen.add(envelope.eventId)
+    return fresh.length
+  })
+  appendTailByRun.set(runId, pending)
+  try {
+    return await pending
+  } finally {
+    if (appendTailByRun.get(runId) === pending) appendTailByRun.delete(runId)
+  }
 }
 
 /** Read the run's canonical envelope stream in persisted (ts) order. */

@@ -44,8 +44,8 @@ static HOOKS_FILE_LOCK: Mutex<()> = Mutex::new(());
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Events we register. Verified present in a live `~/.codex/hooks.json` and in
-/// the shipped binary's `HookEventsToml`. Codex has no `SessionEnd`,
-/// `Notification`, `StopFailure`, or `PermissionDenied` — the manifest in
+/// the shipped binary's `HookEventsToml`. Current Codex exposes SessionEnd and
+/// SubagentStart; Notification, StopFailure, and PermissionDenied remain absent. The manifest in
 /// [`super::integrations`] deliberately omits them rather than registering
 /// hooks that would never fire.
 ///
@@ -59,6 +59,8 @@ pub const CODEX_HOOK_EVENTS: &[(&str, HookMode)] = &[
     ("PostToolUse", HookMode::Fire),
     ("PermissionRequest", HookMode::Wait),
     ("Stop", HookMode::Fire),
+    ("SessionEnd", HookMode::Fire),
+    ("SubagentStart", HookMode::Fire),
     ("SubagentStop", HookMode::Fire),
     ("PreCompact", HookMode::Fire),
     ("PostCompact", HookMode::Fire),

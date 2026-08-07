@@ -42,6 +42,7 @@ import type {
   WorkflowRetryPolicy,
 } from "@/types/workflow/visual"
 import type { LoopItemError, LoopNodeParams } from "@/types/workflow/visual"
+import type { WorkflowExecutionBinding } from "@/types/workflow/deployment"
 import { resolveDeep, resolveExpression } from "./expression"
 import { IdempotencyCache, iterationCacheKey } from "./idempotency"
 import type { RunLogger } from "./event-log"
@@ -77,6 +78,7 @@ export interface RunLoopContainerInput {
   logger: RunLogger
   honorPinData?: boolean
   traceId?: string
+  executionBinding?: WorkflowExecutionBinding
 }
 
 export interface LoopContainerExecution {
@@ -489,6 +491,7 @@ async function runSubgraph(input: RunSubgraphInput): Promise<SubgraphResult> {
         logger: input.logger,
         honorPinData: input.honorPinData,
         ...(input.traceId ? { traceId: input.traceId } : {}),
+        ...(input.executionBinding ? { executionBinding: input.executionBinding } : {}),
         extraUpstream: input.extraUpstream,
         staticData: input.staticData,
         cacheKey: iterationCacheKey(loopId, iterationIndex, child.id),

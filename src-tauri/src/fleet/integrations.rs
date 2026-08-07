@@ -46,6 +46,7 @@ pub enum NormalizedEvent {
     PermissionDenied,
     Stop,
     StopFailure,
+    SubagentStart,
     SubagentStop,
     PreCompact,
     PostCompact,
@@ -61,6 +62,7 @@ pub enum NormalizedEvent {
     SessionIdle,
     /// The agent reports it is actively working (OpenCode `session-active`).
     SessionActive,
+    QuestionAsked,
 }
 
 /// How an agent expects a blocking hook's decision to be encoded on stdout.
@@ -78,6 +80,11 @@ pub enum DecisionShape {
 #[derive(Debug, Clone, Copy)]
 pub struct AgentManifest {
     pub agent: FleetAgent,
+    /// Version of this built-in capability descriptor. Increment whenever the
+    /// declared control contract changes so consumers can detect drift.
+    pub descriptor_version: u32,
+    /// Stable lineage identifier for diagnostics and persisted projections.
+    pub descriptor_source: &'static str,
     /// Payload keys to try, in order, when extracting the session id. Ordered
     /// most-specific first so a payload carrying both keys resolves stably.
     pub session_id_keys: &'static [&'static str],
@@ -174,6 +181,8 @@ impl AgentManifest {
 /// every event, a wait-mode `PermissionRequest`, and full plan/question answering.
 const CLAUDE_CODE: AgentManifest = AgentManifest {
     agent: FleetAgent::ClaudeCode,
+    descriptor_version: 1,
+    descriptor_source: "builtin:claude-code",
     session_id_keys: &["session_id"],
     event_map: &[
         ("SessionStart", NormalizedEvent::SessionStart),
@@ -185,6 +194,7 @@ const CLAUDE_CODE: AgentManifest = AgentManifest {
         ("PermissionDenied", NormalizedEvent::PermissionDenied),
         ("Stop", NormalizedEvent::Stop),
         ("StopFailure", NormalizedEvent::StopFailure),
+        ("SubagentStart", NormalizedEvent::SubagentStart),
         ("SubagentStop", NormalizedEvent::SubagentStop),
         ("PreCompact", NormalizedEvent::PreCompact),
         ("PostCompact", NormalizedEvent::PostCompact),
@@ -219,6 +229,8 @@ const CLAUDE_CODE: AgentManifest = AgentManifest {
 /// freshly written `hooks.json` does not fire until trusted.
 const CODEX: AgentManifest = AgentManifest {
     agent: FleetAgent::Codex,
+    descriptor_version: 1,
+    descriptor_source: "builtin:codex",
     session_id_keys: &["session_id", "session-id", "thread-id", "thread_id"],
     event_map: &[
         ("SessionStart", NormalizedEvent::SessionStart),
@@ -227,6 +239,8 @@ const CODEX: AgentManifest = AgentManifest {
         ("PostToolUse", NormalizedEvent::PostToolUse),
         ("PermissionRequest", NormalizedEvent::PermissionRequest),
         ("Stop", NormalizedEvent::Stop),
+        ("SessionEnd", NormalizedEvent::SessionEnd),
+        ("SubagentStart", NormalizedEvent::SubagentStart),
         ("SubagentStop", NormalizedEvent::SubagentStop),
         ("PreCompact", NormalizedEvent::PreCompact),
         ("PostCompact", NormalizedEvent::PostCompact),
@@ -252,22 +266,23 @@ const CODEX: AgentManifest = AgentManifest {
 /// AskUserQuestion gate.
 const OPENCODE: AgentManifest = AgentManifest {
     agent: FleetAgent::Opencode,
+    descriptor_version: 1,
+    descriptor_source: "builtin:opencode",
     session_id_keys: &["session_id", "session-id"],
     event_map: &[
         ("session-active", NormalizedEvent::SessionActive),
         ("session-idle", NormalizedEvent::SessionIdle),
         ("PermissionRequest", NormalizedEvent::PermissionRequest),
+        ("question.asked", NormalizedEvent::QuestionAsked),
     ],
     capabilities: FleetCapabilities {
         approve_permission: true,
         send_message: true,
         focus_terminal: false,
         open_transcript: false,
-        // One OpenCode server process hosts every session, so a SIGINT aimed at
-        // "this session's turn" would take down all of them. Interrupting a
-        // single OpenCode session needs the reverse command channel to grow an
-        // abort verb; declaring `false` keeps the button off until it does.
-        interrupt: false,
+        // Delivered through the bound OpenCode client, never an OS signal to
+        // the shared multi-session server process.
+        interrupt: true,
     },
     decision_shape: DecisionShape::OpencodeStatus,
     multi_session_host: true,
@@ -301,6 +316,10 @@ mod tests {
             FleetAgent::Opencode,
         ] {
             assert_eq!(manifest_for(agent).agent, agent);
+            assert!(manifest_for(agent).descriptor_version > 0);
+            assert!(manifest_for(agent)
+                .descriptor_source
+                .starts_with("builtin:"));
         }
     }
 

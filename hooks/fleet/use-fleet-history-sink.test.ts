@@ -12,10 +12,15 @@ jest.mock("./use-fleet-stream", () => ({
   useFleetStream: () => streamState,
 }))
 
-const recordMock = jest.fn()
+const reconcileMock = jest.fn()
 jest.mock("@/lib/db/fleet-sessions", () => ({
-  recordFleetHistory: (...args: unknown[]) => recordMock(...args),
+  reconcileFleetHistory: (...args: unknown[]) => reconcileMock(...args),
   fleetHistoryId: (agent: string, sessionId: string) => `${agent}:${sessionId}`,
+}))
+
+const appendMock = jest.fn()
+jest.mock("@/lib/ai/agent/recovery/canonical-log", () => ({
+  appendCanonicalEnvelopes: (...args: unknown[]) => appendMock(...args),
 }))
 
 import { toHistoryRow, useFleetHistorySink } from "./use-fleet-history-sink"
@@ -52,7 +57,8 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
 }
 
 beforeEach(() => {
-  recordMock.mockReset()
+  reconcileMock.mockReset().mockResolvedValue(undefined)
+  appendMock.mockReset().mockResolvedValue(1)
   streamState.available = true
   streamState.snapshot = { sessions: [], generatedAt: 0 }
 })
@@ -70,6 +76,11 @@ describe("toHistoryRow", () => {
       updatedAt: 5000,
       endedAt: null,
       outcome: "active",
+      canonicalRunId: expect.stringMatching(/^fleet:claude-code:[a-f0-9]{16}$/),
+      toolUseCount: 0,
+      turnCount: 0,
+      lastErrorKind: null,
+      lastErrorDetail: null,
     })
   })
 
@@ -88,6 +99,18 @@ describe("toHistoryRow", () => {
     const r = toHistoryRow(session({ terminal: null }), 5000)
     expect(r.terminalLabel).toBeNull()
   })
+
+  it("redacts prompts and errors before writing summary history", () => {
+    const r = toHistoryRow(
+      session({
+        lastPrompt: "contact alice@example.com",
+        lastError: { kind: "turn", detail: "token sk-proj-abcdefghijklmnop", at: 4_000 },
+      }),
+      5_000
+    )
+    expect(r.firstPrompt).toBe("contact <EMAIL_001>")
+    expect(r.lastErrorDetail).toBe("token <API_KEY_001>")
+  })
 })
 
 describe("useFleetHistorySink", () => {
@@ -97,19 +120,35 @@ describe("useFleetHistorySink", () => {
       sessions: [session(), session({ sessionId: "s2" })],
     }
     renderHook(() => useFleetHistorySink())
-    await waitFor(() => expect(recordMock).toHaveBeenCalledTimes(2))
-    expect(recordMock.mock.calls[0][0].updatedAt).toBe(5000)
+    await waitFor(() => expect(reconcileMock).toHaveBeenCalledTimes(1))
+    expect(reconcileMock.mock.calls[0][0]).toHaveLength(2)
+    expect(reconcileMock.mock.calls[0][0][0].updatedAt).toBe(5000)
+    expect(appendMock).toHaveBeenCalledTimes(2)
+    expect(appendMock.mock.calls[0][0]).toMatch(/^fleet:claude-code:[a-f0-9]{16}$/)
   })
 
-  it("does nothing off Tauri or with an empty snapshot", () => {
+  it("does not append unchanged canonical facts on rerender", async () => {
+    const live = session()
+    streamState.snapshot = { generatedAt: 5000, sessions: [live] }
+    const { rerender } = renderHook(() => useFleetHistorySink())
+    await waitFor(() => expect(appendMock).toHaveBeenCalledTimes(1))
+
+    streamState.snapshot = { generatedAt: 6000, sessions: [live] }
+    rerender()
+    await waitFor(() => expect(reconcileMock).toHaveBeenCalledTimes(2))
+    expect(appendMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("does nothing off Tauri and reconciles an empty authoritative snapshot", () => {
     streamState.available = false
     streamState.snapshot = { generatedAt: 1, sessions: [session()] }
     renderHook(() => useFleetHistorySink())
-    expect(recordMock).not.toHaveBeenCalled()
+    expect(reconcileMock).not.toHaveBeenCalled()
 
     streamState.available = true
     streamState.snapshot = { generatedAt: 1, sessions: [] }
-    renderHook(() => useFleetHistorySink())
-    expect(recordMock).not.toHaveBeenCalled()
+    const { rerender } = renderHook(() => useFleetHistorySink())
+    rerender()
+    expect(reconcileMock).toHaveBeenCalledWith([], 1)
   })
 })

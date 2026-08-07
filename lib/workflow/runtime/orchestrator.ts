@@ -77,6 +77,12 @@ import { type ConcurrencyController, createConcurrencyController } from "./concu
  */
 async function releaseRunResources(runId: string): Promise<void> {
   try {
+    const { defaultMcpRuntimeGateway } = await import("@/lib/mcp/runtime-gateway")
+    await defaultMcpRuntimeGateway.closeScope(`run:${runId}`)
+  } catch {
+    // best-effort MCP scope cleanup
+  }
+  try {
     const { closeRunSessions } = await import("@/lib/terminal/headless-session-registry")
     await closeRunSessions(runId)
   } catch {
@@ -260,6 +266,9 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
           deploymentId: input.executionBinding.deploymentId,
           deploymentRevision: input.executionBinding.deploymentRevision,
           executionBinding: input.executionBinding,
+          ...(input.executionBinding.dependencyLock
+            ? { dependencyLock: input.executionBinding.dependencyLock }
+            : {}),
         }
       : {}),
     projectId,
@@ -268,6 +277,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     ...(trigger.triggerId ? { triggerId: trigger.triggerId } : {}),
     triggerPayload: trigger.payload,
     triggerBinding: trigger.binding,
+    triggerOriginAt: trigger.originAt,
     startedAt,
     workflowSnapshot: validated as VisualWorkflow,
     ...(input.triggeredBy ? { triggeredBy: input.triggeredBy } : {}),
@@ -678,6 +688,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
                 logger,
                 honorPinData: input.honorPinData,
                 ...(input.traceId ? { traceId: input.traceId } : {}),
+                ...(input.executionBinding ? { executionBinding: input.executionBinding } : {}),
               })
             : await runStep({
                 workflow: validated as VisualWorkflow,
@@ -693,6 +704,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
                 logger,
                 honorPinData: input.honorPinData,
                 ...(input.traceId ? { traceId: input.traceId } : {}),
+                ...(input.executionBinding ? { executionBinding: input.executionBinding } : {}),
               })
         stepOutputs.set(stepId, result.output)
         completed.add(stepId)

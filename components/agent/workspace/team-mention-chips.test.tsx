@@ -45,7 +45,7 @@ const targets: MentionTarget[] = [
     runtime: "claude-code",
     description: "Frontend",
     nameCollision: false,
-    teammate: { name: "Alice" } as never,
+    teammate: { id: "tm-1", name: "Alice", avatarId: "designer" } as never,
   },
 ]
 
@@ -63,6 +63,14 @@ describe("TeamMentionChips", () => {
     expect(screen.getByText("@claude")).toBeInTheDocument()
     expect(screen.getByText("@codex")).toBeInTheDocument()
     expect(screen.getByText("@Alice")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-team-avatar-__virtual_codex__")).toHaveAttribute(
+      "data-avatar-id",
+      "coder"
+    )
+    expect(screen.getByTestId("agent-team-avatar-tm-1")).toHaveAttribute(
+      "data-avatar-id",
+      "designer"
+    )
   })
 
   it("calls onPick with the matching target when a chip is clicked", () => {

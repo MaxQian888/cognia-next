@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useEffect } from "react"
 import { useTranslations } from "next-intl"
 import { ChevronDown, ChevronRight, Check, X, Settings, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -16,7 +16,7 @@ import {
   type CustomModeCategory,
   type McpToolReference,
 } from "@/stores/agent/custom-mode-store"
-import { useMcpStore } from "@/stores/mcp/mcp-store"
+import { refreshMcpStore, useMcpStore } from "@/stores/mcp/mcp-store"
 
 interface McpToolSelectorRecommendationContext {
   name: string
@@ -42,6 +42,10 @@ export function McpToolSelector({ value, onChange, recommendationContext }: McpT
   const toolSelectionConfig =
     useMcpStore((state) => state.toolSelectionConfig) ?? DEFAULT_TOOL_SELECTION_CONFIG
   const lastToolSelection = useMcpStore((state) => state.lastToolSelection) ?? null
+
+  useEffect(() => {
+    void refreshMcpStore()
+  }, [])
 
   const connectedServers = useMemo(
     () => mcpServers.filter((s) => s.status.type === "connected"),

@@ -21,11 +21,32 @@ import { Textarea } from "@/components/ui/textarea"
 import { downloadBlob } from "@/lib/files/download"
 import { getLocalRuntimeDiagnostics } from "@/lib/native/local-runtime"
 import { buildSupportFeedbackDraft } from "@/lib/support-agent/feedback"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 
-export function SupportFeedbackDialog() {
+export function SupportFeedbackDialog({
+  initialSummary = "",
+  sessionId,
+  surface = "mobile",
+}: {
+  initialSummary?: string
+  sessionId?: string
+  surface?: "chat" | "mobile"
+}) {
   const t = useTranslations("mobile.me.feedback.support")
-  const [summary, setSummary] = useState("")
+  const [open, setOpen] = useState(false)
+  const [summary, setSummary] = useState(initialSummary)
   const [exporting, setExporting] = useState(false)
+
+  const updateOpen = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    if (nextOpen) {
+      setSummary(initialSummary)
+      void trackEvent("support.feedback.draft.opened", {
+        surface,
+        ...(sessionId ? { sessionId } : {}),
+      })
+    }
+  }
 
   const confirmExport = async () => {
     if (exporting) return
@@ -33,7 +54,14 @@ export function SupportFeedbackDialog() {
     try {
       const diagnostics = await getLocalRuntimeDiagnostics()
       const draft = buildSupportFeedbackDraft({ summary, diagnostics })
-      downloadBlob(new Blob([draft.markdown], { type: "text/markdown;charset=utf-8" }), draft.filename)
+      downloadBlob(
+        new Blob([draft.markdown], { type: "text/markdown;charset=utf-8" }),
+        draft.filename
+      )
+      void trackEvent("support.feedback.draft.exported", {
+        surface,
+        ...(sessionId ? { sessionId } : {}),
+      })
       toast.success(t("exported"))
     } catch {
       toast.error(t("exportFailed"))
@@ -43,7 +71,7 @@ export function SupportFeedbackDialog() {
   }
 
   return (
-    <AlertDialog>
+    <AlertDialog open={open} onOpenChange={updateOpen}>
       <AlertDialogTrigger asChild>
         <Button variant="outline" className="w-full justify-start gap-2">
           <DownloadIcon className="size-4" aria-hidden="true" />

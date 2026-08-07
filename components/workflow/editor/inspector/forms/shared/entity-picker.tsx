@@ -37,9 +37,8 @@ import { listPlugins } from "@/lib/db/plugins"
 import { listWorkflows } from "@/lib/db/workflows"
 import { listTwins } from "@/lib/db/twins"
 import { listAdapterInstances } from "@/lib/db/adapter-instances"
-import { testMcpServer, type McpTestRequest } from "@/lib/claude/ipc"
+import { discoverMcpServerViaSidecar } from "@/lib/claude/feature-call"
 import { isTauri } from "@/lib/tauri"
-import type { McpServer } from "@cognia/agent-config-types"
 
 export interface EntityOption {
   value: string
@@ -240,28 +239,10 @@ export function McpServerPicker({ allowExpression = true, ...props }: WrapperPro
   )
 }
 
-/** Map a stored MCP server to the Tauri `test_mcp_server` probe request. */
-function toTestRequest(server: McpServer): McpTestRequest {
-  const cfg = server.config
-  if (server.transport === "stdio") {
-    return {
-      transport: "stdio",
-      command: String(cfg.command ?? ""),
-      args: Array.isArray(cfg.args) ? (cfg.args as string[]) : undefined,
-      env: (cfg.env as Record<string, string>) ?? undefined,
-    }
-  }
-  return {
-    transport: server.transport,
-    url: String(cfg.url ?? ""),
-    headers: (cfg.headers as Record<string, string>) ?? undefined,
-  }
-}
-
 /**
  * Tool selector for the `action.mcp.invokeTool` node. Probes the selected
- * server's tools via the Tauri `test_mcp_server` command (renderer-safe — the
- * MCP SDK never enters the static bundle) and offers them as a dropdown. Falls
+ * server's tools via the sidecar Runtime Gateway (renderer-safe — the MCP SDK
+ * never enters the static bundle) and offers them as a dropdown. Falls
  * back to free-text entry (via {@link EntityPicker}'s expression toggle) when
  * the probe is unavailable (web mode), fails, or returns nothing — so a
  * misconfigured / un-probeable server (e.g. stdio off-desktop) stays usable.
@@ -269,9 +250,9 @@ function toTestRequest(server: McpServer): McpTestRequest {
 export function McpToolPicker({
   serverId,
   allowExpression = true,
-  probe = testMcpServer,
+  probe = discoverMcpServerViaSidecar,
   ...props
-}: WrapperProps & { serverId: string; probe?: typeof testMcpServer }) {
+}: WrapperProps & { serverId: string; probe?: typeof discoverMcpServerViaSidecar }) {
   const t = useTranslations("workflows.forms.mcpInvokeTool")
   const [state, setState] = useState<{ tools: string[]; error?: string; probed: boolean }>({
     tools: [],
@@ -284,7 +265,7 @@ export function McpToolPicker({
     if (!serverId || !isTauri()) return
     let cancelled = false
     getMcpServer(serverId)
-      .then((server) => (server ? probe(toTestRequest(server)) : undefined))
+      .then((server) => (server ? probe(server) : undefined))
       .then((res) => {
         if (cancelled) return
         if (!res) setState({ tools: [], probed: true })

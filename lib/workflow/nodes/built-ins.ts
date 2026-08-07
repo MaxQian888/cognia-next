@@ -46,9 +46,9 @@ import type {
   WorkflowNodeKind,
   WorkflowTriggeredFrom,
 } from "@/types/workflow/visual"
-import type { McpServer } from "@cognia/agent-config-types"
 import { registerNodeExecutor } from "./registry"
 import { resolveExpression } from "@/lib/workflow/runtime/expression"
+import { iterationCacheKey } from "@/lib/workflow/runtime/idempotency"
 import { respondToWebhook } from "@/lib/workflow/runtime/tauri-bridge"
 import { computeGoalAnalytics } from "@/lib/goal/analytics"
 import { getGoalRuntime } from "@/lib/goal/runtime"
@@ -65,7 +65,6 @@ import {
   updateSkill,
 } from "@/lib/db/skills"
 import { getSkill as getPluginSkill } from "@/lib/plugin/registries/skill-registry"
-import { getMcpServerPreset } from "@/lib/plugin/registries/mcp-server-preset-registry"
 import { invokeMcpTool } from "@/lib/mcp/invoke"
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
 import { createTeam, deleteTeam, updateTeam } from "@/lib/db/teams"
@@ -2922,11 +2921,15 @@ registerNodeExecutor({
       await import("@/lib/workflow/runtime/execution-authority")
     let execution: Awaited<ReturnType<typeof executeDeployedWorkflow>>
     try {
+      const lockedDependency = ctx.executionBinding?.dependencyLock?.workflows[ctx.stepId]
       execution = await executeDeployedWorkflow({
         workflowId,
         entrypoint: "subworkflow",
         caller: `run:${ctx.runId}`,
-        idempotencyKey: ctx.stepId,
+        idempotencyKey: ctx.iteration
+          ? iterationCacheKey(ctx.iteration.loopId, ctx.iteration.iterationIndex, ctx.stepId)
+          : ctx.stepId,
+        ...(lockedDependency ? { lockedDependency } : {}),
         triggerKind: "trigger.manual",
         payload: {
           parentRunId: ctx.runId,
@@ -3914,24 +3917,10 @@ registerNodeExecutor({
       unknown
     >
 
-    // Resolve the server up front so the connect hook carries the human name and
-    // the not-found case maps to a non-retryable failure. Falls back to a
-    // plugin-contributed preset (overlay registry) when the Dexie table has no
-    // row — presets share the `{ name, transport, config }` shape.
+    // Presets are installation templates only. Runtime execution requires a
+    // stored Registry row that has crossed the common trust policy.
     const { getMcpServer } = await import("@/lib/db/mcp-servers")
-    const dbServer = await getMcpServer(serverId)
-    const preset = dbServer ? undefined : getMcpServerPreset(serverId)
-    const server = dbServer
-      ? dbServer
-      : preset
-        ? ({
-            id: serverId,
-            name: preset.name,
-            transport: preset.transport,
-            config: preset.config,
-            enabled: true,
-          } as McpServer)
-        : undefined
+    const server = await getMcpServer(serverId)
     if (!server) throw nonRetryable(`MCP server ${serverId} not found`)
 
     const { getPluginEventHooks } = await import("@/lib/plugin")
@@ -3949,6 +3938,8 @@ registerNodeExecutor({
           toolName,
           args,
           signal: ctx.signal,
+          scopeId: `run:${ctx.runId}`,
+          surface: "workflow",
           clientInfo: { name: "cognia-workflow", version: "1.0.0" },
         },
         { getServer: async () => server }

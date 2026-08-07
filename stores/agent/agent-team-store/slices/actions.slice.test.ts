@@ -70,6 +70,7 @@ describe("useAgentTeamStore createTeam", () => {
     const lead = useAgentTeamStore.getState().teammates[team.leadId]
     expect(lead.name).toBe("Team Lead")
     expect(lead.role).toBe("lead")
+    expect(lead.avatarId).toBe("coordinator")
   })
 
   it("respects a translated leadName when supplied", () => {
@@ -296,6 +297,33 @@ describe("useAgentTeamStore Teammate CRUD", () => {
     })
     expect(tm.teamId).toBe(team.id)
     expect(useAgentTeamStore.getState().teams[team.id].teammateIds).toContain(tm.id)
+  })
+
+  it("assigns role-specific portraits without duplicating a teammate portrait", () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "X", task: "t" })
+    const guardian = useAgentTeamStore.getState().addTeammate({
+      teamId: team.id,
+      name: "Security specialist",
+    })
+    const secondGuardian = useAgentTeamStore.getState().addTeammate({
+      teamId: team.id,
+      name: "Security reviewer",
+    })
+
+    expect(guardian.avatarId).toBe("security-guardian")
+    expect(secondGuardian.avatarId).not.toBe(guardian.avatarId)
+    expect(secondGuardian.avatarId).not.toBe("coordinator")
+  })
+
+  it("ignores stale teammate references while assigning a portrait", () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "X", task: "t" })
+    useAgentTeamStore.getState().updateTeam(team.id, {
+      teammateIds: [...team.teammateIds, "missing-teammate"],
+    })
+
+    expect(
+      useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "Researcher" }).avatarId
+    ).toBe("researcher")
   })
 
   it("addTeammate throws if the team is missing", () => {

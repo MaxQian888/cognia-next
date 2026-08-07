@@ -39,6 +39,70 @@ describe("ExecutionAuthority", () => {
     })
   })
 
+  it("locks declared subworkflow deployments before the root run starts", async () => {
+    const child = await createWorkflow({ name: "Child", nodes: [], edges: [] })
+    const childPublication = await publishWorkflow(child.id, 5)
+    const parent = await createWorkflow({
+      name: "Parent",
+      nodes: [
+        {
+          id: "child-step",
+          type: "flow.subworkflow",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "child", params: { workflowId: child.id } },
+        },
+      ],
+      edges: [],
+    })
+    await publishWorkflow(parent.id, 10)
+
+    const execution = await executeDeployedWorkflow({
+      workflowId: parent.id,
+      entrypoint: "http",
+      caller: "client:lock",
+      triggerKind: "trigger.manual",
+      payload: {},
+    })
+
+    const row = await getDb().workflowRuns.get(execution.runId)
+    expect(
+      (
+        row as typeof row & {
+          dependencyLock?: { workflows: Record<string, { versionId: string }> }
+        }
+      )?.dependencyLock?.workflows["child-step"]
+    ).toMatchObject({ workflowId: child.id, versionId: childPublication.versionId })
+  })
+
+  it("rejects dependency cycles before creating run state", async () => {
+    const workflow = await createWorkflow({ name: "Recursive", nodes: [], edges: [] })
+    await updateWorkflow(workflow.id, {
+      nodes: [
+        {
+          id: "self",
+          type: "flow.subworkflow",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "self", params: { workflowId: workflow.id } },
+        },
+      ],
+    })
+    await publishWorkflow(workflow.id, 10)
+
+    await expect(
+      executeDeployedWorkflow({
+        workflowId: workflow.id,
+        entrypoint: "http",
+        caller: "client:cycle",
+        triggerKind: "trigger.manual",
+        payload: {},
+      })
+    ).rejects.toMatchObject({ code: "dependency-cycle" })
+    expect(await getDb().workflowInvocations.count()).toBe(0)
+    expect(await getDb().workflowRuns.count()).toBe(0)
+  })
+
   it("returns the original run for a duplicate idempotency key", async () => {
     const workflow = await createWorkflow({ name: "Idempotent", nodes: [], edges: [] })
     await publishWorkflow(workflow.id, 10)
@@ -60,6 +124,68 @@ describe("ExecutionAuthority", () => {
     expect(duplicate.reused).toBe(true)
     expect(await getDb().workflowInvocations.count()).toBe(1)
     expect(await getDb().workflowRuns.count()).toBe(1)
+  })
+
+  it("falls back to the legacy live publication when the control plane is disabled", async () => {
+    const previous = process.env.NEXT_PUBLIC_WORKFLOW_VERSIONED_DEPLOYMENTS
+    process.env.NEXT_PUBLIC_WORKFLOW_VERSIONED_DEPLOYMENTS = "false"
+    try {
+      const workflow = await createWorkflow({ name: "Published name", nodes: [], edges: [] })
+      await publishWorkflow(workflow.id, 10)
+      await updateWorkflow(workflow.id, { name: "Edited legacy draft" })
+
+      const execution = await executeDeployedWorkflow({
+        workflowId: workflow.id,
+        entrypoint: "trigger",
+        caller: "trigger.manual",
+        triggerKind: "trigger.manual",
+        payload: {},
+      })
+
+      expect(execution.result.status).toBe("succeeded")
+      expect((await getDb().workflowRuns.get(execution.runId))?.workflowSnapshot.name).toBe(
+        "Edited legacy draft"
+      )
+    } finally {
+      if (previous === undefined) delete process.env.NEXT_PUBLIC_WORKFLOW_VERSIONED_DEPLOYMENTS
+      else process.env.NEXT_PUBLIC_WORKFLOW_VERSIONED_DEPLOYMENTS = previous
+    }
+  })
+
+  it("keeps legacy rollback trigger validation", async () => {
+    const previous = process.env.NEXT_PUBLIC_WORKFLOW_VERSIONED_DEPLOYMENTS
+    process.env.NEXT_PUBLIC_WORKFLOW_VERSIONED_DEPLOYMENTS = "0"
+    try {
+      const workflow = await createWorkflow({
+        name: "Legacy trigger validation",
+        nodes: [
+          {
+            id: "manual",
+            type: "trigger.manual",
+            typeVersion: 1,
+            position: { x: 0, y: 0 },
+            data: { label: "manual", params: {} },
+          },
+        ],
+        edges: [],
+      })
+      await publishWorkflow(workflow.id, 10)
+
+      await expect(
+        executeDeployedWorkflow({
+          workflowId: workflow.id,
+          entrypoint: "trigger",
+          caller: "trigger.manual",
+          triggerKind: "trigger.manual",
+          triggerId: "deleted-trigger",
+          payload: {},
+        })
+      ).rejects.toMatchObject({ code: "trigger-binding-invalid" })
+      expect(await getDb().workflowRuns.count()).toBe(0)
+    } finally {
+      if (previous === undefined) delete process.env.NEXT_PUBLIC_WORKFLOW_VERSIONED_DEPLOYMENTS
+      else process.env.NEXT_PUBLIC_WORKFLOW_VERSIONED_DEPLOYMENTS = previous
+    }
   })
 
   it("recovers an orphaned pending admission on an idempotent retry", async () => {

@@ -29,7 +29,7 @@ jest.mock("@cognia/logging", () => ({
   },
 }))
 
-jest.mock("@/lib/plugin", () => ({
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({
     dispatchExternalAgentConnect: jest.fn(),
     dispatchExternalAgentDisconnect: jest.fn(),

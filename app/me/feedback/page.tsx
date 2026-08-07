@@ -19,8 +19,7 @@ import { APP_VERSION } from "@/lib/app-version"
 import { snapshotSyncStates } from "@/lib/sync/companion-sync"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { SupportFeedbackDialog } from "@/components/support/support-feedback-dialog"
-
-const ISSUES_URL = "https://github.com/anthropics/claude-code/issues/new"
+import { ISSUES_URL } from "@/lib/constants/external-urls"
 
 function diagnosticsPayload(): string {
   const ua = typeof navigator !== "undefined" ? navigator.userAgent : "unknown"
@@ -65,7 +64,7 @@ export default function MobileFeedbackPage() {
             label={tFeedback("openIssueLabel")}
             description={tFeedback("openIssueDescription")}
             value={<ExternalLinkIcon className="size-3.5" aria-hidden="true" />}
-            href={ISSUES_URL}
+            href={`${ISSUES_URL}/new`}
             testid="feedback-row-open-issue"
           />
           <MeRow

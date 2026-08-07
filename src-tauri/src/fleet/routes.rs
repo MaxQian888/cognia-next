@@ -30,6 +30,10 @@ pub fn router() -> Router {
             "/api/v1/fleet/opencode/commands",
             post(opencode_commands_handler),
         )
+        .route(
+            "/api/v1/fleet/opencode/commands/ack",
+            post(opencode_commands_ack_handler),
+        )
 }
 
 /// Body for the OpenCode command poll.
@@ -37,6 +41,38 @@ pub fn router() -> Router {
 struct CommandPollBody {
     #[serde(default)]
     session_ids: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct CommandAckBody {
+    #[serde(default)]
+    command_ids: Vec<String>,
+}
+
+async fn opencode_commands_ack_handler(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<CommandAckBody>,
+) -> Response {
+    if !addr.ip().is_loopback() {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let runtime = super::runtime();
+    let presented = headers
+        .get(FLEET_TOKEN_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    if !runtime.token_matches(presented) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match runtime.ack_opencode_commands(&body.command_ids) {
+        Ok(acked) => Json(serde_json::json!({ "acked": acked })).into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": error })),
+        )
+            .into_response(),
+    }
 }
 
 /// `POST /api/v1/fleet/opencode/commands` — the OpenCode plugin long-polls for
@@ -479,7 +515,8 @@ mod tests {
         let token = arm("routes-cmd-drain-token");
         let rt = runtime();
         rt.take_opencode_commands(&["route-cmd-sess".into()]);
-        rt.queue_opencode_command("route-cmd-sess".into(), "please continue".into());
+        rt.queue_opencode_command("route-cmd-sess".into(), "please continue".into())
+            .unwrap();
 
         let resp = router()
             .oneshot(

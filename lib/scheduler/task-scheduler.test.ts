@@ -22,7 +22,7 @@ import type {
 const mockDispatchOnScheduledTaskStart = jest.fn()
 const mockDispatchOnScheduledTaskComplete = jest.fn()
 const mockDispatchOnScheduledTaskError = jest.fn()
-jest.mock("@/lib/plugin", () => ({
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginLifecycleHooks: () => ({
     dispatchOnScheduledTaskStart: mockDispatchOnScheduledTaskStart,
     dispatchOnScheduledTaskComplete: mockDispatchOnScheduledTaskComplete,

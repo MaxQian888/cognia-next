@@ -33,7 +33,7 @@ import type {
   ExternalAgentValiditySnapshot,
 } from "@/types/agent/external-agent"
 import type { AgentTool } from "@/lib/ai/agent"
-import { getPluginEventHooks } from "@/lib/plugin"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import {
   getExternalAgentExecutionBlockReason,

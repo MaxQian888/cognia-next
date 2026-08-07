@@ -63,6 +63,8 @@ export async function dispatchTrigger(
       caller: event.kind,
       triggerKind: normalizedEvent.kind,
       triggerId: normalizedEvent.triggerId,
+      triggerBinding: normalizedEvent.binding,
+      triggerOriginAt: normalizedEvent.originAt,
       payload: normalizedEvent.payload,
       triggeredBy: opts?.triggeredBy,
       onAdmitted: () =>

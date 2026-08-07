@@ -1,23 +1,35 @@
 import { nanoid } from "nanoid"
 
+import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { getDb } from "@/lib/db/schema"
-import { resolveWorkflowDeployment } from "@/lib/db/workflow-deployments"
+import { migrateWorkflow } from "@/lib/workflow/definition/migrate"
+import {
+  resolveLockedWorkflowDeployment,
+  resolveWorkflowDeployment,
+} from "@/lib/db/workflow-deployments"
 import { validateAgainstJsonSchema } from "@/lib/workflow/nodes/ai/schema-validate"
-import { workflowVersionDigest } from "@/lib/workflow/versioning/version-snapshot"
+import {
+  createWorkflowVersion,
+  workflowVersionDigest,
+} from "@/lib/workflow/versioning/version-snapshot"
 import type {
   WorkflowEntrypoint,
+  WorkflowDependencyBinding,
+  WorkflowDependencyLock,
   WorkflowExecutionBinding,
   WorkflowInvocation,
   WorkflowVersion,
 } from "@/types/workflow/deployment"
 import type {
   TriggerEvent,
+  VisualWorkflow,
   WorkflowNodeKind,
   WorkflowRunRow,
   WorkflowTriggerBinding,
   WorkflowTriggeredFrom,
 } from "@/types/workflow/visual"
 import { runWorkflow, type RunWorkflowResult } from "./orchestrator"
+import { isWorkflowDeploymentControlPlaneEnabled } from "./feature-flags"
 
 export class WorkflowAdmissionError extends Error {
   constructor(
@@ -40,11 +52,15 @@ export interface ExecuteDeployedWorkflowInput {
   triggerKind: WorkflowNodeKind
   triggerId?: string
   triggerBinding?: WorkflowTriggerBinding
+  /** Original producer timestamp; defaults to local admission time. */
+  triggerOriginAt?: number
   payload: unknown
   signal?: AbortSignal
   triggeredBy?: WorkflowTriggeredFrom
   /** Server-generated correlation id used by legacy Companion dispatch. */
   requestedRunId?: string
+  /** Exact child artifact selected by an already-admitted parent run. */
+  lockedDependency?: WorkflowDependencyBinding
   /** Called after the admission ledger has durably reserved the run id. */
   onAdmitted?: (runId: string) => void
   /** Called after the orchestrator has persisted the WorkflowRun row. */
@@ -79,6 +95,57 @@ function assertScope(scopes: readonly string[] | undefined): void {
   }
 }
 
+function assertTriggerBinding(
+  workflow: VisualWorkflow,
+  triggerId: string | undefined,
+  triggerKind: WorkflowNodeKind
+): void {
+  if (!triggerId) return
+  const triggerNode = workflow.nodes.find((node) => node.id === triggerId)
+  if (!triggerNode || triggerNode.type !== triggerKind || triggerNode.data.disabled === true) {
+    throw new WorkflowAdmissionError(
+      "trigger-binding-invalid",
+      `Trigger ${triggerId} is missing, disabled, or not ${triggerKind}`
+    )
+  }
+}
+
+async function lockWorkflowDependencies(
+  version: WorkflowVersion,
+  environment = "production",
+  ancestors: ReadonlySet<string> = new Set([version.workflowId])
+): Promise<WorkflowDependencyLock> {
+  const workflows: WorkflowDependencyLock["workflows"] = {}
+  for (const dependency of version.dependencyManifest.workflows) {
+    const resolved = await resolveWorkflowDeployment(dependency.workflowId, environment)
+    if (!resolved) {
+      throw new WorkflowAdmissionError(
+        "dependency-not-deployed",
+        `Subworkflow ${dependency.workflowId} used by node ${dependency.nodeId} is not deployed`
+      )
+    }
+    const cyclic = ancestors.has(resolved.version.workflowId)
+    if (cyclic) {
+      throw new WorkflowAdmissionError(
+        "dependency-cycle",
+        `Subworkflow dependency cycle reaches ${resolved.version.workflowId} at node ${dependency.nodeId}`
+      )
+    }
+    workflows[dependency.nodeId] = {
+      workflowId: resolved.version.workflowId,
+      versionId: resolved.version.id,
+      deploymentId: resolved.deployment.id,
+      deploymentRevision: resolved.deployment.revision,
+      dependencyLock: await lockWorkflowDependencies(
+        resolved.version,
+        environment,
+        new Set([...ancestors, resolved.version.workflowId])
+      ),
+    }
+  }
+  return { workflows, indexes: {} }
+}
+
 /**
  * Canonical formal-execution ingress. Draft/editor calls deliberately continue
  * to call `runWorkflow` directly; every published surface resolves and pins an
@@ -88,11 +155,23 @@ export async function executeDeployedWorkflow(
   input: ExecuteDeployedWorkflowInput
 ): Promise<ExecuteDeployedWorkflowResult> {
   assertScope(input.authorizedScopes)
-  const resolved = await resolveWorkflowDeployment(input.workflowId, input.environment, {
+  if (!isWorkflowDeploymentControlPlaneEnabled()) {
+    return executeLegacyPublishedWorkflow(input)
+  }
+  const provenance = {
     entrypoint: input.entrypoint,
     caller: input.caller,
     idempotencyKey: input.idempotencyKey,
-  })
+  }
+  if (input.lockedDependency && input.lockedDependency.workflowId !== input.workflowId) {
+    throw new WorkflowAdmissionError(
+      "dependency-lock-invalid",
+      `Locked workflow ${input.lockedDependency.workflowId} does not match requested workflow ${input.workflowId}`
+    )
+  }
+  const resolved = input.lockedDependency
+    ? await resolveLockedWorkflowDeployment(input.lockedDependency, provenance)
+    : await resolveWorkflowDeployment(input.workflowId, input.environment, provenance)
   if (!resolved) {
     throw new WorkflowAdmissionError(
       "deployment-not-found",
@@ -120,19 +199,7 @@ export async function executeDeployedWorkflow(
     return reuseInvocation(existingInvocation, input.onAdmitted)
   }
 
-  if (input.triggerId) {
-    const triggerNode = resolved.workflow.nodes.find((node) => node.id === input.triggerId)
-    if (
-      !triggerNode ||
-      triggerNode.type !== input.triggerKind ||
-      triggerNode.data.disabled === true
-    ) {
-      throw new WorkflowAdmissionError(
-        "trigger-binding-invalid",
-        `Trigger ${input.triggerId} is missing, disabled, or not ${input.triggerKind}`
-      )
-    }
-  }
+  assertTriggerBinding(resolved.workflow, input.triggerId, input.triggerKind)
 
   const runInput =
     input.payload && typeof input.payload === "object" && "input" in input.payload
@@ -150,6 +217,14 @@ export async function executeDeployedWorkflow(
     }
   }
 
+  const dependencyLock =
+    input.lockedDependency?.dependencyLock ??
+    (await lockWorkflowDependencies(resolved.version, input.environment))
+  const executionBinding: WorkflowExecutionBinding = {
+    ...resolved.binding,
+    dependencyLock,
+  }
+
   const invocation: WorkflowInvocation = {
     id,
     accountId: resolved.deployment.accountId,
@@ -161,6 +236,7 @@ export async function executeDeployedWorkflow(
     ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
     runId: proposedRunId,
     status: "admitted",
+    dependencyLock,
     createdAt: now,
     updatedAt: now,
   }
@@ -170,12 +246,9 @@ export async function executeDeployedWorkflow(
     ...(input.triggerId ? { triggerId: input.triggerId } : {}),
     ...(input.triggerBinding ? { binding: input.triggerBinding } : {}),
     payload: input.payload,
-    originAt: now,
+    originAt: input.triggerOriginAt ?? now,
   }
-  const executionBinding: WorkflowExecutionBinding = {
-    ...resolved.binding,
-    invocationId: invocation.id,
-  }
+  executionBinding.invocationId = invocation.id
   const pendingRun: WorkflowRunRow = {
     id: proposedRunId,
     workflowId: resolved.workflow.id,
@@ -183,10 +256,12 @@ export async function executeDeployedWorkflow(
     deploymentId: resolved.deployment.id,
     deploymentRevision: resolved.deployment.revision,
     executionBinding,
+    dependencyLock,
     status: "pending",
     triggerKind: trigger.kind,
     ...(trigger.triggerId ? { triggerId: trigger.triggerId } : {}),
     triggerPayload: trigger.payload,
+    triggerOriginAt: trigger.originAt,
     ...(trigger.binding ? { triggerBinding: trigger.binding } : {}),
     startedAt: now,
     workflowSnapshot: resolved.workflow,
@@ -217,6 +292,10 @@ export async function executeDeployedWorkflow(
   if (admission.reused) {
     return reuseInvocation(admission.invocation, input.onAdmitted)
   }
+  // Notify surfaces before starting the driver. Plugin hooks may open their
+  // own Dexie transactions; running them concurrently with the first driver
+  // update leaks fake-indexeddb's transaction zone and can abort admission.
+  input.onAdmitted?.(runId)
   const driving = driveInvocation({
     invocation: admission.invocation,
     version: resolved.version,
@@ -228,13 +307,74 @@ export async function executeDeployedWorkflow(
     onPersisted: input.onPersisted,
   })
   activeInvocations.set(admission.invocation.id, driving)
-  input.onAdmitted?.(runId)
   try {
     return await driving
   } finally {
     if (activeInvocations.get(admission.invocation.id) === driving) {
       activeInvocations.delete(admission.invocation.id)
     }
+  }
+}
+
+async function executeLegacyPublishedWorkflow(
+  input: ExecuteDeployedWorkflowInput
+): Promise<ExecuteDeployedWorkflowResult> {
+  const stored = await getDb().workflows.get(input.workflowId)
+  if (!stored?.published) {
+    throw new WorkflowAdmissionError(
+      "deployment-not-found",
+      `Workflow ${input.workflowId} has no legacy publication`
+    )
+  }
+  const workflow = migrateWorkflow(stored)
+  assertTriggerBinding(workflow, input.triggerId, input.triggerKind)
+  const persistedVersion = stored.published.versionId
+    ? await getDb().workflowVersions.get(stored.published.versionId)
+    : undefined
+  const version =
+    persistedVersion ??
+    createWorkflowVersion({
+      workflow,
+      workflowInterface: workflow.interface ?? {},
+      accountId: getActiveAccountId(),
+      sequence: 0,
+      createdAt: stored.published.at,
+    })
+  const runId = input.requestedRunId ?? `run_${nanoid(12)}`
+  const executionBinding: WorkflowExecutionBinding = {
+    versionId: stored.published.versionId ?? version.id,
+    deploymentId: stored.published.deploymentId ?? `legacy:${workflow.id}`,
+    deploymentRevision: stored.published.deploymentRevision ?? 0,
+    entrypoint: input.entrypoint,
+    caller: input.caller,
+    ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+  }
+  const result = await runWorkflow({
+    workflow,
+    runId,
+    trigger: {
+      workflowId: workflow.id,
+      kind: input.triggerKind,
+      ...(input.triggerId ? { triggerId: input.triggerId } : {}),
+      ...(input.triggerBinding ? { binding: input.triggerBinding } : {}),
+      payload: input.payload,
+      originAt: input.triggerOriginAt ?? Date.now(),
+    },
+    executionBinding,
+    signal: input.signal,
+    triggeredBy: input.triggeredBy,
+    onPersisted: (persistedRunId) => {
+      input.onAdmitted?.(persistedRunId)
+      input.onPersisted?.(persistedRunId)
+    },
+  })
+  return {
+    invocationId: `legacy:${runId}`,
+    runId,
+    reused: false,
+    version,
+    executionBinding,
+    result,
   }
 }
 
@@ -323,6 +463,7 @@ async function reuseInvocation(
       entrypoint: invocation.entrypoint,
       caller: invocation.caller,
       ...(invocation.idempotencyKey ? { idempotencyKey: invocation.idempotencyKey } : {}),
+      ...(invocation.dependencyLock ? { dependencyLock: invocation.dependencyLock } : {}),
     }
     const trigger: TriggerEvent = {
       workflowId: version.workflowId,
@@ -362,6 +503,7 @@ async function reuseInvocation(
       entrypoint: invocation.entrypoint,
       caller: invocation.caller,
       ...(invocation.idempotencyKey ? { idempotencyKey: invocation.idempotencyKey } : {}),
+      ...(invocation.dependencyLock ? { dependencyLock: invocation.dependencyLock } : {}),
     },
     result: existingRun
       ? {

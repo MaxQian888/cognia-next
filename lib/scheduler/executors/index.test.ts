@@ -94,6 +94,7 @@ const buildMcpServerMapMock = jest.fn(
 jest.mock("@/lib/db/mcp-servers", () => ({
   listEnabledMcpServers: () => listEnabledMcpServersMock(),
   buildMcpServerMap: (rows: Array<{ id: string }>) => buildMcpServerMapMock(rows),
+  buildMcpServerMapResolved: (rows: Array<{ id: string }>) => buildMcpServerMapMock(rows),
 }))
 
 const listEnabledSkillsByIdsMock = jest.fn(async (_ids: string[]) => [] as unknown[])

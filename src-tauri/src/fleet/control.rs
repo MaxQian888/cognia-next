@@ -487,6 +487,10 @@ fn send_interrupt(_pid: u32) -> Result<(), String> {
 /// companion RPC arm so the two transports can never drift.
 pub async fn interrupt_session(agent: &str, session_id: &str) -> Result<(), String> {
     let agent = super::registry::FleetAgent::parse(agent).ok_or("unknown agent")?;
+    if agent == super::registry::FleetAgent::Opencode {
+        super::runtime().queue_opencode_interrupt(session_id.to_string())?;
+        return Ok(());
+    }
     let pid = super::runtime()
         .session_agent_pid(agent, session_id)
         .ok_or(InterruptRefusal::NotRunning.code())?;

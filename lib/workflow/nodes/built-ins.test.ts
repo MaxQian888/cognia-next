@@ -2302,6 +2302,96 @@ describe("flow.subworkflow", () => {
     expect(out.status).toBe("succeeded")
   })
 
+  it("uses loop iteration provenance in the child invocation identity", async () => {
+    const { createWorkflow } = await import("@/lib/db/workflows")
+    const { getDb } = await import("@/lib/db/schema")
+    const { publishWorkflow } = await import("@/lib/workflow/publish/publish-workflow")
+    const sub = await createWorkflow({ name: "Loop child", nodes: [], edges: [] })
+    await publishWorkflow(sub.id, 1)
+
+    const first = {
+      ...makeCtx("flow.subworkflow", { workflowId: sub.id }),
+      iteration: { loopId: "loop", iterationIndex: 0 },
+    } as StepExecutionContext<Record<string, unknown>>
+    const second = {
+      ...makeCtx("flow.subworkflow", { workflowId: sub.id }),
+      iteration: { loopId: "loop", iterationIndex: 1 },
+    } as StepExecutionContext<Record<string, unknown>>
+
+    await exec("flow.subworkflow", first)
+    await exec("flow.subworkflow", second)
+
+    const invocations = await getDb().workflowInvocations.toArray()
+    expect(invocations).toHaveLength(2)
+    expect(invocations.map((invocation) => invocation.idempotencyKey).sort()).toEqual([
+      "loop#0#n_test",
+      "loop#1#n_test",
+    ])
+  })
+
+  it("executes the child version locked by the admitted parent", async () => {
+    const { createWorkflow, updateWorkflow } = await import("@/lib/db/workflows")
+    const { getDb } = await import("@/lib/db/schema")
+    const { publishWorkflow } = await import("@/lib/workflow/publish/publish-workflow")
+    const child = await createWorkflow({
+      name: "Locked child",
+      nodes: [
+        {
+          id: "set",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "set", params: { variable: "version", value: "first" } },
+        },
+      ],
+      edges: [],
+    })
+    const first = await publishWorkflow(child.id, 1)
+    await updateWorkflow(child.id, {
+      nodes: [
+        {
+          id: "set",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "set", params: { variable: "version", value: "second" } },
+        },
+      ],
+    })
+    await publishWorkflow(child.id, 2)
+
+    const ctx = {
+      ...makeCtx("flow.subworkflow", { workflowId: child.id }),
+      executionBinding: {
+        versionId: "parent-version",
+        deploymentId: "parent-deployment",
+        deploymentRevision: 1,
+        entrypoint: "http" as const,
+        caller: "test",
+        dependencyLock: {
+          workflows: {
+            n_test: {
+              workflowId: child.id,
+              versionId: first.versionId,
+              deploymentId: first.deploymentId,
+              deploymentRevision: first.deploymentRevision,
+              dependencyLock: { workflows: {}, indexes: {} },
+            },
+          },
+          indexes: {},
+        },
+      },
+    } as StepExecutionContext<Record<string, unknown>>
+
+    const result = await exec("flow.subworkflow", ctx)
+    const childRun = await getDb().workflowRuns.get((result.output as { runId: string }).runId)
+
+    expect(childRun).toMatchObject({
+      versionId: first.versionId,
+      output: { variable: "version", value: "first" },
+    })
+  })
+
   it("rejects a missing workflowId", async () => {
     await expect(exec("flow.subworkflow", makeCtx("flow.subworkflow", {}))).rejects.toThrow(
       /workflowId/

@@ -58,8 +58,23 @@ export interface WorkflowInvocation {
   idempotencyKey?: string
   runId?: string
   status: "admitted" | "running" | "completed" | "rejected"
+  dependencyLock?: WorkflowDependencyLock
   createdAt: number
   updatedAt: number
+}
+
+export interface WorkflowDependencyBinding {
+  workflowId: string
+  versionId: string
+  deploymentId: string
+  deploymentRevision: number
+  dependencyLock?: WorkflowDependencyLock
+}
+
+/** Versions resolved before a formal run is admitted. Keys are parent node ids. */
+export interface WorkflowDependencyLock {
+  workflows: Record<string, WorkflowDependencyBinding>
+  indexes: Record<string, string>
 }
 
 export interface WorkflowExecutionBinding {
@@ -70,4 +85,5 @@ export interface WorkflowExecutionBinding {
   entrypoint: WorkflowEntrypoint
   caller: string
   idempotencyKey?: string
+  dependencyLock?: WorkflowDependencyLock
 }

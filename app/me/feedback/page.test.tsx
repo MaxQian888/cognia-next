@@ -31,7 +31,7 @@ describe("MobileFeedbackPage", () => {
     render(<Page />)
     expect(screen.getByTestId("feedback-row-open-issue")).toHaveAttribute(
       "href",
-      "https://github.com/anthropics/claude-code/issues/new"
+      "https://github.com/MaxQian888/cognia-next/issues/new"
     )
   })
 

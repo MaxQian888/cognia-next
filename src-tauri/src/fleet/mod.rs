@@ -21,6 +21,7 @@ pub mod integrations;
 pub mod island_space;
 pub mod island_window;
 pub mod opencode;
+mod outbox;
 pub mod registry;
 pub mod routes;
 pub mod terminal;
@@ -29,10 +30,11 @@ use once_cell::sync::Lazy;
 use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 use registry::{FleetRegistry, FleetSnapshot};
 
@@ -89,6 +91,9 @@ pub fn set_git_capture_enabled(enabled: bool) {
 /// How long an OpenCode command poll parks before returning empty. Kept short
 /// enough that the plugin re-polls promptly; a queued command wakes it early.
 pub const COMMAND_POLL_WAIT_MS: u64 = 20_000;
+const COMMAND_LEASE_MS: u64 = 30_000;
+const COMMAND_TTL_MS: u64 = 5 * 60_000;
+const COMMAND_MAX_ATTEMPTS: u32 = 5;
 
 static COMMAND_POLL_OVERRIDE_MS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
@@ -128,7 +133,19 @@ pub enum PermissionBehavior {
 pub struct OpencodeCommand {
     pub id: String,
     pub session_id: String,
+    pub kind: String,
     pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub answers: Vec<Vec<String>>,
+    pub attempt: u32,
+    #[serde(skip)]
+    created_at: u64,
+    #[serde(skip)]
+    expires_at: u64,
+    #[serde(skip)]
+    leased_until: u64,
 }
 
 /// A parked AskUserQuestion long-poll: the sender delivers the built
@@ -151,6 +168,9 @@ pub struct FleetRuntime {
     /// Outbound send-message commands for OpenCode sessions, drained by the
     /// plugin's command poll (`/api/v1/fleet/opencode/commands`).
     opencode_commands: Mutex<Vec<OpencodeCommand>>,
+    /// JSON outbox path installed when fleet monitoring starts. Commands are
+    /// restored before a fresh ingress token is published.
+    outbox_path: RwLock<Option<PathBuf>>,
     /// Wakers for parked command polls, so a queued command is delivered
     /// immediately rather than on the next poll tick.
     command_wakers: Mutex<Vec<tokio::sync::oneshot::Sender<()>>>,
@@ -168,6 +188,7 @@ static RUNTIME: Lazy<Arc<FleetRuntime>> = Lazy::new(|| {
         pending: Mutex::new(HashMap::new()),
         question_pending: Mutex::new(HashMap::new()),
         opencode_commands: Mutex::new(Vec::new()),
+        outbox_path: RwLock::new(None),
         command_wakers: Mutex::new(Vec::new()),
         token: RwLock::new(None),
         enabled: AtomicBool::new(false),
@@ -188,6 +209,24 @@ pub fn now_ms() -> u64 {
 }
 
 impl FleetRuntime {
+    fn configure_outbox(&self, path: PathBuf) -> Result<(), String> {
+        let now = now_ms();
+        let mut restored = outbox::load(&path)?;
+        restored
+            .retain(|command| command.expires_at > now && command.attempt < COMMAND_MAX_ATTEMPTS);
+        *self.opencode_commands.lock() = restored;
+        *self.outbox_path.write() = Some(path);
+        self.persist_outbox()
+    }
+
+    fn persist_outbox(&self) -> Result<(), String> {
+        let Some(path) = self.outbox_path.read().clone() else {
+            return Ok(());
+        };
+        let commands = self.opencode_commands.lock().clone();
+        outbox::save(Path::new(&path), &commands)
+    }
+
     pub fn is_enabled(&self) -> bool {
         self.enabled.load(Ordering::SeqCst)
     }
@@ -377,41 +416,139 @@ impl FleetRuntime {
                     registry::build_ask_user_answer_input(&raw_questions, &selections);
                 tx.send(updated_input).is_ok()
             }
-            None => false,
+            None => {
+                let target = self.registry.lock().question_target(request_id);
+                let Some((agent, session_id, questions)) = target else {
+                    return false;
+                };
+                if agent != registry::FleetAgent::Opencode {
+                    return false;
+                }
+                let answers = questions
+                    .iter()
+                    .enumerate()
+                    .map(|(question_index, question)| {
+                        selections
+                            .get(question_index)
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|index| question.options.get(*index as usize).cloned())
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>();
+                if self
+                    .queue_opencode_control(
+                        session_id,
+                        "question-reply",
+                        String::new(),
+                        Some(request_id.to_string()),
+                        answers,
+                    )
+                    .is_err()
+                {
+                    return false;
+                }
+                if self.registry.lock().resolve_question(request_id) {
+                    self.emit_update();
+                }
+                true
+            }
         }
     }
 
     /// Queue an OpenCode send-message command and wake any parked poll so the
     /// plugin picks it up immediately.
-    pub fn queue_opencode_command(&self, session_id: String, text: String) -> String {
+    pub fn queue_opencode_command(
+        &self,
+        session_id: String,
+        text: String,
+    ) -> Result<String, String> {
+        self.queue_opencode_control(session_id, "prompt", text, None, Vec::new())
+    }
+
+    pub fn queue_opencode_interrupt(&self, session_id: String) -> Result<String, String> {
+        self.queue_opencode_control(session_id, "interrupt", String::new(), None, Vec::new())
+    }
+
+    fn queue_opencode_control(
+        &self,
+        session_id: String,
+        kind: &str,
+        text: String,
+        request_id: Option<String>,
+        answers: Vec<Vec<String>>,
+    ) -> Result<String, String> {
         let id = mint_token();
         self.opencode_commands.lock().push(OpencodeCommand {
             id: id.clone(),
             session_id,
+            kind: kind.to_string(),
             text,
+            request_id,
+            answers,
+            attempt: 0,
+            created_at: now_ms(),
+            expires_at: now_ms().saturating_add(COMMAND_TTL_MS),
+            leased_until: 0,
         });
-        // Wake every parked poll — they re-check the queue against their own
-        // session list, so waking all is safe.
+        if let Err(error) = self.persist_outbox() {
+            self.opencode_commands
+                .lock()
+                .retain(|command| command.id != id);
+            return Err(error);
+        }
         for waker in self.command_wakers.lock().drain(..) {
             let _ = waker.send(());
         }
-        id
+        Ok(id)
     }
 
-    /// Drain commands whose session is in `session_ids`. Non-matching commands
-    /// stay queued for the plugin instance that owns those sessions.
+    /// Lease commands whose session is in `session_ids`. Commands remain in the
+    /// outbox until acknowledged; a crashed plugin can receive them again after
+    /// the lease expires.
     fn take_opencode_commands(&self, session_ids: &[String]) -> Vec<OpencodeCommand> {
         let mut queue = self.opencode_commands.lock();
+        let now = now_ms();
+        queue.retain(|cmd| cmd.expires_at > now && cmd.attempt < COMMAND_MAX_ATTEMPTS);
         let mut taken = Vec::new();
-        queue.retain(|cmd| {
-            if session_ids.iter().any(|s| s == &cmd.session_id) {
+        for cmd in queue.iter_mut() {
+            if cmd.leased_until <= now && session_ids.iter().any(|s| s == &cmd.session_id) {
+                cmd.attempt = cmd.attempt.saturating_add(1);
+                cmd.leased_until = now.saturating_add(COMMAND_LEASE_MS);
                 taken.push(cmd.clone());
-                false
-            } else {
-                true
             }
-        });
+        }
+        drop(queue);
+        if let Err(error) = self.persist_outbox() {
+            log::error!("failed to persist fleet command lease: {error}");
+        }
         taken
+    }
+
+    pub fn ack_opencode_commands(&self, command_ids: &[String]) -> Result<usize, String> {
+        let mut queue = self.opencode_commands.lock();
+        let prior = queue.clone();
+        let acked_ids = queue
+            .iter()
+            .filter(|command| command_ids.iter().any(|id| id == &command.id))
+            .map(|command| command.id.clone())
+            .collect::<Vec<_>>();
+        let before = queue.len();
+        queue.retain(|command| !command_ids.iter().any(|id| id == &command.id));
+        let acked = before.saturating_sub(queue.len());
+        drop(queue);
+        if let Err(error) = self.persist_outbox() {
+            *self.opencode_commands.lock() = prior;
+            return Err(error);
+        }
+        crate::companion_api::audit::record(
+            "fleet.command.acknowledged",
+            "opencode-plugin",
+            "fleet.control",
+            "acknowledged",
+            serde_json::json!({ "command_ids": acked_ids, "acked": acked }),
+        );
+        Ok(acked)
     }
 
     /// Long-poll for OpenCode commands: return immediately if any match, else
@@ -431,8 +568,15 @@ impl FleetRuntime {
         self.take_opencode_commands(session_ids)
     }
 
-    fn set_app_handle(&self, app: tauri::AppHandle) {
+    fn set_app_handle(&self, app: tauri::AppHandle) -> Result<(), String> {
+        let outbox_path = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| format!("resolve fleet command outbox directory: {error}"))?
+            .join("fleet-command-outbox.json");
+        self.configure_outbox(outbox_path)?;
         *self.app_handle.write() = Some(app);
+        Ok(())
     }
 
     fn emit_update(&self) {
@@ -502,7 +646,7 @@ pub async fn fleet_monitor_start(
     companion: tauri::State<'_, crate::companion_api::CompanionServerState>,
 ) -> Result<FleetMonitorStatus, String> {
     let runtime = runtime();
-    runtime.set_app_handle(app.clone());
+    runtime.set_app_handle(app.clone())?;
 
     // Reuse the companion server as the ingress listener (user decision: no
     // second HTTP server). Already-running → keeps its current port/bind.
@@ -563,7 +707,14 @@ pub async fn fleet_monitor_stop() -> Result<FleetMonitorStatus, String> {
     let runtime = runtime();
     runtime.enabled.store(false, Ordering::SeqCst);
     *runtime.token.write() = None;
+    runtime.registry.lock().clear_observed_sessions();
+    runtime.pending.lock().clear();
+    runtime.question_pending.lock().clear();
+    runtime.opencode_commands.lock().clear();
+    runtime.persist_outbox()?;
+    runtime.command_wakers.lock().clear();
     install::remove_monitor_config().map_err(|e| e.to_string())?;
+    runtime.emit_update();
     Ok(FleetMonitorStatus {
         enabled: false,
         port: None,
@@ -608,7 +759,7 @@ pub async fn fleet_opencode_send_message(
     if trimmed.is_empty() {
         return Err("message is empty".to_string());
     }
-    Ok(runtime().queue_opencode_command(session_id, trimmed.to_string()))
+    runtime().queue_opencode_command(session_id, trimmed.to_string())
 }
 
 /// Island Approve/Deny → resolves the parked hook long-poll.
@@ -713,6 +864,49 @@ mod tests {
         assert!(!runtime().respond_question("ghost-question", vec![vec![0]]));
     }
 
+    #[tokio::test]
+    async fn opencode_question_response_queues_native_reply_without_long_poll() {
+        let _guard = TEST_RUNTIME_LOCK.lock().await;
+        let rt = runtime();
+        let session_id = "mod-opencode-question-native";
+        let request_id = "mod-opencode-question-request";
+        let event = registry::FleetEvent {
+            agent: registry::FleetAgent::Opencode,
+            event: "question.asked".into(),
+            pid: Some(101),
+            ppid: None,
+            env: Default::default(),
+            payload: serde_json::json!({
+                "session_id": session_id,
+                "request_id": request_id,
+                "tool_input": {
+                    "questions": [{
+                        "question": "Which auth method?",
+                        "options": [{"label": "OAuth"}, {"label": "API key"}]
+                    }]
+                }
+            }),
+        };
+        assert_eq!(rt.ingest(&event), registry::RegistryEffect::Updated);
+
+        assert!(rt.respond_question(request_id, vec![vec![1]]));
+        let commands = rt.take_opencode_commands(&[session_id.to_string()]);
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].kind, "question-reply");
+        assert_eq!(commands[0].request_id.as_deref(), Some(request_id));
+        assert_eq!(commands[0].answers, vec![vec!["API key".to_string()]]);
+        assert_eq!(
+            rt.ack_opencode_commands(&[commands[0].id.clone()]).unwrap(),
+            1
+        );
+        assert!(rt
+            .snapshot()
+            .sessions
+            .iter()
+            .find(|session| session.session_id == session_id)
+            .is_some_and(|session| session.pending_question_request.is_none()));
+    }
+
     #[test]
     fn ingest_updates_registry_without_app_handle() {
         let rt = runtime();
@@ -776,7 +970,9 @@ mod tests {
         // Drain any leftovers from other tests.
         rt.take_opencode_commands(&["mod-oc-a".into(), "mod-oc-b".into()]);
 
-        let id = rt.queue_opencode_command("mod-oc-a".into(), "continue".into());
+        let id = rt
+            .queue_opencode_command("mod-oc-a".into(), "continue".into())
+            .unwrap();
         assert!(!id.is_empty());
 
         // A poll listing a different session gets nothing (command stays).
@@ -788,9 +984,44 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].session_id, "mod-oc-a");
         assert_eq!(got[0].text, "continue");
+        assert_eq!(got[0].kind, "prompt");
+        assert_eq!(got[0].attempt, 1);
 
-        // Now empty.
+        // Still queued but hidden behind a lease until the plugin acks it.
         assert!(rt.take_opencode_commands(&["mod-oc-a".into()]).is_empty());
+        assert_eq!(rt.ack_opencode_commands(&[id]).unwrap(), 1);
+        assert_eq!(rt.ack_opencode_commands(&["missing".into()]).unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn opencode_commands_survive_runtime_memory_loss_and_ack_is_audited() {
+        let _guard = TEST_RUNTIME_LOCK.lock().await;
+        let _audit_guard = crate::companion_api::audit::test_guard();
+        let tmp = tempfile::tempdir().unwrap();
+        let outbox_path = tmp.path().join("fleet-command-outbox.json");
+        let audit_path = tmp.path().join("audit.log");
+        crate::companion_api::audit::install_at_for_testing(Some(audit_path.clone()));
+
+        let rt = runtime();
+        rt.configure_outbox(outbox_path.clone()).unwrap();
+        let id = rt
+            .queue_opencode_command("durable-session".into(), "continue".into())
+            .unwrap();
+
+        rt.opencode_commands.lock().clear();
+        rt.configure_outbox(outbox_path).unwrap();
+        let restored = rt.take_opencode_commands(&["durable-session".into()]);
+        assert_eq!(restored.len(), 1);
+        assert_eq!(restored[0].id, id);
+        assert_eq!(rt.ack_opencode_commands(&[id.clone()]).unwrap(), 1);
+
+        let audit = std::fs::read_to_string(audit_path).unwrap();
+        assert!(audit.contains("fleet.command.acknowledged"));
+        assert!(audit.contains(&id));
+
+        *rt.outbox_path.write() = None;
+        rt.opencode_commands.lock().clear();
+        crate::companion_api::audit::install_at_for_testing(None);
     }
 
     #[tokio::test]
@@ -807,7 +1038,8 @@ mod tests {
             })
         };
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        rt.queue_opencode_command("mod-oc-wake".into(), "hi".into());
+        rt.queue_opencode_command("mod-oc-wake".into(), "hi".into())
+            .unwrap();
         let got = poller.await.unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].text, "hi");

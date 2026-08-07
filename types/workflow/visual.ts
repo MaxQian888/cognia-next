@@ -815,6 +815,8 @@ export interface WorkflowRunRow {
   deploymentRevision?: number
   /** Formal ingress provenance; draft/editor runs intentionally omit it. */
   executionBinding?: import("./deployment").WorkflowExecutionBinding
+  /** Immutable child workflow/index versions resolved before formal admission. */
+  dependencyLock?: import("./deployment").WorkflowDependencyLock
   /**
    * Owning workspace id — Workspace isolation column (Dexie v86). Workflow
    * DEFINITIONS stay profile-shared; only their RUN history is per-project.
@@ -828,6 +830,8 @@ export interface WorkflowRunRow {
   triggerId?: string
   triggerPayload: unknown
   triggerBinding?: WorkflowTriggerBinding
+  /** Original producer timestamp; distinct from local run admission time. */
+  triggerOriginAt?: number
   input?: unknown
   output?: unknown
   error?: WorkflowRunError
@@ -995,6 +999,10 @@ export interface StepExecutionContext<TParams = Record<string, unknown>> {
   runId: string
   workflowId: string
   stepId: string
+  /** Loop-container provenance for this concrete step execution. */
+  iteration?: { loopId: string; iterationIndex: number }
+  /** Formal run provenance, including the pre-admission dependency lock. */
+  executionBinding?: import("./deployment").WorkflowExecutionBinding
   /**
    * Optional run-scoped agent-trace id. When set (e.g. by the eval workflow
    * target), AI nodes emit their LLM spans under this trace so the run can be

@@ -62,7 +62,7 @@ import {
   settleAgentTaskAttempt,
 } from "@/lib/db/agent-tasks"
 import { getSettings } from "@/lib/db/settings"
-import { listEnabledMcpServers, buildMcpServerMap } from "@/lib/db/mcp-servers"
+import { listEnabledMcpServers, buildMcpServerMapResolved } from "@/lib/db/mcp-servers"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
@@ -254,7 +254,7 @@ async function applyPayloadOverrides(
       const wanted = new Set(payload.mcpServerIds)
       const subset = enabled.filter((srv) => wanted.has(srv.id))
       if (subset.length > 0) {
-        out.mcpServers = buildMcpServerMap(subset)
+        out.mcpServers = await buildMcpServerMapResolved(subset)
       } else {
         // Empty array means "no MCP servers" — strip the resolved map.
         delete out.mcpServers

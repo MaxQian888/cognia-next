@@ -60,6 +60,7 @@ import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { listRunEvents } from "./event-log"
 import type { TriggerEvent, VisualWorkflow } from "@/types/workflow/visual"
+import type { WorkflowExecutionBinding } from "@/types/workflow/deployment"
 
 // Cold-opening the full schema ladder on fresh fake-indexeddb regularly
 // exceeds Jest's 5 s default on a busy machine (grew again with v95–v98).
@@ -105,6 +106,50 @@ function buildWorkflow(
 }
 
 describe("runWorkflow — end-to-end happy paths", () => {
+  it("persists formal dependency and original trigger provenance", async () => {
+    const executionBinding: WorkflowExecutionBinding = {
+      invocationId: "wfi_test",
+      versionId: "wfv_test_1",
+      deploymentId: "wfd_test",
+      deploymentRevision: 7,
+      entrypoint: "trigger",
+      caller: "trigger.cron",
+      dependencyLock: {
+        workflows: {
+          child: {
+            workflowId: "wf_child",
+            versionId: "wfv_child_2",
+            deploymentId: "wfd_child",
+            deploymentRevision: 2,
+          },
+        },
+        indexes: {},
+      },
+    }
+    const provenanceTrigger: TriggerEvent = {
+      ...trigger,
+      originAt: 1234,
+      binding: {
+        adapterId: "lark",
+        sessionId: "session-1",
+        conversationKey: "chat-1",
+      },
+    }
+
+    const result = await runWorkflow({
+      workflow: buildWorkflow([], []),
+      trigger: provenanceTrigger,
+      executionBinding,
+    })
+
+    expect(await getDb().workflowRuns.get(result.runId)).toMatchObject({
+      executionBinding,
+      dependencyLock: executionBinding.dependencyLock,
+      triggerOriginAt: 1234,
+      triggerBinding: provenanceTrigger.binding,
+    })
+  })
+
   it("runs a 4-node linear workflow and produces output", async () => {
     const wf = buildWorkflow(
       [

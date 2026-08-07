@@ -18,7 +18,7 @@ jest.mock("@/lib/db/mcp-servers", () => ({
 jest.mock("@/lib/db/plugins", () => ({ listPlugins: jest.fn(async () => []) }))
 jest.mock("@/lib/db/workflows", () => ({ listWorkflows: jest.fn(async () => []) }))
 jest.mock("@/lib/db/twins", () => ({ listTwins: jest.fn(async () => []) }))
-jest.mock("@/lib/claude/ipc", () => ({ testMcpServer: jest.fn() }))
+jest.mock("@/lib/claude/feature-call", () => ({ discoverMcpServerViaSidecar: jest.fn() }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
 import { isTauri } from "@/lib/tauri"
 const isTauriMock = isTauri as jest.Mock
@@ -159,10 +159,15 @@ describe("McpToolPicker", () => {
     wrap(
       <McpToolPicker id="mt" serverId="srv1" value="" onChange={jest.fn()} probe={probe as never} />
     )
-    // The probe ran against the resolved server's transport/url.
+    // The probe receives the complete stored definition; secret resolution is
+    // owned by the feature-call wrapper immediately before sidecar dispatch.
     await waitFor(() =>
       expect(probe).toHaveBeenCalledWith(
-        expect.objectContaining({ transport: "http", url: "https://x/mcp" })
+        expect.objectContaining({
+          id: "srv1",
+          transport: "http",
+          config: { url: "https://x/mcp" },
+        })
       )
     )
   })

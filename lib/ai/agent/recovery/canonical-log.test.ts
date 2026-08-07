@@ -56,6 +56,19 @@ describe("canonical envelope log", () => {
     expect((await readCanonicalEnvelopes("run-b")).map((e) => e.sequence)).toEqual([0, 1, 2])
   })
 
+  it("serializes concurrent appends so duplicate ids remain exactly once", async () => {
+    const first = envelope(0)
+    const second = envelope(1)
+
+    const [a, b] = await Promise.all([
+      appendCanonicalEnvelopes("run-concurrent", [first, second]),
+      appendCanonicalEnvelopes("run-concurrent", [first, second]),
+    ])
+
+    expect(a + b).toBe(2)
+    expect(await readCanonicalEnvelopes("run-concurrent")).toHaveLength(2)
+  })
+
   it("coexists with ordinary workflow events and stays OUT of the semantic journal", async () => {
     await appendEvent({ runId: "run-c", type: "run_started" })
     await appendCanonicalEnvelopes("run-c", [envelope(0)])

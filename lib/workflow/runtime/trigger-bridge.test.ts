@@ -1,9 +1,7 @@
-/**
- * @jest-environment jsdom
- */
 import "fake-indexeddb/auto"
 import { dispatchTrigger, isTriggerEvent } from "./trigger-bridge"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createWorkflow, listWorkflowRuns } from "@/lib/db/workflows"
 import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
@@ -11,15 +9,11 @@ import type { TriggerEvent } from "@/types/workflow/visual"
 
 jest.setTimeout(15_000)
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-  await getDb().workflows.clear()
-  await getDb().workflowRuns.clear()
-  await getDb().workflowRunEvents.clear()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(() => dbFixture.initialize())
+beforeEach(() => dbFixture.restore())
+afterAll(() => dbFixture.dispose())
 
 describe("isTriggerEvent", () => {
   it("accepts a well-formed event", () => {
@@ -219,6 +213,45 @@ describe("dispatchTrigger", () => {
     expect(runs.length).toBe(1)
     expect(runs[0].triggeredBy).toEqual({ source: "api", deviceId: "dev-42" })
     expect(runs[0].triggeredBySource).toBe("api")
+  })
+
+  it("preserves trigger binding and origin time on the run", async () => {
+    const wf = await createWorkflow({
+      name: "bound trigger",
+      nodes: [
+        {
+          id: "n_start",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "start", params: {} },
+        },
+      ],
+      edges: [],
+    })
+    await publishWorkflow(wf.id, 1)
+
+    await dispatchTrigger({
+      workflowId: wf.id,
+      kind: "trigger.manual",
+      payload: {},
+      originAt: 1234,
+      binding: {
+        adapterId: "lark",
+        sessionId: "session-1",
+        conversationKey: "chat-1",
+        sourceMessageId: "message-1",
+      },
+    })
+
+    const [run] = await listWorkflowRuns({ workflowId: wf.id })
+    expect(run.triggerBinding).toEqual({
+      adapterId: "lark",
+      sessionId: "session-1",
+      conversationKey: "chat-1",
+      sourceMessageId: "message-1",
+    })
+    expect((run as typeof run & { triggerOriginAt?: number }).triggerOriginAt).toBe(1234)
   })
 
   it("fires the onWorkflowTriggerFired plugin hook before running", async () => {

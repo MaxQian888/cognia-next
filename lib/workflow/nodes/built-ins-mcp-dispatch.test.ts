@@ -36,7 +36,7 @@ import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import "./built-ins"
 import { getExecutor } from "./registry"
-import { getPluginEventHooks } from "@/lib/plugin"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import type { McpServer } from "@cognia/agent-config-types"
 import type { StepExecutionContext, TriggerEvent, WorkflowNodeKind } from "@/types/workflow/visual"
 
@@ -147,6 +147,11 @@ describe("action.mcp.invokeTool — plugin event dispatch", () => {
     // URL + headers folded into requestInit.
     const [url, opts] = SSEClientTransport.mock.calls[0]
     expect((url as URL).href).toBe("https://example.test/sse")
-    expect(opts).toEqual({ requestInit: { headers: { Authorization: "Bearer t" } } })
+    expect(opts).toEqual({
+      requestInit: {
+        headers: { Authorization: "Bearer t" },
+        redirect: "error",
+      },
+    })
   })
 })

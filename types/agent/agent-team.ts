@@ -37,6 +37,25 @@ import type {
  */
 export type TeamMemberRole = "lead" | "teammate"
 
+/** Built-in portrait identifiers for Agent Team members and bot identities. */
+export type AgentTeamAvatarId =
+  | "coordinator"
+  | "researcher"
+  | "coder"
+  | "designer"
+  | "planner"
+  | "data-analyst"
+  | "writer"
+  | "browser-scout"
+  | "workflow-engineer"
+  | "memory-archivist"
+  | "security-guardian"
+  | "reviewer"
+  | "operator"
+  | "translator"
+  | "creative-agent"
+  | "general-assistant"
+
 /**
  * Team status
  */
@@ -909,6 +928,8 @@ export interface AgentTeammate {
   description: string
   /** Role in the team */
   role: TeamMemberRole
+  /** Stable built-in portrait. Older persisted teammates resolve one on read. */
+  avatarId?: AgentTeamAvatarId
   /** Current status */
   status: TeammateStatus
   /** Configuration */
@@ -1545,6 +1566,7 @@ export interface AddTeammateInput {
   name: string
   description?: string
   role?: TeamMemberRole
+  avatarId?: AgentTeamAvatarId
   config?: TeammateConfig
   spawnPrompt?: string
 }

@@ -17,7 +17,7 @@ import { MCP_AGENT_ADAPTERS, type McpAgentAdapter } from "@/lib/claude/agents"
 import { readAgentConfig } from "@/lib/claude/ipc"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { isTauri } from "@/lib/tauri"
-import type { AgentId } from "@cognia/agent-config-types"
+import type { AgentId, McpServer } from "@cognia/agent-config-types"
 
 export interface AgentStatus {
   agent: McpAgentAdapter
@@ -122,9 +122,13 @@ export interface UseAgentStatusesResult {
   refresh: () => void
 }
 
-export function useAgentStatuses(): UseAgentStatusesResult {
+export function useAgentStatuses(serverSnapshot?: McpServer[]): UseAgentStatusesResult {
   const [snapshots, setSnapshots] = useState<Record<AgentId, FileSnapshot> | null>(null)
-  const servers = useLiveQuery(() => listMcpServers(), []) ?? []
+  const liveServers = useLiveQuery(
+    () => serverSnapshot ?? listMcpServers(),
+    serverSnapshot ? [serverSnapshot] : []
+  )
+  const servers = serverSnapshot ?? liveServers ?? []
 
   useEffect(() => {
     let cancelled = false

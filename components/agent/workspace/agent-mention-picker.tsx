@@ -12,8 +12,8 @@ import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { fuzzyFilterSort } from "@/lib/chat/completion/fuzzy-match"
 import { Badge } from "@/components/ui/badge"
-import { senderColor } from "./sender-color"
 import { RuntimeBadge } from "./runtime-badge"
+import { AgentTeamAvatar, mentionTargetAvatarSubject } from "./agent-team-avatar"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-targets"
 
@@ -25,7 +25,6 @@ export interface AgentMentionRowProps {
 
 export function AgentMentionRow({ target, highlighted }: AgentMentionRowProps) {
   const t = useTranslations("agentTeamsWorkspace.chat")
-  const initial = target.name.charAt(0).toUpperCase() || "?"
   const isVirtual = target.kind === "virtual"
 
   return (
@@ -37,13 +36,10 @@ export function AgentMentionRow({ target, highlighted }: AgentMentionRowProps) {
         highlighted && "bg-accent text-accent-foreground"
       )}
     >
-      <span
-        aria-hidden
-        className="flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white"
-        style={{ backgroundColor: senderColor(target.name) }}
-      >
-        {initial}
-      </span>
+      <AgentTeamAvatar
+        subject={mentionTargetAvatarSubject(target)}
+        className="size-7 rounded-full bg-muted ring-1 ring-inset ring-border/60"
+      />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="flex items-center gap-2 text-xs font-medium">
           <span className="truncate">@{target.name}</span>
@@ -75,7 +71,6 @@ export interface SubagentMentionRowProps {
  * a team runtime) instead of the team `RuntimeBadge`.
  */
 export function SubagentMentionRow({ target, highlighted }: SubagentMentionRowProps) {
-  const initial = target.name.charAt(0).toUpperCase() || "?"
   return (
     <div
       data-testid={`subagent-mention-row-${target.id}`}
@@ -84,13 +79,10 @@ export function SubagentMentionRow({ target, highlighted }: SubagentMentionRowPr
         highlighted && "bg-accent text-accent-foreground"
       )}
     >
-      <span
-        aria-hidden
-        className="flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white"
-        style={{ backgroundColor: senderColor(target.name) }}
-      >
-        {initial}
-      </span>
+      <AgentTeamAvatar
+        subject={{ id: target.id, name: target.name, description: target.description }}
+        className="size-7 rounded-full bg-muted ring-1 ring-inset ring-border/60"
+      />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="flex items-center gap-2 text-xs font-medium">
           <span className="truncate">@{target.handle}</span>

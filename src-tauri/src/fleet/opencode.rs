@@ -46,6 +46,7 @@ pub fn opencode_plugin_source() -> String {
 import {{ readFileSync }} from "node:fs"
 import {{ homedir }} from "node:os"
 import {{ join }} from "node:path"
+import {{ createOpencodeClient as createV2Client }} from "@opencode-ai/sdk/v2"
 
 function loadConfig() {{
   try {{
@@ -116,9 +117,25 @@ async function pollCommands(cfg, sessionIds) {{
   }}
 }}
 
-export const CogniaFleet = async ({{ client, directory }}) => {{
+async function ackCommands(cfg, commandIds) {{
+  if (!commandIds.length) return
+  try {{
+    await fetch(`https://127.0.0.1:${{cfg.port}}/api/v1/fleet/opencode/commands/ack`, {{
+      method: "POST",
+      headers: {{ "Content-Type": "application/json", "X-Cognia-Fleet-Token": cfg.token }},
+      body: JSON.stringify({{ command_ids: commandIds }}),
+    }})
+  }} catch {{}}
+}}
+
+export const CogniaFleet = async ({{ directory, serverUrl }}) => {{
   const cwd = directory || process.cwd()
+  // The plugin's bound client still exposes the legacy surface in current
+  // OpenCode releases. Create the documented v2 client against the same local
+  // server so question replies and per-session interrupts use native APIs.
+  const client = createV2Client({{ baseUrl: serverUrl.toString(), directory: cwd }})
   const seen = new Set()
+  const completed = new Set()
   const fire = (event, payload) => {{
     const cfg = loadConfig()
     if (!cfg) return
@@ -137,14 +154,42 @@ export const CogniaFleet = async ({{ client, directory }}) => {{
       }}
       const commands = await pollCommands(cfg, Array.from(seen))
       for (const cmd of commands) {{
+        if (completed.has(cmd.id)) {{
+          await ackCommands(cfg, [cmd.id])
+          continue
+        }}
         try {{
-          await client.session.promptAsync({{
-            path: {{ id: cmd.sessionId }},
-            body: {{ parts: [{{ type: "text", text: cmd.text }}] }},
-          }})
+          if (cmd.kind === "interrupt") {{
+            if (client.v2 && client.v2.session && client.v2.session.interrupt) {{
+              await client.v2.session.interrupt(
+                {{ sessionID: cmd.sessionId }},
+                {{ throwOnError: true }}
+              )
+            }} else {{
+              await client.session.abort(
+                {{ sessionID: cmd.sessionId, directory: cwd }},
+                {{ throwOnError: true }}
+              )
+            }}
+          }} else if (cmd.kind === "question-reply" && cmd.requestId) {{
+            await client.question.reply(
+              {{ requestID: cmd.requestId, answers: cmd.answers || [], directory: cwd }},
+              {{ throwOnError: true }}
+            )
+          }} else {{
+            await client.session.promptAsync(
+              {{
+                sessionID: cmd.sessionId,
+                directory: cwd,
+                parts: [{{ type: "text", text: cmd.text }}],
+              }},
+              {{ throwOnError: true }}
+            )
+          }}
+          completed.add(cmd.id)
+          await ackCommands(cfg, [cmd.id])
         }} catch {{
-          // Ignore — the session may have ended; the command is already
-          // consumed server-side.
+          // No ack: the lease expires and Cognia retries until TTL/attempt cap.
         }}
       }}
     }}
@@ -156,6 +201,17 @@ export const CogniaFleet = async ({{ client, directory }}) => {{
     event: async ({{ event }}) => {{
       if (event && event.type === "session.idle" && event.properties && event.properties.sessionID) {{
         fire("session-idle", {{ session_id: event.properties.sessionID }})
+      }} else if (event && event.type === "question.asked" && event.properties) {{
+        const sid = event.properties.sessionID
+        const requestId = event.properties.id || event.properties.requestID
+        if (sid && requestId) {{
+          seen.add(sid)
+          fire("question.asked", {{
+            session_id: sid,
+            request_id: requestId,
+            tool_input: {{ questions: event.properties.questions || [] }},
+          }})
+        }}
       }}
     }},
     // A user message started a turn.
@@ -317,7 +373,16 @@ mod tests {
         assert!(src.contains("output.status = decision.status"));
         // Send-message reverse channel: command poll + client execution.
         assert!(src.contains("/api/v1/fleet/opencode/commands"));
+        assert!(src.contains("/api/v1/fleet/opencode/commands/ack"));
+        assert!(src.contains("ackCommands"));
+        assert!(src.contains("createOpencodeClient as createV2Client"));
         assert!(src.contains("client.session.promptAsync"));
+        assert!(src.contains("client.v2.session.interrupt"));
+        assert!(src.contains("client.session.abort"));
+        assert!(src.contains("client.question.reply"));
+        assert!(src.contains("throwOnError: true"));
+        assert!(src.contains("completed.has"));
+        assert!(src.contains("question.asked"));
         assert!(src.contains("runCommandLoop"));
         // Sessions are tracked so commands route to the owning instance.
         assert!(src.contains("seen.add"));

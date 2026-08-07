@@ -29,6 +29,7 @@ import { TeamComposer } from "./team-composer"
 import { ToolCallList } from "./tool-call-card"
 import { TokenUsageLine } from "./token-usage-line"
 import { MessageActionsMenu } from "./message-actions-menu"
+import { AgentTeamAvatar, mentionTargetAvatarSubject } from "./agent-team-avatar"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { stripAgentBlocks } from "@/lib/agent-team/agent-blocks"
 import type { RuntimeAvailabilityMap } from "@/lib/agent-team/use-runtime-availability"
@@ -37,6 +38,7 @@ import { TEAM_USER_SENDER_ID } from "@/types/agent/agent-team"
 import type { TeammateRuntime } from "@/types/agent/agent-team"
 import type { SubAgentTokenUsage } from "@/types/agent/sub-agent"
 import type { ProjectFileReference } from "@/lib/files/project-file-reference"
+import type { AgentTeamAvatarSubject } from "@/lib/agent-team/avatar"
 
 /* ------------------------------------------------------------------ */
 /*  Border color per message type                                       */
@@ -141,6 +143,7 @@ function renderMessageBody(
 
 interface ChatMessageItemProps {
   msg: AgentTeamMessage
+  avatarSubject?: AgentTeamAvatarSubject
   /** Stagger-animate only the last few new messages. */
   animate: boolean
   /** 0-based position within the animated tail window (drives the delay). */
@@ -158,6 +161,7 @@ interface ChatMessageItemProps {
  */
 const ChatMessageItem = memo(function ChatMessageItem({
   msg,
+  avatarSubject,
   animate,
   animationSlot,
   onRetry,
@@ -193,13 +197,20 @@ const ChatMessageItem = memo(function ChatMessageItem({
       >
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <span
-              className="flex size-6 items-center justify-center rounded-full text-[10px] font-medium"
-              style={{ backgroundColor: senderColor(msg.senderName), color: "white" }}
-              aria-hidden
-            >
-              {msg.senderName.charAt(0).toUpperCase()}
-            </span>
+            {avatarSubject ? (
+              <AgentTeamAvatar
+                subject={avatarSubject}
+                className="size-6 rounded-full bg-muted ring-1 ring-inset ring-border/60"
+              />
+            ) : (
+              <span
+                className="flex size-6 items-center justify-center rounded-full text-[10px] font-medium"
+                style={{ backgroundColor: senderColor(msg.senderName), color: "white" }}
+                aria-hidden
+              >
+                {msg.senderName.charAt(0).toUpperCase()}
+              </span>
+            )}
             <span className="text-xs font-medium">{msg.senderName}</span>
             {runtime && <RuntimeBadge runtime={runtime} iconOnly />}
             <Badge variant="outline" className="text-[9px]">
@@ -364,10 +375,17 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
                 // Only stagger the last few new messages — established history
                 // would otherwise flicker on every render.
                 const shouldAnimate = !prefersReducedMotion && index >= messages.length - 5
+                const senderTarget = mentionables?.find((target) => target.id === msg.senderId)
+                const avatarSubject = senderTarget
+                  ? mentionTargetAvatarSubject(senderTarget)
+                  : msg.senderId === TEAM_USER_SENDER_ID
+                    ? undefined
+                    : { id: msg.senderId, name: msg.senderName }
                 const row = (
                   <ChatMessageItem
                     key={msg.id}
                     msg={msg}
+                    avatarSubject={avatarSubject}
                     animate={shouldAnimate}
                     animationSlot={index - Math.max(messages.length - 5, 0)}
                     onRetry={onRetry}

@@ -19,6 +19,7 @@ import type {
   WorkflowEdge,
   WorkflowNode,
 } from "@/types/workflow/visual"
+import type { WorkflowExecutionBinding } from "@/types/workflow/deployment"
 
 const dbFixture = createDbTestFixture()
 
@@ -87,6 +88,7 @@ async function run(
     signal?: AbortSignal
     cache?: IdempotencyCache
     runId?: string
+    executionBinding?: WorkflowExecutionBinding
   } = {}
 ) {
   const runId = opts.runId ?? "run_loop_test"
@@ -101,6 +103,7 @@ async function run(
     retryPolicy: workflow.settings.retryDefaults,
     secretResolver: NoopSecretResolver,
     logger: createRunLogger(runId),
+    executionBinding: opts.executionBinding,
   })
 }
 
@@ -116,6 +119,42 @@ describe("forEach mode", () => {
     )
     const result = await run(workflow, loopNode)
     expect(result.output).toMatchObject({ count: 3 })
+  })
+
+  it("threads the formal execution binding into every child iteration", async () => {
+    const contexts: Array<{ iteration?: unknown; executionBinding?: unknown }> = []
+    registerNodeExecutor({
+      kind: "testplugin.capturebinding" as never,
+      typeVersion: 1,
+      execute: async (ctx) => {
+        contexts.push({ iteration: ctx.iteration, executionBinding: ctx.executionBinding })
+        return { output: null }
+      },
+    })
+    const { workflow, loopNode } = loopWorkflow({ mode: "times", times: 2 }, [
+      node("capture", "testplugin.capturebinding" as never, {}, "loop1"),
+    ])
+    const executionBinding: WorkflowExecutionBinding = {
+      versionId: "wfv_parent_1",
+      deploymentId: "wfd_parent",
+      deploymentRevision: 4,
+      entrypoint: "http",
+      caller: "test",
+      dependencyLock: { workflows: {}, indexes: {} },
+    }
+
+    await run(workflow, loopNode, { executionBinding })
+
+    expect(contexts).toEqual([
+      {
+        iteration: { loopId: "loop1", iterationIndex: 0 },
+        executionBinding,
+      },
+      {
+        iteration: { loopId: "loop1", iterationIndex: 1 },
+        executionBinding,
+      },
+    ])
   })
 })
 
