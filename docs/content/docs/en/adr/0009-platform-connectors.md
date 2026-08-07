@@ -322,6 +322,36 @@ OAuth completion handler already existed):
 
 ---
 
+## Revision — 2026-08-06 (governance and bounded-runtime pass)
+
+The connector delivery and lifecycle seams were tightened without changing the public
+`PlatformAdapter` or `getBus()` compatibility façades:
+
+- **Governed delivery:** ordinary AI, workflow, skill, plugin, manual, draft-approved, remote
+  control, inbox, and notification sends enter `ConnectorDeliveryGateway.enqueue()` (or its
+  transactional `enqueueMany()` variant). Automated sources fail closed at the deep PII gate;
+  human-reviewed sources retain their existing semantics and record provenance. Direct adapter
+  sends are reserved for the explicitly labelled diagnostic probe. Legacy plugin `send` /
+  `sendText` remain for one migration cycle and emit `delivery.legacy_direct` audit waivers.
+- **Single lifecycle owner:** `ConnectorRuntimeSupervisor` owns built-in and plugin transports.
+  Each adapter has a serial operation lane, generation fencing, a four-start global semaphore,
+  truthful desired/observed snapshots, and fail-closed stop handling. Credential rotation,
+  manual restart, resume, and row-fingerprint reconciliation all enter the same lane.
+- **Bounded queue scheduler:** schema v151 adds monotonic `orderSeq`,
+  `[conversationKey+orderSeq]`, `[status+claimedAt]`, and inbound `[status+updatedAt]` indexes.
+  The runner reads at most 128 due rows, permits at most 16 active platform sends, keeps only the
+  head of each conversation per batch, and evicts idle lanes. `enqueueMany()` allocates a stable
+  sequence range in one Dexie transaction and wakes the runner once.
+- **Retention and health:** terminal inbound payloads are compacted immediately. Successful,
+  history-only, and dismissed jobs retain seven days; failed and recovery-required jobs retain
+  thirty. Audit retention is tiered (security 30 days, operational 14, diagnostic 7), heartbeat
+  pruning is handled by housekeeping, and backlog includes pending, failed, and sending rows.
+  Settings Health reads the supervisor generation/state and the global connector execution
+  broker snapshot.
+- **Delivery ambiguity contract:** Slack is classified as `reconciliation_required`; Lark remains
+  `remote_idempotent`. A contract test now requires every remotely idempotent adapter serializer
+  to transmit the stable idempotency key.
+
 ## References
 
 - Original spec: `C:\Users\qwdma\.claude\plans\d-project-agentforge-astrbot-fluttering-cerf.md`
