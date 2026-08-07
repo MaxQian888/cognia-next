@@ -2,6 +2,7 @@
 // If you call an external API from the browser, add its origin to the
 // `connect-src` directive there, otherwise the request will be blocked.
 import type { Metadata, Viewport } from "next"
+import dynamic from "next/dynamic"
 import { Suspense } from "react"
 // Geist ships as a self-hosted local font package (geist/font/*), so the build
 // never fetches from fonts.gstatic.com. This keeps offline / proxied / CI and
@@ -68,7 +69,6 @@ import { PluginErrorToaster } from "@/components/plugins/plugin-error-toaster"
 import { SettingsLoadFailedBanner } from "@/components/error/settings-load-failed-banner"
 import { DbUpgradeBlockedDialog } from "@/components/error/db-upgrade-blocked-dialog"
 import { DiagnosticNotifier } from "@/components/error/diagnostic-notifier"
-import { PluginSurfaceReferenceHarness } from "@/app/e2e/plugin-ui-surfaces/plugin-surface-reference-harness"
 import { WorkflowRunToaster } from "@/components/workflow/runs/workflow-run-toaster"
 import { OrchestrationDispatchProvider } from "@/components/providers/orchestration-dispatch-provider"
 import { SubscriptionUsageProvider } from "@/components/providers/subscription-usage-provider"
@@ -96,6 +96,16 @@ import { TtsNowPlayingBar } from "@/components/tts/tts-now-playing-bar"
 import { AskUserDialog } from "@/components/chat/ask-user-dialog"
 import { SkillRecorderRoot } from "@/components/skills/recorder/recorder-root"
 import "./globals.css"
+
+// This harness reaches nearly every plugin surface and renderer by design.
+// Keeping it as a static import made ordinary `pnpm dev` compile the E2E-only
+// graph even though NEXT_PUBLIC_E2E is unset. The conditional render below now
+// has a real module boundary; E2E builds still load the exact same component.
+const PluginSurfaceReferenceHarness = dynamic(() =>
+  import("@/app/e2e/plugin-ui-surfaces/plugin-surface-reference-harness").then(
+    (module) => module.PluginSurfaceReferenceHarness
+  )
+)
 
 export const metadata: Metadata = {
   title: "Cognia · Claude Code",

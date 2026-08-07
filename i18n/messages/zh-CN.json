@@ -5252,9 +5252,6 @@
       "memoryUse": "在此对话使用记忆",
       "noApiKey": "未配置 API Key",
       "openBrowser": "打开浏览器面板",
-      "openInCodexApp": "在 Codex App 中打开",
-      "openInCodexAppFailed": "无法在 Codex App 中打开此对话",
-      "openedInCodexApp": "已在 Codex App 中打开对话",
       "permissionModeAppDefault": "使用应用默认",
       "permissionModeLabel": "权限模式",
       "pickDirAria": "选择目录",
@@ -5706,6 +5703,7 @@
         "titleNamed": "{name} 渲染错误"
       },
       "image": {
+        "allImagesTitle": "全部图片",
         "close": "关闭",
         "copyUrl": "复制链接",
         "counter": "第 {current} 张，共 {total} 张",
@@ -5720,8 +5718,10 @@
         "previewAria": "预览{name}",
         "previewDescription": "预览所选图片，可缩放或旋转。",
         "previous": "上一张图片",
+        "retry": "重试",
         "rotate": "旋转",
         "selectImage": "查看{name}",
+        "showAllImages": "显示全部 {count} 张图片",
         "viewFullscreen": "全屏查看",
         "zoomIn": "放大",
         "zoomOut": "缩小"
@@ -5957,6 +5957,13 @@
       "interruptedNotice": "该请求已被中断——工具调用已被拒绝。重新发送消息可重试。",
       "titleFallback": "允许执行 {tool}？",
       "toolLabel": "工具"
+    },
+    "transcript": {
+      "collapseTurn": "收起轮次",
+      "expandTurn": "展开完整轮次",
+      "loadOlder": "加载更早轮次",
+      "loading": "正在加载聊天记录…",
+      "retry": "重试加载聊天记录"
     },
     "truncateFrom": {
       "cancel": "保留",
@@ -7109,11 +7116,8 @@
       "deselect": "取消选择",
       "dragHandle": "拖拽以重新排序或移动到文件夹",
       "moveToFolder": "移动到文件夹",
-      "openInCodexApp": "在 Codex App 中打开",
-      "openInCodexAppFailed": "无法在 Codex App 中打开此对话",
       "openInTerminal": "在终端打开",
       "openInTerminalFailed": "无法导出此会话到终端",
-      "openedInCodexApp": "已在 Codex App 中打开对话",
       "openedInTerminal": "在终端运行：{command}",
       "pin": "置顶",
       "pinned": "已置顶",
@@ -13362,15 +13366,20 @@
       },
       "back": "返回会话列表",
       "detail": {
+        "collapseTurn": "收起回合详情",
         "composerAria": "追问消息",
         "composerPlaceholder": "发送追问…",
         "empty": "还没有消息。",
         "ended": "该会话已结束。",
         "endedBadge": "已结束",
+        "expandTurn": "展开回合详情",
         "interruptAria": "打断当前回合",
+        "loadOlder": "加载更早回合",
+        "loadingTranscript": "正在加载会话记录…",
         "notFound": "会话不存在或已不可用。",
         "observeOnly": "仅观察",
         "offlineHint": "桌面端已离线——重新连接后可继续跟随此会话。",
+        "retryTranscript": "重试加载会话记录",
         "sendAria": "发送",
         "streaming": "流式输出中",
         "title": "实时会话"

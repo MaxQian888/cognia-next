@@ -26,8 +26,8 @@ pub use cognia_ccswitch as ccswitch;
 mod claude;
 mod cli_bridge;
 mod code_adoption;
-mod codex_app_dispatch;
 mod codeserver;
+mod codex_app_dispatch;
 // ADR-0067 Phase 6 — extracted to cognia-core; re-aliased so `crate::command_error`
 // (claude, logging, plugin_api/vscode, top-level) resolves unchanged.
 pub use cognia_core::command_error;
@@ -626,7 +626,6 @@ pub fn run() {
             claude::commands::claude_feature_abort,
             claude::commands::claude_sidecar_status,
             claude::commands::sidecar_restart_count,
-            claude::mcp_test::test_mcp_server,
             // Hooks runtime bridge — external agents (claude-code/codex/opencode)
             // reach the settings.json hook runtime via run_agent_hook; the trust
             // gate for project/local-scope hooks is seeded by set_trusted_workspaces.
@@ -717,6 +716,7 @@ pub fn run() {
             pet_window::pet_window_set_ignore_cursor_events,
             pet_window::pet_window_set_position,
             pet_window::pet_window_get_position,
+            pet_window::pet_window_get_cursor_position,
             pet_window::pet_window_get_work_area,
             pet_window::pet_window_get_surfaces,
             pet_window::is_pet_window_open,
@@ -1062,6 +1062,7 @@ pub fn run() {
             companion_api::commands::companion_seed_locked_computer_use,
             companion_api::commands::companion_sync_pull_response,
             companion_api::commands::companion_message_response,
+            companion_api::commands::companion_media_response,
             companion_api::commands::companion_desktop_write_response,
             companion_api::commands::companion_get_tls_fingerprint,
             companion_api::commands::companion_tls_paths,

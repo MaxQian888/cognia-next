@@ -11,7 +11,7 @@ import { __resetAppKeybindingStoreForTesting } from "@/stores/shortcuts/app-keyb
 import { __resetContextKeysForTesting } from "@/lib/plugin/context-keys/context-key-store"
 import type { Skill } from "@cognia/agent-config-types"
 
-jest.mock("@/lib/plugin", () => ({
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({ dispatchShortcut: jest.fn() }),
 }))
 

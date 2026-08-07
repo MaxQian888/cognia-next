@@ -17,8 +17,8 @@ describe("resolveBootProfile", () => {
     expect(resolveBootProfile("test", "main")).toBe("eager")
   })
 
-  it("defaults unknown or missing values to eager", () => {
-    expect(resolveBootProfile("development", undefined)).toBe("eager")
+  it("defaults development to main while invalid values stay eager", () => {
+    expect(resolveBootProfile("development", undefined)).toBe("main")
     expect(resolveBootProfile("development", "unexpected")).toBe("eager")
   })
 })

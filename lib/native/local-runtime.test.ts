@@ -45,6 +45,17 @@ jest.mock(
 
 import { getLocalRuntimeDiagnostics } from "./local-runtime"
 
+const healthyReaders = {
+  readSidecarStatus: async () => ({ ready: true }),
+  readSyncStates: async () => ({}),
+  readPluginStatuses: async () => [],
+  readMcpTransports: async () => [],
+  readRecentErrorCount: async () => 0,
+}
+
+const readDiagnostics = (overrides: Parameters<typeof getLocalRuntimeDiagnostics>[0] = {}) =>
+  getLocalRuntimeDiagnostics({ ...healthyReaders, ...overrides })
+
 beforeEach(() => {
   isTauriValue = false
   platformMock.mockReset()
@@ -60,7 +71,7 @@ beforeEach(() => {
 
 describe("getLocalRuntimeDiagnostics — web mode", () => {
   it("returns runtime: browser with userAgent/language/platform/online", async () => {
-    const diag = await getLocalRuntimeDiagnostics()
+    const diag = await readDiagnostics()
     expect(diag).toBeTruthy()
     expect(diag?.status).toBe("ok")
     expect(diag?.isTauri).toBe(false)
@@ -70,6 +81,41 @@ describe("getLocalRuntimeDiagnostics — web mode", () => {
     expect(typeof diag?.capturedAt).toBe("string")
   })
 
+  it("aggregates real subsystem health without retaining raw failure messages", async () => {
+    const diag = await readDiagnostics({
+      readSyncStates: async () => ({
+        messages: { lastSyncAt: 10, since: 4, lastError: "token secret leaked" },
+        sessions: { lastSyncAt: 20, since: 5, lastError: null },
+      }),
+      readPluginStatuses: async () => ["enabled", "error", "disabled"],
+      readMcpTransports: async () => ["stdio", "http", "stdio"],
+      readRecentErrorCount: async () => 3,
+    })
+
+    expect(diag?.status).toBe("error")
+    expect(diag?.health).toMatchObject({
+      sidecar: { status: "not-applicable" },
+      sync: { status: "error", trackedTables: 2, failedTables: 1 },
+      plugins: { status: "error", total: 3, enabled: 1, failed: 1 },
+      mcp: { status: "ok", enabled: 3, transports: { stdio: 2, http: 1 } },
+      recentErrors: { status: "error", count: 3 },
+    })
+    expect(JSON.stringify(diag)).not.toContain("token secret leaked")
+  })
+
+  it("marks a failed health reader unavailable instead of losing the whole snapshot", async () => {
+    const diag = await readDiagnostics({
+      readPluginStatuses: async () => {
+        throw new Error("private plugin path")
+      },
+    })
+    expect(diag?.status).toBe("error")
+    expect(diag?.health).toEqual(
+      expect.objectContaining({ plugins: { status: "unavailable", code: "plugins_unavailable" } })
+    )
+    expect(JSON.stringify(diag)).not.toContain("private plugin path")
+  })
+
   it("returns runtime: server when navigator is undefined", async () => {
     const originalNavigator = (globalThis as { navigator?: unknown }).navigator
     Object.defineProperty(globalThis, "navigator", {
@@ -77,7 +123,7 @@ describe("getLocalRuntimeDiagnostics — web mode", () => {
       configurable: true,
     })
     try {
-      const diag = await getLocalRuntimeDiagnostics()
+      const diag = await readDiagnostics()
       expect(diag?.runtime).toBe("server")
     } finally {
       Object.defineProperty(globalThis, "navigator", {
@@ -104,7 +150,7 @@ describe("getLocalRuntimeDiagnostics — Tauri mode", () => {
     getVersionMock.mockResolvedValue("1.0.0")
     getTauriVersionMock.mockResolvedValue("2.9.0")
 
-    const diag = await getLocalRuntimeDiagnostics()
+    const diag = await readDiagnostics()
     expect(diag).toMatchObject({
       status: "ok",
       isTauri: true,
@@ -139,7 +185,7 @@ describe("getLocalRuntimeDiagnostics — Tauri mode", () => {
     getVersionMock.mockRejectedValue(new Error("app missing"))
     getTauriVersionMock.mockRejectedValue(new Error("app missing"))
 
-    const diag = await getLocalRuntimeDiagnostics()
+    const diag = await readDiagnostics()
     expect(diag?.status).toBe("ok")
     expect(diag?.isTauri).toBe(true)
     // platform comes from webEnv in jsdom (navigator.platform); the Tauri
@@ -173,7 +219,7 @@ describe("getLocalRuntimeDiagnostics — Tauri mode", () => {
   it("records an error status when readWebEnv itself throws", async () => {
     isTauriValue = true
     await withThrowingUserAgent(new Error("navigator gone"), async () => {
-      const diag = await getLocalRuntimeDiagnostics()
+      const diag = await readDiagnostics()
       expect(diag?.status).toBe("error")
       expect(diag?.lastError).toMatch(/navigator gone/)
     })
@@ -182,7 +228,7 @@ describe("getLocalRuntimeDiagnostics — Tauri mode", () => {
   it("coerces non-Error throws to a string in lastError", async () => {
     isTauriValue = true
     await withThrowingUserAgent("string-thrown", async () => {
-      const diag = await getLocalRuntimeDiagnostics()
+      const diag = await readDiagnostics()
       expect(diag?.status).toBe("error")
       expect(diag?.lastError).toBe("string-thrown")
     })

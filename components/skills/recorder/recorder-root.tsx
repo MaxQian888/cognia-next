@@ -102,6 +102,12 @@ export function SkillRecorderRoot() {
   /** Focus goes back where it came from when the Sheet closes. */
   const openerRef = useRef<Element | null>(null)
 
+  const utilityClient = useMemo(
+    () =>
+      buildUtilityLlmClient({ session: null, appSettings: settings, featureId: "skills.recorder" }),
+    [settings]
+  )
+
   // Reconcile with the native side once. A recording can outlive a renderer
   // reload — the hook and the journal are both native — so the first thing the
   // app does is ask whether one is still running.
@@ -147,12 +153,6 @@ export function SkillRecorderRoot() {
       useRecorderStore.getState().dispatch({ type: "OPEN", source: "shortcut" })
     },
     { enabled: available }
-  )
-
-  const utilityClient = useMemo(
-    () =>
-      buildUtilityLlmClient({ session: null, appSettings: settings, featureId: "skills.recorder" }),
-    [settings]
   )
 
   const reached = useMemo(() => STAGES.slice(0, STAGES.indexOf(stageForPhase(phase)) + 1), [phase])

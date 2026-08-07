@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useMemo } from "react"
+import { useShallow } from "zustand/react/shallow"
 
 import { usePlatform } from "@/hooks/use-platform"
 import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
@@ -59,7 +60,6 @@ export interface UseSidebarLayout {
 export function useSidebarLayout(): UseSidebarLayout {
   const platform = usePlatform()
   const runtimeSnapshot = useRuntimeSnapshot()
-  const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
 
   const catalog = useMemo(
@@ -68,17 +68,23 @@ export function useSidebarLayout(): UseSidebarLayout {
   )
   const validIds = useMemo(() => new Set(catalog.map((c) => c.id)), [catalog])
 
-  // Key on `settings.sidebarLayout` (not the whole `settings` object): every
-  // settings write swaps in a fresh `settings` reference, and recomputing here
-  // would re-create all callbacks and re-render the always-mounted GuildRail on
-  // unrelated changes (theme, fonts, pinned workflows, …).
-  const sidebarLayout = settings?.sidebarLayout
+  // Subscribe to the two layout arrays independently. `save()` may hydrate a
+  // fresh settings tree, so comparing only the `sidebarLayout` object reference
+  // would still re-render the always-mounted GuildRail for unrelated writes.
+  // `useShallow` compares the string entries and preserves each selected array
+  // when its contents are unchanged.
+  const pinned = useSettingsStore(
+    useShallow((s) => s.settings?.sidebarLayout?.pinned ?? DEFAULT_SIDEBAR_LAYOUT.pinned)
+  )
+  const hidden = useSettingsStore(
+    useShallow((s) => s.settings?.sidebarLayout?.hidden ?? DEFAULT_SIDEBAR_LAYOUT.hidden)
+  )
   const layout = useMemo<SidebarLayout>(
     () => ({
-      pinned: sidebarLayout?.pinned ?? DEFAULT_SIDEBAR_LAYOUT.pinned,
-      hidden: sidebarLayout?.hidden ?? DEFAULT_SIDEBAR_LAYOUT.hidden,
+      pinned,
+      hidden,
     }),
-    [sidebarLayout]
+    [hidden, pinned]
   )
 
   const resolved = useMemo(() => resolveSidebarLayout(catalog, layout), [catalog, layout])
@@ -86,7 +92,7 @@ export function useSidebarLayout(): UseSidebarLayout {
   // Read from its own settings key, not from `sidebarLayout`. Keeping the two
   // apart is what stops `pin`/`hide` (which rebuild the layout object) from
   // silently discarding the side, and what stops `reset` from moving the rail.
-  const side = settings?.sidebarSide ?? DEFAULT_SIDEBAR_SIDE
+  const side = useSettingsStore((s) => s.settings?.sidebarSide ?? DEFAULT_SIDEBAR_SIDE)
   const setSide = useCallback((next: SidebarSide) => save({ sidebarSide: next }), [save])
 
   const commit = useCallback((next: SidebarLayout) => save({ sidebarLayout: next }), [save])

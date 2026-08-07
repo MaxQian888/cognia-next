@@ -19,7 +19,7 @@ const redo = jest.fn()
 jest.mock("@/stores/a2ui", () => ({
   useA2UIStore: (selector: (state: Record<string, unknown>) => unknown) => selector({ undo, redo }),
 }))
-jest.mock("@/lib/plugin", () => ({
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({ dispatchShortcut: jest.fn() }),
 }))
 

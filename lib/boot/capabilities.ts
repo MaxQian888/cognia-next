@@ -34,7 +34,9 @@ export function resolveBootProfile(
   nodeEnv: string | undefined,
   configured: string | undefined
 ): BootProfile {
-  return nodeEnv === "development" && configured === "main" ? "main" : "eager"
+  if (nodeEnv !== "development") return "eager"
+  if (configured === undefined || configured === "main") return "main"
+  return "eager"
 }
 
 let bootProfile = resolveBootProfile(

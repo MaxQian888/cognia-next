@@ -113,20 +113,26 @@ describe("useSidebarLayout", () => {
   })
 
   it("does not recompute layout/callbacks when an unrelated setting changes", () => {
-    const { result, rerender } = renderHook(() => useSidebarLayout())
+    let renderCount = 0
+    const { result } = renderHook(() => {
+      renderCount += 1
+      return useSidebarLayout()
+    })
     const firstLayout = result.current.layout
     const firstPin = result.current.pin
-    // An unrelated settings write swaps in a fresh `settings` object reference
-    // but keeps the SAME `sidebarLayout` reference — the memo (keyed on
-    // `settings.sidebarLayout`, not the whole object) must hold its identity.
-    const existingLayout = (useSettingsStore.getState().settings as { sidebarLayout: unknown })
-      .sidebarLayout
+    const initialRenderCount = renderCount
+    // The persisted settings path may hydrate fresh objects and arrays even
+    // when the layout values did not change. Content-stable selectors must
+    // still prevent the always-mounted rail from rendering again.
     act(() => {
       useSettingsStore.setState({
-        settings: { theme: "dark", sidebarLayout: existingLayout } as never,
+        settings: {
+          theme: "dark",
+          sidebarLayout: { pinned: ["workflows", "inbox"], hidden: [] },
+        } as never,
       })
     })
-    rerender()
+    expect(renderCount).toBe(initialRenderCount)
     expect(result.current.layout).toBe(firstLayout)
     expect(result.current.pin).toBe(firstPin)
   })

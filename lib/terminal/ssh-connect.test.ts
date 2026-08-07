@@ -8,7 +8,7 @@ jest.mock("./session-registry", () => ({
 jest.mock("./spawn-orchestrator", () => ({
   wireSessionToStore: (...args: unknown[]) => wireSessionToStore(...args),
 }))
-jest.mock("@/lib/plugin", () => ({
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({ dispatchTerminalLifecycle: lifecycle }),
 }))
 

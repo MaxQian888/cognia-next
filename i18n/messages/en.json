@@ -5252,9 +5252,6 @@
       "memoryUse": "Use memories in this chat",
       "noApiKey": "No API key",
       "openBrowser": "Open browser panel",
-      "openInCodexApp": "Open in Codex App",
-      "openInCodexAppFailed": "Could not open this conversation in Codex App",
-      "openedInCodexApp": "Conversation opened in Codex App",
       "permissionModeAppDefault": "Use app default",
       "permissionModeLabel": "Permission mode",
       "pickDirAria": "Pick directory",
@@ -5706,6 +5703,7 @@
         "titleNamed": "{name} Render Error"
       },
       "image": {
+        "allImagesTitle": "All images",
         "close": "Close",
         "copyUrl": "Copy URL",
         "counter": "{current} of {total}",
@@ -5720,8 +5718,10 @@
         "previewAria": "Preview {name}",
         "previewDescription": "Preview the selected image, zoom or rotate it.",
         "previous": "Previous image",
+        "retry": "Retry",
         "rotate": "Rotate",
         "selectImage": "View {name}",
+        "showAllImages": "Show all {count} images",
         "viewFullscreen": "View fullscreen",
         "zoomIn": "Zoom in",
         "zoomOut": "Zoom out"
@@ -5957,6 +5957,13 @@
       "interruptedNotice": "This request was interrupted — the tool was already denied. Resend the message to retry.",
       "titleFallback": "Allow {tool}?",
       "toolLabel": "Tool"
+    },
+    "transcript": {
+      "collapseTurn": "Collapse turn",
+      "expandTurn": "Expand full turn",
+      "loadOlder": "Load older turns",
+      "loading": "Loading transcript…",
+      "retry": "Retry transcript"
     },
     "truncateFrom": {
       "cancel": "Keep them",
@@ -7109,11 +7116,8 @@
       "deselect": "Deselect",
       "dragHandle": "Drag to reorder or move to a folder",
       "moveToFolder": "Move to folder",
-      "openInCodexApp": "Open in Codex App",
-      "openInCodexAppFailed": "Could not open this conversation in Codex App",
       "openInTerminal": "Open in terminal",
       "openInTerminalFailed": "Could not export this session for the terminal",
-      "openedInCodexApp": "Conversation opened in Codex App",
       "openedInTerminal": "Run in your terminal: {command}",
       "pin": "Pin",
       "pinned": "Pinned",
@@ -13362,15 +13366,20 @@
       },
       "back": "Back to sessions",
       "detail": {
+        "collapseTurn": "Collapse turn details",
         "composerAria": "Follow-up message",
         "composerPlaceholder": "Send a follow-up…",
         "empty": "No messages yet.",
         "ended": "This session has ended.",
         "endedBadge": "Ended",
+        "expandTurn": "Expand turn details",
         "interruptAria": "Interrupt the current turn",
+        "loadOlder": "Load older turns",
+        "loadingTranscript": "Loading transcript…",
         "notFound": "Session not found or no longer available.",
         "observeOnly": "Observe only",
         "offlineHint": "Desktop is offline — reconnect to resume following this session.",
+        "retryTranscript": "Retry transcript",
         "sendAria": "Send",
         "streaming": "Streaming",
         "title": "Live session"

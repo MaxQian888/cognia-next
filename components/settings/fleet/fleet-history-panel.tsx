@@ -188,13 +188,19 @@ export function FleetHistoryPanel() {
                   <span
                     className={cn(
                       "shrink-0 tabular-nums",
-                      row.outcome === "ended" ? "text-muted-foreground" : "text-emerald-500"
+                      row.outcome === "ended"
+                        ? "text-muted-foreground"
+                        : row.outcome === "detached"
+                          ? "text-amber-600"
+                          : "text-emerald-500"
                     )}
                     data-testid={`fleet-history-outcome-${row.id}`}
                   >
                     {row.outcome === "ended"
                       ? t("endedAgo", { ago: formatElapsed(row.endedAt ?? row.startedAt, now) })
-                      : t("activeFor", { duration: formatElapsed(row.startedAt, now) })}
+                      : row.outcome === "detached"
+                        ? t("detachedAgo", { ago: formatElapsed(row.updatedAt, now) })
+                        : t("activeFor", { duration: formatElapsed(row.startedAt, now) })}
                   </span>
                   <Button
                     variant="ghost"

@@ -16,7 +16,7 @@ import {
 jest.mock("@/hooks/ui", () => ({
   useIsMobile: jest.fn(() => false),
 }))
-jest.mock("@/lib/plugin", () => ({
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({ dispatchShortcut: jest.fn() }),
 }))
 

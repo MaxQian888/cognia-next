@@ -29,6 +29,14 @@ import { Separator } from "@/components/ui/separator"
 import { Kbd } from "@/components/ui/kbd"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { SessionListLoading } from "@/components/ui/loading-states"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { PluginViewContainerPanel } from "@/components/shell/plugin-view-container-panel"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { useIsNarrow, useRangeSelection, useEdgeResize } from "@/hooks/ui"
@@ -458,30 +466,11 @@ function ChannelListBody({
     return visible.filter((s) => s.kind !== "team")
   }, [sessions, chatGuild, groupBy])
 
-  // Search box: keep the field value immediate but debounce the value fed
-  // to the grouping model so typing doesn't re-bucket on every keystroke.
+  // Search owns only the debounced model query here. The immediate field value
+  // lives inside `ChannelListSearch`, so each keystroke repaints the input
+  // without traversing the grouping model, DnD contexts, and every row.
   const searchInputRef = useRef<HTMLInputElement>(null)
-  const [searchInput, setSearchInput] = useState("")
   const [query, setQuery] = useState("")
-  // Destructure the stable `call`/`cancel` identities — the handle object
-  // itself is a fresh literal each render, so depending on it would re-run the
-  // guild-change effect (and wipe the multi-selection) on every render.
-  const { call: debouncedSetQuery, cancel: cancelDebouncedQuery } = useDebouncedCallback(
-    (next: string) => setQuery(next),
-    150
-  )
-  const handleSearchChange = useCallback(
-    (next: string) => {
-      setSearchInput(next)
-      debouncedSetQuery(next)
-    },
-    [debouncedSetQuery]
-  )
-  const clearSearch = useCallback(() => {
-    setSearchInput("")
-    cancelDebouncedQuery()
-    setQuery("")
-  }, [cancelDebouncedQuery])
 
   // Active ⇄ Archived view — seeded from and written back to the persisted UI
   // store so the choice survives reloads. Local state keeps re-render cheap.
@@ -779,41 +768,7 @@ function ChannelListBody({
           onNewDirect={handleNewDirect}
           onNewTeamConversation={handleNewTeamConversation}
         />
-        <div className="px-3 pb-2.5">
-          <div className="relative">
-            <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              ref={searchInputRef}
-              type="search"
-              value={searchInput}
-              onChange={(e) => handleSearchChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape" && searchInput) {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  clearSearch()
-                }
-              }}
-              placeholder={t("searchPlaceholder")}
-              aria-label={t("searchAria")}
-              className="h-9 rounded-xl border-transparent bg-muted/60 pr-9 pl-8 text-sm shadow-none focus-visible:border-input focus-visible:bg-background"
-            />
-            {searchInput ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="absolute top-1/2 right-1 size-6 -translate-y-1/2"
-                aria-label={t("clearSearch")}
-                onClick={clearSearch}
-              >
-                <XIcon className="size-3.5" />
-              </Button>
-            ) : (
-              <Kbd className="absolute top-1/2 right-1.5 h-5 -translate-y-1/2">/</Kbd>
-            )}
-          </div>
-        </div>
+        <ChannelListSearch inputRef={searchInputRef} onQueryChange={setQuery} />
         <ChannelListBulkActions
           visible={toolbarVisible}
           selected={selected}
@@ -836,16 +791,20 @@ function ChannelListBody({
           {loading && total === 0 ? (
             <SessionListLoading />
           ) : total === 0 ? (
-            <p className="px-4 py-6 text-center text-xs text-muted-foreground">
-              {view === "archived"
-                ? t("emptyArchived")
-                : chatGuild.kind === "team"
-                  ? t("emptyTeam")
-                  : t("emptyDm")}
-            </p>
+            <ConversationListEmptyState
+              archived={view === "archived"}
+              team={chatGuild.kind === "team"}
+              onCreate={
+                view === "archived"
+                  ? undefined
+                  : chatGuild.kind === "team"
+                    ? () => handleNewTeamConversation(chatGuild.teamId)
+                    : handleNewDirect
+              }
+            />
           ) : filteredCount === 0 ? (
             <p className="px-4 py-6 text-center text-xs text-muted-foreground">
-              {t("emptySearch", { query: searchInput.trim() })}
+              {t("emptySearch", { query: query.trim() })}
             </p>
           ) : (
             <DndContext
@@ -885,6 +844,108 @@ function ChannelListBody({
         </ScrollArea>
       </div>
     </PerfBoundary>
+  )
+}
+
+function ChannelListSearch({
+  inputRef,
+  onQueryChange,
+}: {
+  inputRef: React.RefObject<HTMLInputElement | null>
+  onQueryChange: (query: string) => void
+}) {
+  const t = useTranslations("desktop.channelList")
+  const [value, setValue] = useState("")
+  const { call: debouncedQueryChange, cancel: cancelQueryChange } = useDebouncedCallback(
+    onQueryChange,
+    150
+  )
+
+  const updateValue = useCallback(
+    (next: string) => {
+      setValue(next)
+      debouncedQueryChange(next)
+    },
+    [debouncedQueryChange]
+  )
+  const clear = useCallback(() => {
+    setValue("")
+    cancelQueryChange()
+    onQueryChange("")
+  }, [cancelQueryChange, onQueryChange])
+
+  return (
+    <div className="px-3 pb-2.5">
+      <div className="relative">
+        <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          ref={inputRef}
+          type="search"
+          value={value}
+          onChange={(event) => updateValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && value) {
+              event.preventDefault()
+              event.stopPropagation()
+              clear()
+            }
+          }}
+          placeholder={t("searchPlaceholder")}
+          aria-label={t("searchAria")}
+          className="h-9 rounded-xl border-transparent bg-muted/60 pr-9 pl-8 text-sm shadow-none focus-visible:border-input focus-visible:bg-background"
+        />
+        {value ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="absolute top-1/2 right-1 size-6 -translate-y-1/2"
+            aria-label={t("clearSearch")}
+            onClick={clear}
+          >
+            <XIcon className="size-3.5" />
+          </Button>
+        ) : (
+          <Kbd className="absolute top-1/2 right-1.5 h-5 -translate-y-1/2">/</Kbd>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ConversationListEmptyState({
+  archived,
+  team,
+  onCreate,
+}: {
+  archived: boolean
+  team: boolean
+  onCreate?: () => void
+}) {
+  const t = useTranslations("desktop.channelList")
+  const title = archived ? t("conversationsTitle") : team ? t("newConversation") : t("newChat")
+  const description = archived ? t("emptyArchived") : team ? t("emptyTeam") : t("emptyDm")
+  const actionLabel = team ? t("newConversation") : t("newChat")
+  const Icon = archived ? ArchiveIcon : team ? UsersIcon : MailIcon
+
+  return (
+    <Empty className="min-h-48 gap-4 rounded-none border-0 px-5 py-10">
+      <EmptyHeader>
+        <EmptyMedia variant="icon" className="rounded-xl bg-muted/70 text-muted-foreground">
+          <Icon className="size-5" />
+        </EmptyMedia>
+        <EmptyTitle className="text-sm">{title}</EmptyTitle>
+        <EmptyDescription className="text-xs">{description}</EmptyDescription>
+      </EmptyHeader>
+      {onCreate ? (
+        <EmptyContent>
+          <Button size="sm" onClick={onCreate}>
+            <PlusIcon className="size-4" />
+            {actionLabel}
+          </Button>
+        </EmptyContent>
+      ) : null}
+    </Empty>
   )
 }
 
@@ -940,18 +1001,6 @@ function Header({
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
-        {onNewFolder ? (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-7"
-            onClick={onNewFolder}
-            aria-label={t("newFolder")}
-            title={t("newFolder")}
-          >
-            <FolderPlusIcon className="size-4" />
-          </Button>
-        ) : null}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -965,6 +1014,15 @@ function Header({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
+            {onNewFolder ? (
+              <>
+                <DropdownMenuItem onSelect={onNewFolder}>
+                  <FolderPlusIcon className="size-4" />
+                  {t("newFolder")}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            ) : null}
             <DropdownMenuLabel>{t("displayOptions")}</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuCheckboxItem

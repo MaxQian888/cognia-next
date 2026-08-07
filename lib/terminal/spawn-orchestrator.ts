@@ -19,7 +19,7 @@
  * scattered through component callbacks.
  */
 
-import { getPluginEventHooks } from "@/lib/plugin"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 
 import type { BaseTerminalSession } from "./base-session"
 import { selectTerminalTransportChain } from "./pick-transport"

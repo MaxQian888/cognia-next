@@ -5,6 +5,8 @@ import { useEffect } from "react"
 import { usePlatform } from "@/hooks/use-platform"
 import { installDesktopSyncSource } from "@/lib/sync/desktop-sync-source"
 import { installAgentTeamProjection } from "@/lib/db/agent-team-projection"
+import { startMcpSyncCoordinator } from "@/lib/mcp/sync-coordinator"
+import { migrateMcpCredentials } from "@/lib/mcp/credential-migrator"
 
 /**
  * Tauri-only provider that installs the desktop-side bridge for
@@ -27,6 +29,13 @@ export function DesktopSyncSourceProvider({ children }: { children: React.ReactN
     // `agentTeamBoard` sync table (v104). Installing this on the mobile
     // shell would wipe the synced mirror with the phone's empty store.
     const uninstallProjection = installAgentTeamProjection()
+    startMcpSyncCoordinator()
+    void migrateMcpCredentials().then((report) => {
+      const failures = report.items.filter((item) => item.status === "failed")
+      if (failures.length > 0) {
+        console.warn(`[mcp] ${failures.length} credential migration(s) require attention`)
+      }
+    })
     void installDesktopSyncSource().then((unsub) => {
       if (cancelled) {
         unsub()

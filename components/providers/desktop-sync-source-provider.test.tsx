@@ -10,9 +10,24 @@ const installMock = jest.fn()
 jest.mock("@/lib/sync/desktop-sync-source", () => ({
   installDesktopSyncSource: () => installMock(),
 }))
+jest.mock("@/lib/mcp/sync-coordinator", () => ({ startMcpSyncCoordinator: jest.fn() }))
+jest.mock("@/lib/mcp/credential-migrator", () => ({
+  migrateMcpCredentials: jest.fn(async () => ({ items: [] })),
+}))
+jest.mock("@/lib/db/agent-team-projection", () => ({
+  installAgentTeamProjection: () => jest.fn(),
+}))
+
+import { startMcpSyncCoordinator } from "@/lib/mcp/sync-coordinator"
+import { migrateMcpCredentials } from "@/lib/mcp/credential-migrator"
+
+const startMcpSyncCoordinatorMock = startMcpSyncCoordinator as jest.Mock
+const migrateMcpCredentialsMock = migrateMcpCredentials as jest.Mock
 
 beforeEach(() => {
   installMock.mockReset()
+  startMcpSyncCoordinatorMock.mockClear()
+  migrateMcpCredentialsMock.mockClear()
   delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
   delete (window as { Capacitor?: unknown }).Capacitor
 })
@@ -31,6 +46,8 @@ describe("<DesktopSyncSourceProvider />", () => {
 
     await new Promise((r) => setTimeout(r, 0))
     expect(installMock).toHaveBeenCalled()
+    expect(startMcpSyncCoordinatorMock).toHaveBeenCalled()
+    expect(migrateMcpCredentialsMock).toHaveBeenCalled()
 
     unmount()
     expect(teardown).toHaveBeenCalled()

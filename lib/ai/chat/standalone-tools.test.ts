@@ -47,6 +47,16 @@ describe("isUsableStandaloneToolName", () => {
 })
 
 describe("buildStandaloneTools", () => {
+  it("exposes no executable tools when the runtime tool surface is disabled", () => {
+    expect(
+      buildStandaloneTools(
+        { toolSurface: "none", pluginTools: [entry("web_search")] },
+        "support-session"
+      )
+    ).toBeUndefined()
+    expect(handlePluginToolExec).not.toHaveBeenCalled()
+  })
+
   it("returns undefined when the turn carries no tool manifest", () => {
     expect(buildStandaloneTools({}, "s1")).toBeUndefined()
     expect(buildStandaloneTools({ pluginTools: [] }, "s1")).toBeUndefined()

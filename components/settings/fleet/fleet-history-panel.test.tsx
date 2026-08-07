@@ -111,6 +111,15 @@ describe("FleetHistoryPanel", () => {
     expect(screen.getByTestId("fleet-history-count").textContent).toBe("2")
   })
 
+  it("renders detached sessions without claiming they ended or remain active", () => {
+    liveRows = [row({ id: "opencode:s3", agent: "opencode", sessionId: "s3", outcome: "detached" })]
+    render(<FleetHistoryPanel />)
+    expect(screen.getByTestId("fleet-history-outcome-opencode:s3").textContent).toContain(
+      "detachedAgo"
+    )
+    expect(screen.queryByTestId("fleet-history-duration-opencode:s3")).toBeNull()
+  })
+
   it("falls back to the session id when there's no project name", () => {
     liveRows = [row({ projectName: null })]
     render(<FleetHistoryPanel />)

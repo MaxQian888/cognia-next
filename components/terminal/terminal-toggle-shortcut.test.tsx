@@ -5,7 +5,7 @@
 import { render, cleanup, act } from "@testing-library/react"
 
 const mockDispatchShortcut = jest.fn()
-jest.mock("@/lib/plugin", () => ({
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({
     dispatchShortcut: (id: string) => mockDispatchShortcut(id),
   }),
