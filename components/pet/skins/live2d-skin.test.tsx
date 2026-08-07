@@ -1,5 +1,6 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import type { PetBones, PetStage } from "@/types/pet"
+import { getPetSkinRuntime, resetPetSkinRuntimeForTests } from "@/lib/pet/skin-runtime"
 
 // The lazy canvas is replaced with a probe that can optionally throw (sync error
 // boundary path) or report a typed code through `onError` (async load-failure
@@ -31,24 +32,7 @@ jest.mock("./svg-skin", () => ({
   svgSkin: { id: "svg", render: () => <div data-pet-skin-root="svg" /> },
 }))
 
-let activeModelId: string | undefined
-let activeRow: unknown
-jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
-  useActiveLive2dModel: () => ({ modelId: activeModelId, row: activeRow, coreReady: true }),
-}))
-
-let settingsNull = false
-jest.mock("@/stores/settings", () => ({
-  useSettingsStore: (selector: (s: unknown) => unknown) =>
-    selector({
-      settings: settingsNull
-        ? null
-        : { petSettings: { skinId: "live2d", activeLive2dModelId: activeModelId } },
-    }),
-}))
-
 import { live2dSkin } from "./live2d-skin"
-import { usePetStore } from "@/stores/pet/pet-store"
 
 const baseProps = {
   bones: {} as PetBones,
@@ -57,16 +41,14 @@ const baseProps = {
   oneShot: null,
   reducedMotion: false,
   size: 96,
+  selection: { skinId: "live2d", modelId: "m1" } as const,
 }
 
 beforeEach(() => {
+  resetPetSkinRuntimeForTests()
   canvasShouldThrow = false
   canvasErrorCode = null
   canvasProps.mockClear()
-  activeModelId = "m1"
-  activeRow = undefined
-  settingsNull = false
-  usePetStore.setState({ bubble: null })
 })
 
 describe("live2dSkin", () => {
@@ -80,45 +62,42 @@ describe("live2dSkin", () => {
   })
 
   it("renders the SVG fallback when there is no active model", () => {
-    activeModelId = undefined
-    const { container } = render(<>{live2dSkin.render(baseProps)}</>)
+    const { container } = render(
+      <>{live2dSkin.render({ ...baseProps, selection: { skinId: "svg" } })}</>
+    )
     expect(container.querySelector('[data-pet-skin-root="svg"]')).not.toBeNull()
     expect(screen.queryByTestId("live2d-canvas")).toBeNull()
   })
 
-  it("falls back to default settings when the settings store is empty", async () => {
-    settingsNull = true
-    activeModelId = "m1"
-    render(<>{live2dSkin.render(baseProps)}</>)
-    await waitFor(() => expect(screen.getByTestId("live2d-canvas")).toBeInTheDocument())
-  })
-
-  it("passes the row's normalized customization to the canvas", async () => {
-    activeRow = {
-      id: "m1",
-      transform: { scale: 9, offsetX: 0.1 }, // out of range → clamped on read
-      motionOverrides: { happy: { motionGroup: "Tap" } },
-    }
-    render(<>{live2dSkin.render(baseProps)}</>)
+  it("forwards governed render props to the canvas", async () => {
+    const lookTarget = { x: 0.4, y: -0.2, updatedAt: 1, source: "window" as const }
+    render(
+      <>
+        {live2dSkin.render({
+          ...baseProps,
+          lowPower: true,
+          speaking: true,
+          held: true,
+          mood: "lonely",
+          flavor: "radiant",
+          lookTarget,
+        })}
+      </>
+    )
     await waitFor(() =>
       expect(canvasProps).toHaveBeenCalledWith(
         expect.objectContaining({
-          transform: { scale: 2, offsetX: 0.1, offsetY: 0 },
-          motionOverrides: { happy: { motionGroup: "Tap" } },
+          modelId: "m1",
+          lowPower: true,
+          speaking: true,
+          paused: true,
+          lookTarget,
         })
       )
     )
-  })
-
-  it("defaults the transform when the row has no customization", async () => {
-    render(<>{live2dSkin.render(baseProps)}</>)
-    await waitFor(() =>
-      expect(canvasProps).toHaveBeenCalledWith(
-        expect.objectContaining({
-          transform: { scale: 1, offsetX: 0, offsetY: 0 },
-          motionOverrides: undefined,
-        })
-      )
+    expect(screen.getByTestId("live2d-canvas").parentElement).toHaveAttribute(
+      "data-pet-held",
+      "true"
     )
   })
 
@@ -131,22 +110,6 @@ describe("live2dSkin", () => {
       expect(container.querySelector('[data-pet-skin-root="svg"]')).not.toBeNull()
     )
     spy.mockRestore()
-  })
-
-  it("tells the canvas it is speaking only while a bubble is showing", async () => {
-    // No bubble → not speaking.
-    render(<>{live2dSkin.render(baseProps)}</>)
-    await waitFor(() =>
-      expect(canvasProps).toHaveBeenCalledWith(expect.objectContaining({ speaking: false }))
-    )
-
-    // A visible bubble flips the lip-sync `speaking` flag on the canvas.
-    canvasProps.mockClear()
-    usePetStore.setState({ bubble: { text: "hi!", origin: "llm" } })
-    render(<>{live2dSkin.render(baseProps)}</>)
-    await waitFor(() =>
-      expect(canvasProps).toHaveBeenCalledWith(expect.objectContaining({ speaking: true }))
-    )
   })
 
   it("degrades to the SVG fallback when the canvas reports an async load error", async () => {
@@ -166,8 +129,21 @@ describe("live2dSkin", () => {
     )
     // A new model clears the failure flag and mounts the canvas again.
     canvasErrorCode = null
-    activeModelId = "m2"
-    rerender(<>{live2dSkin.render(baseProps)}</>)
+    rerender(
+      <>{live2dSkin.render({ ...baseProps, selection: { skinId: "live2d", modelId: "m2" } })}</>
+    )
     await waitFor(() => expect(screen.getByTestId("live2d-canvas")).toHaveTextContent("m2"))
+  })
+
+  it("remounts a degraded canvas after a user-triggered runtime retry", async () => {
+    canvasErrorCode = "modelFailed"
+    const { container } = render(<>{live2dSkin.render(baseProps)}</>)
+    await waitFor(() =>
+      expect(container.querySelector('[data-pet-skin-root="svg"]')).not.toBeNull()
+    )
+
+    canvasErrorCode = null
+    act(() => getPetSkinRuntime().retryAsset("live2d:m1"))
+    await waitFor(() => expect(screen.getByTestId("live2d-canvas")).toHaveTextContent("m1"))
   })
 })

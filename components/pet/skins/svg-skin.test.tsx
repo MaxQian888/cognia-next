@@ -1,8 +1,6 @@
 import { render } from "@testing-library/react"
 import { svgSkin } from "./svg-skin"
-import { useSettingsStore } from "@/stores/settings"
 import type { PetBones, PetSkinRenderProps } from "@/types/pet"
-import type { AppSettings } from "@cognia/agent-config-types"
 
 function makeBones(overrides: Partial<PetBones> = {}): PetBones {
   return {
@@ -32,25 +30,17 @@ function props(overrides: Partial<PetSkinRenderProps> = {}): PetSkinRenderProps 
 }
 
 describe("svgSkin", () => {
-  it("halves the looping cadence under low power (settings-driven)", () => {
-    const before = useSettingsStore.getState().settings
+  it("halves the looping cadence under explicit low power", () => {
     const baseline = render(<>{svgSkin.render(props())}</>)
     const normalSec = Number(
       baseline.container.querySelector('[data-pet-skin="svg"]')?.getAttribute("data-pet-loop-sec")
     )
     baseline.unmount()
-    try {
-      useSettingsStore.setState({
-        settings: { petSettings: { lowPower: true } } as unknown as AppSettings,
-      })
-      const { container } = render(<>{svgSkin.render(props())}</>)
-      const slowSec = Number(
-        container.querySelector('[data-pet-skin="svg"]')?.getAttribute("data-pet-loop-sec")
-      )
-      expect(slowSec).toBe(normalSec * 2)
-    } finally {
-      useSettingsStore.setState({ settings: before })
-    }
+    const { container } = render(<>{svgSkin.render(props({ lowPower: true }))}</>)
+    const slowSec = Number(
+      container.querySelector('[data-pet-skin="svg"]')?.getAttribute("data-pet-loop-sec")
+    )
+    expect(slowSec).toBe(normalSec * 2)
   })
 
   it("renders an svg root carrying the visual state", () => {

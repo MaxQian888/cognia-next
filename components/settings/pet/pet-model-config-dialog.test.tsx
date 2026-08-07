@@ -111,6 +111,7 @@ describe("PetModelConfigDialog", () => {
       expect(updatePetModelCustomization).toHaveBeenCalledWith("m1", {
         transform: { scale: 1.4, offsetX: 0.1, offsetY: 0 },
         motionOverrides: { happy: { motionGroup: "Tap" } },
+        parameterMapping: {},
       })
     )
     expect(onOpenChange).toHaveBeenCalledWith(false)
@@ -131,6 +132,31 @@ describe("PetModelConfigDialog", () => {
       expect(updatePetModelCustomization).toHaveBeenCalledWith("m1", {
         transform: { scale: 1, offsetX: 0, offsetY: 0 },
         motionOverrides: {},
+        parameterMapping: {},
+      })
+    )
+  })
+
+  it("saves custom and disabled Live2D parameter mappings", async () => {
+    const user = userEvent.setup()
+    await renderDialog()
+    await user.click(screen.getByRole("tab", { name: "tabParameters" }))
+
+    await user.selectOptions(screen.getByLabelText("parameters.roles.headX"), "custom")
+    await user.type(screen.getByLabelText("parameters.parameterIdFor"), "ParamCustomHeadX")
+    await user.selectOptions(screen.getByLabelText("parameters.roles.eyeY"), "disabled")
+    await user.click(screen.getByRole("button", { name: "save" }))
+
+    await waitFor(() =>
+      expect(updatePetModelCustomization).toHaveBeenCalledWith("m1", {
+        transform: { scale: 1.4, offsetX: 0.1, offsetY: 0 },
+        motionOverrides: { happy: { motionGroup: "Tap" } },
+        parameterMapping: { headX: "ParamCustomHeadX", eyeY: null },
+      })
+    )
+    expect(canvasProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        parameterMappingOverrides: { headX: "ParamCustomHeadX", eyeY: null },
       })
     )
   })

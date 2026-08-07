@@ -32,6 +32,11 @@ export interface Live2DManifest {
   physicsPath?: string
   /** Full entry path of the pose file, when present. */
   posePath?: string
+  /** Optional resource graph, resolved to full entry paths. */
+  motionPaths: string[]
+  expressionPaths: string[]
+  soundPaths: string[]
+  metadataPaths: string[]
 }
 
 /** The motion/expression surface a loaded model exposes to the state mapper. */
@@ -72,12 +77,40 @@ export type Live2dImportError =
   | "tooLarge"
   | "cubism2Unsupported"
   | "zipFailed"
+  | "ambiguousPath"
+  | "duplicatePath"
+  | "pathTraversal"
+  | "corruptTexture"
+
+export interface Live2dCompatibilityDiagnostic {
+  code:
+    | Live2dImportError
+    | "missingMotion"
+    | "missingExpression"
+    | "missingSound"
+    | "missingPhysics"
+    | "missingPose"
+    | "missingMetadata"
+  severity: "warning" | "error"
+  path?: string
+}
+
+export interface Live2dCompatibilitySummary {
+  version: 1
+  status: "ready" | "degraded" | "invalid"
+  diagnostics: Live2dCompatibilityDiagnostic[]
+  usableMotionGroups: string[]
+  usableExpressionIds: string[]
+  usableParameterIds: string[]
+  resourceCost: { totalBytes: number; fileCount: number; textureBytes: number }
+}
 
 /** A fully-validated model ready to persist or load. */
 export interface ValidatedModel {
   manifest: Live2DManifest
   entries: ModelFileEntry[]
   totalBytes: number
+  compatibility: Live2dCompatibilitySummary
 }
 
 /** Result of `validateLive2dImport`. */

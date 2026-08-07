@@ -7,6 +7,7 @@ commands.allow = [
   "open_pet_popup",
   "pet_popup_resize",
   "pet_window_get_position",
+  "pet_window_get_cursor_position",
   "pet_window_get_surfaces",
   "pet_window_get_work_area",
   "pet_window_set_ignore_cursor_events",

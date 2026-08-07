@@ -45,6 +45,7 @@
       "../sidecar/a2ui-mcp.mjs",
       "../sidecar/cognia-mcp.mjs",
       "../sidecar/mcp-oauth-helper.mjs",
+      "../sidecar/mcp-stdio-relay.mjs",
       "../sidecar/package.json",
       "../sidecar/node_modules/**/*",
       "../sidecar/vscode-ext-host/package.json",

@@ -32,6 +32,7 @@ import { usePetAnimationState } from "@/hooks/pet/use-pet-animation-state"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { useActiveSpritePack } from "@/hooks/pet/use-active-sprite-pack"
 import { useDocumentHidden } from "@/hooks/pet/use-document-visible"
+import { usePetLookTarget } from "@/hooks/pet/use-pet-look-target"
 import { usePetLocomotion } from "@/hooks/pet/use-pet-locomotion"
 import { usePetDragGesture } from "@/hooks/pet/use-pet-drag-gesture"
 import { usePetStore } from "@/stores/pet/pet-store"
@@ -54,7 +55,8 @@ import {
 } from "@/lib/pet/popup-geometry"
 import { reactionForZone, resolveHitZone } from "@/lib/pet/interaction/hit-zones"
 import { withCareCondition } from "@/lib/pet/state/reducer"
-import { resolveEffectiveSkin } from "./skins/resolve-effective-skin"
+import { resolveCharacterSkinSelection } from "@/lib/pet/binding/resolve-skin"
+import { resolveEffectiveSkin, selectionFromEffectiveSkin } from "./skins/resolve-effective-skin"
 import { PetRenderer } from "./pet-renderer"
 import { PetBubbleView } from "./pet-bubble"
 
@@ -69,12 +71,20 @@ export function PetOverlayView() {
   // Unified skin resolution — identical to the in-app widget: live2d renders
   // only when picked, the Cubism runtime is ready, and an active model exists;
   // otherwise the SVG mascot.
-  const { modelId, coreReady } = useActiveLive2dModel(pet)
-  const { row: activeSpritePack } = useActiveSpritePack(pet)
-  const skinId = resolveEffectiveSkin(pet.skinId, {
+  const bridgedSelection = usePetStore((s) => s.appearanceSelection)
+  const bridgedLookTarget = usePetStore((s) => s.lookTarget)
+  const preferredSelection = bridgedSelection ?? resolveCharacterSkinSelection(pet, undefined)
+  const { modelId, row: activeModel, coreReady } = useActiveLive2dModel(pet, preferredSelection)
+  const { row: activeSpritePack } = useActiveSpritePack(pet, preferredSelection)
+  const skinId = resolveEffectiveSkin(preferredSelection.skinId, {
     coreReady,
     hasActiveModel: Boolean(modelId),
+    modelReady: activeModel?.compatibility?.status !== "invalid",
     hasActiveSpritePack: Boolean(activeSpritePack),
+  })
+  const selection = selectionFromEffectiveSkin(skinId, {
+    modelId,
+    packId: activeSpritePack?.id,
   })
 
   const osReduced = useReducedMotion()
@@ -101,6 +111,18 @@ export function PetOverlayView() {
       offResume()
     }
   }, [])
+  const nativeLookTarget = usePetLookTarget({
+    enabled: pet.gazeFollowing !== false && !reduced,
+    native: true,
+    suspended: hidden || nativeSuspended || desktopPet.clickThrough,
+    getBounds: () => ({
+      left: window.screenX,
+      top: window.screenY + Math.max(0, window.innerHeight - size),
+      width: size,
+      height: size,
+    }),
+  })
+  const lookTarget = nativeLookTarget ?? bridgedLookTarget
 
   // Last user-interaction timestamp (perf clock — same one the locomotion io
   // uses) feeding the "only move after interaction" wander gate. Stamped by
@@ -342,6 +364,10 @@ export function PetOverlayView() {
             reducedMotion={reduced}
             size={size}
             skinId={skinId}
+            selection={selection}
+            renderPriority="interactive"
+            lookTarget={lookTarget}
+            lowPower={pet.lowPower}
             locomotion={locomotion}
             mood={view.mood}
             speaking={Boolean(bubble)}

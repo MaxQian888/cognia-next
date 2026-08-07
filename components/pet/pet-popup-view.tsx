@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { useSettingsStore } from "@/stores/settings"
+import { usePetStore } from "@/stores/pet/pet-store"
 import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS } from "@/types/pet"
 import { usePet } from "@/hooks/pet/use-pet"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
@@ -34,7 +35,8 @@ import {
   setPetClickThrough,
   showMainWindow,
 } from "@/lib/tauri/pet-window"
-import { resolveEffectiveSkin } from "./skins/resolve-effective-skin"
+import { resolveEffectiveSkin, selectionFromEffectiveSkin } from "./skins/resolve-effective-skin"
+import { resolveCharacterSkinSelection } from "@/lib/pet/binding/resolve-skin"
 import { PetInteractionPanel } from "./pet-interaction-panel"
 
 /** Extra px around the measured card so its drop-shadow isn't clipped by the
@@ -51,12 +53,19 @@ export function PetPopupView() {
   // Resolve the effective skin so the popup's stat-card avatar matches the
   // floating sprite (Live2D when picked + ready, otherwise SVG) instead of
   // always drawing the SVG mascot.
-  const { modelId, coreReady } = useActiveLive2dModel(pet)
-  const { row: activeSpritePack } = useActiveSpritePack(pet)
-  const effectiveSkin = resolveEffectiveSkin(pet.skinId, {
+  const bridgedSelection = usePetStore((s) => s.appearanceSelection)
+  const preferredSelection = bridgedSelection ?? resolveCharacterSkinSelection(pet, undefined)
+  const { modelId, row: activeModel, coreReady } = useActiveLive2dModel(pet, preferredSelection)
+  const { row: activeSpritePack } = useActiveSpritePack(pet, preferredSelection)
+  const effectiveSkin = resolveEffectiveSkin(preferredSelection.skinId, {
     coreReady,
     hasActiveModel: Boolean(modelId),
+    modelReady: activeModel?.compatibility?.status !== "invalid",
     hasActiveSpritePack: Boolean(activeSpritePack),
+  })
+  const selection = selectionFromEffectiveSkin(effectiveSkin, {
+    modelId,
+    packId: activeSpritePack?.id,
   })
 
   // Paint through to the desktop while mounted (transparent page background).
@@ -164,6 +173,7 @@ export function PetPopupView() {
             onClean={() => send("cleaned")}
             onTreat={() => send("treated")}
             skinId={effectiveSkin}
+            selection={selection}
             // No controller in this window: the consume event would be lost.
             showInventory={false}
             // Console navigation happens in the main window (it owns the

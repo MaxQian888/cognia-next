@@ -167,7 +167,11 @@ describe("PetWidget", () => {
   it("passes the resolved Live2D skin to the interaction panel when active + ready", () => {
     withPet()
     mockUseActiveLive2dModel.mockReturnValue({ modelId: "m1", row: undefined, coreReady: true })
-    render(<PetWidget settings={{ ...DEFAULT_PET_SETTINGS, skinId: "live2d" }} />)
+    render(
+      <PetWidget
+        settings={{ ...DEFAULT_PET_SETTINGS, skinId: "live2d", activeLive2dModelId: "m1" }}
+      />
+    )
     fireEvent.click(screen.getByTestId("pet-handle"))
     expect(screen.getByTestId("pet-interaction-panel").dataset.skin).toBe("live2d")
   })

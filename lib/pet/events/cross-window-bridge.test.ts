@@ -5,7 +5,7 @@ import {
 } from "./cross-window-bridge"
 import type { PetBridgeMessage } from "./cross-window-protocol"
 import type { PetBubble } from "@/stores/pet/pet-store"
-import type { PetOneShot, PetVisualState } from "@/types/pet"
+import type { PetLookTarget, PetOneShot, PetSkinSelection, PetVisualState } from "@/types/pet"
 
 // A fake channel that records posts and lets the test deliver inbound messages.
 class FakeChannel implements BroadcastChannelLike {
@@ -31,9 +31,13 @@ interface FakeState {
   visualState: PetVisualState
   oneShotQueue: PetOneShot[]
   bubble: PetBubble | null
+  appearanceSelection: PetSkinSelection | null
+  lookTarget: PetLookTarget | null
   setVisualState: (s: PetVisualState) => void
   enqueueOneShot: (s: PetOneShot) => void
   setBubble: (b: PetBubble | null) => void
+  setAppearanceSelection: (selection: PetSkinSelection | null) => void
+  setLookTarget: (target: PetLookTarget | null) => void
 }
 
 function makeStore() {
@@ -41,6 +45,8 @@ function makeStore() {
     visualState: "idle",
     oneShotQueue: [],
     bubble: null,
+    appearanceSelection: null,
+    lookTarget: null,
     setVisualState: jest.fn((s: PetVisualState) => {
       state.visualState = s
     }),
@@ -49,6 +55,12 @@ function makeStore() {
     }),
     setBubble: jest.fn((b: PetBubble | null) => {
       state.bubble = b
+    }),
+    setAppearanceSelection: jest.fn((selection: PetSkinSelection | null) => {
+      state.appearanceSelection = selection
+    }),
+    setLookTarget: jest.fn((target: PetLookTarget | null) => {
+      state.lookTarget = target
     }),
   }
   let listener: ((s: FakeState, p: FakeState) => void) | null = null
@@ -93,6 +105,29 @@ describe("startMainPetBridge", () => {
       bubble: { text: "hey", origin: "template" },
     })
     expect(channel.msgs()).toContainEqual({ v: 1, t: "bubble", bubble: null })
+  })
+
+  it("broadcasts effective appearance and gaze changes", () => {
+    const channel = new FakeChannel()
+    const store = makeStore()
+    startMainPetBridge({ channel, store: store as never })
+    const target: PetLookTarget = {
+      x: 0.25,
+      y: -0.5,
+      updatedAt: 1717575600000,
+      source: "screen",
+    }
+    store.emit({ appearanceSelection: { skinId: "live2d", modelId: "m1" } })
+    store.emit({ lookTarget: target })
+    store.emit({ lookTarget: null })
+
+    expect(channel.msgs()).toContainEqual({
+      v: 1,
+      t: "appearance",
+      selection: { skinId: "live2d", modelId: "m1" },
+    })
+    expect(channel.msgs()).toContainEqual({ v: 1, t: "look-target", target })
+    expect(channel.msgs()).toContainEqual({ v: 1, t: "look-target", target: null })
   })
 
   it("forwards only newly-appended one-shots", () => {
@@ -157,6 +192,13 @@ describe("startMainPetBridge", () => {
     const store = makeStore()
     store.__state.visualState = "happy"
     store.__state.bubble = { text: "yo", origin: "llm" }
+    store.__state.appearanceSelection = { skinId: "sprite-v2", packId: "momo" }
+    store.__state.lookTarget = {
+      x: -0.5,
+      y: 0.25,
+      updatedAt: 1717575600000,
+      source: "window",
+    }
     startMainPetBridge({ channel, store: store as never })
     channel.deliver({ v: 1, t: "request-state" })
     expect(channel.msgs()).toContainEqual({ v: 1, t: "visual-state", state: "happy" })
@@ -164,6 +206,16 @@ describe("startMainPetBridge", () => {
       v: 1,
       t: "bubble",
       bubble: { text: "yo", origin: "llm" },
+    })
+    expect(channel.msgs()).toContainEqual({
+      v: 1,
+      t: "appearance",
+      selection: { skinId: "sprite-v2", packId: "momo" },
+    })
+    expect(channel.msgs()).toContainEqual({
+      v: 1,
+      t: "look-target",
+      target: store.__state.lookTarget,
     })
   })
 
@@ -290,6 +342,32 @@ describe("startOverlayPetBridge", () => {
     expect(store.__state.setVisualState).toHaveBeenCalledWith("review")
     expect(store.__state.enqueueOneShot).toHaveBeenCalledWith("levelUp")
     expect(store.__state.setBubble).toHaveBeenCalledWith({ text: "done", origin: "system" })
+  })
+
+  it("applies effective appearance and gaze into the overlay store", () => {
+    const channel = new FakeChannel()
+    const store = makeStore()
+    const target: PetLookTarget = {
+      x: 0.75,
+      y: -0.25,
+      updatedAt: 1717575600000,
+      source: "screen",
+    }
+    startOverlayPetBridge({ channel, store: store as never })
+    channel.deliver({
+      v: 1,
+      t: "appearance",
+      selection: { skinId: "live2d", modelId: "hiyori" },
+    })
+    channel.deliver({ v: 1, t: "look-target", target })
+    channel.deliver({ v: 1, t: "look-target", target: null })
+
+    expect(store.__state.setAppearanceSelection).toHaveBeenCalledWith({
+      skinId: "live2d",
+      modelId: "hiyori",
+    })
+    expect(store.__state.setLookTarget).toHaveBeenNthCalledWith(1, target)
+    expect(store.__state.setLookTarget).toHaveBeenNthCalledWith(2, null)
   })
 
   it("clears the bubble on a null bubble message", () => {

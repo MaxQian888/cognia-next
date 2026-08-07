@@ -13,8 +13,9 @@ jest.mock("@/hooks/pet/use-pet", () => ({ usePet: (id?: string | null) => mockUs
 
 // Active Live2D model resolution (drives the popup's effective preview skin).
 const mockUseActiveLive2dModel = jest.fn()
+const mockUseActiveSpritePack = jest.fn()
 jest.mock("@/hooks/pet/use-active-sprite-pack", () => ({
-  useActiveSpritePack: () => ({ packId: undefined, row: undefined }),
+  useActiveSpritePack: (...args: unknown[]) => mockUseActiveSpritePack(...args),
 }))
 jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
   useActiveLive2dModel: () => mockUseActiveLive2dModel(),
@@ -32,6 +33,7 @@ jest.mock("./pet-interaction-panel", () => ({
     onClean,
     onTreat,
     skinId,
+    selection,
     onOpenConsole,
     showInventory,
   }: {
@@ -43,12 +45,20 @@ jest.mock("./pet-interaction-panel", () => ({
     onClean: () => void
     onTreat: () => void
     skinId?: string
+    selection?: { skinId: string; modelId?: string; packId?: string }
     onOpenConsole?: (tab: string) => void
     showInventory?: boolean
   }) => (
     <div
       data-testid="pet-interaction-panel"
       data-skin={skinId ?? "default"}
+      data-selection={
+        selection?.skinId === "live2d"
+          ? `${selection.skinId}:${selection.modelId}`
+          : selection?.skinId === "sprite-v2"
+            ? `${selection.skinId}:${selection.packId}`
+            : selection?.skinId
+      }
       data-show-inventory={String(showInventory ?? true)}
     >
       <button onClick={() => onFeed()}>feed</button>
@@ -110,6 +120,7 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 import { PetPopupView } from "./pet-popup-view"
+import { usePetStore } from "@/stores/pet/pet-store"
 
 const PROFILE = { stage: "baby" }
 const VIEW = { effectiveBones: { eyes: "dot" }, needs: { energy: 80, mood: 70, bond: 60 } }
@@ -133,6 +144,9 @@ beforeEach(() => {
   mockUseActiveLive2dModel.mockReset()
   // Default: no active Live2D model → the popup preview resolves to SVG.
   mockUseActiveLive2dModel.mockReturnValue({ modelId: undefined, row: undefined, coreReady: false })
+  mockUseActiveSpritePack.mockReset()
+  mockUseActiveSpritePack.mockReturnValue({ packId: undefined, row: undefined })
+  usePetStore.getState().setAppearanceSelection(null)
   bridgeDispose.mockReset()
   bridgeSendInteraction.mockReset()
   startOverlayPetBridge.mockClear()
@@ -213,6 +227,22 @@ describe("PetPopupView", () => {
     mockUseActiveLive2dModel.mockReturnValue({ modelId: "m1", row: undefined, coreReady: true })
     render(<PetPopupView />)
     expect(screen.getByTestId("pet-interaction-panel").dataset.skin).toBe("live2d")
+    expect(screen.getByTestId("pet-interaction-panel").dataset.selection).toBe("live2d:m1")
+  })
+
+  it("uses the bridged per-character sprite selection instead of the global appearance", () => {
+    usePetStore.getState().setAppearanceSelection({ skinId: "sprite-v2", packId: "character-pack" })
+    mockUseActiveSpritePack.mockReturnValue({
+      packId: "character-pack",
+      row: { id: "character-pack" },
+    })
+
+    render(<PetPopupView />)
+
+    expect(screen.getByTestId("pet-interaction-panel").dataset.skin).toBe("sprite-v2")
+    expect(screen.getByTestId("pet-interaction-panel").dataset.selection).toBe(
+      "sprite-v2:character-pack"
+    )
   })
 
   it("omits the panel while the profile is still loading (actions still present)", () => {

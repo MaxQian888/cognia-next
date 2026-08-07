@@ -18,7 +18,7 @@ import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { useActiveSpritePack } from "@/hooks/pet/use-active-sprite-pack"
 import { PetModelConfigDialog } from "@/components/settings/pet/pet-model-config-dialog"
 import type { PetSettings } from "@/types/pet"
-import { resolveEffectiveSkin } from "../skins/resolve-effective-skin"
+import { resolveEffectiveSkin, selectionFromEffectiveSkin } from "../skins/resolve-effective-skin"
 import { PetRenderer } from "../pet-renderer"
 
 export interface PetLive2dLookControlsProps {
@@ -37,7 +37,12 @@ export function PetLive2dLookControls({ pet }: PetLive2dLookControlsProps) {
   const effectiveSkin = resolveEffectiveSkin(pet.skinId, {
     coreReady,
     hasActiveModel: Boolean(modelId),
+    modelReady: row?.compatibility?.status !== "invalid",
     hasActiveSpritePack: Boolean(activeSpritePack),
+  })
+  const selection = selectionFromEffectiveSkin(effectiveSkin, {
+    modelId,
+    packId: activeSpritePack?.id,
   })
   // A model is picked but the Cubism runtime is definitively unavailable — the
   // preview is the SVG fallback, so say why it reads as intentional. (While the
@@ -53,6 +58,9 @@ export function PetLive2dLookControls({ pet }: PetLive2dLookControlsProps) {
           state="idle"
           size={120}
           skinId={effectiveSkin}
+          selection={selection}
+          renderPriority={configOpen ? "thumbnail" : "console"}
+          lowPower={pet.lowPower}
         />
       </div>
 

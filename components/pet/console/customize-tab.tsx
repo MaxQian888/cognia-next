@@ -42,11 +42,12 @@ export function CustomizeTab() {
   // Resolve the effective skin so the Look preview matches the live sprite, and
   // swap the SVG cosmetic controls for the Live2D look panel when the user has
   // chosen Live2D — the cosmetic palette/hat/eyes don't touch a Live2D model.
-  const { modelId, coreReady } = useActiveLive2dModel(pet)
+  const { modelId, row: activeModel, coreReady } = useActiveLive2dModel(pet)
   const { row: activeSpritePack } = useActiveSpritePack(pet)
   const effectiveSkin = resolveEffectiveSkin(pet.skinId, {
     coreReady,
     hasActiveModel: Boolean(modelId),
+    modelReady: activeModel?.compatibility?.status !== "invalid",
     hasActiveSpritePack: Boolean(activeSpritePack),
   })
   const live2dChosen = pet.skinId === "live2d"

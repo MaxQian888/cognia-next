@@ -6,8 +6,8 @@
 
 import { motion } from "motion/react"
 import type { PetBones, PetSkin, PetSkinRenderProps } from "@/types/pet"
+import { PET_SKIN_CAPABILITIES } from "@/lib/pet/skin-governance"
 import { resolvePetMotion } from "@/lib/pet/animation/motion-spec"
-import { useSettingsStore } from "@/stores/settings"
 import {
   resolveClimbMotion,
   resolveFallMotion,
@@ -50,9 +50,9 @@ function PetSvgContent({
   mood,
   speaking,
   held,
+  lookTarget,
+  lowPower = false,
 }: PetSkinRenderProps) {
-  // Low power halves the looping cadence (same settings read as live2d-skin).
-  const lowPower = useSettingsStore((s) => Boolean(s.settings?.petSettings?.lowPower))
   // After a stretch of plain idle the breathing loop has nothing to express;
   // quiescing collapses it to a still frame (zero rAF) until something changes.
   const quiescent = useIdleQuiescence(state, oneShot, lowPower)
@@ -108,6 +108,15 @@ function PetSvgContent({
   // Lip flap while a bubble is showing (SVG parity with Live2D's lip sync).
   // One-shots own the mouth for their moment.
   const lipFlap = Boolean(speaking) && !still && oneShot === null
+  const gazeActive =
+    Boolean(lookTarget) &&
+    state === "idle" &&
+    oneShot === null &&
+    mode === "resting" &&
+    !held &&
+    !still
+  const gazeX = gazeActive ? Math.max(-1, Math.min(1, lookTarget?.x ?? 0)) * 2.2 : 0
+  const gazeY = gazeActive ? Math.max(-1, Math.min(1, lookTarget?.y ?? 0)) * 1.4 : 0
 
   return (
     <g
@@ -169,35 +178,41 @@ function PetSvgContent({
         ) : (
           <>
             <PetBody bones={bones} />
-            {blink ? (
-              <motion.g
-                data-pet-part="blink"
-                animate={{ scaleY: blink.scaleY }}
-                transition={{
-                  duration: blink.intervalSec,
-                  times: blink.times,
-                  repeat: Infinity,
-                  ease: "easeInOut",
-                }}
-                style={{ transformOrigin: "50px 50px" }}
-              >
+            <motion.g
+              data-pet-part="gaze"
+              animate={{ x: gazeX, y: gazeY }}
+              transition={still ? { duration: 0 } : { duration: 0.12, ease: "easeOut" }}
+            >
+              {blink ? (
+                <motion.g
+                  data-pet-part="blink"
+                  animate={{ scaleY: blink.scaleY }}
+                  transition={{
+                    duration: blink.intervalSec,
+                    times: blink.times,
+                    repeat: Infinity,
+                    ease: "easeInOut",
+                  }}
+                  style={{ transformOrigin: "50px 50px" }}
+                >
+                  <PetEyesGroup kind={spec.eyes} />
+                </motion.g>
+              ) : (
                 <PetEyesGroup kind={spec.eyes} />
-              </motion.g>
-            ) : (
-              <PetEyesGroup kind={spec.eyes} />
-            )}
-            {lipFlap ? (
-              <motion.g
-                data-pet-part="lip-flap"
-                animate={{ scaleY: [1, 0.5, 1] }}
-                transition={{ duration: 0.35, repeat: Infinity, ease: "easeInOut" }}
-                style={{ transformOrigin: "50px 66px" }}
-              >
-                <PetMouth shape={spec.mouth === "frown" ? spec.mouth : "o"} />
-              </motion.g>
-            ) : (
-              <PetMouth shape={spec.mouth} />
-            )}
+              )}
+              {lipFlap ? (
+                <motion.g
+                  data-pet-part="lip-flap"
+                  animate={{ scaleY: [1, 0.5, 1] }}
+                  transition={{ duration: 0.35, repeat: Infinity, ease: "easeInOut" }}
+                  style={{ transformOrigin: "50px 66px" }}
+                >
+                  <PetMouth shape={spec.mouth === "frown" ? spec.mouth : "o"} />
+                </motion.g>
+              ) : (
+                <PetMouth shape={spec.mouth} />
+              )}
+            </motion.g>
           </>
         )}
       </motion.g>
@@ -219,6 +234,7 @@ function PetSvgContent({
 
 export const svgSkin: PetSkin = {
   id: "svg",
+  capabilities: PET_SKIN_CAPABILITIES.svg,
   render(props: PetSkinRenderProps) {
     const facing = props.locomotion?.facing ?? "right"
     return (
@@ -230,6 +246,8 @@ export const svgSkin: PetSkin = {
         data-pet-skin-root="svg"
         data-pet-facing={facing}
         data-pet-locomotion={props.locomotion?.mode ?? "resting"}
+        data-pet-paused={props.paused || undefined}
+        data-pet-render-mode={props.renderMode}
         style={{ overflow: "visible" }}
       >
         {/* The art faces right by default; walking left mirrors the content

@@ -73,6 +73,10 @@ export function startMainPetBridge(deps: MainPetBridgeDeps = {}): () => void {
       t: "bubble",
       bubble: s.bubble ? { text: s.bubble.text, origin: s.bubble.origin } : null,
     })
+    if (s.appearanceSelection) {
+      post(channel, { v: 1, t: "appearance", selection: s.appearanceSelection })
+    }
+    post(channel, { v: 1, t: "look-target", target: s.lookTarget })
   }
 
   const unsub = store.subscribe((state, prev) => {
@@ -85,6 +89,12 @@ export function startMainPetBridge(deps: MainPetBridgeDeps = {}): () => void {
         t: "bubble",
         bubble: state.bubble ? { text: state.bubble.text, origin: state.bubble.origin } : null,
       })
+    }
+    if (state.appearanceSelection !== prev.appearanceSelection && state.appearanceSelection) {
+      post(channel, { v: 1, t: "appearance", selection: state.appearanceSelection })
+    }
+    if (state.lookTarget !== prev.lookTarget) {
+      post(channel, { v: 1, t: "look-target", target: state.lookTarget })
     }
     // One-shots are an append-only queue drained by the animation hook; detect
     // growth and forward only the newly-appended shots.
@@ -170,6 +180,12 @@ export function startOverlayPetBridge(deps: OverlayPetBridgeDeps = {}): OverlayP
       }
       case "activity":
         deps.onActivity?.(msg.at)
+        break
+      case "appearance":
+        api.setAppearanceSelection(msg.selection)
+        break
+      case "look-target":
+        api.setLookTarget(msg.target)
         break
       // interaction / request-state are main-side concerns; ignore here.
     }

@@ -37,6 +37,15 @@ function commonTopLevel(paths: string[]): string {
   return paths.every((p) => p.startsWith(candidate)) ? candidate : ""
 }
 
+function inferredMime(path: string): string {
+  const lower = path.toLowerCase()
+  if (lower.endsWith(".png")) return "image/png"
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg"
+  if (lower.endsWith(".webp")) return "image/webp"
+  if (lower.endsWith(".json")) return "application/json"
+  return ""
+}
+
 export async function extractModelZip(blob: Blob, deps: ZipDeps = {}): Promise<ExtractZipResult> {
   const loadAsync = deps.loadAsync ?? ((data: Blob) => JSZip.loadAsync(data) as Promise<ZipLike>)
 
@@ -60,7 +69,11 @@ export async function extractModelZip(blob: Blob, deps: ZipDeps = {}): Promise<E
       // A bare top-level folder entry could normalize to empty — skip it.
       if (normalizePath(stripped) === "") continue
       const fileBlob = await obj.async("blob")
-      entries.push({ path: stripped, blob: fileBlob })
+      const mime = inferredMime(stripped)
+      entries.push({
+        path: stripped,
+        blob: mime && fileBlob.type !== mime ? new Blob([fileBlob], { type: mime }) : fileBlob,
+      })
     }
 
     return { ok: true, entries }

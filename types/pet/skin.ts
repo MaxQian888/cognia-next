@@ -10,6 +10,68 @@ import type { PetMood, PetOneShot, PetVisualState } from "./visual-state"
 /** Horizontal facing of the pet while it moves (or after its last walk). */
 export type PetFacing = "left" | "right"
 
+/** Renderer families supported by the desktop-pet subsystem. */
+export type PetSkinId = "svg" | "live2d" | "sprite-v2"
+
+/** Durable asset selection resolved before a skin is asked to render. */
+export type PetSkinSelection =
+  | { skinId: "svg" }
+  | { skinId: "live2d"; modelId: string }
+  | { skinId: "sprite-v2"; packId: string }
+
+/** Expensive renderer budget assigned by the per-WebView skin runtime. */
+export type PetRenderMode = "live" | "snapshot" | "placeholder"
+
+/** Normalized pointer target. Values are clamped to the render box. */
+export interface PetLookTarget {
+  x: number
+  y: number
+  /** Epoch milliseconds of the most recent pointer sample. */
+  updatedAt: number
+  source: "window" | "screen"
+}
+
+/** Stable capability vocabulary shared by every renderer family. */
+export interface PetSkinCapabilities {
+  semanticStates: boolean
+  oneShots: boolean
+  locomotion: boolean
+  facing: boolean
+  heldPose: boolean
+  speaking: boolean
+  mood: boolean
+  flavor: boolean
+  gaze: boolean
+  pause: boolean
+  reducedMotion: boolean
+  lowPower: boolean
+}
+
+export type PetAssetDiagnosticCode =
+  | "unknownSkin"
+  | "assetMissing"
+  | "runtimeUnavailable"
+  | "invalidSettings"
+  | "missingRequiredResource"
+  | "missingOptionalResource"
+  | "ambiguousPath"
+  | "duplicatePath"
+  | "pathTraversal"
+  | "corruptTexture"
+  | "cubism2Unsupported"
+  | "assetTooLarge"
+  | "contextLost"
+  | "renderFailed"
+
+/** Machine-readable compatibility/recovery finding; UI localizes `code`. */
+export interface PetAssetDiagnostic {
+  code: PetAssetDiagnosticCode
+  severity: "info" | "warning" | "error"
+  path?: string
+  detail?: string
+  recoverable: boolean
+}
+
 /**
  * Desktop-overlay locomotion descriptor, parallel to (NOT part of)
  * `PetVisualState` — the in-app widget never walks, so skins treat an absent
@@ -48,9 +110,18 @@ export interface PetSkinRenderProps {
   speaking?: boolean
   /** The user is holding/dragging the pet — dangle pose overrides resting. */
   held?: boolean
+  /** Resolved asset selection. Legacy callers may omit it and receive SVG. */
+  selection?: PetSkinSelection
+  /** Whether this surface owns the per-WebView real-time renderer lease. */
+  renderMode?: PetRenderMode
+  /** Latest normalized gaze sample, when gaze following is enabled. */
+  lookTarget?: PetLookTarget | null
+  /** Low-power behavior is explicit instead of being read from settings. */
+  lowPower?: boolean
 }
 
 export interface PetSkin {
-  id: string
+  id: PetSkinId
+  capabilities: PetSkinCapabilities
   render(props: PetSkinRenderProps): ReactNode
 }

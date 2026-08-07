@@ -15,6 +15,7 @@ import type {
   PetStatKey,
   PetStatProgress,
   PetStats,
+  PetSkinSelection,
 } from "@/types/pet"
 import { effectiveStats } from "@/types/pet"
 import { PetRenderer } from "./pet-renderer"
@@ -51,6 +52,7 @@ export interface PetStatCardProps {
    * always showing SVG.
    */
   skinId?: string
+  selection?: PetSkinSelection
   className?: string
 }
 
@@ -62,6 +64,7 @@ export function PetStatCard({
   grew,
   flavor,
   skinId,
+  selection,
   className,
 }: PetStatCardProps) {
   const t = useTranslations("pet")
@@ -79,7 +82,15 @@ export function PetStatCard({
     >
       <div className="flex items-center gap-4">
         <div className={cn("rounded-lg bg-muted/40 p-2 ring-2", RARITY_RING[bones.rarity])}>
-          <PetRenderer bones={bones} stage={stage} state="idle" size={72} skinId={skinId} />
+          <PetRenderer
+            bones={bones}
+            stage={stage}
+            state="idle"
+            size={72}
+            skinId={skinId}
+            selection={selection}
+            renderPriority="thumbnail"
+          />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">

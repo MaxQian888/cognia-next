@@ -7,13 +7,10 @@
 
 "use client"
 
-import { Component, lazy, Suspense, useMemo, useState, type ReactNode } from "react"
+import { Component, lazy, Suspense, useState, useSyncExternalStore, type ReactNode } from "react"
 import type { PetSkin, PetSkinRenderProps } from "@/types/pet"
-import { useSettingsStore } from "@/stores/settings"
-import { usePetStore } from "@/stores/pet/pet-store"
-import { DEFAULT_PET_SETTINGS } from "@/types/pet"
-import { normalizeTransform } from "@/lib/pet/live2d/transform"
-import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
+import { PET_SKIN_CAPABILITIES } from "@/lib/pet/skin-governance"
+import { getPetSkinRuntime } from "@/lib/pet/skin-runtime"
 // Import the SVG skin directly (not via the registry) — the registry imports
 // this module, so going through `getSkin` would form an init-time cycle.
 import { svgSkin } from "./svg-skin"
@@ -28,6 +25,7 @@ function svgFallback(props: PetSkinRenderProps): ReactNode {
 interface BoundaryProps {
   children: ReactNode
   fallback: ReactNode
+  onError?: () => void
 }
 
 interface BoundaryState {
@@ -47,6 +45,10 @@ class Live2dErrorBoundary extends Component<BoundaryProps, BoundaryState> {
     return { failed: true }
   }
 
+  componentDidCatch(): void {
+    this.props.onError?.()
+  }
+
   render(): ReactNode {
     if (this.state.failed) return this.props.fallback
     return this.props.children
@@ -54,12 +56,12 @@ class Live2dErrorBoundary extends Component<BoundaryProps, BoundaryState> {
 }
 
 function Live2dSkinBoundary(props: PetSkinRenderProps) {
-  const settings = useSettingsStore((s) => s.settings)
-  const pet = settings?.petSettings ?? DEFAULT_PET_SETTINGS
-  const { modelId, row } = useActiveLive2dModel(pet)
-  // A visible bubble means the pet is "talking" → drive the Live2D mouth flap.
-  const speaking = usePetStore((s) => s.bubble !== null)
+  const modelId = props.selection?.skinId === "live2d" ? props.selection.modelId : undefined
   const fallback = svgFallback(props)
+  const runtime = getPetSkinRuntime()
+  useSyncExternalStore(runtime.subscribe, runtime.snapshotRevision, runtime.snapshotRevision)
+  const assetKey = modelId ? `live2d:${modelId}` : "live2d:missing"
+  const attemptKey = `${assetKey}:${runtime.retryGeneration(assetKey)}`
 
   // Async load failures (missing row, bad blob, engine/core init failure) report
   // a typed code through the canvas's `onError`; without this flag the canvas
@@ -68,40 +70,74 @@ function Live2dSkinBoundary(props: PetSkinRenderProps) {
   // Reset the failure flag the render the active model changes (a new model
   // deserves a fresh attempt) — React's documented "adjust state during render"
   // pattern, which avoids a setState-in-effect cascade.
-  const [prevModelId, setPrevModelId] = useState(modelId)
-  if (modelId !== prevModelId) {
-    setPrevModelId(modelId)
+  const [previousAttemptKey, setPreviousAttemptKey] = useState(attemptKey)
+  if (attemptKey !== previousAttemptKey) {
+    setPreviousAttemptKey(attemptKey)
     setLoadFailed(false)
   }
 
   // Per-model customization rides the reactive row (liveQuery re-emits on
   // save, so editor changes reach the live pet immediately). Memoized so the
   // canvas's re-fit effect doesn't churn on unrelated renders.
-  const transform = useMemo(() => normalizeTransform(row?.transform), [row?.transform])
-
   // No active model (or a load that already failed) → render the SVG fallback
   // directly (no lazy chunk needed).
   if (!modelId || loadFailed) return <>{fallback}</>
 
   return (
-    <Live2dErrorBoundary fallback={fallback}>
-      <Suspense fallback={fallback}>
-        <Live2dCanvas
-          {...props}
-          modelId={modelId}
-          lowPower={pet.lowPower ?? false}
-          transform={transform}
-          motionOverrides={row?.motionOverrides}
-          speaking={speaking}
-          onError={() => setLoadFailed(true)}
-        />
-      </Suspense>
-    </Live2dErrorBoundary>
+    <div
+      data-pet-skin="live2d"
+      data-pet-held={props.held || undefined}
+      data-pet-speaking={props.speaking || undefined}
+      data-pet-mood={props.mood}
+      data-pet-flavor={props.flavor}
+      style={{
+        width: props.size,
+        height: props.size,
+        transform: props.held ? "rotate(7deg) translateY(3%)" : undefined,
+        filter:
+          props.mood === "lonely"
+            ? "saturate(.72)"
+            : props.flavor === "radiant"
+              ? "saturate(1.25)"
+              : props.flavor === "plain"
+                ? "saturate(.78)"
+                : undefined,
+      }}
+    >
+      <Live2dErrorBoundary
+        fallback={fallback}
+        onError={() => runtime.recordAssetFailure(assetKey, "renderFailed")}
+      >
+        <Suspense fallback={fallback}>
+          <Live2dCanvas
+            key={`${modelId}:${loadFailed ? "failed" : "ready"}`}
+            {...props}
+            paused={Boolean(props.paused || props.held)}
+            modelId={modelId}
+            onError={(code) => {
+              if (code === "contextLost") {
+                const recovery = runtime.recordContextLoss(assetKey)
+                if (recovery.action === "retry") {
+                  window.setTimeout(() => setLoadFailed(false), recovery.delayMs)
+                  setLoadFailed(true)
+                  return
+                }
+                setLoadFailed(true)
+                return
+              }
+              runtime.recordAssetFailure(assetKey, code)
+              setLoadFailed(true)
+            }}
+          />
+        </Suspense>
+      </Live2dErrorBoundary>
+    </div>
   )
 }
 
 export const live2dSkin: PetSkin = {
   id: "live2d",
+  capabilities: PET_SKIN_CAPABILITIES.live2d,
   render(props: PetSkinRenderProps) {
     return <Live2dSkinBoundary {...props} />
   },
