@@ -76,14 +76,12 @@ import {
 } from "@/lib/connectors/health/heartbeat-sweep"
 import { recordHeartbeatNow } from "@/lib/connectors/health/heartbeat"
 import {
-  listRunningAdapters,
   registerRunningAdapter,
   resumeSuspendedAdaptersByOwner,
   subscribeCredentialsRotatedToLifecycle,
   suspendRunningAdaptersByOwner,
   unregisterRunningAdapter,
 } from "@/lib/connectors/lifecycle"
-import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { installConnectorHousekeepingSchedule } from "@/lib/connectors/housekeeping-scheduler"
 import type { DailyScheduleHandle } from "@/lib/connectors/daily-schedule"
 import {
@@ -99,6 +97,7 @@ import {
   type ResumeReconnectHandle,
 } from "@/lib/connectors/bootstrap/resume-reconnect"
 import { liveQuery } from "dexie"
+import { getConnectorRuntimeSupervisor } from "@/lib/connectors/runtime-supervisor"
 
 export type ConnectorRuntimeLogLevel = "info" | "warn" | "error"
 
@@ -223,6 +222,16 @@ const consoleLog = (level: ConnectorRuntimeLogLevel, message: string): void => {
   else console.error(message)
 }
 
+export function adapterRuntimeFingerprint(row: AdapterInstanceRow): string {
+  return JSON.stringify([
+    row.type,
+    row.transportMode,
+    row.publicUrl ?? null,
+    row.settings,
+    row.credentialsRef,
+  ])
+}
+
 /**
  * Boot the connector subsystem. Synchronous by design — the async boot runs
  * detached (exactly like the provider effect it was extracted from) and the
@@ -239,7 +248,6 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
   // must never stop the owner's inbound axum server or reap its
   // registrations.
   let ownsRuntime = false
-  const startedAdapters: PlatformAdapter[] = []
   // Ids of adapters registered with the Rust axum server (webhook /
   // reverse-WS). Single source of truth for both "does the inbound server
   // need to start" and "which registrations to reap on teardown".
@@ -264,101 +272,90 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
    * mid-interval. Returns true on success. Failures are isolated — they
    * audit `adapter.error` and swallow.
    */
+  const runtimeRows = new Map<string, AdapterInstanceRow>()
+  const runtimeFingerprints = new Map<string, string>()
+  const managedAdapterIds = new Set<string>()
+  const supervisor = getConnectorRuntimeSupervisor()
+
+  /** Register one built-in definition and reconcile it through the supervisor. */
   const bootAdapter = async (
-    adapter: PlatformAdapter,
+    initialAdapter: PlatformAdapter | undefined,
     row: AdapterInstanceRow,
     bus: ReturnType<typeof getBus>
   ): Promise<boolean> => {
-    const perAdapterAc = new AbortController()
-    const ctx = buildAdapterContext({
-      adapterId: row.id,
-      signal: perAdapterAc.signal,
-      bus,
-      publicUrl: row.publicUrl,
-    })
-    // Webhook / reverse-WS adapters receive inbound events over the Rust
-    // axum server. Register this adapter's type with that server BEFORE the
-    // transport starts — otherwise the webhook handler 404s every inbound
-    // POST because the id was never recorded (`verify_webhook` /
-    // `wechat_oa_handler` resolve the branch off the registered type). The
-    // Rust insert is idempotent, so a StrictMode double-mount or a
-    // credential-rotation restart (this closure runs on both) is safe.
-    if (adapterNeedsInboundServer(adapter, row)) {
-      serverAdapterIds.add(row.id)
-      try {
-        await connectorsRegisterAdapter({
-          adapterId: row.id,
-          adapterType: adapter.meta.type,
-        })
-      } catch (err) {
-        // Best-effort — a register failure must not block the boot. The
-        // installer is host-gated, so this only throws on a genuine
-        // command-transport error.
-        log(
-          "error",
-          `[connector-bus] adapter ${row.id} webhook registration failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`
+    runtimeRows.set(row.id, row)
+    runtimeFingerprints.set(row.id, adapterRuntimeFingerprint(row))
+    managedAdapterIds.add(row.id)
+    let firstBuild: PlatformAdapter | undefined = initialAdapter
+    supervisor.setDefinition({
+      id: row.id,
+      owner: "adapter-instance",
+      desiredState: () => (runtimeRows.get(row.id)?.enabled === false ? "disabled" : "enabled"),
+      build: async () => {
+        if (firstBuild) {
+          const adapter = firstBuild
+          firstBuild = undefined
+          return adapter
+        }
+        const currentRow = runtimeRows.get(row.id)
+        if (!currentRow) throw new Error(`Adapter row disappeared: ${row.id}`)
+        runtimeRows.set(row.id, currentRow)
+        const rebuilt = await buildAdapterFromRow(currentRow)
+        if (!rebuilt) throw new Error(`Adapter factory unavailable: ${row.id}`)
+        try {
+          const { getDb } = await import("@/lib/db/schema")
+          await getDb().adapterInstances.update(row.id, {
+            lastKnownCapabilities: rebuilt.a2uiCapability(),
+            updatedAt: Date.now(),
+          })
+        } catch {
+          // Capability refresh is diagnostic metadata, never a startup gate.
+        }
+        return rebuilt
+      },
+      registerRust: async (adapter) => {
+        const currentRow = runtimeRows.get(row.id) ?? row
+        if (!adapterNeedsInboundServer(adapter, currentRow)) return
+        await connectorsRegisterAdapter({ adapterId: row.id, adapterType: adapter.meta.type })
+        serverAdapterIds.add(row.id)
+      },
+      unregisterRust: async (adapterId) => {
+        if (!serverAdapterIds.has(adapterId)) return
+        await connectorsUnregisterAdapter(adapterId)
+        serverAdapterIds.delete(adapterId)
+      },
+      start: async (adapter, signal) => {
+        const currentRow = runtimeRows.get(row.id) ?? row
+        await adapter.start(
+          buildAdapterContext({
+            adapterId: row.id,
+            signal,
+            bus,
+            publicUrl: currentRow.publicUrl,
+          })
         )
-      }
-    }
-    try {
-      await adapter.start(ctx)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      log("error", `[connector-bus] adapter ${row.id} failed to start: ${message}`)
-      await appendAudit({
-        adapterId: row.id,
-        kind: "adapter.error",
-        at: Date.now(),
-        reason: "start_failed",
-        message,
-      }).catch(() => undefined)
-      perAdapterAc.abort()
-      return false
-    }
-    // Heartbeats (active + passive-transport probe) are driven by a single
-    // bus-scope sweep started after the boot loop — no per-adapter timers.
-    registerRunningAdapter(row.id, {
-      adapter,
-      abortController: perAdapterAc,
-      restart: async () => {
-        // Rebuild the adapter from the persisted row so a credential
-        // rotation (Settings → Save) takes effect without requiring an
-        // app restart. `buildAdapterFromRow` re-reads keyring material
-        // through the same getter closures, but it also re-runs any
-        // startup probes (Lark `bot/v3/info`, Slack `auth.test`, etc.)
-        // that captured the old credentials at build time.
-        //
-        // Falls back to restarting the existing handle if the row is
-        // gone (race with deletion) or `buildAdapterFromRow` returns
-        // null (e.g. plugin-contributed adapter is no longer loaded).
-        const freshRow = await getAdapterInstance(row.id)
-        if (!freshRow) {
-          await bootAdapter(adapter, row, bus)
-          return
-        }
-        const rebuilt = await buildAdapterFromRow(freshRow)
-        if (!rebuilt) {
-          await bootAdapter(adapter, freshRow, bus)
-          return
-        }
-        bus.unregisterAdapter(row.id)
-        bus.registerAdapter(rebuilt)
-        await bootAdapter(rebuilt, freshRow, bus)
+      },
+      publish: (adapter) => {
+        bus.registerAdapter(adapter)
+        const active = supervisor.getRunningAdapter(row.id)
+        if (!active) throw new Error(`Supervisor did not fence active adapter: ${row.id}`)
+        registerRunningAdapter(row.id, {
+          adapter,
+          abortController: active.abortController,
+          restart: () => supervisor.restartAdapter(row.id, "compatibility_restart"),
+          owner: "adapter-instance",
+        })
+        void recordHeartbeatNow(adapter).catch(() => undefined)
+      },
+      unpublish: (adapterId) => {
+        unregisterRunningAdapter(adapterId)
+        bus.unregisterAdapter(adapterId)
       },
     })
-    startedAdapters.push(adapter)
-    await appendAudit({
-      adapterId: row.id,
-      kind: "adapter.started",
-      at: Date.now(),
-    }).catch(() => undefined)
-    // Immediate heartbeat so the Health view has a fresh snapshot for this
-    // (re)boot now, not in up to one sweep interval. Fire-and-forget — a
-    // write failure must never fail the boot.
-    void recordHeartbeatNow(adapter).catch(() => undefined)
-    return true
+
+    await supervisor.reconcileAdapter(row.id, "runtime_reconcile")
+    const observed = supervisor.getSnapshot(row.id)?.observedState
+    return observed === "running" || observed === "starting" || observed === "degraded"
   }
 
   void (async () => {
@@ -496,38 +493,20 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
     if (cancelled) return
 
     // Instantiate and register each enabled adapter.
-    const { getDb } = await import("@/lib/db/schema")
     // Whether any enabled adapter receives inbound events over the Rust axum
     // server (webhook / reverse-WS) is derived from `serverAdapterIds`, which
     // `bootAdapter` populates as it registers each such adapter. The server
     // is started once, after the boot loop, only when the set is non-empty —
     // long-poll / gateway adapters dial out and need no local listener.
-    for (const row of enabled) {
-      const adapter = await buildAdapterFromRow(row)
-      if (cancelled) return
-      if (!adapter) continue
-      bus.registerAdapter(adapter)
-      // G6 — refresh the per-row capability matrix from the live
-      // adapter so build-options' connector-capability prompt picks
-      // up post-deploy capability changes without requiring a
-      // settings-tab roundtrip.
-      try {
-        await getDb().adapterInstances.update(row.id, {
-          lastKnownCapabilities: adapter.a2uiCapability(),
-          updatedAt: Date.now(),
-        })
-      } catch {
-        // Best-effort — if the update fails the prompt section
-        // simply falls back to the stale matrix already on disk.
-      }
-
-      // im-refactored-crayon — boot the adapter's inbound transport
-      // through the production AdapterContext + register with the
-      // lifecycle registry (so the Health Tab can drive a manual
-      // "Reconnect now"). Heartbeats are driven by the bus-scope sweep
-      // started below, not per adapter.
-      await bootAdapter(adapter, row, bus)
-    }
+    await Promise.all(
+      enabled.map(async (row) => {
+        const booted = await bootAdapter(undefined, row, bus)
+        if (!booted) {
+          const reason = supervisor.getSnapshot(row.id)?.reasonCode ?? "unknown"
+          log("error", `[connector-bus] adapter ${row.id} failed to boot: ${reason}`)
+        }
+      })
+    )
 
     if (cancelled) return
 
@@ -694,45 +673,33 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
         if (cancelled) return
         const enabledRows = opts.rowFilter ? rows.filter(opts.rowFilter) : rows
         const enabledIds = new Set(enabledRows.map((r) => r.id))
-        const running = listRunningAdapters()
-
-        // Hot-remove: a running adapter no longer in the enabled set
-        // (disabled or deleted). Mirrors the teardown's per-adapter reap.
-        for (const entry of running) {
-          if (entry.owner === "plugin") continue
-          const id = entry.adapter.id
+        // Disabled, deleted and host-filtered definitions stop through the
+        // same serialized lane as every other lifecycle operation.
+        for (const id of Array.from(managedAdapterIds)) {
           if (enabledIds.has(id)) continue
-          unregisterRunningAdapter(id) // aborts signal + stops transport
-          bus.unregisterAdapter(id)
-          if (serverAdapterIds.has(id)) {
-            serverAdapterIds.delete(id)
-            void connectorsUnregisterAdapter(id).catch(() => undefined)
-          }
-          void appendAudit({ adapterId: id, kind: "adapter.stopped", at: Date.now() }).catch(
-            () => undefined
-          )
+          runtimeRows.delete(id)
+          runtimeFingerprints.delete(id)
+          managedAdapterIds.delete(id)
+          await supervisor.removeDefinition(id, "runtime_disabled")
         }
 
-        // Hot-add: an enabled adapter not yet running (newly created/enabled).
-        const runningIds = new Set(running.map((e) => e.adapter.id))
+        // Add new definitions and restart rows whose transport-affecting
+        // fingerprint changed. Presence/capability metadata writes no-op.
         for (const row of enabledRows) {
           if (cancelled) return
-          if (runningIds.has(row.id)) continue
           try {
-            const adapter = await buildAdapterFromRow(row)
-            if (cancelled) return
-            if (!adapter) continue
-            bus.registerAdapter(adapter)
-            try {
-              const { getDb } = await import("@/lib/db/schema")
-              await getDb().adapterInstances.update(row.id, {
-                lastKnownCapabilities: adapter.a2uiCapability(),
-                updatedAt: Date.now(),
-              })
-            } catch {
-              // Best-effort capability refresh; falls back to the stale matrix.
+            const fingerprint = adapterRuntimeFingerprint(row)
+            if (!managedAdapterIds.has(row.id)) {
+              const booted = await bootAdapter(undefined, row, bus)
+              if (!booted) {
+                const reason = supervisor.getSnapshot(row.id)?.reasonCode ?? "unknown"
+                log("error", `[connector-bus] hot-enable of adapter ${row.id} failed: ${reason}`)
+              }
+            } else if (runtimeFingerprints.get(row.id) !== fingerprint) {
+              runtimeRows.set(row.id, row)
+              runtimeFingerprints.set(row.id, fingerprint)
+              await supervisor.restartAdapter(row.id, "runtime_fingerprint_changed")
             }
-            await bootAdapter(adapter, row, bus)
           } catch (err) {
             log(
               "error",
@@ -817,45 +784,17 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
     // brain owns connector routing to avoid double-dial. Suspend them first so
     // their restart closures survive the local runtime teardown.
     suspendRunningAdaptersByOwner("plugin")
-    // Tear down every remaining running adapter through the lifecycle registry so
-    // the per-adapter abort signals get cleaned up too. Swallow
-    // per-adapter errors so a bad stop() can't crash the teardown; the
-    // registry's `unregisterRunningAdapter` already catches the stop()
-    // rejection. We still audit `adapter.stopped` on best-effort.
-    const entries = listRunningAdapters()
-    for (const entry of entries) {
-      const adapterId = entry.adapter.id
-      unregisterRunningAdapter(adapterId)
-      void appendAudit({
-        adapterId,
-        kind: "adapter.stopped",
-        at: Date.now(),
-      }).catch(() => undefined)
-    }
-    // Defensive fallback: if an adapter started before the registry
-    // entry was recorded (e.g. an error mid-bootAdapter), still try to
-    // stop the bare handle so its transport doesn't leak.
-    for (const adapter of startedAdapters) {
-      if (entries.some((e) => e.adapter.id === adapter.id)) continue
-      void adapter.stop().catch((err) => {
-        log(
-          "error",
-          `[connector-bus] adapter ${adapter.id} failed to stop: ${
-            err instanceof Error ? err.message : String(err)
-          }`
-        )
-      })
-    }
-    // Reap this install's webhook / reverse-WS registrations so the Rust
-    // registered-adapter map doesn't retain stale entries across a remount.
-    // Mirrors the per-adapter registration in `bootAdapter`.
-    for (const adapterId of serverAdapterIds) {
-      void connectorsUnregisterAdapter(adapterId).catch(() => undefined)
-    }
-    serverAdapterIds.clear()
-    // Stop the inbound axum server (install-lifetime). Safe no-op in Rust
-    // when it was never started (no webhook / reverse-WS adapter), so we
-    // swallow any error.
-    void connectorsStopServer().catch(() => undefined)
+    const removals = Array.from(managedAdapterIds, (adapterId) => {
+      runtimeRows.delete(adapterId)
+      return supervisor.removeDefinition(adapterId, "runtime_teardown")
+    })
+    managedAdapterIds.clear()
+    // Preserve the supervisor's stop → Rust unregister order on teardown.
+    // The public disposer remains synchronous, but server shutdown is chained
+    // after every adapter lane has completed its cleanup attempt.
+    void Promise.allSettled(removals).then(async () => {
+      serverAdapterIds.clear()
+      await connectorsStopServer().catch(() => undefined)
+    })
   }
 }
