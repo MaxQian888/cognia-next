@@ -143,6 +143,7 @@ try {
     join(consumer, "index.ts"),
     [
       'import { defineContextPanel, type PluginManifest } from "@cognia/plugin-sdk";',
+      'import { PLUGIN_CONTRACT_VERSION, PLUGIN_GATEWAY_CLIENT_VERSION, type PluginApiNamespaceContract } from "@cognia/plugin-sdk/contracts";',
       'import type { EventFilter } from "@cognia/plugin-sdk/events";',
       'import type { PluginHooks } from "@cognia/plugin-sdk/hooks";',
       'import type { PluginPermission } from "@cognia/plugin-sdk/permissions";',
@@ -151,8 +152,9 @@ try {
       'import { definePlugin as invalidHookExport } from "@cognia/plugin-sdk/hooks";',
       'const manifest: PluginManifest = { id: "x", name: "X", description: "X", version: "0.1.0", type: "frontend", capabilities: [], main: "index.js" };',
       "const probe: [EventFilter?, PluginHooks?, PluginPermission?, ExtensionPoint?] = [];",
+      'const contractProbe: ["1.0.0", "2.0.0", PluginApiNamespaceContract?] = [PLUGIN_CONTRACT_VERSION, PLUGIN_GATEWAY_CLIENT_VERSION];',
       'defineContextPanel({ id: "x", entry: "panel.js", export: "Panel", resourceKinds: ["project-file"], activity: "inspect", labelKey: "x", label: "X" });',
-      "void manifest; void probe; void invalidHookExport;",
+      "void manifest; void probe; void contractProbe; void invalidHookExport;",
       "",
     ].join("\n")
   )

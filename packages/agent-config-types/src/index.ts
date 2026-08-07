@@ -35,6 +35,8 @@ import type {
 import type { AgentCapabilityId, AgentExecutionSendSpec } from "./agent-execution"
 import type { ClaudeAgentSdkOptionsV1 } from "./claude-agent-sdk-options"
 
+export * from "./transcript"
+
 // ---- Outbound (UI → Tauri → sidecar) -------------------------------------
 
 /**
@@ -297,6 +299,14 @@ export interface SendOptions {
   systemPrompt?: string
   /** Appended to the SDK's default system prompt. Mutually exclusive with `systemPrompt`. */
   appendSystemPrompt?: string
+  /**
+   * Runtime-wide tool surface policy. `none` is an explicit deny-all contract:
+   * adapters must expose neither SDK-native tools nor built-in, plugin, MCP,
+   * LSP, A2UI, or subagent tool entry points. It is intentionally distinct
+   * from an empty `allowedTools` array because several runtimes interpret an
+   * empty allowlist as "no filtering".
+   */
+  toolSurface?: "default" | "none"
   allowedTools?: string[]
   disallowedTools?: string[]
   additionalDirectories?: string[]
@@ -1342,6 +1352,15 @@ export type FeatureCallOperation =
   | "embedding"
   | "bedrock-discover"
   | "opencode-v2-discover"
+  | "mcp-discover"
+
+/** Ephemeral, secret-resolved definition sent only to the trusted sidecar. */
+export interface McpFeatureServer {
+  id: string
+  name: string
+  transport: McpTransport
+  config: Record<string, unknown>
+}
 
 export interface FeatureCallCredentials {
   protocol?: string
@@ -1365,6 +1384,7 @@ export interface FeatureCallRequest {
   providerId?: string
   model?: string
   credentials: FeatureCallCredentials
+  mcpServer?: McpFeatureServer
   /** Same protocol-adapter descriptor used by ordinary provider execution. */
   protocolAdapterSpec?: SendOptions["protocolAdapterSpec"]
   options?: Record<string, unknown>
@@ -1820,6 +1840,10 @@ export interface ChatSession {
   /** Durable Local/managed-worktree binding reused by subsequent turns. */
   executionContext?: import("@/types/execution-context").SessionExecutionContext
   title: string
+  /** Monotonic lineage for timeline pages, turn details, and opaque cursors. */
+  transcriptRevision?: number
+  /** Persisted branch choices; absent entries resolve to the highest branchIndex. */
+  activeBranchByGroup?: Record<string, string>
   /**
    * True while the title is auto-derived (instant first-message truncation
    * or the LLM-generated upgrade). A manual rename sets this to `false`,
@@ -2168,6 +2192,8 @@ export type MessageSenderKind = "user" | "assistant" | "system"
 export interface StoredMessage {
   id: string
   sessionId: string
+  /** Stable provider-agnostic turn identity used by the lazy transcript index. */
+  turnKey?: string
   /** Owning workspace id — Workspace isolation column (Dexie v86). Inherits the session's project. */
   projectId?: string
   role: UIMessage["role"]
@@ -4557,18 +4583,57 @@ export type AgentId =
   | "opencode"
   | "cognia"
 
+export interface McpSecretRef {
+  /** Stable keyring locator. Secret material is never serialized here. */
+  secretRef: string
+}
+
+export type McpConfigValue = string | McpSecretRef
+
+export interface McpConfigShape extends Record<string, unknown> {
+  command?: string
+  args?: McpConfigValue[]
+  cwd?: string
+  env?: Record<string, McpConfigValue>
+  url?: McpConfigValue
+  headers?: Record<string, McpConfigValue>
+  allowPrivateNetwork?: boolean
+}
+
+export interface McpStdioConfig extends McpConfigShape {
+  command: string
+}
+
+export interface McpRemoteConfig extends McpConfigShape {
+  url: McpConfigValue
+  /** Explicitly reviewed exception to the default private-network egress block. */
+}
+
+/**
+ * Compatibility shape for pre-governance rows. Registry writes validate this
+ * into a transport-specific shape; legacy rows remain readable during the
+ * resumable host migration.
+ */
+export type McpLegacyConfig = McpConfigShape
+
+export type McpServerConfig = McpStdioConfig | McpRemoteConfig | McpLegacyConfig
+export type McpServerTrustState = "legacy" | "pending" | "trusted" | "blocked"
+export type McpServerOrigin =
+  "manual" | "preset" | "agent-import" | "project-import" | "plugin" | "builtin"
+
+export interface McpServerTrust {
+  state: McpServerTrustState
+  /** Fingerprint of the executable/endpoint shape approved by the user. */
+  reviewedFingerprint?: string
+  reviewedAt?: number
+}
+
 export interface McpServer {
   id: string
   name: string
   transport: McpTransport
-  /**
-   * Free-form configuration object passed verbatim to the SDK as
-   * `options.mcpServers[name]`. Shape varies per transport:
-   *   stdio: { command: string, args?: string[], env?: Record<string,string> }
-   *   sse:   { url: string, headers?: Record<string,string> }
-   *   http:  { url: string, headers?: Record<string,string> }
-   */
-  config: Record<string, unknown>
+  /** Validated transport-discriminated configuration. Sensitive values are SecretRef. */
+  config: McpServerConfig
   /** Whether this server is exposed to Claude in cognia-next's own chats. */
   enabled: boolean
   /**
@@ -4588,8 +4653,65 @@ export interface McpServer {
    * User-created MCP rows leave this field undefined.
    */
   pluginId?: string
+  /** Human-facing label; changing it never changes the SDK namespace. */
+  displayName?: string
+  /** Persisted governance contract version. Legacy rows omit this until migration. */
+  schemaVersion?: 1
+  /** Monotonic config revision used by runtime/cache/sync fingerprints. */
+  revision?: number
+  /** Increments when a referenced credential is rotated. */
+  credentialVersion?: number
+  origin?: McpServerOrigin
+  trust?: McpServerTrust
   createdAt: number
   updatedAt: number
+}
+
+export interface McpServerSummary {
+  id: string
+  displayName: string
+  transport: McpTransport
+  enabled: boolean
+  trustState: McpServerTrustState
+  updatedAt: number
+}
+
+export type McpSyncJobStatus = "pending" | "running" | "retrying" | "succeeded" | "failed"
+
+export interface McpSyncJob {
+  /** AgentId; one durable coalescing row per target Agent. */
+  id: AgentId
+  desiredRevision: number
+  tombstones: string[]
+  status: McpSyncJobStatus
+  attempts: number
+  nextAttemptAt: number
+  createdAt: number
+  updatedAt: number
+  lastError?: string
+}
+
+export interface McpCapabilityCacheRow {
+  /** `${serverId}:${fingerprint}` */
+  id: string
+  serverId: string
+  fingerprint: string
+  tools: Array<{ name: string; description?: string; inputSchema?: unknown }>
+  resources: Array<{ uri: string; name?: string; description?: string; mimeType?: string }>
+  prompts: Array<{ name: string; description?: string }>
+  expiresAt: number
+  updatedAt: number
+}
+
+export type McpRuntimeStatusState =
+  "idle" | "connecting" | "ready" | "needs-auth" | "degraded" | "blocked" | "failed" | "closing"
+
+export interface McpRuntimeStatusSnapshot {
+  scopeId: string
+  serverId: string
+  state: McpRuntimeStatusState
+  updatedAt: number
+  errorCode?: string
 }
 
 export interface PendingApproval {

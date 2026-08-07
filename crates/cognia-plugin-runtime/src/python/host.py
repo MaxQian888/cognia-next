@@ -313,6 +313,12 @@ def _handle_import_main(params):
 
 def _info():
     return {
+        "sdk_version": "__COGNIA_SDK_VERSION__",
+        "protocol_version": "__COGNIA_PROTOCOL_VERSION__",
+        "contract_version": "__COGNIA_CONTRACT_VERSION__",
+        "runtime_id": "python",
+        "capabilities": ["tools", "hooks", "contributions", "config", "events", "streaming"],
+        "legacy_adapter": False,
         "tool_count": len(_TOOLS),
         "hook_count": len(_HOOKS),
         "contribution_count": len(_CONTRIBUTIONS),

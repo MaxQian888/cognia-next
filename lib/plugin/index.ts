@@ -10,7 +10,7 @@
  * `lib/plugin/messaging/hooks-system.ts`. The plugin-facing API
  * namespaces (extension/permission/notification/storage/media/etc.)
  * live under `lib/plugin/api/` and are re-exported below so external
- * consumers can `import { … } from "@/lib/plugin"` without reaching
+ * consumers can `import { … } from "@/lib/plugin/messaging/hooks-system"` without reaching
  * into a deep `api/<name>-api` path.
  */
 

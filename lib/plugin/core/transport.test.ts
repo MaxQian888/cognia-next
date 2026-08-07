@@ -24,6 +24,7 @@ import {
   revokePluginPermission,
   listPluginPermissions,
   PluginGatewayError,
+  normalizePluginRuntimeHandshake,
 } from "./transport"
 import { setActiveRemoteTransport, __resetRoutingForTests } from "@/lib/tauri/transport-routing"
 
@@ -59,6 +60,43 @@ describe("PluginGatewayError", () => {
     expect(err.requestId).toBe("req-1")
     expect(err.api).toBe("getStatus")
     expect(err.pluginId).toBe("test-plugin")
+  })
+})
+
+describe("normalizePluginRuntimeHandshake", () => {
+  it("preserves a current handshake", () => {
+    expect(
+      normalizePluginRuntimeHandshake(
+        {
+          sdk_version: "3.0.0",
+          protocol_version: "3.0.0",
+          contract_version: "2.0.0",
+          runtime_id: "python-worker",
+          capabilities: ["tools", 1],
+          legacy_adapter: false,
+        },
+        "python"
+      )
+    ).toMatchObject({
+      sdk_version: "3.0.0",
+      protocol_version: "3.0.0",
+      contract_version: "2.0.0",
+      runtime_id: "python-worker",
+      capabilities: ["tools"],
+      legacy_adapter: false,
+    })
+  })
+
+  it("marks runtimes without a handshake as legacy", () => {
+    expect(normalizePluginRuntimeHandshake({ tool_count: 1 }, "python")).toMatchObject({
+      sdk_version: "0.1.0",
+      protocol_version: "2.0.0",
+      contract_version: "1.0.0",
+      runtime_id: "python",
+      capabilities: [],
+      legacy_adapter: true,
+      tool_count: 1,
+    })
   })
 })
 

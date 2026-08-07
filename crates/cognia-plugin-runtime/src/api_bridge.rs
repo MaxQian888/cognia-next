@@ -60,7 +60,6 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use super::{NetworkAccessRule, PluginError, PluginRuntimeState, Result};
 
 const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
-const MIN_SUPPORTED_SDK: &str = "1.0.0";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Wire types — mirror lib/plugin/core/transport.ts:25-42
@@ -80,7 +79,7 @@ pub struct PluginApiInvokeRequest {
 }
 
 fn default_sdk_version() -> String {
-    "2.0.0".to_string()
+    crate::contract::gateway_client_version().to_string()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -140,7 +139,8 @@ impl PluginApiError {
         Self::new(
             "INCOMPATIBLE_SDK",
             format!(
-                "plugin SDK version {sdk_version} is below the minimum supported {MIN_SUPPORTED_SDK}"
+                "plugin SDK version {sdk_version} is below the minimum supported {}",
+                crate::contract::minimum_gateway_client_version()
             ),
         )
     }
@@ -168,7 +168,7 @@ fn parse_sdk_semver(s: &str) -> Option<(u32, u32, u32)> {
 fn sdk_is_compatible(sdk_version: &str) -> bool {
     match (
         parse_sdk_semver(sdk_version),
-        parse_sdk_semver(MIN_SUPPORTED_SDK),
+        parse_sdk_semver(crate::contract::minimum_gateway_client_version()),
     ) {
         (Some(sdk), Some(min)) => sdk >= min,
         _ => false,
@@ -178,7 +178,7 @@ fn sdk_is_compatible(sdk_version: &str) -> bool {
 fn compat_for(sdk_version: &str) -> PluginApiCompat {
     PluginApiCompat {
         sdk_version: sdk_version.to_string(),
-        min_supported_sdk: MIN_SUPPORTED_SDK.to_string(),
+        min_supported_sdk: crate::contract::minimum_gateway_client_version().to_string(),
         compatible: sdk_is_compatible(sdk_version),
     }
 }

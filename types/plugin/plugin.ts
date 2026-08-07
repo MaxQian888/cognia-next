@@ -13,6 +13,7 @@ import type {
   A2UISurfaceType,
 } from "../artifact/a2ui"
 import type { AgentModeConfig } from "../agent/agent-mode"
+import type { CanonicalPluginPermission } from "@/packages/plugin-sdk/src/contracts/generated"
 import type { LspServerConfig } from "../lsp/config"
 import type { ExternalAgentPresetConfig } from "@/lib/ai/agent/external/presets"
 import type { ProtocolAdapterFactory } from "@/lib/ai/agent/external/protocol-adapter"
@@ -393,127 +394,7 @@ export interface ExtensionCatalogEntry {
 /**
  * Permission types that plugins can request
  */
-export type PluginPermission =
-  | "filesystem:read" // Read files
-  | "filesystem:write" // Write files
-  | "network:fetch" // Make HTTP requests
-  | "network:upload" // Upload local file contents
-  | "network:websocket" // WebSocket connections
-  | "clipboard:read" // Read clipboard
-  | "clipboard:write" // Write clipboard
-  | "notification" // Show notifications
-  | "shell:execute" // Execute shell commands
-  | "process:spawn" // Spawn processes
-  | "database:read" // Read from database
-  | "database:write" // Write to database
-  | "settings:read" // Read settings
-  | "settings:write" // Modify settings
-  | "session:read" // Read chat sessions
-  | "session:write" // Modify chat sessions
-  | "session:delete" // Delete chat sessions
-  | "project:read" // Read project metadata and files through scoped APIs
-  | "project:write" // Create/modify projects, their knowledge files and links
-  | "project:delete" // Delete projects
-  | "canvas:read" // Read Canvas document metadata and selection
-  | "canvas:write" // Create/modify/delete Canvas documents
-  | "canvas:run" // Execute Canvas code blocks and actions
-  | "canvas:collaborate" // Join Canvas collaboration sessions
-  | "artifact:read" // Read artifact metadata
-  | "artifact:write" // Create and modify artifacts
-  | "workflow:read" // Read workflow metadata and selection
-  | "editor:read" // Read what the user is looking at in the project editor
-  | "editor:write" // Open files and reflect edits in the project editor
-  | "debug:control" // Start, inspect, and control debug sessions
-  | "tests:run" // Discover and run tests through an IDE test controller
-  | "notebook:execute" // Execute notebook cells or notebook-backed kernels
-  | "vector:read" // Query the vector store
-  | "vector:write" // Write to and delete from the vector store
-  | "ai:chat" // Send prompts to a language model on the user's account
-  | "ai:embed" // Generate embeddings on the user's account
-  | "export:session" // Export chat sessions
-  | "export:project" // Export whole projects
-  | "theme:read" // Read the active theme
-  | "theme:write" // Change the active theme
-  | "extension:ui" // Contribute trusted host-rendered UI
-  | "extension:workflow" // Contribute workflow nodes, triggers, tasks, and templates
-  | "media:image:read" // Read image media assets
-  | "media:image:write" // Write image media assets
-  | "media:video:read" // Read video media assets
-  | "media:video:write" // Write video media assets
-  | "media:video:export" // Export rendered video output
-  | "agent:control" // Control agent execution (tool-enabled headless runs)
-  | "agent:dispatch-external" // Dispatch external coding agents (Claude Code / Codex / …)
-  | "agent:dispatch" // Dispatch built-in subagents / agent teams in-process
-  | "agent:shared-memory:read" // Read team shared-memory entries (ACL-gated)
-  | "twin:read" // Query the employee twin's RAG memory
-  | "templates:read" // Read the unified template catalog and validation results
-  | "templates:contribute" // Register lifecycle-scoped template packages
-  | "templates:instantiate" // Request guarded preflight/instantiation
-  | "templates:library:write" // Create user-owned template drafts after confirmation
-  | "ipc:call" // Call/send to another plugin over inter-plugin IPC (incl. RPC)
-  | "ipc:expose" // Expose RPC methods other plugins can invoke over IPC
-  | "events:publish" // Emit onto the cross-plugin event bus
-  | "events:subscribe" // Listen on the cross-plugin event bus
-  | "python:execute" // Execute Python code
-  | "sandbox:web-execute" // Execute code in browser sandbox (Pyodide/JS)
-  | "secrets:read" // Read from OS keyring / secure storage
-  | "secrets:write" // Write to OS keyring / secure storage
-  | "auth:provide" // Register a native auth/OAuth provider (C1)
-  | "auth:consume" // Consume sessions from a registered auth provider (C1)
-  | "terminal:spawn" // Open a new PTY session in the integrated terminal dock
-  | "terminal:write" // Pipe bytes into an existing terminal session's stdin
-  | "terminal:kill" // Signal-terminate an existing terminal session
-  | "terminal:completion" // Contribute inline command completions + read the in-progress input line
-  | "terminal:safety" // Contribute command-safety rules + classify command risk for Auto-mode
-  | "git:read" // Read the active source-control repository (status/log/diff/branches)
-  | "git:write" // Mutate the active repo (stage/commit/checkout/push/stash/discard)
-  | "goal:read" // Read the user's goals and their progress
-  | "goal:write" // Create, update, complete, and decompose goals
-  | "memory:read" // Search/list the user's long-term memories
-  | "memory:write" // Store, update, and forget long-term memories (PII-gated, never procedural)
-  | "team:read" // Read agent teams, rosters, and their task boards
-  | "team:write" // Create tasks / comment / guarded card moves on team boards (no run control)
-  | "subscription:read" // Read subscription plan + usage metrics (never raw credentials)
-  | "perf:read" // Read performance dashboard snapshots + live sample stream
-  | "connectors:read" // List connector adapters + subscribe to inbound bus events
-  | "connectors:send" // Send outbound messages through a connector adapter
-  | "connectors:manage" // Create / update / delete / enable connector adapter instances
-  | "integrations:read" // Read Integration definitions, accounts, subscriptions, jobs, and audit
-  | "integrations:events" // Publish verified normalized Integration events
-  | "integrations:execute" // Queue Integration actions through host risk policy
-  | "integrations:manage" // Create/update/remove Integration accounts and subscriptions
-  | "share:read" // Read the local mirror of created public share links + their stats
-  | "share:create" // Create / revoke public share links (publishes data to the share worker)
-  | "backup:read" // Build + read encrypted backup packages and the backup history
-  | "backup:write" // Restore a backup package (overwrites local data)
-  // Desktop automation (Computer Use) — drives the real desktop. All DANGEROUS.
-  // Reuses the host Rust gate→policy→consent→audit pipeline (surface:"plugin").
-  | "automation:screenshot" // Capture desktop screenshots / regions
-  | "automation:read" // Read a11y tree, find elements, cursor position, pick-at-point
-  | "automation:click" // Mouse click / double / triple / button down-up
-  | "automation:type" // Keyboard input, key chords, hold-key
-  | "automation:pointer" // Mouse move, drag, scroll
-  | "automation:window" // Window focus / close / minimize / maximize / resize
-  // Companion remote-control management (host-side). read is sensitive, control is DANGEROUS.
-  | "companion:read" // List paired devices, read remote-control grants + inbound activity
-  | "companion:control" // Grant / revoke a device's remote-control capability
-  | "cli:execute" // Run an allowlisted external CLI declared via manifest.cliTools — DANGEROUS
-  | "companion:goal-control" // Pause / resume / stop a host goal loop
-  // Native Anthropic computer-use tool bridge (declared by computer-use; keyed
-  // on by the automation settings UI and the plugin-sdk native-tool examples).
-  | "native:input" // Synthesize native keyboard / mouse input via a native Anthropic tool
-  | "native:screen" // Capture the native screen via a native Anthropic tool
-  // Sandboxed core tools (ADR-0028; declared by cognia-sandboxed-tools).
-  | "native:filesystem" // Read/write the host filesystem through the sandboxed-tools backend
-  | "native:process" // Run host processes through the sandboxed-tools backend
-  // Desktop pet (gated by the "pet" capability; see lib/plugin/api/pet-api.ts).
-  | "pet:read" // Read the pet's public view (level/stage/needs/mood) + subscribe to sanitized events
-  | "pet:interact" // Emit nurture interactions and budget-capped XP/coin rewards
-  // Chat interception (W3.2). High-risk: lets a plugin rewrite/block every
-  // prompt, tool call, and tool result. Required to declare the
-  // onUserPromptSubmit / onPreToolUse / onPostToolUse / onMessageSend /
-  // onMessageReceive hooks.
-  | "hooks:chat-intercept" // Intercept and rewrite chat prompts, tool calls, and tool results
+export type PluginPermission = CanonicalPluginPermission
 
 export type PluginPermissionDecision = "allow" | "deny"
 export type PluginPermissionPolicy = "ask" | "allow" | "deny"
@@ -4764,49 +4645,8 @@ export interface PluginExtensionAPI {
 /**
  * Plugin API permissions for extended features
  */
-export type PluginAPIPermission =
-  | "session:read"
-  | "session:write"
-  | "session:delete"
-  | "project:read"
-  | "project:write"
-  | "project:delete"
-  | "vector:read"
-  | "vector:write"
-  | "canvas:read"
-  | "canvas:write"
-  | "canvas:run"
-  | "canvas:collaborate"
-  | "artifact:read"
-  | "artifact:write"
-  | "workflow:read"
-  | "ai:chat"
-  | "ai:embed"
-  | "agent:control"
-  | "agent:dispatch-external"
-  | "agent:dispatch"
-  | "agent:shared-memory:read"
-  | "twin:read"
-  | "templates:read"
-  | "templates:contribute"
-  | "templates:instantiate"
-  | "templates:library:write"
-  | "export:session"
-  | "export:project"
-  | "theme:read"
-  | "theme:write"
-  | "media:image:read"
-  | "media:image:write"
-  | "media:video:read"
-  | "media:video:write"
-  | "media:video:export"
-  | "extension:ui"
-  | "extension:workflow"
-  | "notification:show"
-  | "ipc:call"
-  | "ipc:expose"
-  | "events:publish"
-  | "events:subscribe"
+/** @deprecated Use PluginPermission; retained as a zero-breaking alias. */
+export type PluginAPIPermission = PluginPermission
 
 /**
  * Permission API for plugins
@@ -4817,7 +4657,7 @@ export type PluginAPIPermission =
  * by the `PermissionGuard` (e.g. `git:write`, `terminal:execute`).
  * Introspection consults both stores so it agrees with enforcement.
  */
-export type IntrospectablePluginPermission = PluginAPIPermission | PluginPermission
+export type IntrospectablePluginPermission = PluginPermission
 
 export interface PluginPermissionAPI {
   /** Check if plugin has a permission (API or guard-enforced) */

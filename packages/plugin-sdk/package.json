@@ -115,9 +115,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "NODE_OPTIONS=--max-old-space-size=12288 tsup",
+    "build": "node scripts/build-package.mjs",
     "typecheck": "node ../../scripts/plugin/test-sdk-package.mjs",
-    "pack:test": "pnpm --dir ../provider-types build && node ../../scripts/plugin/test-sdk-package.mjs"
+    "pack:test": "pnpm --dir ../provider-types build && pnpm build && node ../../scripts/plugin/test-sdk-package.mjs",
+    "performance:check": "node scripts/check-performance-budget.mjs"
   },
   "dependencies": {
     "@cognia/provider-core": "workspace:*",

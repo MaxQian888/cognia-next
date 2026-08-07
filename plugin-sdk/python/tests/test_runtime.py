@@ -7,6 +7,15 @@ import pytest
 from cognia.runtime import Runtime
 
 
+def assert_current_handshake(info):
+    assert info["sdk_version"] == "0.1.0"
+    assert info["protocol_version"] == "2.0.0"
+    assert info["contract_version"] == "1.0.0"
+    assert info["runtime_id"] == "python"
+    assert info["legacy_adapter"] is False
+    assert set(info["capabilities"]) >= {"tools", "hooks", "contributions"}
+
+
 def test_register_and_get_tools_infers_definition():
     rt = Runtime()
 
@@ -24,7 +33,11 @@ def test_register_and_get_tools_infers_definition():
         }
     ]
     assert rt.has_tool("greet")
-    assert rt.get_info() == {"tool_count": 1, "hook_count": 0, "contribution_count": 0}
+    info = rt.get_info()
+    assert_current_handshake(info)
+    assert info["tool_count"] == 1
+    assert info["hook_count"] == 0
+    assert info["contribution_count"] == 0
 
 
 def test_register_tool_explicit_overrides_win():
@@ -161,7 +174,11 @@ def test_dispatch_protocol_methods():
     rt.register_tool(lambda: "ok", name="t")
     assert rt.dispatch("ping") == "pong"
     assert rt.dispatch("get_tools")[0]["name"] == "t"
-    assert rt.dispatch("get_info") == {"tool_count": 1, "hook_count": 0, "contribution_count": 0}
+    info = rt.dispatch("get_info")
+    assert_current_handshake(info)
+    assert info["tool_count"] == 1
+    assert info["hook_count"] == 0
+    assert info["contribution_count"] == 0
     assert rt.dispatch("push_config", {"config": {"a": 1}}) is None
     assert rt.get_config() == {"a": 1}
     with pytest.raises(RuntimeError, match="unknown method"):

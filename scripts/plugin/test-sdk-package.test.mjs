@@ -12,5 +12,6 @@ test("tests packed ESM, CJS, declarations, contents, and monorepo independence",
   assert.match(script, /run\("node", \["esm\.mjs"\]/)
   assert.match(script, /run\("node", \["cjs\.cjs"\]/)
   assert.match(script, /node_modules\/\.bin\/tsc/)
+  assert.match(script, /PLUGIN_GATEWAY_CLIENT_VERSION/)
   assert.match(script, /packed SDK must not contain host-linked source/)
 })

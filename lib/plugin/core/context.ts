@@ -203,6 +203,8 @@ import type {
   PluginAgentRunResult,
 } from "@/types/plugin/plugin-agent-sdk"
 import type { FullPluginContext as PublicFullPluginContext } from "@cognia/plugin-sdk/context"
+import { withPluginDisposableScope } from "./disposable-scope"
+import { withGovernedPluginContext } from "../contracts/governed-context"
 
 /** @deprecated `PluginContext` is now the complete activated context. */
 export type FullPluginContext = PluginContext
@@ -366,7 +368,7 @@ export function createFullPluginContext(
   // v2 namespaces (`ocr`, `workspace`). Both are stateless wrappers; the
   // underlying registries already auto-clean on disable through the
   // bridge layer's `clear*ForPlugin(pluginId)` hooks.
-  return {
+  const fullContext = {
     ...baseContext,
     ...contextAPI,
     events: enhancedEvents,
@@ -398,6 +400,14 @@ export function createFullPluginContext(
     companion: createCompanionAPI(pluginId),
     pet: createPetAPI({ pluginId, capabilities: plugin.manifest.capabilities ?? [] }),
   } satisfies PublicFullPluginContext
+  const governedContext = withGovernedPluginContext(fullContext, {
+    pluginId,
+    hasPermission: (permission) => permissionsAPI.hasPermission(permission),
+  })
+  const scope = manager.getPluginDisposableScope?.(pluginId)
+  return (
+    scope ? withPluginDisposableScope(scope, "ctx", governedContext) : governedContext
+  ) as FullPluginContext
 }
 
 /**

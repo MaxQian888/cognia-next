@@ -22,6 +22,8 @@ import inspect
 import sys
 from typing import Any, Callable, Dict, List, Optional
 
+from ._generated_contract import CONTRACT_VERSION, PROTOCOL_VERSION, SDK_VERSION
+
 from .types import (
     HookRegistration,
     RegisteredTool,
@@ -157,8 +159,21 @@ class Runtime:
             for cid, methods in self._contributions.items()
         ]
 
-    def get_info(self) -> Dict[str, int]:
+    def get_info(self) -> Dict[str, Any]:
         return {
+            "sdk_version": SDK_VERSION,
+            "protocol_version": PROTOCOL_VERSION,
+            "contract_version": CONTRACT_VERSION,
+            "runtime_id": "python",
+            "capabilities": [
+                "tools",
+                "hooks",
+                "contributions",
+                "config",
+                "events",
+                "streaming",
+            ],
+            "legacy_adapter": False,
             "tool_count": len(self._tools),
             "hook_count": len(self._hooks),
             "contribution_count": len(self._contributions),

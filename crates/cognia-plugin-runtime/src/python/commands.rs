@@ -82,8 +82,27 @@ pub struct PythonRuntimeInfo {
 #[derive(Debug, Clone, Serialize)]
 pub struct PythonPluginInfo {
     pub plugin_id: String,
+    pub sdk_version: String,
+    pub protocol_version: String,
+    pub contract_version: String,
+    pub runtime_id: String,
+    pub capabilities: Vec<String>,
+    pub legacy_adapter: bool,
     pub tool_count: usize,
     pub hook_count: usize,
+}
+
+fn rendered_host_script() -> String {
+    HOST_SCRIPT
+        .replace("__COGNIA_SDK_VERSION__", crate::contract::sdk_version())
+        .replace(
+            "__COGNIA_PROTOCOL_VERSION__",
+            crate::contract::protocol_version(),
+        )
+        .replace(
+            "__COGNIA_CONTRACT_VERSION__",
+            crate::contract::contract_version(),
+        )
 }
 
 // ============================================================================
@@ -540,7 +559,7 @@ fn apply_initialize(state: &PythonRuntimeState, interpreter: Option<Interpreter>
     match interpreter {
         Some(interp) => {
             fs::create_dir_all(&state.python_dir)?;
-            fs::write(state.host_script_path(), HOST_SCRIPT)?;
+            fs::write(state.host_script_path(), rendered_host_script())?;
             log::info!(
                 "python runtime initialized: {} ({})",
                 interp.argv_prefix.join(" "),
@@ -817,6 +836,22 @@ fn get_info_inner(state: &PythonRuntimeState, plugin_id: &str) -> Option<PythonP
         .entry_counts(plugin_id)
         .map(|(tool_count, hook_count)| PythonPluginInfo {
             plugin_id: plugin_id.to_string(),
+            sdk_version: crate::contract::sdk_version().to_string(),
+            protocol_version: crate::contract::protocol_version().to_string(),
+            contract_version: crate::contract::contract_version().to_string(),
+            runtime_id: "python".to_string(),
+            capabilities: vec![
+                "tools",
+                "hooks",
+                "contributions",
+                "config",
+                "events",
+                "streaming",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+            legacy_adapter: false,
             tool_count,
             hook_count,
         })
@@ -2122,6 +2157,12 @@ def rewrite(payload):
 
         let info = PythonPluginInfo {
             plugin_id: "demo".into(),
+            sdk_version: crate::contract::sdk_version().into(),
+            protocol_version: crate::contract::protocol_version().into(),
+            contract_version: crate::contract::contract_version().into(),
+            runtime_id: "python".into(),
+            capabilities: vec!["tools".into()],
+            legacy_adapter: false,
             tool_count: 5,
             hook_count: 6,
         };
@@ -2129,5 +2170,12 @@ def rewrite(payload):
         assert_eq!(json["plugin_id"], "demo");
         assert_eq!(json["tool_count"], 5);
         assert_eq!(json["hook_count"], 6);
+        assert_eq!(json["protocol_version"], "2.0.0");
+        assert_eq!(json["runtime_id"], "python");
+
+        let host = rendered_host_script();
+        assert!(host.contains(r#""sdk_version": "0.1.0""#));
+        assert!(host.contains(r#""contract_version": "1.0.0""#));
+        assert!(!host.contains("__COGNIA_"));
     }
 }

@@ -27,7 +27,7 @@ import type {
   PluginReview,
 } from "@/types/plugin"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
-import { validatePluginManifest } from "@/lib/plugin"
+import { validatePluginManifest } from "@/lib/plugin/core/validation"
 import type { PluginPointGovernanceMode } from "@/lib/plugin/contracts/plugin-points"
 import { buildExtensionDescriptor } from "@/lib/plugin/core/descriptor"
 import { grantPluginPermission } from "@/lib/plugin/core/transport"

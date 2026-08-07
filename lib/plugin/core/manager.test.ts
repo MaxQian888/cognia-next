@@ -3764,6 +3764,24 @@ describe("PluginManager", () => {
   })
 
   describe("plugin point governance", () => {
+    it("reuses precompiled activation specs and wildcard matchers", () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const manifest: PluginManifest = {
+        ...createManifest("indexed-activation"),
+        activationEvents: ["onCommand:plugin.*"],
+      }
+      const internals = manager as unknown as {
+        parseActivationSpec: (value: PluginManifest) => unknown
+        matchesActivation: (pattern: string, value: string) => boolean
+        activationPatternCache: Map<string, RegExp>
+      }
+
+      expect(internals.parseActivationSpec(manifest)).toBe(internals.parseActivationSpec(manifest))
+      expect(internals.matchesActivation("plugin.*", "plugin.open")).toBe(true)
+      expect(internals.matchesActivation("plugin.*", "plugin.close")).toBe(true)
+      expect(internals.activationPatternCache.size).toBe(1)
+    })
+
     it("blocks retired activation events in block mode", async () => {
       const manager = new PluginManager({
         pluginDirectory: "/plugins",
@@ -3824,6 +3842,21 @@ describe("PluginManager", () => {
 
       manager.setPluginPointGovernanceMode("warn")
       expect(manager.getPluginPointGovernanceMode()).toBe("warn")
+    })
+  })
+
+  describe("disposable lifecycle ledger", () => {
+    it("disposes a partial activation even when the store row is already gone", async () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const dispose = jest.fn()
+      manager.getPluginDisposableScope("partial").track(dispose, "partial.registration")
+      mockGetState.mockReturnValue({ plugins: {} })
+
+      await (
+        manager as unknown as { unregisterPluginContributions: (pluginId: string) => Promise<void> }
+      ).unregisterPluginContributions("partial")
+
+      expect(dispose).toHaveBeenCalledTimes(1)
     })
   })
 

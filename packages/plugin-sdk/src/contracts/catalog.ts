@@ -1,5 +1,15 @@
 import catalog from "../../contract/catalog.json"
 import pluginPointCatalog from "../../contract/plugin-points.json"
+export {
+  CANONICAL_PLUGIN_PERMISSION_IDS,
+  PLUGIN_CONTRACT_VERSION,
+  PLUGIN_GATEWAY_CLIENT_VERSION,
+  PLUGIN_MINIMUM_GATEWAY_CLIENT_VERSION,
+  PLUGIN_MINIMUM_SDK_VERSION,
+  PLUGIN_PROTOCOL_VERSION,
+  PLUGIN_SDK_VERSION,
+} from "./generated"
+export type { CanonicalPluginPermission } from "./generated"
 
 export type PluginCapabilitySupport = "supported" | "partial" | "experimental" | "blocked"
 export type PluginRuntimeKind = "javascript" | "python" | "wasm" | "vscode" | "asset"
@@ -52,6 +62,38 @@ export interface PluginPathFieldContract {
   sentinels?: readonly string[]
 }
 
+export type PluginApiDataClassification = "public" | "internal" | "sensitive" | "secret"
+export type PluginApiRisk = "low" | "medium" | "high" | "critical"
+
+export interface PluginApiMethodContract {
+  id: string
+  name: string
+  requiredPermissions: readonly string[]
+  consentTier: "none" | "policy" | "confirm" | "forbid"
+  risk: PluginApiRisk
+  idempotent: boolean
+  cancellable: boolean
+}
+
+export interface PluginApiNamespaceContract {
+  id: string
+  authorPath: string
+  type: string
+  stability: "stable" | "experimental" | "deprecated"
+  introducedIn: string
+  runtimes: readonly string[]
+  platforms: readonly string[]
+  transport: "direct" | "gateway" | "rpc"
+  factory: string
+  enforcement: "shadow" | "active"
+  dataClassification: PluginApiDataClassification
+  timeoutMs: number | null
+  retry: "never" | "safe" | "idempotent"
+  errorPolicy: "preserve" | "normalize"
+  lifecycle: "call" | "plugin" | "host"
+  methods: readonly PluginApiMethodContract[]
+}
+
 export const CANONICAL_PLUGIN_POINT_KINDS = ["ui-slot", "hook", "activation", "runtime"] as const
 
 export type AuthorPluginPointKind = (typeof CANONICAL_PLUGIN_POINT_KINDS)[number]
@@ -78,6 +120,8 @@ export const PLUGIN_POINT_CONTRACT_SCHEMA_VERSION = pluginPointCatalog.schemaVer
 export const PLUGIN_CONTRACT_MINIMUM_HOST_VERSION = catalog.minimumHostVersion
 export const CANONICAL_PLUGIN_TYPES = catalog.pluginTypes as readonly string[]
 export const CANONICAL_PLUGIN_PERMISSIONS = catalog.permissions as readonly string[]
+export const PLUGIN_API_NAMESPACE_CONTRACTS =
+  catalog.apiNamespaces as readonly PluginApiNamespaceContract[]
 export const AUTHOR_CAPABILITY_CONTRACTS = catalog.capabilities.map((contract) => ({
   ...contract,
   minimumHostVersion:

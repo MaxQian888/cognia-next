@@ -39,6 +39,8 @@ import {
 import { __resetSkillsForTesting } from "@/lib/plugin/registries/skill-registry"
 import { __resetMcpServerPresetsForTesting } from "@/lib/plugin/registries/mcp-server-preset-registry"
 import { __resetNativeAnthropicToolsForTesting } from "@/lib/plugin/registries/native-anthropic-tool-registry"
+import { PluginDisposableScope } from "./disposable-scope"
+import { subscribePluginApiAudit } from "../contracts/interface-catalog"
 
 // Mock Tauri invoke
 jest.mock("@tauri-apps/api/core", () => ({
@@ -1397,6 +1399,26 @@ describe("createFullPluginContext", () => {
     expect(context.webview).toBeDefined()
     expect(context.auth).toBeDefined()
     expect(context.uri).toBeDefined()
+  })
+
+  it("enrolls registration disposers in the manager lifecycle scope", async () => {
+    const scope = new PluginDisposableScope("test-plugin")
+    const audit = jest.fn()
+    const unsubscribeAudit = subscribePluginApiAudit(audit)
+    const manager = {
+      getPluginPointGovernanceMode: jest.fn(() => "warn"),
+      getPluginDisposableScope: jest.fn(() => scope),
+    } as unknown as PluginManager
+    const context = createFullPluginContext(createMockPlugin(), manager)
+
+    context.events.on("test-event", () => undefined)
+
+    await expect(scope.dispose()).resolves.toEqual({ disposed: 1, failures: [] })
+    expect(audit).toHaveBeenCalledTimes(1)
+    expect(audit).toHaveBeenCalledWith(
+      expect.objectContaining({ methodId: "events.on", outcome: "allowed" })
+    )
+    unsubscribeAudit()
   })
 
   it("should have session API methods", () => {

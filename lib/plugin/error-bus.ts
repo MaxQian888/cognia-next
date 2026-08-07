@@ -20,6 +20,17 @@
 import { loggers } from "@cognia/logging"
 
 export const PLUGIN_ERROR_EVENT = "plugin:error" as const
+export const PLUGIN_ENABLE_FAILED_EVENT = "plugin:enable-failed" as const
+
+export interface PluginEnableFailedEventDetail {
+  pluginId: string
+  /** Best-effort plugin display name (falls back to pluginId). */
+  pluginName: string
+  /** Short error message — the toast UI may wrap or truncate. */
+  errorMessage: string
+  /** Reason string passed to enablePlugin (e.g. "manual" / "startup"). */
+  reason: string
+}
 
 export type PluginErrorStage =
   | "install"

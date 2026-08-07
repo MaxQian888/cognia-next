@@ -13,7 +13,7 @@ import {
   getExtensionsForPoint,
   getExtensionRevision,
   subscribeExtensionChanges,
-} from "@/lib/plugin/api"
+} from "@/lib/plugin/api/extension-api"
 import {
   getContextKeyRevision,
   subscribeContextKeys,

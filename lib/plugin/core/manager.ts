@@ -191,7 +191,12 @@ import {
   registerPluginTemplatePackages,
 } from "@/lib/plugin/api/templates-api"
 import { getTemplateRuntime } from "@/lib/templates/runtime"
-import { dispatchPluginError } from "@/lib/plugin/error-bus"
+import {
+  dispatchPluginError,
+  PLUGIN_ENABLE_FAILED_EVENT,
+  type PluginEnableFailedEventDetail,
+} from "@/lib/plugin/error-bus"
+import { PluginDisposableScope } from "./disposable-scope"
 
 async function invokePluginRuntime<T = unknown>(
   command: string,
@@ -352,6 +357,12 @@ export interface PythonRuntimeInfo {
 /** Python plugin information */
 export interface PythonPluginInfo {
   plugin_id: string
+  sdk_version: string
+  protocol_version: string
+  contract_version: string
+  runtime_id: string
+  capabilities: string[]
+  legacy_adapter: boolean
   tool_count: number
   hook_count: number
 }
@@ -439,16 +450,6 @@ export class PluginFrontendTrustError extends Error {
 }
 
 /**
- * Window CustomEvent name fired when `enablePlugin` rolls back after a
- * failure. The detail carries the pluginId + a short error string so a
- * React component near the app root can translate + render a toast
- * (decoupling the manager from i18n at the .ts boundary). Mirrors the
- * established pattern used by `plugin:consent-request` /
- * `plugin:updates-available` / `plugin:hot-reload-notification`.
- */
-export const PLUGIN_ENABLE_FAILED_EVENT = "plugin:enable-failed"
-
-/**
  * Hooks that intercept the user↔model conversation (prompts, tool calls,
  * tool results). Declaring ANY of these requires the high-risk
  * `hooks:chat-intercept` manifest permission — enforced in
@@ -461,16 +462,6 @@ export const CHAT_INTERCEPT_HOOKS = [
   "onMessageSend",
   "onMessageReceive",
 ] as const
-
-export interface PluginEnableFailedEventDetail {
-  pluginId: string
-  /** Best-effort plugin display name (falls back to pluginId). */
-  pluginName: string
-  /** Short error message — the toast UI may wrap or truncate. */
-  errorMessage: string
-  /** Reason string passed to enablePlugin (e.g. "manual" / "startup"). */
-  reason: string
-}
 
 // =============================================================================
 // Plugin Manager Singleton + Factory (PR-E)
@@ -578,6 +569,7 @@ export class PluginManager {
   private a2uiBridge: PluginA2UIBridge | null = null
   private themesBridge: PluginThemesBridge | null = null
   private contexts: Map<string, FullPluginContext> = new Map()
+  private disposableScopes: Map<string, PluginDisposableScope> = new Map()
   private registeredSlashCommandsByPlugin: Map<string, string[]> = new Map()
   private activationInFlight: Set<string> = new Set()
   /**
@@ -614,6 +606,8 @@ export class PluginManager {
     return run
   }
   private warnedActivationEvents: Set<string> = new Set()
+  private activationSpecCache = new WeakMap<PluginManifest, ParsedActivationSpec>()
+  private activationPatternCache = new Map<string, RegExp>()
   private idleSweepTimer: ReturnType<typeof setInterval> | null = null
   /** Guards against overlapping idle sweeps — one slow suspend must not let the
    * next interval tick start a second concurrent sweep on the same plugins. */
@@ -641,6 +635,14 @@ export class PluginManager {
       cogniaVersion: config.hostVersion || "0.1.0",
       nodeVersion: typeof process !== "undefined" ? process.versions?.node : undefined,
     }
+  }
+
+  getPluginDisposableScope(pluginId: string): PluginDisposableScope {
+    const existing = this.disposableScopes.get(pluginId)
+    if (existing) return existing
+    const scope = new PluginDisposableScope(pluginId)
+    this.disposableScopes.set(pluginId, scope)
+    return scope
   }
 
   private ensureA2UIBridge(): PluginA2UIBridge {
@@ -3208,6 +3210,8 @@ export class PluginManager {
   }
 
   private parseActivationSpec(manifest: PluginManifest): ParsedActivationSpec {
+    const cached = this.activationSpecCache.get(manifest)
+    if (cached) return cached
     const rawEvents = [
       ...(manifest.activationEvents || []),
       ...(manifest.extensions ?? []).map((extension) => `onView:${extension.point}` as const),
@@ -3267,7 +3271,7 @@ export class PluginManager {
       }
     }
 
-    return {
+    const parsed = {
       startup,
       commandEvents,
       toolEvents,
@@ -3275,6 +3279,8 @@ export class PluginManager {
       uriActivation,
       rawEvents,
     }
+    this.activationSpecCache.set(manifest, parsed)
+    return parsed
   }
 
   private shouldActivateOnStartup(manifest: PluginManifest): boolean {
@@ -3294,9 +3300,14 @@ export class PluginManager {
       return normalizedPattern === normalizedValue
     }
 
-    const escaped = normalizedPattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    const wildcardPattern = escaped.replace(/\\\*/g, ".*")
-    return new RegExp(`^${wildcardPattern}$`).test(normalizedValue)
+    let compiled = this.activationPatternCache.get(normalizedPattern)
+    if (!compiled) {
+      const escaped = normalizedPattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      const wildcardPattern = escaped.replace(/\\\*/g, ".*")
+      compiled = new RegExp(`^${wildcardPattern}$`)
+      this.activationPatternCache.set(normalizedPattern, compiled)
+    }
+    return compiled.test(normalizedValue)
   }
 
   private shouldActivateForEvent(
@@ -4238,6 +4249,23 @@ export class PluginManager {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 
+    const scope = this.disposableScopes.get(pluginId)
+    if (scope) {
+      const report = await scope.dispose()
+      this.disposableScopes.delete(pluginId)
+      if (report.failures.length > 0) {
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "manager.unregisterPluginContributions.disposableScope",
+            message: `Failed to dispose ${report.failures.length} plugin registration(s).`,
+            expected: false,
+          },
+          report.failures[0].error
+        )
+      }
+    }
+
     if (!plugin) return
 
     this.a2uiBridge?.unregisterPluginComponents(pluginId)
@@ -4806,7 +4834,13 @@ export class PluginManager {
    * Get Python plugin info (tool/hook counts)
    */
   async getPythonPluginInfo(pluginId: string): Promise<PythonPluginInfo | null> {
-    return invokePluginRuntime<PythonPluginInfo | null>("plugin_python_get_info", { pluginId })
+    const info = await invokePluginRuntime<Record<string, unknown> | null>(
+      "plugin_python_get_info",
+      { pluginId }
+    )
+    if (!info) return null
+    const { normalizePluginRuntimeHandshake } = await import("./transport")
+    return normalizePluginRuntimeHandshake(info, "python") as unknown as PythonPluginInfo
   }
 
   /**
@@ -4866,6 +4900,7 @@ export class PluginManager {
    */
   setPluginPointGovernanceMode(mode: PluginPointGovernanceMode): void {
     this.pluginPointGovernanceMode = mode
+    this.activationSpecCache = new WeakMap()
   }
 
   private validateHookDeclarations(pluginId: string, hooks: PluginHooks): void {
