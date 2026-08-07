@@ -113,6 +113,16 @@ mod tests {
         assert_eq!(parse_event("PostToolUse"), Some(HookEvent::PostToolUse));
         assert_eq!(parse_event("Stop"), Some(HookEvent::Stop));
         assert_eq!(parse_event("SessionStart"), Some(HookEvent::SessionStart));
+        assert_eq!(parse_event("Setup"), Some(HookEvent::Setup));
+        assert_eq!(parse_event("SubagentStart"), Some(HookEvent::SubagentStart));
+        assert_eq!(
+            parse_event("DirectoryAdded"),
+            Some(HookEvent::DirectoryAdded)
+        );
+        assert_eq!(
+            parse_event("MessageDisplay"),
+            Some(HookEvent::MessageDisplay)
+        );
         assert_eq!(parse_event("nope"), None);
     }
 

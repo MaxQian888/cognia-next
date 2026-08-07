@@ -50,7 +50,7 @@ describe("HookHandlerForm", () => {
     expect((screen.getByTestId("handler-command") as HTMLTextAreaElement).value).toBe("echo hi")
   })
 
-  it("switching type from command to webhook resets fields to webhook defaults", () => {
+  it("switching type from command to http resets fields to HTTP defaults", () => {
     const onChange = jest.fn()
     render(
       <HookHandlerForm
@@ -65,10 +65,10 @@ describe("HookHandlerForm", () => {
       .closest("div")!
       .querySelector("button")!
     fireEvent.click(hiddenSelect)
-    // Radix select renders options to a portal; click the webhook option.
-    fireEvent.click(screen.getByText("typeWebhook"))
+    // Radix select renders options to a portal; click the canonical HTTP option.
+    fireEvent.click(screen.getByText("typeHttp"))
     expect(onChange).toHaveBeenCalledWith({
-      type: "webhook",
+      type: "http",
       url: "",
       headers: {},
       timeout: undefined,
@@ -241,7 +241,7 @@ describe("HookHandlerForm", () => {
     expect(screen.getByText("headersEmpty")).toBeInTheDocument()
   })
 
-  it("shows the webhook-unsupported note only for webhook handlers", () => {
+  it("shows the HTTP capability note only for outbound HTTP handlers", () => {
     const { rerender } = render(
       <HookHandlerForm
         value={{ type: "command", command: "echo hi" }}
@@ -249,7 +249,7 @@ describe("HookHandlerForm", () => {
         onRemove={() => undefined}
       />
     )
-    expect(screen.queryByTestId("handler-webhook-unsupported")).toBeNull()
+    expect(screen.queryByTestId("handler-http-capability")).toBeNull()
 
     rerender(
       <HookHandlerForm
@@ -258,7 +258,16 @@ describe("HookHandlerForm", () => {
         onRemove={() => undefined}
       />
     )
-    expect(screen.getByTestId("handler-webhook-unsupported")).toBeInTheDocument()
+    expect(screen.getByTestId("handler-http-capability")).toBeInTheDocument()
+
+    rerender(
+      <HookHandlerForm
+        value={{ type: "http", url: "https://x.test" }}
+        onChange={() => undefined}
+        onRemove={() => undefined}
+      />
+    )
+    expect(screen.getByTestId("handler-http-capability")).toBeInTheDocument()
   })
 
   it("surfaces an inline error for an empty command", () => {
@@ -305,6 +314,7 @@ describe("validateHandler", () => {
   it("accepts a valid http(s) webhook URL", () => {
     expect(validateHandler({ type: "webhook", url: "https://example.com/hook" })).toBeNull()
     expect(validateHandler({ type: "webhook", url: "http://localhost:3000/x" })).toBeNull()
+    expect(validateHandler({ type: "http", url: "https://example.com/hook" })).toBeNull()
   })
 
   it("rejects an empty URL", () => {

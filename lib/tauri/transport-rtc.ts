@@ -31,11 +31,13 @@
 import { SignalingClient } from "@/lib/signaling/client"
 import type { RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
 import {
+  decodeRtcBinaryResourceChunk,
   encodeRtcChunkAck,
   encodeRtcChunkCancel,
   encodeRtcLogicalMessage,
   RtcChunkReassembler,
 } from "@/lib/tauri/datachannel-framing"
+import type { TransportBinaryResource, TransportBinaryResponse } from "@/lib/tauri/transport-types"
 import { remoteEventResyncCoordinator } from "@/lib/tauri/resync-coordinator"
 import {
   DATACHANNEL_LABEL,
@@ -210,10 +212,23 @@ type Pending = {
   timer: ReturnType<typeof setTimeout> | null
 }
 
+type PendingBinary = {
+  resolve: (value: TransportBinaryResponse) => void
+  reject: (err: Error) => void
+  timer: ReturnType<typeof setTimeout> | null
+  mediaType?: string
+  totalBytes?: number
+  totalChunks?: number
+  receivedBytes: number
+  chunks: Map<number, Uint8Array>
+}
+
 type EventHandler = (payload: unknown) => void
 
 const RPC_TIMEOUT_MS = 30_000
 const MAX_CONCURRENT_RPCS = 32
+const MAX_CONCURRENT_BINARY_RESOURCES = 8
+const MAX_BINARY_RESOURCE_BYTES = 10 * 1024 * 1024
 const BUFFERED_AMOUNT_HIGH_WATER = 1024 * 1024
 const BUFFERED_AMOUNT_LOW_WATER = 256 * 1024
 const MAX_PENDING_REMOTE_ICE = 256
@@ -261,6 +276,7 @@ export class TransportRtc {
   private negotiationSettled = false
   private nextRpcId = 1
   private pending: Map<string, Pending> = new Map()
+  private pendingBinary: Map<string, PendingBinary> = new Map()
   private readonly reassembler = new RtcChunkReassembler()
   private channels: Map<string, Set<EventHandler>> = new Map()
   private highestSeq: Map<string, number> = new Map()
@@ -647,6 +663,35 @@ export class TransportRtc {
     })
   }
 
+  /** Read one authenticated transcript media resource over raw binary frames. */
+  readBinary(resource: TransportBinaryResource): Promise<TransportBinaryResponse> {
+    if (this.state !== "open" || !this.dc || this.dc.readyState !== "open") {
+      return Promise.reject(new Error("TransportRtc: DataChannel is not open"))
+    }
+    if (this.pendingBinary.size >= MAX_CONCURRENT_BINARY_RESOURCES) {
+      return Promise.reject(new Error("TransportRtc: too many concurrent binary resources"))
+    }
+    const id = crypto.randomUUID()
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingBinary.delete(id)
+        reject(new Error("TransportRtc: binary resource timed out"))
+      }, RPC_TIMEOUT_MS)
+      this.pendingBinary.set(id, {
+        resolve,
+        reject,
+        timer,
+        receivedBytes: 0,
+        chunks: new Map(),
+      })
+      void this.sendLogicalMessage(
+        JSON.stringify({ kind: "binary-resource", id, protocolVersion: 2, resource })
+      ).catch((error) => {
+        this.rejectPendingBinary(id, error)
+      })
+    })
+  }
+
   /** Subscribe to an event channel sent over the data channel. */
   subscribe<T = unknown>(event: string, handler: (payload: T) => void): () => void {
     if (!this.channels.has(event)) {
@@ -925,6 +970,7 @@ export class TransportRtc {
 
   private attachDataChannel(dc: RTCDataChannel): void {
     this.dc = dc
+    dc.binaryType = "arraybuffer"
     dc.bufferedAmountLowThreshold = BUFFERED_AMOUNT_LOW_WATER
     dc.onopen = () => {
       dc.send(JSON.stringify({ kind: "event-resume", since: this.eventCursor }))
@@ -948,7 +994,13 @@ export class TransportRtc {
       }
     }
     dc.onmessage = (event: MessageEvent) => {
-      this.handleDataChannelMessage(String(event.data))
+      if (typeof event.data === "string") {
+        this.handleDataChannelMessage(event.data)
+      } else if (event.data instanceof ArrayBuffer) {
+        this.handleBinaryDataChannelMessage(event.data)
+      } else if (event.data instanceof Blob) {
+        void event.data.arrayBuffer().then((data) => this.handleBinaryDataChannelMessage(data))
+      }
     }
   }
 
@@ -1009,6 +1061,11 @@ export class TransportRtc {
       p.reject(new Error("TransportRtc: connection reset"))
     }
     this.pending.clear()
+    for (const pending of this.pendingBinary.values()) {
+      if (pending.timer) clearTimeout(pending.timer)
+      pending.reject(new Error("TransportRtc: connection reset"))
+    }
+    this.pendingBinary.clear()
     if (this.dc) {
       try {
         this.dc.close()
@@ -1198,6 +1255,34 @@ export class TransportRtc {
     }
     if (!frame || typeof frame !== "object") return
 
+    if ("kind" in frame && (frame as { kind: string }).kind === "binary-resource-start") {
+      const start = frame as {
+        id?: unknown
+        mediaType?: unknown
+        totalBytes?: unknown
+        totalChunks?: unknown
+      }
+      if (typeof start.id !== "string") return
+      const pending = this.pendingBinary.get(start.id)
+      if (!pending) return
+      if (
+        typeof start.mediaType !== "string" ||
+        !Number.isSafeInteger(start.totalBytes) ||
+        (start.totalBytes as number) < 0 ||
+        (start.totalBytes as number) > MAX_BINARY_RESOURCE_BYTES ||
+        !Number.isSafeInteger(start.totalChunks) ||
+        (start.totalChunks as number) < 1 ||
+        (start.totalChunks as number) > 512
+      ) {
+        this.rejectPendingBinary(start.id, new Error("invalid binary resource metadata"))
+        return
+      }
+      pending.mediaType = start.mediaType
+      pending.totalBytes = start.totalBytes as number
+      pending.totalChunks = start.totalChunks as number
+      return
+    }
+
     if ("kind" in frame && (frame as { kind: string }).kind === "resync_required") {
       const notice = frame as {
         kind: "resync_required"
@@ -1224,6 +1309,18 @@ export class TransportRtc {
 
     if ("id" in frame && typeof (frame as { id: unknown }).id === "string") {
       const resp = frame as RtcResponse
+      const binary = this.pendingBinary.get(resp.id)
+      if (binary) {
+        if (resp.ok) {
+          this.rejectPendingBinary(resp.id, new Error("unexpected binary resource response"))
+        } else {
+          this.rejectPendingBinary(
+            resp.id,
+            Object.assign(new Error(resp.error.message), { code: resp.error.code })
+          )
+        }
+        return
+      }
       const pending = this.pending.get(resp.id)
       if (!pending) return
       this.pending.delete(resp.id)
@@ -1231,6 +1328,56 @@ export class TransportRtc {
       if (resp.ok) pending.resolve(resp.result)
       else pending.reject(Object.assign(new Error(resp.error.message), { code: resp.error.code }))
     }
+  }
+
+  private handleBinaryDataChannelMessage(data: ArrayBuffer): void {
+    let chunk: ReturnType<typeof decodeRtcBinaryResourceChunk>
+    try {
+      chunk = decodeRtcBinaryResourceChunk(data)
+    } catch {
+      return
+    }
+    const pending = this.pendingBinary.get(chunk.requestId)
+    if (!pending || pending.totalBytes === undefined || pending.totalChunks === undefined) return
+    if (chunk.totalChunks !== pending.totalChunks) {
+      this.rejectPendingBinary(chunk.requestId, new Error("binary resource chunk count mismatch"))
+      return
+    }
+    if (pending.chunks.has(chunk.index)) return
+    pending.receivedBytes += chunk.bytes.byteLength
+    if (pending.receivedBytes > pending.totalBytes) {
+      this.rejectPendingBinary(chunk.requestId, new Error("binary resource length mismatch"))
+      return
+    }
+    pending.chunks.set(chunk.index, chunk.bytes)
+    if (pending.chunks.size !== pending.totalChunks) return
+
+    const bytes = new Uint8Array(pending.totalBytes)
+    let offset = 0
+    for (let index = 0; index < pending.totalChunks; index += 1) {
+      const part = pending.chunks.get(index)
+      if (!part || offset + part.byteLength > bytes.byteLength) {
+        this.rejectPendingBinary(chunk.requestId, new Error("binary resource length mismatch"))
+        return
+      }
+      bytes.set(part, offset)
+      offset += part.byteLength
+    }
+    if (offset !== bytes.byteLength || !pending.mediaType) {
+      this.rejectPendingBinary(chunk.requestId, new Error("binary resource length mismatch"))
+      return
+    }
+    this.pendingBinary.delete(chunk.requestId)
+    if (pending.timer) clearTimeout(pending.timer)
+    pending.resolve({ bytes, mediaType: pending.mediaType })
+  }
+
+  private rejectPendingBinary(requestId: string, error: unknown): void {
+    const pending = this.pendingBinary.get(requestId)
+    if (!pending) return
+    this.pendingBinary.delete(requestId)
+    if (pending.timer) clearTimeout(pending.timer)
+    pending.reject(error instanceof Error ? error : new Error(String(error)))
   }
 
   private startAuthoritativeResync(notice: { domains?: string[]; cursor?: number }): void {

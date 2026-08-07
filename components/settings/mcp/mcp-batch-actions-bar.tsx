@@ -62,8 +62,8 @@ export function McpBatchActionsBar({ servers }: Props) {
   }
 
   const handleSync = async () => {
-    // Collect the union of agents the selected servers project to, then fire
-    // one scheduled sync per agent (reusing the debounced sync orchestrator).
+    // Collect the union of agents the selected servers project to, then
+    // persist one coalesced coordinator request for the affected agents.
     const agents = new Set<AgentId>()
     for (const s of selected) {
       for (const [agentId, on] of Object.entries(s.appsEnabled ?? {})) {
@@ -72,8 +72,8 @@ export function McpBatchActionsBar({ servers }: Props) {
     }
     if (agents.size > 0) {
       try {
-        const { scheduleSync } = await import("@/lib/claude/sync")
-        for (const id of agents) scheduleSync(id)
+        const { requestMcpSync } = await import("@/lib/mcp/sync-coordinator")
+        await requestMcpSync(agents)
       } catch (err) {
         loggers.mcp.error("batch sync failed", err)
       }

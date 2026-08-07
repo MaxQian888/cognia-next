@@ -1,19 +1,9 @@
-// Hook dispatcher — loads hook config from the merged Claude Code settings
-// and runs handlers that match an event + tool. Phase 1 wires:
-//   - `UserPromptSubmit`: invoked by `claude::commands::claude_send` BEFORE
-//     forwarding the prompt to the sidecar. A blocking hook causes the
-//     command to return Err with the hook's reason; non-blocking hooks may
-//     contribute additional context that the caller prepends to the prompt.
-//   - `PreToolUse`: invoked from inside `claude::sidecar`'s stdout reader
-//     when a `permission_request` event arrives. A blocking hook short-
-//     circuits the user-approval round-trip with an automatic deny.
-//
-// Project- and local-scope hooks are loaded only when the workspace has been
-// trusted (Phase 2 ships the trust UI); for now we read the user-scope file
-// only, which lives at `~/.claude/settings.json`.
+// Host-native compatibility hook dispatcher. The built-in Claude Agent SDK
+// rail executes settings hooks inside the Node sidecar so every event has one
+// owner and SDK input/output semantics are preserved. Rust remains the shared
+// executor for external-agent adapters and direct compatibility commands.
 
 pub mod builtin;
-pub mod classify;
 pub mod command;
 pub mod commands;
 pub mod trust;
@@ -23,7 +13,6 @@ pub mod webhook;
 use regex::Regex;
 use serde_json::{json, Value};
 
-pub use classify::{classify_sidecar_message, extract_tool_results, extract_tool_uses};
 pub use types::{HookDecision, HookEvent, HookEventPayload, HookGroup, HookHandler, HookOutcome};
 
 use crate::settings::{ClaudeSettings, EffectiveSettings};
@@ -122,6 +111,11 @@ async fn run_handler(handler: HookHandler, payload_json: &str) -> HookOutcome {
             command::run_command_handler(&command, timeout, payload_json).await
         }
         HookHandler::Webhook {
+            url,
+            headers,
+            timeout,
+        }
+        | HookHandler::Http {
             url,
             headers,
             timeout,

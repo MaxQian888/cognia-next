@@ -22,8 +22,10 @@ jest.mock("@/lib/db/mcp-servers", () => ({
   deleteMcpServer: (...a: unknown[]) => deleteMcpServer(...a),
 }))
 
-const scheduleSync = jest.fn()
-jest.mock("@/lib/claude/sync", () => ({ scheduleSync: (...a: unknown[]) => scheduleSync(...a) }))
+const requestMcpSync = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/mcp/sync-coordinator", () => ({
+  requestMcpSync: (...a: unknown[]) => requestMcpSync(...a),
+}))
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { toast } from "sonner"
@@ -57,7 +59,7 @@ const servers: McpServer[] = [
 beforeEach(() => {
   updateMcpServer.mockClear()
   deleteMcpServer.mockClear()
-  scheduleSync.mockClear()
+  requestMcpSync.mockClear()
   ;(toast.success as jest.Mock).mockClear()
   useMcpPanelStore.setState({ selection: new Set(["a", "b"]) })
 })
@@ -91,6 +93,7 @@ describe("McpBatchActionsBar", () => {
   it("re-syncs the union of projected agents", async () => {
     render(<McpBatchActionsBar servers={servers} />)
     fireEvent.click(screen.getByText("sync"))
-    await waitFor(() => expect(scheduleSync).toHaveBeenCalledWith("claude-code"))
+    await waitFor(() => expect(requestMcpSync).toHaveBeenCalledTimes(1))
+    expect([...requestMcpSync.mock.calls[0][0]]).toEqual(["claude-code"])
   })
 })

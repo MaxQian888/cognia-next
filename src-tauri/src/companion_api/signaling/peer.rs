@@ -255,6 +255,48 @@ impl PeerSession {
         Ok(())
     }
 
+    /// Send a media resource as raw bounded DataChannel frames. Metadata is
+    /// announced separately by the dispatcher; these frames contain only the
+    /// request id, ordering fields, and the original bytes.
+    pub async fn send_binary_resource(
+        &self,
+        request_id: &str,
+        bytes: &[u8],
+    ) -> Result<(), PeerSendError> {
+        let dc = self.dc.read().await;
+        let channel = dc.as_ref().ok_or(PeerSendError::ChannelClosed)?;
+        let chunk_bytes = super::datachannel_framing::BINARY_RESOURCE_CHUNK_BYTES;
+        let total_chunks = bytes.len().max(1).div_ceil(chunk_bytes) as u32;
+        if bytes.is_empty() {
+            let frame = super::datachannel_framing::encode_binary_resource_chunk(
+                request_id,
+                0,
+                total_chunks,
+                &[],
+            )
+            .map_err(|error| PeerSendError::Webrtc(error.to_string()))?;
+            channel
+                .send(&Bytes::from(frame))
+                .await
+                .map_err(|error| PeerSendError::Webrtc(error.to_string()))?;
+            return Ok(());
+        }
+        for (index, payload) in bytes.chunks(chunk_bytes).enumerate() {
+            let frame = super::datachannel_framing::encode_binary_resource_chunk(
+                request_id,
+                index as u32,
+                total_chunks,
+                payload,
+            )
+            .map_err(|error| PeerSendError::Webrtc(error.to_string()))?;
+            channel
+                .send(&Bytes::from(frame))
+                .await
+                .map_err(|error| PeerSendError::Webrtc(error.to_string()))?;
+        }
+        Ok(())
+    }
+
     /// Wait until the data channel transitions to the `open` state. Returns
     /// `Err` if the channel never opens (e.g., negotiation failed and the
     /// peer connection was torn down before the open event fired).

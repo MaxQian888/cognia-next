@@ -24,6 +24,7 @@ import {
   setPetClickThrough,
   setPetWindowPosition,
   getPetWindowPosition,
+  getPetCursorPosition,
   getPetWorkArea,
   getPetSurfaces,
   isPetWindowOpen,
@@ -89,6 +90,12 @@ describe("lib/tauri/pet-window — happy path command mapping", () => {
     mockInvoke.mockResolvedValue({ x: 5, y: 6 })
     await expect(getPetWindowPosition()).resolves.toEqual({ x: 5, y: 6 })
     expect(mockInvoke).toHaveBeenCalledWith("pet_window_get_position")
+  })
+
+  it("getPetCursorPosition invokes the least-privilege cursor command", async () => {
+    mockInvoke.mockResolvedValue({ x: 320, y: 180 })
+    await expect(getPetCursorPosition()).resolves.toEqual({ x: 320, y: 180 })
+    expect(mockInvoke).toHaveBeenCalledWith("pet_window_get_cursor_position")
   })
 
   it("getPetWorkArea returns the work-area DTO", async () => {
@@ -189,6 +196,7 @@ describe("lib/tauri/pet-window — off Tauri", () => {
     await expect(setPetClickThrough(true)).resolves.toBe(false)
     await expect(setPetWindowPosition(1, 1)).resolves.toBe(false)
     await expect(getPetWindowPosition()).resolves.toBeNull()
+    await expect(getPetCursorPosition()).resolves.toBeNull()
     await expect(getPetWorkArea()).resolves.toBeNull()
     await expect(getPetSurfaces()).resolves.toEqual([])
     await expect(isPetWindowOpen()).resolves.toBe(false)

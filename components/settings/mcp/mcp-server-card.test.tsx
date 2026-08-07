@@ -14,8 +14,10 @@ jest.mock("../mcp-agent-chip-group", () => ({
   McpAgentChipGroup: () => <div data-testid="chip-group" />,
 }))
 
-const testMcpServer = jest.fn()
-jest.mock("@/lib/claude/ipc", () => ({ testMcpServer: (...a: unknown[]) => testMcpServer(...a) }))
+const discoverMcpServerViaSidecar = jest.fn()
+jest.mock("@/lib/claude/feature-call", () => ({
+  discoverMcpServerViaSidecar: (...a: unknown[]) => discoverMcpServerViaSidecar(...a),
+}))
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
@@ -55,7 +57,7 @@ const handlers = {
 beforeEach(() => {
   mockIsTauri.mockReturnValue(false)
   for (const fn of Object.values(handlers)) fn.mockReset()
-  testMcpServer.mockReset()
+  discoverMcpServerViaSidecar.mockReset()
   ;(toast.success as jest.Mock).mockReset()
   ;(toast.error as jest.Mock).mockReset()
 })
@@ -101,7 +103,7 @@ describe("McpServerCard", () => {
 
   it("runs a successful test in Tauri and shows the tool count badge", async () => {
     mockIsTauri.mockReturnValue(true)
-    testMcpServer.mockResolvedValue({
+    discoverMcpServerViaSidecar.mockResolvedValue({
       ok: true,
       toolCount: 3,
       tools: [{ name: "a" }],
@@ -109,14 +111,14 @@ describe("McpServerCard", () => {
     })
     render(<McpServerCard server={server} selected={false} favorite={false} {...handlers} />)
     fireEvent.click(screen.getByLabelText('test:{"name":"github"}'))
-    await waitFor(() => expect(testMcpServer).toHaveBeenCalled())
+    await waitFor(() => expect(discoverMcpServerViaSidecar).toHaveBeenCalledWith(server))
     await waitFor(() => expect(screen.getByText('toolsOther:{"count":3}')).toBeInTheDocument())
     expect(toast.success).toHaveBeenCalled()
   })
 
   it("shows the failed badge and an error toast when a test fails", async () => {
     mockIsTauri.mockReturnValue(true)
-    testMcpServer.mockResolvedValue({
+    discoverMcpServerViaSidecar.mockResolvedValue({
       ok: false,
       toolCount: 0,
       tools: [],

@@ -229,6 +229,42 @@ pub fn companion_message_response(
     Ok(())
 }
 
+/// Resolve a pending session-media read with a raw IPC body. Metadata travels
+/// in bounded headers so image bytes never expand through JSON/base64.
+#[tauri::command]
+pub fn companion_media_response(
+    request: tauri::ipc::Request<'_>,
+    state: State<'_, CompanionServerState>,
+) -> Result<(), String> {
+    const MAX_MEDIA_BYTES: usize = 10 * 1024 * 1024;
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+    };
+    let request_id = header("x-cognia-request-id")
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+        .ok_or_else(|| "missing media request id".to_string())?;
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) if bytes.len() <= MAX_MEDIA_BYTES => bytes.clone(),
+        tauri::ipc::InvokeBody::Raw(_) => return Err("media response too large".to_string()),
+        _ => return Err("media response must use a raw invoke body".to_string()),
+    };
+    state
+        .desktop_messages_bridge
+        .resolve_media(desktop_messages_bridge::MediaBridgeResponse {
+            request_id,
+            bytes,
+            media_type: header("content-type")
+                .unwrap_or_else(|| "application/octet-stream".to_string()),
+            etag: header("etag"),
+            error: header("x-cognia-error"),
+        });
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Desktop-write bridge response command (Wave 2)
 // ---------------------------------------------------------------------------
@@ -456,6 +492,9 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     register_tauri_event(app, Arc::clone(&bus), "claude://message-added");
     register_tauri_event(app, Arc::clone(&bus), "claude://message-updated");
     register_tauri_event(app, Arc::clone(&bus), "claude://message-deleted");
+    // Transcript V1 invalidation contains only session identity + monotonic
+    // revision. Clients reconcile the bounded newest page on receipt.
+    register_tauri_event(app, Arc::clone(&bus), "transcript://revision");
     // Remote Session Control — /goal lifecycle status so a remote watcher
     // sees pause / resume / stop / completion transitions live.
     register_tauri_event(app, Arc::clone(&bus), "goal://status");

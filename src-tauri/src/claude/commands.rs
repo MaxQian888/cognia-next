@@ -6,7 +6,7 @@ use tauri::{AppHandle, State};
 use tracing::Instrument as _;
 
 use super::host::{SidecarHost, TauriSidecarHost};
-use super::sidecar::{emit_hook_fire, spawn as spawn_sidecar, SidecarState};
+use super::sidecar::{spawn as spawn_sidecar, SidecarState};
 use crate::hooks;
 
 /// Options the frontend can pass per-send. Mirrors a subset of the SDK's
@@ -426,67 +426,26 @@ pub async fn claude_send_with_host(
         None => Value::Object(Default::default()),
     };
 
-    // ---- UserPromptSubmit hooks ---------------------------------------------
-    // Run before the prompt reaches the SDK so a hook can short-circuit the
-    // turn entirely. The hook receives the raw prompt + cwd; if it blocks, we
-    // surface the reason as the IPC error. AdditionalContext is appended via
-    // an `appendSystemPrompt`-style merge — it lands in front of the user
-    // message rather than the system prompt because that matches the CLI's
-    // documented semantics for UserPromptSubmit.
+    // Resolve trusted settings once and inject them into the SDK-native hook
+    // pipeline. The SDK owns every built-in lifecycle event, including
+    // UserPromptSubmit. Running that event here as well would execute each
+    // configured handler twice because `buildAgentHooks` registers all SDK
+    // lifecycle events.
     let cwd = opts_value
         .get("cwd")
         .and_then(|v| v.as_str())
         .map(String::from);
     // Remember the send-time cwd so the sidecar's lifecycle-hook observer can
     // resolve project/local-scope settings for this session's later events.
-    state.register_session_cwd(&session_id, cwd.clone()).await;
-    let prompt_text = extract_prompt_text(&prompt);
     // Project/local hooks load only for a trusted cwd; untrusted → user scope.
     let trusted_cwd = hooks::trust::resolve_trusted_cwd(cwd.as_deref());
     let settings = hooks::load_effective_settings(trusted_cwd.as_deref());
 
-    // Convergence (ADR-0040 follow-up): hand the trusted, merged settings.json
-    // hooks to the sidecar so it runs tool-scoped hooks (PreToolUse / PostToolUse
-    // / PostToolUseFailure) as SDK-native `options.hooks` — where `updatedInput`
-    // / `updatedToolOutput` and blocking work in-process. Injected HERE, HOST-side,
-    // AFTER the trust gate, so a compromised renderer cannot smuggle untrusted
-    // project hooks in via `options`. Session-scoped events (UserPromptSubmit
-    // below, and the observational lifecycle hooks) stay HOST-run in this phase;
-    // the sidecar's `buildAgentHooks` only registers the tool-scoped events, so
-    // passing the full config causes no double-firing.
+    // Injected host-side after the trust gate, so a compromised renderer cannot
+    // smuggle untrusted project hooks through `options`.
     if let Some(hooks_value) = settings.merged.hooks.clone() {
         if let Value::Object(map) = &mut opts_value {
             map.insert("hooks".to_string(), hooks_value);
-        }
-    }
-
-    let mut prompt = prompt;
-    if !prompt_text.is_empty() {
-        let decision = hooks::run_user_prompt_submit(
-            &settings,
-            &session_id,
-            trusted_cwd.as_deref(),
-            &prompt_text,
-        )
-        .await;
-        // Surface a consequential UserPromptSubmit fire as a hook row before the
-        // decision fields are consumed below (block short-circuits the turn,
-        // additional_context is folded into the prompt).
-        emit_hook_fire(
-            host.as_ref(),
-            &session_id,
-            &hooks::hook_event_name(hooks::HookEvent::UserPromptSubmit),
-            None,
-            &decision,
-        );
-        if let Some(reason) = decision.block {
-            return Err(format!("hook blocked: {reason}"));
-        }
-        if let Some(extra) = decision.additional_context {
-            prompt = prepend_context_to_prompt(&prompt, &extra);
-        }
-        for w in decision.warnings {
-            log::warn!("UserPromptSubmit: {w}");
         }
     }
 
@@ -497,49 +456,6 @@ pub async fn claude_send_with_host(
       "options": opts_value,
     });
     state.write_command(&msg).await
-}
-
-/// Extract a flat text representation of `prompt` for hook payloads. Strings
-/// pass through; arrays of content blocks are joined on the `text` blocks.
-fn extract_prompt_text(prompt: &Value) -> String {
-    if let Some(s) = prompt.as_str() {
-        return s.to_string();
-    }
-    if let Some(arr) = prompt.as_array() {
-        let mut buf = String::new();
-        for block in arr {
-            if block.get("type").and_then(|v| v.as_str()) == Some("text") {
-                if let Some(t) = block.get("text").and_then(|v| v.as_str()) {
-                    if !buf.is_empty() {
-                        buf.push('\n');
-                    }
-                    buf.push_str(t);
-                }
-            }
-        }
-        return buf;
-    }
-    String::new()
-}
-
-/// Prepend hook-supplied additional context to a prompt. For string prompts
-/// we wrap the context in an `<additional-context>` block so the model can
-/// treat it as a system-style insertion. For multimodal prompts we insert a
-/// new text block at index 0.
-fn prepend_context_to_prompt(prompt: &Value, extra: &str) -> Value {
-    let wrapped = format!("<additional-context>\n{}\n</additional-context>\n\n", extra);
-    if let Some(s) = prompt.as_str() {
-        return Value::String(format!("{wrapped}{s}"));
-    }
-    if let Some(arr) = prompt.as_array() {
-        let mut blocks: Vec<Value> = vec![json!({
-          "type": "text",
-          "text": wrapped.trim_end().to_string(),
-        })];
-        blocks.extend(arr.iter().cloned());
-        return Value::Array(blocks);
-    }
-    prompt.clone()
 }
 
 // ---------------------------------------------------------------------------
@@ -948,6 +864,7 @@ fn build_feature_call_payload(mut request: Value) -> Result<Value, String> {
             | "embedding"
             | "bedrock-discover"
             | "opencode-v2-discover"
+            | "mcp-discover"
     ) {
         return Err(format!("unsupported feature call operation: {operation}"));
     }
@@ -1704,6 +1621,11 @@ mod tests {
         assert!(build_feature_call_payload(json!({
             "requestId": "request-3",
             "operation": "opencode-v2-discover"
+        }))
+        .is_ok());
+        assert!(build_feature_call_payload(json!({
+            "requestId": "request-4",
+            "operation": "mcp-discover"
         }))
         .is_ok());
     }

@@ -18,6 +18,19 @@ jest.mock("@/stores/account/account-store", () => ({
   },
 }))
 
+jest.mock("@/lib/files/allowed-roots-sync", () => ({
+  registerDialogPathInRust: jest.fn(),
+}))
+
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: {
+    getState: () => ({
+      createProject: jest.fn(),
+      addSessionToProject: jest.fn(),
+    }),
+  },
+}))
+
 import {
   __resetInstalledForTests,
   installDesktopSyncSource,
@@ -43,6 +56,7 @@ describe("readDexieDelta", () => {
     await db.plugins.clear()
     await db.adapterInstances.clear()
     await db.mcpServers.clear()
+    await db.mcpServerSummaries.clear()
     await db.terminalHistory.clear()
     await db.conversationOverrides.clear()
     await db.settings.clear()
@@ -346,8 +360,7 @@ describe("readDexieDelta", () => {
       { id: "adapter-old", updatedAt: 4 } as never,
       { id: "adapter-new", updatedAt: 50 } as never,
     ])
-    await db.mcpServers.bulkPut([
-      { id: "mcp-missing" } as never,
+    await db.mcpServerSummaries.bulkPut([
       { id: "mcp-old", updatedAt: 6 } as never,
       { id: "mcp-new", updatedAt: 60 } as never,
     ])

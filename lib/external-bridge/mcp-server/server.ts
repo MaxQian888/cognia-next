@@ -2006,7 +2006,7 @@ async function runWithGate<T>(input: RunWithGateInput<T>): Promise<ToolEnvelope>
       scope: input.scope,
       check: { allowed: true },
       latencyMs: Date.now() - start,
-      errorMessage: message,
+      errorCode: "handler-error",
     })
     return {
       content: [{ type: "text", text: message }],

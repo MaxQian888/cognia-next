@@ -1,4 +1,4 @@
-//! Bridge WebSocket — `GET /ws/v1/bridge` (ADR-0059 W3, protocol v1).
+//! Bridge WebSocket — `GET /internal/bridge` (ADR-0059 W3, protocol v1).
 //!
 //! The headless Node brain connects here and becomes the data plane: the
 //! companion bridges (`sync_bridge`, `desktop_messages_bridge`,
@@ -336,7 +336,7 @@ pub fn resolve_bridge_transport(state: &SharedState) -> Result<Arc<dyn BridgeTra
 // Handler
 // ---------------------------------------------------------------------------
 
-/// Axum handler for `GET /ws/v1/bridge`.
+/// Axum handler for `GET /internal/bridge`.
 ///
 /// `require_device_jwt` has already verified the JWT (and enforced loopback
 /// for service scope); this handler additionally rejects non-service scopes —
@@ -729,9 +729,7 @@ mod tests {
     use serde_json::json;
     use std::net::SocketAddr;
     use tokio_tungstenite::tungstenite::{
-        client::IntoClientRequest,
-        http::{header::AUTHORIZATION, Request},
-        Message as WsMessage,
+        client::IntoClientRequest, http::Request, Message as WsMessage,
     };
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
@@ -763,7 +761,7 @@ mod tests {
     async fn serve_bridge(state: SharedState) -> SocketAddr {
         let router = axum::Router::new()
             .route(
-                "/ws/v1/bridge",
+                "/internal/bridge",
                 axum::routing::any(super::ws_bridge_handler),
             )
             .layer(axum::middleware::from_fn_with_state(
@@ -795,15 +793,9 @@ mod tests {
     >;
 
     fn authorized_request(addr: SocketAddr, token: &str) -> Request<()> {
-        let mut request = format!("ws://{addr}/ws/v1/bridge")
+        let request = format!("ws://{addr}/internal/bridge?token={token}")
             .into_client_request()
             .expect("valid bridge URL");
-        request.headers_mut().insert(
-            AUTHORIZATION,
-            format!("Bearer {token}")
-                .parse()
-                .expect("valid authorization header"),
-        );
         request
     }
 

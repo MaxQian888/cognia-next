@@ -1,17 +1,15 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::Mutex;
 
 use super::host::SidecarHost;
-use crate::hooks;
 use crate::supervision_backoff::CrashBackoff;
 
 /// Tauri event channel name. The frontend subscribes via
@@ -56,8 +54,8 @@ fn parse_node_major(version_output: &str) -> Option<u32> {
 pub struct SidecarState {
     inner: Arc<Mutex<Inner>>,
     /// The live child's stdin, kept behind its own lock — separate from
-    /// `inner` so a slow control-message write never blocks hook-state reads
-    /// (`is_ready`, `session_cwd`, `record_tool_uses`). Mirrors the owned-stdin
+    /// `inner` so a slow control-message write never blocks state reads
+    /// (`is_ready`). Mirrors the owned-stdin
     /// shape in `external_agent/process.rs`.
     stdin: Arc<Mutex<Option<ChildStdin>>>,
     /// Held for the entire `spawn` body so concurrent callers serialize: the
@@ -99,17 +97,6 @@ struct Inner {
     /// disable the sidecar and drop the app into safe mode after four ordinary
     /// "restart sidecar" clicks. Only unexpected deaths count.
     intentional_stop: bool,
-    /// Per-session hook context: the send-time cwd (for project/local scope
-    /// resolution) and the in-flight tool_use map used to correlate a
-    /// `tool_result` back to the tool name/input that produced it (PostToolUse).
-    sessions: HashMap<String, SessionHookCtx>,
-}
-
-#[derive(Default)]
-struct SessionHookCtx {
-    cwd: Option<String>,
-    /// tool_use_id → (tool_name, input), pending until the matching tool_result.
-    pending_tools: HashMap<String, (String, Value)>,
 }
 
 impl SidecarState {
@@ -231,7 +218,6 @@ impl SidecarState {
         let mut guard = self.inner.lock().await;
         guard.child = None;
         guard.ready = false;
-        guard.sessions.clear();
         guard.backoff.note_failure(now);
         !std::mem::take(&mut guard.intentional_stop)
     }
@@ -263,67 +249,6 @@ impl SidecarState {
     pub async fn managed_snapshot(&self) -> Option<(Option<u32>, bool)> {
         let guard = self.inner.lock().await;
         guard.child.as_ref().map(|c| (c.id(), guard.ready))
-    }
-
-    /// Record the send-time cwd for a session so the hook observer can resolve
-    /// project/local-scope settings (trust-gated). Called from `claude_send`.
-    pub async fn register_session_cwd(&self, session_id: &str, cwd: Option<String>) {
-        let mut guard = self.inner.lock().await;
-        guard
-            .sessions
-            .entry(session_id.to_string())
-            .or_default()
-            .cwd = cwd;
-    }
-
-    /// The send-time cwd for a session, if known.
-    async fn session_cwd(&self, session_id: &str) -> Option<String> {
-        self.inner
-            .lock()
-            .await
-            .sessions
-            .get(session_id)
-            .and_then(|s| s.cwd.clone())
-    }
-
-    /// Remember in-flight tool_use blocks so a later tool_result can resolve its
-    /// tool name + input for the PostToolUse payload. Called INLINE from the
-    /// sequential reader (not the spawned observer) so the assistant message is
-    /// always recorded before its tool_result task runs — otherwise concurrent
-    /// observer tasks could `take` before the `record` and drop the tool name.
-    async fn record_tool_uses_from_message(&self, value: &Value) {
-        let Some(evt) = value.get("event") else {
-            return;
-        };
-        let uses = hooks::extract_tool_uses(evt);
-        if uses.is_empty() {
-            return;
-        }
-        let session_id = value
-            .get("sessionId")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let mut guard = self.inner.lock().await;
-        let ctx = guard.sessions.entry(session_id).or_default();
-        for (id, name, input) in uses {
-            ctx.pending_tools.insert(id, (name, input));
-        }
-    }
-
-    /// Remove and return the `(tool_name, input)` recorded for `tool_use_id`.
-    async fn take_tool(&self, session_id: &str, tool_use_id: &str) -> Option<(String, Value)> {
-        self.inner
-            .lock()
-            .await
-            .sessions
-            .get_mut(session_id)
-            .and_then(|s| s.pending_tools.remove(tool_use_id))
-    }
-
-    /// Drop all per-session hook state when a session ends.
-    async fn clear_session(&self, session_id: &str) {
-        self.inner.lock().await.sessions.remove(session_id);
     }
 }
 
@@ -547,7 +472,7 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
                                     let host = Arc::clone(&host);
                                     let state = state.clone();
                                     tokio::spawn(async move {
-                                        handle_permission_request(host, state, value).await;
+                                        handle_permission_request(host, value).await;
                                     });
                                     continue;
                                 }
@@ -583,23 +508,10 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
                                     host.emit(AGENT_EVENT, &value);
                                     continue;
                                 }
-                                // Lifecycle hooks: observe the SDK event stream
-                                // and fire the matching settings.json hooks
-                                // (PostToolUse, Stop, SessionStart/End, …). Spawn
-                                // so the reader keeps draining; skip the
-                                // stream-event flood via the cheap predicate.
-                                if hooks::classify::is_hook_relevant(&value) {
-                                    // Record tool_use blocks synchronously so a
-                                    // later tool_result observer can always
-                                    // resolve the tool name despite task concurrency.
-                                    state.record_tool_uses_from_message(&value).await;
-                                    let host = Arc::clone(&host);
-                                    let state = state.clone();
-                                    let observed = value.clone();
-                                    tokio::spawn(async move {
-                                        observe_hooks(host, state, observed).await;
-                                    });
-                                }
+                                // Built-in lifecycle execution is SDK-native.
+                                // Rust only owns external-agent compatibility
+                                // hooks; reclassifying this stream would execute
+                                // SessionStart/Stop/Task handlers twice.
                                 host.emit(SIDECAR_EVENT, &value);
                             }
                             Err(e) => {
@@ -759,199 +671,17 @@ fn host_rpc_uses_session_store(method: &str) -> bool {
     crate::agent_session_store::is_session_store_method(method)
 }
 
-/// Handle a `permission_request` event from the sidecar. PreToolUse hooks
-/// (blocking + `updatedInput`) now run IN the sidecar as SDK-native hooks, so
-/// this fires only the observational `PermissionRequest` event and forwards the
-/// event onward for the user / approval store to handle.
+/// Forward a `permission_request` event from the sidecar. Both PreToolUse and
+/// PermissionRequest hooks run in the SDK-native sidecar callback pipeline;
+/// Rust must not execute either event again.
 ///
 /// The forward at the bottom is load-bearing on headless hosts: it MUST reach
 /// the EventBus (→ `/ws/v1/events`) or every gated tool call deadlocks
 /// waiting for an approval nobody saw.
-async fn handle_permission_request(host: Arc<dyn SidecarHost>, state: SidecarState, value: Value) {
-    let session_id = value
-        .get("sessionId")
-        .and_then(|v| v.as_str())
-        .map(String::from)
-        .unwrap_or_default();
-    let tool_name = value
-        .get("toolName")
-        .and_then(|v| v.as_str())
-        .map(String::from)
-        .unwrap_or_default();
-    let input = value.get("input").cloned().unwrap_or(Value::Null);
-
-    // Hook config: read fresh per request so the user can edit settings without
-    // restarting the sidecar. Read is cheap (one or two small JSON files).
-    // Project/local-scope hooks load only for the session's trusted cwd.
-    let raw_cwd = state.session_cwd(&session_id).await;
-    let cwd = hooks::trust::resolve_trusted_cwd(raw_cwd.as_deref());
-    let settings = hooks::load_effective_settings(cwd.as_deref());
-
-    // PermissionRequest is the observational sibling of PreToolUse — fire it so
-    // plugins/hooks can audit every gate, regardless of the allow/deny outcome.
-    let pr = hooks::run_tool_scoped(
-        &settings,
-        hooks::HookEvent::PermissionRequest,
-        &session_id,
-        cwd.as_deref(),
-        &tool_name,
-        json!({ "tool_name": tool_name, "tool_input": input }),
-    )
-    .await;
-    emit_hook_diagnostics(
-        host.as_ref(),
-        hooks::HookEvent::PermissionRequest,
-        &session_id,
-        Some(tool_name.as_str()),
-        &pr,
-    );
-
-    // PreToolUse execution — including blocking (`permissionDecision: "deny"`),
-    // `updatedInput` rewrite, and `additionalContext` — now runs IN the sidecar
-    // as an SDK-native hook (`dispatch/agent-hooks.mjs`), which fires BEFORE
-    // `canUseTool`. Running it here as well would double-execute the user's
-    // command hooks, so this path is intentionally observational-only now: it
-    // fires `PermissionRequest` above and forwards the event for the normal
-    // approval flow. A sidecar PreToolUse deny short-circuits before any
-    // `permission_request` is emitted, so we never even reach here for it.
-    let _ = &input;
-
+async fn handle_permission_request(host: Arc<dyn SidecarHost>, value: Value) {
     // Forward so the normal approval flow can run (WebView approval store on
     // desktop; `/ws/v1/events` subscribers headless).
     host.emit(SIDECAR_EVENT, &value);
-}
-
-/// Status of a consequential hook fire, by precedence: block > context >
-/// warning. `None` means the fire was a no-op (nothing to show).
-pub(crate) fn hook_fire_outcome(decision: &hooks::HookDecision) -> Option<&'static str> {
-    if decision.block.is_some() {
-        Some("blocked")
-    } else if decision.additional_context.is_some() {
-        Some("context")
-    } else if !decision.warnings.is_empty() {
-        Some("warning")
-    } else {
-        None
-    }
-}
-
-/// Build the synthetic `hook_fire` SDK-system envelope, or `None` for a no-op
-/// fire. Split from [`emit_hook_fire`] so the gate + shape are unit-testable
-/// without a live `AppHandle`.
-pub(crate) fn build_hook_fire_payload(
-    session_id: &str,
-    event_name: &str,
-    tool_name: Option<&str>,
-    decision: &hooks::HookDecision,
-) -> Option<Value> {
-    let outcome = hook_fire_outcome(decision)?;
-    Some(json!({
-      "type": "event",
-      "sessionId": session_id,
-      "event": {
-        "type": "system",
-        "subtype": "hook_fire",
-        "hook_event": event_name,
-        "tool_name": tool_name,
-        "outcome": outcome,
-        "block": decision.block,
-        "additional_context": decision.additional_context,
-        "warnings": decision.warnings,
-      },
-    }))
-}
-
-/// Project a *consequential* hook fire into the chat timeline as a synthetic
-/// SDK `system` event (`subtype:"hook_fire"`). It rides the same
-/// `claude://message` → `applySdkEvent` pipeline the frontend already uses for
-/// `permission_denied` / `compact_boundary`, so the row persists like any other
-/// message. A no-op fire (nothing blocked, no context, no warnings) emits
-/// nothing — hook rows are invisible unless the hook actually did something.
-///
-/// `outcome` is derived by precedence (block > context > warning) so the row can
-/// pick a status colour; the full decision still travels so the expanded row can
-/// show the reason, injected-context summary, and every warning.
-pub(crate) fn emit_hook_fire(
-    host: &dyn SidecarHost,
-    session_id: &str,
-    event_name: &str,
-    tool_name: Option<&str>,
-    decision: &hooks::HookDecision,
-) {
-    if let Some(payload) = build_hook_fire_payload(session_id, event_name, tool_name, decision) {
-        host.emit(SIDECAR_EVENT, &payload);
-    }
-}
-
-/// Log a hook's warnings server-side, then surface a consequential fire to the
-/// chat timeline via [`emit_hook_fire`]. Observational lifecycle hooks can't
-/// re-inject context mid-stream, so this row is how the user sees a hook did
-/// something.
-fn emit_hook_diagnostics(
-    host: &dyn SidecarHost,
-    event: hooks::HookEvent,
-    session_id: &str,
-    tool_name: Option<&str>,
-    decision: &hooks::HookDecision,
-) {
-    let name = hooks::hook_event_name(event);
-    for w in &decision.warnings {
-        log::warn!("{name}: {w}");
-    }
-    emit_hook_fire(host, session_id, &name, tool_name, decision);
-}
-
-/// Observe one SDK-stream message and fire the matching settings.json lifecycle
-/// hooks for the built-in agent. Records in-flight tool_use blocks, correlates
-/// tool_result → PostToolUse(/Failure), then fires the stateless lifecycle
-/// hooks (SessionStart/End, Stop, SubagentStop, Notification, PostCompact,
-/// Task*). All firing is observational — blocking stays on the permission path.
-async fn observe_hooks(host: Arc<dyn SidecarHost>, state: SidecarState, value: Value) {
-    let session_id = value
-        .get("sessionId")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_string();
-
-    // tool_use blocks were already recorded inline by the reader (see
-    // `record_tool_uses_from_message`) so the take below resolves reliably.
-
-    // Resolve the session's trusted cwd once for every fire below.
-    let raw_cwd = state.session_cwd(&session_id).await;
-    let cwd = hooks::trust::resolve_trusted_cwd(raw_cwd.as_deref());
-
-    // PostToolUse / PostToolUseFailure now execute IN the sidecar as SDK-native
-    // hooks (`dispatch/agent-hooks.mjs`), where `updatedToolOutput` can rewrite
-    // the tool result before the model sees it. We still drain the recorded
-    // tool_use map here so it doesn't leak across the turn, but no longer run the
-    // hooks — doing so would double-execute the user's command handlers.
-    if let Some(evt) = value.get("event") {
-        for (tool_use_id, _is_error, _result) in hooks::extract_tool_results(evt) {
-            let _ = state.take_tool(&session_id, &tool_use_id).await;
-        }
-    }
-
-    // Stateless lifecycle hooks.
-    let classified = hooks::classify_sidecar_message(&value);
-    if !classified.is_empty() {
-        let settings = hooks::load_effective_settings(cwd.as_deref());
-        for ch in classified {
-            let decision = hooks::run_session_scoped(
-                &settings,
-                ch.event,
-                &session_id,
-                cwd.as_deref(),
-                ch.fields,
-            )
-            .await;
-            emit_hook_diagnostics(host.as_ref(), ch.event, &session_id, None, &decision);
-        }
-    }
-
-    // Tear down per-session hook state when the session ends.
-    if value.get("type").and_then(|v| v.as_str()) == Some("session_ended") {
-        state.clear_session(&session_id).await;
-    }
 }
 
 /// Charge one unexpected sidecar death against the recovery restart budget and
@@ -1115,16 +845,6 @@ mod tests {
             .is_none());
     }
 
-    #[tokio::test]
-    async fn note_exit_clears_orphaned_session_state() {
-        let s = SidecarState::new();
-        s.register_session_cwd("sess-1", Some("/tmp/x".to_string()))
-            .await;
-        assert_eq!(s.session_cwd("sess-1").await, Some("/tmp/x".to_string()));
-        s.note_exit(Instant::now()).await; // crash → session state must not leak
-        assert_eq!(s.session_cwd("sess-1").await, None);
-    }
-
     #[test]
     fn spawn_epoch_advances_monotonically() {
         let s = SidecarState::new();
@@ -1152,90 +872,5 @@ mod tests {
     async fn managed_snapshot_is_none_when_no_child() {
         let s = SidecarState::new();
         assert!(s.managed_snapshot().await.is_none());
-    }
-
-    fn decision(
-        block: Option<&str>,
-        context: Option<&str>,
-        warnings: &[&str],
-    ) -> hooks::HookDecision {
-        hooks::HookDecision {
-            block: block.map(String::from),
-            additional_context: context.map(String::from),
-            warnings: warnings.iter().map(|s| s.to_string()).collect(),
-        }
-    }
-
-    #[test]
-    fn hook_fire_outcome_is_none_for_no_op() {
-        assert_eq!(hook_fire_outcome(&decision(None, None, &[])), None);
-        assert_eq!(hook_fire_outcome(&hooks::HookDecision::default()), None);
-    }
-
-    #[test]
-    fn hook_fire_outcome_follows_block_context_warning_precedence() {
-        // Block wins over everything.
-        assert_eq!(
-            hook_fire_outcome(&decision(Some("nope"), Some("ctx"), &["w"])),
-            Some("blocked")
-        );
-        // Context wins over a warning when there is no block.
-        assert_eq!(
-            hook_fire_outcome(&decision(None, Some("ctx"), &["w"])),
-            Some("context")
-        );
-        // Warning-only.
-        assert_eq!(
-            hook_fire_outcome(&decision(None, None, &["timed out"])),
-            Some("warning")
-        );
-    }
-
-    #[test]
-    fn build_hook_fire_payload_skips_no_op() {
-        assert!(build_hook_fire_payload(
-            "s1",
-            "PreToolUse",
-            Some("Bash"),
-            &decision(None, None, &[])
-        )
-        .is_none());
-    }
-
-    #[test]
-    fn build_hook_fire_payload_shapes_a_blocked_fire() {
-        let payload = build_hook_fire_payload(
-            "s1",
-            "PreToolUse",
-            Some("Bash"),
-            &decision(Some("denylist"), None, &["hook timed out after 5000ms"]),
-        )
-        .expect("consequential fire should build a payload");
-
-        assert_eq!(payload["type"], "event");
-        assert_eq!(payload["sessionId"], "s1");
-        let ev = &payload["event"];
-        assert_eq!(ev["type"], "system");
-        assert_eq!(ev["subtype"], "hook_fire");
-        assert_eq!(ev["hook_event"], "PreToolUse");
-        assert_eq!(ev["tool_name"], "Bash");
-        assert_eq!(ev["outcome"], "blocked");
-        assert_eq!(ev["block"], "denylist");
-        assert_eq!(ev["additional_context"], Value::Null);
-        assert_eq!(ev["warnings"][0], "hook timed out after 5000ms");
-    }
-
-    #[test]
-    fn build_hook_fire_payload_omits_tool_name_as_null() {
-        let payload = build_hook_fire_payload(
-            "s1",
-            "UserPromptSubmit",
-            None,
-            &decision(None, Some("ctx"), &[]),
-        )
-        .expect("context fire should build a payload");
-        assert_eq!(payload["event"]["tool_name"], Value::Null);
-        assert_eq!(payload["event"]["outcome"], "context");
-        assert_eq!(payload["event"]["additional_context"], "ctx");
     }
 }

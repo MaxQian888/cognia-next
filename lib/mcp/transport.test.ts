@@ -54,28 +54,51 @@ describe("buildMcpTransport", () => {
     )
     expect(calls[0].kind).toBe("http")
     expect((calls[0].args[0] as URL).href).toBe("https://x/mcp")
-    expect(calls[0].args[1]).toEqual({ requestInit: { headers: { Authorization: "Bearer t" } } })
+    expect(calls[0].args[1]).toEqual({
+      requestInit: { headers: { Authorization: "Bearer t" }, redirect: "error" },
+    })
   })
 
   it("uses the SSE ctor for the sse transport (no opts when bare)", () => {
     const { ctors, calls } = recordingCtors()
     buildMcpTransport(srv("sse", { url: "https://x/sse" }), ctors)
     expect(calls[0].kind).toBe("sse")
-    expect(calls[0].args[1]).toBeUndefined()
+    expect(calls[0].args[1]).toEqual({ requestInit: { redirect: "error" } })
   })
 
   it("folds headers into the SSE transport too", () => {
     const { ctors, calls } = recordingCtors()
     buildMcpTransport(srv("sse", { url: "https://x/sse", headers: { A: "1" } }), ctors)
     expect(calls[0].kind).toBe("sse")
-    expect(calls[0].args[1]).toEqual({ requestInit: { headers: { A: "1" } } })
+    expect(calls[0].args[1]).toEqual({
+      requestInit: { headers: { A: "1" }, redirect: "error" },
+    })
   })
 
   it("attaches the authProvider when provided", () => {
     const { ctors, calls } = recordingCtors()
     const authProvider = { tag: "provider" }
     buildMcpTransport(srv("http", { url: "https://x" }), ctors, { authProvider })
-    expect(calls[0].args[1]).toEqual({ authProvider })
+    expect(calls[0].args[1]).toEqual({
+      authProvider,
+      requestInit: { redirect: "error" },
+    })
+  })
+
+  it("uses the guarded fetch for every remote HTTP and SSE socket", () => {
+    const guardedFetch = jest.fn()
+    for (const transport of ["http", "sse"] as const) {
+      const { ctors, calls } = recordingCtors()
+      buildMcpTransport(srv(transport, { url: "https://rebinding.example/mcp" }), ctors, {
+        fetch: guardedFetch as never,
+      })
+      expect(calls[0].args[1]).toEqual(
+        expect.objectContaining({
+          fetch: guardedFetch,
+          ...(transport === "sse" ? { eventSourceInit: { fetch: guardedFetch } } : {}),
+        })
+      )
+    }
   })
 })
 
@@ -110,6 +133,23 @@ describe("createMcpConnection", () => {
     })
     await createMcpConnection(srv("stdio", { command: "x" }), {}, { load })
     expect(seen?.name).toBe("cognia")
+  })
+
+  it("registers tools/list_changed capability invalidation", async () => {
+    const onToolsChanged = jest.fn()
+    const setNotificationHandler = jest.fn()
+    const schema = { method: "notifications/tools/list_changed" }
+    const load = async () => ({
+      Client: class {
+        setNotificationHandler = setNotificationHandler
+      } as never,
+      ctors: recordingCtors().ctors,
+      toolsListChangedSchema: schema,
+    })
+
+    await createMcpConnection(srv("stdio", { command: "x" }), { onToolsChanged }, { load })
+
+    expect(setNotificationHandler).toHaveBeenCalledWith(schema, onToolsChanged)
   })
 })
 
@@ -249,5 +289,33 @@ describe("openMcpClient", () => {
     )
     ac.abort()
     expect(client.close).toHaveBeenCalled()
+  })
+
+  it("owns the direct-transport DNS guard for the full remote lease", async () => {
+    const client = fakeClient()
+    const { ctors, calls } = recordingCtors()
+    const guardedFetch = jest.fn()
+    const closeGuard = jest.fn(async () => undefined)
+    const createEgressGuard = jest.fn(async () => ({ fetch: guardedFetch, close: closeGuard }))
+    const opened = await openMcpClient(
+      srv("http", { url: "https://rebinding.example/mcp" }),
+      {},
+      {
+        load: async () => ({
+          Client: class {
+            constructor() {
+              return client as never
+            }
+          } as never,
+          ctors,
+        }),
+        createEgressGuard,
+      } as never
+    )
+
+    expect(createEgressGuard).toHaveBeenCalledWith(false)
+    expect(calls[0].args[1]).toEqual(expect.objectContaining({ fetch: guardedFetch }))
+    await opened.close()
+    expect(closeGuard).toHaveBeenCalledTimes(1)
   })
 })

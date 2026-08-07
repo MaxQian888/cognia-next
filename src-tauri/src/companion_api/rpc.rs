@@ -51,7 +51,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     agents::commands as agent_commands,
-    claude::{commands as claude_commands, mcp_test, sidecar::kill_sidecar},
+    claude::{commands as claude_commands, sidecar::kill_sidecar},
     mcp_server::orchestration_proxy::OrchestrationEventSink,
     skills::{install, native as skills_native, registry},
 };
@@ -261,7 +261,6 @@ async fn ensure_terminal_rpc_authorized(
 /// surface as 404 rather than 503-in-test-mode. Keep in lockstep with the
 /// `match name` arms in `dispatch()` below — drift means unknown names
 /// silently bypass the 404 path.
-#[cfg(test)]
 const KNOWN_COMMANDS: &[&str] = &[
     "claude_send",
     "claude_interrupt",
@@ -309,7 +308,6 @@ const KNOWN_COMMANDS: &[&str] = &[
     "mcp_server_start",
     "mcp_server_stop",
     "mcp_server_restart",
-    "test_mcp_server",
     "read_agent_config",
     "write_agent_config",
     // Generic encrypted secret-store facade for the headless brain. These
@@ -325,6 +323,9 @@ const KNOWN_COMMANDS: &[&str] = &[
     "message_delete",
     "session_list",
     "message_get_by_session",
+    "transcript_capabilities",
+    "session_timeline",
+    "session_turn_messages",
     "message_send",
     // Wave 2 mutating RPCs — round-trip through desktop_writes_bridge.
     "character_upsert",
@@ -827,7 +828,7 @@ const KNOWN_COMMANDS: &[&str] = &[
 /// list has a matching `/api/v1/_rpc/<name>` path in the OpenAPI spec.
 #[allow(dead_code)] // referenced from `spec_parity::tests` only.
 pub fn known_commands() -> &'static [&'static str] {
-    super::command_manifest::legacy_rpc_command_names()
+    KNOWN_COMMANDS
 }
 
 /// Commands in this list skip the idempotency cache entirely.
@@ -872,6 +873,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // Read-only message-by-session listing — same `(session_id, limit, offset)`
     // returns the same page.
     "message_get_by_session",
+    "transcript_capabilities",
+    "session_timeline",
+    "session_turn_messages",
     // Wave 2 read-only twin profile projection.
     "twin_profile_get",
     "host_capabilities",
@@ -1285,7 +1289,7 @@ fn is_control_command(name: &str) -> bool {
 
 fn is_control_authorized(name: &str, device_id: &str, scope: Option<&str>) -> bool {
     !is_control_command(name)
-        || scope == Some("device_v2")
+        || scope == Some("device")
         || (scope == Some("service")
             && matches!(
                 name,
@@ -1521,7 +1525,7 @@ fn is_agent_control_authorized(name: &str, device_id: &str, scope: Option<&str>)
     if !is_agent_control_command(name) {
         return true;
     }
-    if scope == Some("device_v2") || scope == Some("service") {
+    if scope == Some("device") || scope == Some("service") {
         return true;
     }
     // An unauthenticated or malformed context carries an empty `device_id`, and
@@ -1592,7 +1596,7 @@ fn payload_agent_control_authorized(
     if !scheduled_task_requires_agent_control(name, args) {
         return true;
     }
-    if scope == Some("device_v2") || scope == Some("service") {
+    if scope == Some("device") || scope == Some("service") {
         return true;
     }
     !device_id.trim().is_empty()
@@ -1820,13 +1824,16 @@ pub async fn rpc_handler(
         return Err(refuse_agent_control(&name, &ctx.device_id, Some(ctx.scope.as_str())).await);
     }
 
-    // Wave 3.3 — per-device rate limiter sits after the JWT verifier
-    // middleware (so we can key on device_id) and before idempotency
-    // lookup (cache hits don't burn a token).
-    if let crate::companion_api::rate_limit::RateLimitDecision::Reject { retry_after } =
-        state.rate_limiter.check(&ctx.device_id)
-    {
-        return Err(RpcError::rate_limited(retry_after.as_secs()));
+    // Wave 3.3 — paired devices are rate-limited per device. The headless
+    // service principal is loopback-only and performs a large deterministic
+    // bootstrap burst, so charging it against a 10-request device bucket
+    // leaves runtimes half-initialized.
+    if ctx.scope != "service" {
+        if let crate::companion_api::rate_limit::RateLimitDecision::Reject { retry_after } =
+            state.rate_limiter.check(&ctx.device_id)
+        {
+            return Err(RpcError::rate_limited(retry_after.as_secs()));
+        }
     }
 
     let is_read_only = READ_ONLY_COMMANDS_SET.contains(name.as_str());
@@ -1898,6 +1905,36 @@ pub async fn rpc_handler(
     Ok(Json(result))
 }
 
+/// Execute a command after the canonical remote execution module has completed
+/// authentication, capability, approval, transport, and durable-idempotency
+/// checks. This is intentionally the only non-HTTP entry into the dispatch
+/// table; protocol adapters must call `remote_execution::execute` instead.
+pub(super) async fn dispatch_canonical(
+    name: &str,
+    args: Value,
+    state: &SharedState,
+    ctx: &DeviceContext,
+) -> Result<Value, (StatusCode, Json<RpcError>)> {
+    if name == "app_settings_update" {
+        validate_app_settings_update(&args)?;
+    }
+    let host = super::dispatch_host::DispatchHost::from_state(state).ok_or_else(|| {
+        RpcError::service_unavailable("app_handle not available (test mode)".to_string())
+    })?;
+    let result = dispatch(
+        name,
+        args,
+        state,
+        &host,
+        &ctx.device_id,
+        Some(&ctx.account_id),
+        Some(&ctx.scope),
+    )
+    .await;
+    super::metrics::record_rpc_call(result.is_ok());
+    result
+}
+
 // ---------------------------------------------------------------------------
 // DataPlane selection helper
 // ---------------------------------------------------------------------------
@@ -1914,6 +1951,20 @@ fn pick_data_plane(
                 .to_string(),
         )
     })
+}
+
+async fn publish_direct_transcript_revision(
+    state: &SharedState,
+    data_plane: &super::data_plane::DataPlane,
+    session_id: &str,
+) {
+    let Some(revision) = data_plane.direct_transcript_revision(session_id).await else {
+        return;
+    };
+    state.event_bus.publish(
+        "transcript://revision".to_string(),
+        json!({ "sessionId": session_id, "revision": revision }),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -3016,7 +3067,7 @@ pub(super) async fn dispatch(
             let ttl_seconds: Option<u64> =
                 optional_aliased(&args, "ttl_seconds", "ttlSeconds")?;
             let confirmed: bool = required(&args, "confirmed")?;
-            let owner_authorized = if scope == Some("owner_v2") || scope == Some("service") {
+            let owner_authorized = if scope == Some("owner") || scope == Some("service") {
                 true
             } else {
                 account_id
@@ -3252,18 +3303,24 @@ pub(super) async fn dispatch(
             let message_id: String = required(&args, "message_id")?;
             let updates: Value = required(&args, "updates")?;
             let dp = pick_data_plane(state)?;
-            dp.update_message(session_id, message_id, updates)
+            let result = dp
+                .update_message(session_id.clone(), message_id, updates)
                 .await
-                .map_err(RpcError::internal)
+                .map_err(RpcError::internal)?;
+            publish_direct_transcript_revision(state, &dp, &session_id).await;
+            Ok(result)
         }
 
         "message_delete" => {
             let session_id: String = required(&args, "session_id")?;
             let message_id: String = required(&args, "message_id")?;
             let dp = pick_data_plane(state)?;
-            dp.delete_message(session_id, message_id)
+            let result = dp
+                .delete_message(session_id.clone(), message_id)
                 .await
-                .map_err(RpcError::internal)
+                .map_err(RpcError::internal)?;
+            publish_direct_transcript_revision(state, &dp, &session_id).await;
+            Ok(result)
         }
 
         "session_list" => {
@@ -3286,14 +3343,55 @@ pub(super) async fn dispatch(
                 .map_err(RpcError::internal)
         }
 
+        "transcript_capabilities" => {
+            let dp = pick_data_plane(state)?;
+            dp.transcript_capabilities()
+                .await
+                .map_err(RpcError::internal)
+        }
+
+        "session_timeline" => {
+            let session_id: String = required(&args, "session_id")?;
+            let direction: Option<String> = optional(&args, "direction")?;
+            let cursor: Option<String> = optional(&args, "cursor")?;
+            let limit: Option<u32> = optional(&args, "limit")?;
+            let dp = pick_data_plane(state)?;
+            dp.session_timeline(session_id, direction, cursor, limit)
+                .await
+                .map_err(RpcError::internal)
+        }
+
+        "session_turn_messages" => {
+            let session_id: String = required(&args, "session_id")?;
+            let turn_key: String = required(&args, "turn_key")?;
+            let revision: u64 = required(&args, "revision")?;
+            let detail_revision: u64 = required(&args, "detail_revision")?;
+            let cursor: Option<String> = optional(&args, "cursor")?;
+            let limit: Option<u32> = optional(&args, "limit")?;
+            let dp = pick_data_plane(state)?;
+            dp.session_turn_messages(
+                session_id,
+                turn_key,
+                revision,
+                detail_revision,
+                cursor,
+                limit,
+            )
+            .await
+            .map_err(RpcError::internal)
+        }
+
         "message_send" => {
             let session_id: String = required(&args, "session_id")?;
             let content: String = required(&args, "content")?;
             let role: Option<String> = optional(&args, "role")?;
             let dp = pick_data_plane(state)?;
-            dp.send_message(session_id, content, role)
+            let result = dp
+                .send_message(session_id.clone(), content, role)
                 .await
-                .map_err(RpcError::internal)
+                .map_err(RpcError::internal)?;
+            publish_direct_transcript_revision(state, &dp, &session_id).await;
+            Ok(result)
         }
 
         // ── Rust-owned background jobs and durable monitors ─────────────────
@@ -4226,25 +4324,6 @@ pub(super) async fn dispatch(
                 )
                 .await
                 .map_err(RpcError::internal)
-        }
-
-        // ── Test MCP ──────────────────────────────────────────────────────────
-
-        "test_mcp_server" => {
-            let transport: String = required(&args, "transport")?;
-            let command: Option<String> = optional(&args, "command")?;
-            let mcp_args: Option<Vec<String>> = optional(&args, "args")?;
-            let env: Option<std::collections::HashMap<String, String>> =
-                optional(&args, "env")?;
-            let url: Option<String> = optional(&args, "url")?;
-            let headers: Option<std::collections::HashMap<String, String>> =
-                optional(&args, "headers")?;
-            mcp_test::test_mcp_server(transport, command, mcp_args, env, url, headers)
-                .await
-                .map_err(RpcError::internal)
-                .and_then(|r| {
-                    serde_json::to_value(r).map_err(|e| RpcError::internal(e.to_string()))
-                })
         }
 
         // ── Source control (ADR-0038) — native git porcelain ────────────────
@@ -7102,6 +7181,37 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 401);
     }
 
+    #[tokio::test]
+    async fn service_scope_startup_burst_does_not_consume_device_quota() {
+        let state = test_state();
+        let context = DeviceContext {
+            device_id: crate::companion_api::jwt::SERVICE_DEVICE_ID.to_string(),
+            account_id: ACCOUNT_ID.to_string(),
+            scope: "service".to_string(),
+            granted_scopes: Vec::new(),
+        };
+
+        for request_index in 0..25 {
+            let response = rpc_handler(
+                Path("claude_sidecar_status".to_string()),
+                Extension(context.clone()),
+                HeaderMap::new(),
+                State(Arc::clone(&state)),
+                Json(json!({})),
+            )
+            .await;
+            if let Err((status, body)) = response {
+                assert_ne!(
+                    status,
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "headless startup request {request_index} was rate limited: {}",
+                    body.0.message
+                );
+            }
+        }
+        assert_eq!(state.rate_limiter.bucket_count(), 0);
+    }
+
     // ── app_handle=None → 503 for commands that need it ──────────────────────
 
     #[tokio::test]
@@ -9114,25 +9224,6 @@ rl.on("line", (line) => {
         assert_not_404!("mcp_server_status", json!({}));
     }
 
-    #[tokio::test]
-    async fn dispatch_coverage_test_mcp_server() {
-        assert_not_404!(
-            "test_mcp_server",
-            json!({ "transport": "stdio", "command": "echo" })
-        );
-    }
-
-    #[test]
-    fn arbitrary_mcp_probe_is_service_only_until_signed_policy_execution_lands() {
-        assert!(is_service_only_command("test_mcp_server"));
-        assert_eq!(
-            super::super::command_manifest::descriptor("test_mcp_server")
-                .expect("descriptor")
-                .capability,
-            "process.spawn"
-        );
-    }
-
     // ── Desktop-message bridge command coverage (Mobile completeness P2) ─────
 
     #[tokio::test]
@@ -9161,6 +9252,34 @@ rl.on("line", (line) => {
     #[tokio::test]
     async fn dispatch_coverage_session_list() {
         assert_not_404!("session_list", json!({ "limit": 20, "offset": 0 }));
+    }
+
+    #[tokio::test]
+    async fn direct_message_mutations_publish_the_transcript_revision_shape() {
+        use crate::companion_api::{
+            data_plane::DataPlane,
+            event_bus::SubscribeResult,
+            store::{sqlite::SqliteAppStore, AppStore},
+        };
+
+        let state = test_state();
+        let store = SqliteAppStore::in_memory().unwrap();
+        store
+            .upsert_session("s1", "Transcript", "direct")
+            .await
+            .unwrap();
+        store.create_message("s1", "hello", "user").await.unwrap();
+        let data_plane = DataPlane::Direct(store as Arc<dyn AppStore>);
+        let mut receiver = match state.event_bus.subscribe(None, unix_time_ms() as i64) {
+            SubscribeResult::Ok { receiver, .. } => receiver,
+            SubscribeResult::ResyncRequired => panic!("fresh subscriber cannot require resync"),
+        };
+
+        publish_direct_transcript_revision(&state, &data_plane, "s1").await;
+
+        let frame = receiver.recv().await.unwrap();
+        assert_eq!(frame.event_type, "transcript://revision");
+        assert_eq!(frame.payload, json!({ "sessionId": "s1", "revision": 1 }));
     }
 
     #[tokio::test]

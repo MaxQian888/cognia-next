@@ -16,6 +16,8 @@ const meta = {
     view: "grid",
     groupBy: "none",
     selection: new Set<string>(),
+    agentStatuses: [],
+    agentStatusesLoading: false,
     isFavorite: (_id: string): boolean => false,
     onToggleSelect: fn(),
     onToggleFavorite: fn(),

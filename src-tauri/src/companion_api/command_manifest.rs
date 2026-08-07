@@ -6,6 +6,7 @@
 
 use once_cell::sync::Lazy;
 use serde::Deserialize;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -61,7 +62,6 @@ pub enum CommandTransport {
 #[serde(rename_all = "camelCase")]
 pub struct CommandDescriptor {
     pub name: String,
-    pub since: u8,
     pub target: CommandTarget,
     pub operation: CommandOperation,
     pub capability: String,
@@ -85,7 +85,7 @@ static MANIFEST: Lazy<CommandManifest> = Lazy::new(|| {
         serde_json::from_str(include_str!("../../../protocol/companion-commands.json"))
             .expect("protocol/companion-commands.json must be valid");
     assert_eq!(
-        manifest.schema_version, 1,
+        manifest.schema_version, 2,
         "unsupported companion command manifest schema"
     );
 
@@ -132,12 +132,11 @@ static COMMAND_NAMES: Lazy<Vec<&'static str>> = Lazy::new(|| {
         .collect()
 });
 
-static LEGACY_RPC_COMMAND_NAMES: Lazy<Vec<&'static str>> = Lazy::new(|| {
+static DESCRIPTORS: Lazy<HashMap<&'static str, &'static CommandDescriptor>> = Lazy::new(|| {
     MANIFEST
         .commands
         .iter()
-        .filter(|descriptor| descriptor.since == 1)
-        .map(|descriptor| descriptor.name.as_str())
+        .map(|descriptor| (descriptor.name.as_str(), descriptor))
         .collect()
 });
 
@@ -149,16 +148,8 @@ pub fn command_names() -> &'static [&'static str] {
     &COMMAND_NAMES
 }
 
-/// Commands exposed by the one-release v1 payload adapter.
-pub fn legacy_rpc_command_names() -> &'static [&'static str] {
-    &LEGACY_RPC_COMMAND_NAMES
-}
-
 pub fn descriptor(name: &str) -> Option<&'static CommandDescriptor> {
-    MANIFEST
-        .commands
-        .iter()
-        .find(|descriptor| descriptor.name == name)
+    DESCRIPTORS.get(name).copied()
 }
 
 #[cfg(test)]
@@ -167,19 +158,9 @@ mod tests {
 
     #[test]
     fn shared_manifest_is_complete_and_validated() {
-        assert_eq!(commands().len(), 1000);
+        assert_eq!(commands().len(), 1026);
         assert_eq!(command_names().len(), commands().len());
-        assert_eq!(legacy_rpc_command_names().len(), 406);
-    }
-
-    #[test]
-    fn arbitrary_mcp_probe_requires_signed_process_policy() {
-        let command = descriptor("test_mcp_server").expect("descriptor");
-        assert_eq!(command.target, CommandTarget::Service);
-        assert_eq!(command.capability, "process.spawn");
-        assert_eq!(command.risk, CommandRisk::Critical);
-        assert_eq!(command.approval, CommandApproval::SignedPolicy);
-        assert_eq!(command.idempotency, CommandIdempotency::Required);
+        assert_eq!(DESCRIPTORS.len(), commands().len());
     }
 
     #[test]

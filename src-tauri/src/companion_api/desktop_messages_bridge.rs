@@ -67,6 +67,10 @@ const DELETE_EVENT: &str = "companion://message-delete-request";
 const LIST_EVENT: &str = "companion://session-list-request";
 const GET_BY_SESSION_EVENT: &str = "companion://message-get-by-session-request";
 const SEND_EVENT: &str = "companion://message-send-request";
+const TRANSCRIPT_CAPABILITIES_EVENT: &str = "companion://transcript-capabilities-request";
+const SESSION_TIMELINE_EVENT: &str = "companion://session-timeline-request";
+const SESSION_TURN_MESSAGES_EVENT: &str = "companion://session-turn-messages-request";
+const SESSION_MEDIA_EVENT: &str = "companion://session-media-request";
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Payload emitted to the WebView for a `message_update` RPC.
@@ -132,6 +136,61 @@ pub struct SendMessageRequest {
     pub role: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptCapabilitiesRequest {
+    pub request_id: String,
+    pub kind: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTimelineRequest {
+    pub request_id: String,
+    pub kind: &'static str,
+    pub session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTurnMessagesRequest {
+    pub request_id: String,
+    pub kind: &'static str,
+    pub session_id: String,
+    pub turn_key: String,
+    pub revision: u64,
+    pub detail_revision: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionMediaRequest {
+    pub request_id: String,
+    pub kind: &'static str,
+    pub session_id: String,
+    pub hash: String,
+    pub variant: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct MediaBridgeResponse {
+    pub request_id: String,
+    pub bytes: Vec<u8>,
+    pub media_type: String,
+    pub etag: Option<String>,
+    pub error: Option<String>,
+}
+
 /// Generic response from the WebView. The TS-side handler always sets
 /// `result` for success and leaves `error` for failure (or vice-versa);
 /// both being `None` is a malformed bridge state and is reported as an
@@ -151,12 +210,14 @@ pub struct MessageBridgeResponse {
 /// oneshot receiver under its request_id, then awaits.
 pub struct DesktopMessagesBridge {
     pending: Mutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>,
+    pending_media: Mutex<HashMap<String, oneshot::Sender<Result<MediaBridgeResponse, String>>>>,
 }
 
 impl DesktopMessagesBridge {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             pending: Mutex::new(HashMap::new()),
+            pending_media: Mutex::new(HashMap::new()),
         })
     }
 
@@ -263,6 +324,124 @@ impl DesktopMessagesBridge {
         self.await_response(request_id, rx, timeout).await
     }
 
+    pub async fn transcript_capabilities(
+        self: Arc<Self>,
+        transport: &dyn BridgeTransport,
+        timeout: Duration,
+    ) -> Result<Value, String> {
+        let (request_id, rx) = self.register();
+        let payload = TranscriptCapabilitiesRequest {
+            request_id: request_id.clone(),
+            kind: "transcript_capabilities",
+        };
+        emit_or_cleanup(
+            &self,
+            transport,
+            &request_id,
+            TRANSCRIPT_CAPABILITIES_EVENT,
+            payload,
+        )?;
+        self.await_response(request_id, rx, timeout).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn session_timeline(
+        self: Arc<Self>,
+        transport: &dyn BridgeTransport,
+        session_id: String,
+        direction: Option<String>,
+        cursor: Option<String>,
+        limit: Option<u32>,
+        timeout: Duration,
+    ) -> Result<Value, String> {
+        let (request_id, rx) = self.register();
+        let payload = SessionTimelineRequest {
+            request_id: request_id.clone(),
+            kind: "session_timeline",
+            session_id,
+            direction,
+            cursor,
+            limit,
+        };
+        emit_or_cleanup(
+            &self,
+            transport,
+            &request_id,
+            SESSION_TIMELINE_EVENT,
+            payload,
+        )?;
+        self.await_response(request_id, rx, timeout).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn session_turn_messages(
+        self: Arc<Self>,
+        transport: &dyn BridgeTransport,
+        session_id: String,
+        turn_key: String,
+        revision: u64,
+        detail_revision: u64,
+        cursor: Option<String>,
+        limit: Option<u32>,
+        timeout: Duration,
+    ) -> Result<Value, String> {
+        let (request_id, rx) = self.register();
+        let payload = SessionTurnMessagesRequest {
+            request_id: request_id.clone(),
+            kind: "session_turn_messages",
+            session_id,
+            turn_key,
+            revision,
+            detail_revision,
+            cursor,
+            limit,
+        };
+        emit_or_cleanup(
+            &self,
+            transport,
+            &request_id,
+            SESSION_TURN_MESSAGES_EVENT,
+            payload,
+        )?;
+        self.await_response(request_id, rx, timeout).await
+    }
+
+    pub async fn session_media(
+        self: Arc<Self>,
+        transport: &dyn BridgeTransport,
+        session_id: String,
+        hash: String,
+        variant: String,
+        timeout: Duration,
+    ) -> Result<MediaBridgeResponse, String> {
+        let request_id = Uuid::new_v4().to_string();
+        let (tx, rx) = oneshot::channel();
+        self.pending_media.lock().insert(request_id.clone(), tx);
+        let payload = SessionMediaRequest {
+            request_id: request_id.clone(),
+            kind: "session_media",
+            session_id,
+            hash,
+            variant,
+        };
+        let value = serde_json::to_value(payload).map_err(|error| {
+            self.pending_media.lock().remove(&request_id);
+            error.to_string()
+        })?;
+        if let Err(error) = transport.emit(SESSION_MEDIA_EVENT, value) {
+            self.pending_media.lock().remove(&request_id);
+            return Err(error);
+        }
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err("desktop media responder dropped".to_string()),
+            Err(_) => {
+                self.pending_media.lock().remove(&request_id);
+                Err("desktop media request timed out".to_string())
+            }
+        }
+    }
+
     fn register(&self) -> (String, oneshot::Receiver<Result<Value, String>>) {
         let request_id = Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel::<Result<Value, String>>();
@@ -313,6 +492,16 @@ impl DesktopMessagesBridge {
         let _ = sender.send(payload);
     }
 
+    pub fn resolve_media(&self, response: MediaBridgeResponse) {
+        let sender = self.pending_media.lock().remove(&response.request_id);
+        let Some(sender) = sender else { return };
+        let result = match response.error.as_ref() {
+            Some(error) => Err(error.clone()),
+            None => Ok(response),
+        };
+        let _ = sender.send(result);
+    }
+
     /// Test-only — number of in-flight requests.
     #[cfg(test)]
     pub fn pending_count(&self) -> usize {
@@ -352,6 +541,85 @@ mod tests {
             error: None,
         });
         assert_eq!(handle.await.unwrap().unwrap(), json!({ "rows": [] }));
+    }
+
+    #[tokio::test]
+    async fn session_timeline_emits_revision_bound_request_fields() {
+        let bridge = DesktopMessagesBridge::new();
+        let transport = RecordingBridgeTransport::new();
+        let t = Arc::clone(&transport);
+        let b = Arc::clone(&bridge);
+        let handle = tokio::spawn(async move {
+            b.session_timeline(
+                t.as_ref(),
+                "s1".into(),
+                Some("backward".into()),
+                Some("opaque".into()),
+                Some(30),
+                DEFAULT_TIMEOUT,
+            )
+            .await
+        });
+        let (channel, payload) = loop {
+            if let Some(entry) = transport.last() {
+                break entry;
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(channel, SESSION_TIMELINE_EVENT);
+        assert_eq!(payload["kind"], "session_timeline");
+        assert_eq!(payload["sessionId"], "s1");
+        assert_eq!(payload["direction"], "backward");
+        assert_eq!(payload["cursor"], "opaque");
+        assert_eq!(payload["limit"], 30);
+        let request_id = payload["requestId"].as_str().unwrap().to_string();
+        bridge.resolve(MessageBridgeResponse {
+            request_id,
+            result: Some(json!({ "items": [], "revision": 1, "hasMore": false })),
+            error: None,
+        });
+        assert_eq!(
+            handle.await.unwrap().unwrap(),
+            json!({ "items": [], "revision": 1, "hasMore": false })
+        );
+    }
+
+    #[tokio::test]
+    async fn session_media_round_trips_raw_bytes_without_json_encoding() {
+        let bridge = DesktopMessagesBridge::new();
+        let transport = RecordingBridgeTransport::new();
+        let t = Arc::clone(&transport);
+        let b = Arc::clone(&bridge);
+        let handle = tokio::spawn(async move {
+            b.session_media(
+                t.as_ref(),
+                "s1".into(),
+                "a".repeat(64),
+                "thumbnail".into(),
+                DEFAULT_TIMEOUT,
+            )
+            .await
+        });
+        let (channel, payload) = loop {
+            if let Some(entry) = transport.last() {
+                break entry;
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(channel, SESSION_MEDIA_EVENT);
+        assert_eq!(payload["sessionId"], "s1");
+        assert_eq!(payload["variant"], "thumbnail");
+        let request_id = payload["requestId"].as_str().unwrap().to_string();
+        bridge.resolve_media(MediaBridgeResponse {
+            request_id,
+            bytes: vec![1, 2, 3],
+            media_type: "image/png".into(),
+            etag: Some("etag".into()),
+            error: None,
+        });
+        let response = handle.await.unwrap().unwrap();
+        assert_eq!(response.bytes, vec![1, 2, 3]);
+        assert_eq!(response.media_type, "image/png");
     }
 
     #[tokio::test]

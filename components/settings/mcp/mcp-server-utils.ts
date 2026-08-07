@@ -1,13 +1,12 @@
 /**
  * Pure helpers shared across the MCP servers panel components — config
- * summarization, the structured ⇄ test-request transform, and the key/value
+ * summarization and the key/value
  * row model used by the editor. Extracted from the legacy
  * `mcp-servers-section.tsx` so the card / list-row / editor can share one
  * implementation instead of each re-deriving it.
  */
 
 import type { McpServer, McpTransport } from "@cognia/agent-config-types"
-import type { McpTestRequest } from "@/lib/claude/ipc"
 
 export interface KvRow {
   key: string
@@ -49,37 +48,6 @@ export function summarizeServer(s: Pick<McpServer, "transport" | "config">): str
     return [c.command, ...(c.args ?? [])].filter(Boolean).join(" ")
   }
   return c.url ?? ""
-}
-
-/** Project a stored server row into the IPC test-connection request shape. */
-export function serverToTestRequest(s: McpServer): McpTestRequest {
-  const c = s.config as Record<string, unknown>
-  if (s.transport === "stdio") {
-    return {
-      transport: "stdio",
-      command: typeof c.command === "string" ? c.command : "",
-      args: Array.isArray(c.args) ? c.args.filter((x): x is string => typeof x === "string") : [],
-      env:
-        c.env && typeof c.env === "object"
-          ? Object.fromEntries(
-              Object.entries(c.env as Record<string, unknown>).map(([k, v]) => [k, String(v ?? "")])
-            )
-          : undefined,
-    }
-  }
-  return {
-    transport: s.transport,
-    url: typeof c.url === "string" ? c.url : "",
-    headers:
-      c.headers && typeof c.headers === "object"
-        ? Object.fromEntries(
-            Object.entries(c.headers as Record<string, unknown>).map(([k, v]) => [
-              k,
-              String(v ?? ""),
-            ])
-          )
-        : undefined,
-  }
 }
 
 /**

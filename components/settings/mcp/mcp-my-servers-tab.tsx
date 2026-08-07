@@ -30,6 +30,7 @@ import { cloneServerDraft } from "./mcp-server-utils"
 import { McpBatchActionsBar } from "./mcp-batch-actions-bar"
 import { McpFilterSheet } from "./mcp-filter-sheet"
 import { blankServerSeed } from "./server-seed"
+import { useAgentStatuses } from "@/hooks/agent/use-agent-status"
 
 /**
  * The "My Servers" tab — view/group controls, the filtered + grouped server
@@ -64,6 +65,9 @@ export function McpMyServersTab() {
 
   const liveServers = useLiveQuery(() => listMcpServers(), [])
   const servers = useMemo(() => liveServers ?? [], [liveServers])
+  // One Agent-file snapshot subscription at the catalog seam, shared by all
+  // cards. A 100-server panel no longer mounts 100 hooks and live queries.
+  const { statuses: agentStatuses, loading: agentStatusesLoading } = useAgentStatuses(servers)
 
   const visibleServers = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -211,6 +215,8 @@ export function McpMyServersTab() {
             view={view}
             groupBy={groupBy}
             selection={selection}
+            agentStatuses={agentStatuses}
+            agentStatusesLoading={agentStatusesLoading}
             isFavorite={isFavorite}
             onToggleSelect={toggleSelection}
             onToggleFavorite={(id) => void toggleFavorite(id)}

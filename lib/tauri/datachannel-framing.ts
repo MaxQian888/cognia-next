@@ -7,6 +7,53 @@ export const RTC_MAX_REASSEMBLIES = 8
 export const RTC_MAX_REASSEMBLY_BYTES = 4 * 1024 * 1024
 export const RTC_CHUNK_TIMEOUT_MS = 15_000
 const CHUNK_DATA_BYTES = 23 * 1024
+const BINARY_RESOURCE_MAGIC = new Uint8Array([0x43, 0x47, 0x4d, 0x31])
+const BINARY_RESOURCE_ID_BYTES = 36
+export const RTC_BINARY_RESOURCE_HEADER_BYTES =
+  BINARY_RESOURCE_MAGIC.byteLength + BINARY_RESOURCE_ID_BYTES + 4 + 4
+
+export interface RtcBinaryResourceChunk {
+  requestId: string
+  index: number
+  totalChunks: number
+  bytes: Uint8Array
+}
+
+export function decodeRtcBinaryResourceChunk(data: ArrayBuffer): RtcBinaryResourceChunk {
+  const bytes = new Uint8Array(data)
+  if (
+    bytes.byteLength < RTC_BINARY_RESOURCE_HEADER_BYTES ||
+    bytes.byteLength > RTC_MAX_FRAME_BYTES ||
+    !BINARY_RESOURCE_MAGIC.every((value, index) => bytes[index] === value)
+  ) {
+    throw new Error("invalid_binary_resource_frame")
+  }
+  const requestId = TEXT_DECODER.decode(
+    bytes.slice(
+      BINARY_RESOURCE_MAGIC.byteLength,
+      BINARY_RESOURCE_MAGIC.byteLength + BINARY_RESOURCE_ID_BYTES
+    )
+  )
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(requestId)
+  ) {
+    throw new Error("invalid_binary_resource_frame")
+  }
+  const view = new DataView(data)
+  const index = view.getUint32(BINARY_RESOURCE_MAGIC.byteLength + BINARY_RESOURCE_ID_BYTES)
+  const totalChunks = view.getUint32(
+    BINARY_RESOURCE_MAGIC.byteLength + BINARY_RESOURCE_ID_BYTES + 4
+  )
+  if (totalChunks < 1 || index >= totalChunks) {
+    throw new Error("invalid_binary_resource_frame")
+  }
+  return {
+    requestId,
+    index,
+    totalChunks,
+    bytes: bytes.slice(RTC_BINARY_RESOURCE_HEADER_BYTES),
+  }
+}
 
 type ChunkFrame =
   | {

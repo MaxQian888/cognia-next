@@ -24,16 +24,23 @@ import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
 import { loggers } from "@cognia/logging"
-import { testMcpServer, type McpTestResult } from "@/lib/claude/ipc"
+import {
+  discoverMcpServerViaSidecar,
+  type McpDiscoveryResult,
+} from "@/lib/claude/feature-call"
 import type { McpServer } from "@cognia/agent-config-types"
 import { McpAgentChipGroup } from "../mcp-agent-chip-group"
 import { McpAuthButton } from "./mcp-auth-button"
-import { serverToTestRequest, summarizeServer } from "./mcp-server-utils"
+import { summarizeServer } from "./mcp-server-utils"
+import type { AgentStatus } from "@/hooks/agent/use-agent-status"
+import { reviewMcpServer } from "@/lib/db/mcp-servers"
 
 export interface McpServerCardProps {
   server: McpServer
   selected: boolean
   favorite: boolean
+  agentStatuses?: AgentStatus[]
+  agentStatusesLoading?: boolean
   /** Dense list-row layout instead of the default card. */
   variant?: "card" | "row"
   onToggleSelect: (id: string) => void
@@ -54,6 +61,8 @@ export function McpServerCard({
   server,
   selected,
   favorite,
+  agentStatuses = [],
+  agentStatusesLoading = false,
   variant = "card",
   onToggleSelect,
   onToggleFavorite,
@@ -66,7 +75,8 @@ export function McpServerCard({
   const tCard = useTranslations("mcp.card")
   const tTest = useTranslations("mcp.test")
   const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<McpTestResult | null>(null)
+  const [reviewing, setReviewing] = useState(false)
+  const [testResult, setTestResult] = useState<McpDiscoveryResult | null>(null)
 
   const runTest = async () => {
     if (testing) return
@@ -77,7 +87,7 @@ export function McpServerCard({
     setTesting(true)
     try {
       loggers.mcp.info("settings.serverTestStarted", { id: server.id, transport: server.transport })
-      const result = await testMcpServer(serverToTestRequest(server))
+      const result = await discoverMcpServerViaSidecar(server)
       setTestResult(result)
       loggers.mcp.info("settings.serverTestResult", {
         id: server.id,
@@ -94,7 +104,15 @@ export function McpServerCard({
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       loggers.mcp.error("settings.serverTestThrew", err)
-      setTestResult({ ok: false, toolCount: 0, tools: [], error: message, durationMs: 0 })
+      setTestResult({
+        ok: false,
+        toolCount: 0,
+        tools: [],
+        resources: [],
+        prompts: [],
+        error: message,
+        durationMs: 0,
+      })
       toast.error(tTest("error", { name: server.name, error: message }))
     } finally {
       setTesting(false)
@@ -230,6 +248,44 @@ export function McpServerCard({
     </span>
   )
 
+  const trustState = server.trust?.state ?? "legacy"
+  const trustBadge = (
+    <span
+      className={cn(
+        "rounded px-1.5 py-0.5 text-[10px] uppercase",
+        trustState === "trusted" && "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+        trustState === "pending" && "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+        trustState === "blocked" && "bg-destructive/10 text-destructive",
+        trustState === "legacy" && "bg-muted text-muted-foreground"
+      )}
+    >
+      {tCard(`trust.${trustState}`)}
+    </span>
+  )
+
+  const reviewButton = (trustState === "pending" || trustState === "legacy") && (
+    <Button
+      size="sm"
+      variant="outline"
+      className="h-6 px-2 text-[10px]"
+      disabled={reviewing}
+      onClick={async () => {
+        setReviewing(true)
+        try {
+          await reviewMcpServer(server.id, true)
+          toast.success(tCard("reviewed", { name: server.displayName || server.name }))
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : String(error))
+        } finally {
+          setReviewing(false)
+        }
+      }}
+    >
+      {reviewing && <Loader2Icon className="size-3 animate-spin" />}
+      {tCard("reviewTrust")}
+    </Button>
+  )
+
   if (variant === "row") {
     return (
       <div
@@ -242,12 +298,14 @@ export function McpServerCard({
         {selectBox}
         <p className="truncate text-sm font-medium">{server.name}</p>
         {transportBadge}
+        {trustBadge}
         {testBadge}
         <span className="ml-1 hidden min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground md:inline">
           {summarizeServer(server)}
         </span>
         <div className="ml-auto flex items-center gap-1">
           {toggle}
+          {reviewButton}
           {actions}
         </div>
       </div>
@@ -268,6 +326,7 @@ export function McpServerCard({
           {selectBox}
           <p className="truncate text-sm font-medium">{server.name}</p>
           {transportBadge}
+          {trustBadge}
           {testBadge}
         </div>
         <div className="flex shrink-0 items-center gap-1">{toggle}</div>
@@ -276,7 +335,12 @@ export function McpServerCard({
         {summarizeServer(server)}
       </p>
       <div className="mt-auto flex items-center justify-between gap-2">
-        <McpAgentChipGroup server={server} />
+        <McpAgentChipGroup
+          server={server}
+          statuses={agentStatuses}
+          loading={agentStatusesLoading}
+        />
+        {reviewButton}
         {actions}
       </div>
       <McpAuthButton server={server} />

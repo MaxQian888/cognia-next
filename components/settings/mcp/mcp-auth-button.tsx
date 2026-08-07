@@ -26,7 +26,7 @@ export interface McpAuthButtonProps {
  */
 export function McpAuthButton({ server }: McpAuthButtonProps) {
   const t = useTranslations("mcp.auth")
-  const { status, refetch } = useMcpOAuthStatus(server.name, server.transport)
+  const { status, refetch } = useMcpOAuthStatus(server.id, server.transport, server.name)
   const [busy, setBusy] = useState(false)
 
   if (server.transport === "stdio") return null
@@ -39,7 +39,7 @@ export function McpAuthButton({ server }: McpAuthButtonProps) {
     }
     setBusy(true)
     try {
-      const res = await mcpOAuthAuthenticate(server.name, {
+      const res = await mcpOAuthAuthenticate(server.id, {
         transport: server.transport,
         config: server.config,
       })
@@ -60,7 +60,7 @@ export function McpAuthButton({ server }: McpAuthButtonProps) {
     if (busy) return
     setBusy(true)
     try {
-      await mcpOAuthClear(server.name)
+      await mcpOAuthClear(server.id, server.name)
       await refetch()
     } finally {
       setBusy(false)

@@ -45,6 +45,34 @@ pub struct InboundRpc {
     pub protocol_version: u8,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InboundBinaryResource {
+    kind: String,
+    id: String,
+    protocol_version: u8,
+    resource: BinaryResourceRequest,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BinaryResourceRequest {
+    kind: String,
+    session_id: String,
+    hash: String,
+    variant: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BinaryResourceStart<'a> {
+    kind: &'static str,
+    id: &'a str,
+    media_type: &'a str,
+    total_bytes: usize,
+    total_chunks: u32,
+}
+
 /// Outbound DataChannel frame shape (desktop → mobile).
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
@@ -333,8 +361,25 @@ async fn handle_inbound(
         "signaling::dispatch: inbound {} bytes for device {device_id}",
         bytes.len()
     );
+    let envelope: Value =
+        serde_json::from_slice(&bytes).map_err(|e| format!("malformed inbound frame: {e}"))?;
+    if envelope.get("kind").and_then(Value::as_str) == Some("binary-resource") {
+        let request_id = envelope
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let request = match serde_json::from_value::<InboundBinaryResource>(envelope) {
+            Ok(request) => request,
+            Err(_) if uuid::Uuid::parse_str(&request_id).is_ok() => {
+                return send_binary_resource_error(peer, request_id, "INVALID_PARAMS").await;
+            }
+            Err(_) => return Err("malformed binary resource request".to_string()),
+        };
+        return handle_binary_resource(peer, request, state, device_id).await;
+    }
     let rpc: InboundRpc =
-        serde_json::from_slice(&bytes).map_err(|e| format!("malformed inbound rpc: {e}"))?;
+        serde_json::from_value(envelope).map_err(|e| format!("malformed inbound rpc: {e}"))?;
     log::debug!("signaling::dispatch: inbound rpc method={}", rpc.method);
 
     let request_id = rpc.id.clone();
@@ -466,6 +511,105 @@ async fn handle_inbound(
     send_outbound(peer, &outbound)
         .await
         .map_err(|e| e.to_string())
+}
+
+const MAX_BINARY_RESOURCE_BYTES: usize = 10 * 1024 * 1024;
+
+async fn send_binary_resource_error(
+    peer: &PeerSession,
+    request_id: String,
+    code: &str,
+) -> Result<(), String> {
+    let frame = OutboundFrame::Response(ResponseFrame {
+        id: request_id,
+        ok: false,
+        result: None,
+        error: Some(ErrorBody {
+            code: code.to_string(),
+            message: "binary resource request failed".to_string(),
+        }),
+    });
+    send_outbound(peer, &frame)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+async fn handle_binary_resource(
+    peer: &PeerSession,
+    request: InboundBinaryResource,
+    state: &SharedState,
+    device_id: &str,
+) -> Result<(), String> {
+    if request.protocol_version != RTC_PROTOCOL_VERSION {
+        return send_binary_resource_error(peer, request.id, "unsupported_protocol").await;
+    }
+    if uuid::Uuid::parse_str(&request.id).is_err()
+        || request.resource.kind != "session-media"
+        || request.resource.session_id.is_empty()
+        || request.resource.session_id.len() > 512
+        || request.resource.hash.len() != 64
+        || !request
+            .resource
+            .hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        || !matches!(
+            request.resource.variant.as_str(),
+            "thumbnail" | "canonical" | "original"
+        )
+    {
+        return send_binary_resource_error(peer, request.id, "INVALID_PARAMS").await;
+    }
+    if state.deny_list.is_revoked(device_id) {
+        return send_binary_resource_error(peer, request.id, "device_revoked").await;
+    }
+    if !matches!(
+        state.rate_limiter.check(device_id),
+        crate::companion_api::rate_limit::RateLimitDecision::Accept
+    ) {
+        return send_binary_resource_error(peer, request.id, "rate_limited").await;
+    }
+    let Some(data_plane) = crate::companion_api::data_plane::DataPlane::pick(state) else {
+        return send_binary_resource_error(peer, request.id, "service_unavailable").await;
+    };
+    let media = match data_plane
+        .session_media(
+            request.resource.session_id,
+            request.resource.hash,
+            request.resource.variant,
+        )
+        .await
+    {
+        Ok(media) => media,
+        Err(code) if matches!(code.as_str(), "MEDIA_NOT_FOUND" | "INVALID_PARAMS") => {
+            return send_binary_resource_error(peer, request.id, &code).await;
+        }
+        Err(_) => {
+            return send_binary_resource_error(peer, request.id, "service_unavailable").await;
+        }
+    };
+    if media.bytes.len() > MAX_BINARY_RESOURCE_BYTES {
+        return send_binary_resource_error(peer, request.id, "binary_resource_too_large").await;
+    }
+    let total_chunks = media
+        .bytes
+        .len()
+        .max(1)
+        .div_ceil(super::datachannel_framing::BINARY_RESOURCE_CHUNK_BYTES)
+        as u32;
+    let start = BinaryResourceStart {
+        kind: "binary-resource-start",
+        id: &request.id,
+        media_type: &media.media_type,
+        total_bytes: media.bytes.len(),
+        total_chunks,
+    };
+    peer.send_bytes(serde_json::to_vec(&start).map_err(|error| error.to_string())?)
+        .await
+        .map_err(|error| error.to_string())?;
+    peer.send_binary_resource(&request.id, &media.bytes)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 /// Build a `device_revoked` rejection frame for an inbound DataChannel RPC when

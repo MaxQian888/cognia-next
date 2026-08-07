@@ -21,7 +21,12 @@
  * drives it via {@link setActiveRemoteTransport}.
  */
 
-import type { Transport, TransportCallOptions } from "./transport-types"
+import type {
+  Transport,
+  TransportBinaryResource,
+  TransportBinaryResponse,
+  TransportCallOptions,
+} from "./transport-types"
 import { getCommandDescriptor } from "./command-descriptors"
 
 /**
@@ -192,5 +197,13 @@ export class RoutingTransport implements Transport {
       unsubscribeRouting()
       unsubscribeTarget()
     }
+  }
+
+  readBinary(resource: TransportBinaryResource): Promise<TransportBinaryResponse> {
+    const target = this.target()
+    if (!target.readBinary) {
+      return Promise.reject(new Error("active transport does not support binary resources"))
+    }
+    return target.readBinary(resource)
   }
 }

@@ -279,25 +279,21 @@ pub fn build_router(state: SharedState) -> Router {
 }
 
 fn build_router_for_mode(state: SharedState, mode: super::deployment::DeploymentMode) -> Router {
-    // Pre-auth POST routes that can be brute-forced from the LAN — gated
-    // by a per-source-IP token bucket. See `middleware::pre_auth_rate_limit`
-    // for the bucket parameters and rationale.
-    let metered_pre_auth_routes = match mode {
-        super::deployment::DeploymentMode::SingleUser => Router::new()
+    // The released mobile client still bootstraps a single-user installation
+    // through the legacy pair-JWT exchange. Keep that deliberately narrow
+    // compatibility surface out of multi-tenant deployments, where device
+    // registration is invitation/OIDC based.
+    let legacy_pairing_routes = if mode == super::deployment::DeploymentMode::SingleUser {
+        Router::new()
             .route("/api/v1/auth/pair/issue", post(auth::issue_handler))
             .route("/api/v1/auth/pair", post(auth::pair_handler))
-            // 6-digit numeric code redemption path. Same trust model as
-            // `/api/v1/auth/pair` (callable from the phone over LAN); we
-            // resolve `code -> pair_jwt` server-side then run the same
-            // redeem logic. The 6-digit keyspace (~900K codes) makes this the
-            // primary brute-force target — see the docstring on
-            // `middleware::pre_auth_rate_limit`.
             .route(
                 "/api/v1/auth/pair/redeem-code",
                 post(auth::redeem_code_handler),
             )
-            .layer(from_fn(middleware::pre_auth_rate_limit)),
-        super::deployment::DeploymentMode::MultiTenant => Router::new(),
+            .layer(from_fn(middleware::pre_auth_rate_limit))
+    } else {
+        Router::new()
     };
 
     // Unmetered public routes — no rate limit, no JWT. Used for service
@@ -308,9 +304,9 @@ fn build_router_for_mode(state: SharedState, mode: super::deployment::Deployment
         // stable installation identifier so mobile clients can detect
         // cert rotation and confirm they're talking to the right
         // desktop. See `healthz` module docs.
-        .route("/api/v1/healthz", get(healthz::healthz_handler))
-        .route("/api/v1/livez", get(healthz::livez_handler))
-        .route("/api/v1/readyz", get(healthz::readyz_handler))
+        .route("/healthz", get(healthz::healthz_handler))
+        .route("/livez", get(healthz::livez_handler))
+        .route("/readyz", get(healthz::readyz_handler))
         // A2A Agent Card (a2a-protocol.org) — public discovery document. Read
         // only, discovery-safe fields only; the A2A endpoint itself (`/a2a`)
         // is device-JWT gated below.
@@ -322,142 +318,166 @@ fn build_router_for_mode(state: SharedState, mode: super::deployment::Deployment
     let operator_routes = Router::new()
         .route("/metrics", get(super::metrics::metrics_handler))
         .route(
-            "/api/v1/maintenance/backups",
+            "/operator/maintenance/backups",
             post(super::maintenance::backup_handler),
         )
         .layer(from_fn(middleware::require_loopback_operator));
 
-    // Authenticated routes — JWT verifier middleware applied.
+    // Canonical device routes — short-lived key-bound token + DPoP.
     //
     // The WS upgrade route uses `any()` rather than `get()` so it handles both
     // HTTP/1.1 GET upgrades and HTTP/2 CONNECT upgrades transparently.
     // It is intentionally outside the `RequestBodyLimitLayer` applied below
     // because that layer can interfere with the WS upgrade handshake.
-    let protected_routes = Router::new()
-        .route("/api/v1/whoami", get(auth::whoami_handler))
-        .route("/api/v1/_rpc/{name}", post(rpc::rpc_handler))
+    let device_routes = Router::new()
+        .route("/api/whoami", get(super::api::whoami_handler))
+        .route("/api/_rpc/{name}", post(super::api::rpc_handler))
         .route(
-            "/api/v1/workflow-deployments/{deployment_id}/runs",
+            "/api/sessions/{session_id}/media/{hash}",
+            get(super::session_media::session_media_handler),
+        )
+        .route(
+            "/api/operations/{operation_id}",
+            get(super::api::operation_handler),
+        )
+        .route(
+            "/api/workflow-deployments/{deployment_id}/runs",
             post(super::workflow_api::create_run_handler),
         )
         .route(
-            "/api/v1/workflow-runs/{run_id}",
+            "/api/workflow-runs/{run_id}",
             get(super::workflow_api::get_run_handler),
         )
         .route(
-            "/api/v1/workflow-runs/{run_id}/events",
+            "/api/workflow-runs/{run_id}/events",
             get(super::workflow_api::events_handler),
         )
         .route(
-            "/api/v1/workflow-runs/{run_id}/cancel",
+            "/api/workflow-runs/{run_id}/cancel",
             post(super::workflow_api::cancel_run_handler),
         )
-        .route(
-            "/api/v1/browser/stream-ticket",
-            post(super::browser_gateway::issue_ticket_handler),
-        )
-        .route(
-            "/api/v1/terminal/socket-ticket",
-            post(ws_terminal::issue_ticket_handler),
-        )
-        // Legacy JSON/raw-byte terminal protocol. Keep this behind device-JWT
-        // middleware for released clients while `/ws/terminal` uses tickets
-        // and canonical binary frames.
-        .route(
-            "/ws/v1/terminal",
-            any(ws_terminal::legacy_ws_terminal_handler),
-        )
-        .route("/ws/v1/events", any(ws::ws_handler))
-        // Headless-brain data plane (ADR-0059 W3). The JWT middleware already
-        // enforces loopback for service-scope tokens; the handler additionally
-        // rejects non-service scopes before the upgrade.
-        .route("/ws/v1/bridge", any(ws_bridge::ws_bridge_handler))
         // Remote Pro IDE relay. The companion owns code-server and revalidates
         // the paired device on every HTTP request and WebSocket upgrade.
         .route(
-            "/ide/v1/relay/{relay_id}",
+            "/ide/relay/{relay_id}",
             any(crate::codeserver::remote::relay_root_handler),
         )
         .route(
-            "/ide/v1/relay/{relay_id}/",
+            "/ide/relay/{relay_id}/",
             any(crate::codeserver::remote::relay_root_handler),
         )
         .route(
-            "/ide/v1/relay/{relay_id}/{*tail}",
+            "/ide/relay/{relay_id}/{*tail}",
             any(crate::codeserver::remote::relay_handler),
         )
         // ACP server (Agent Client Protocol) — external editors drive cognia
         // Claude sessions over JSON-RPC. Baseline-chat surface only (the
         // handler reaches `claude_*` arms through `rpc::dispatch`, whose
         // control/service gates still apply), so a device JWT suffices.
-        .route("/ws/v1/acp", any(acp::acp_handler))
+        .route("/ws/acp", any(acp::acp_handler))
         // A2A server (Agent2Agent, a2a-protocol.org) — external agents drive
         // cognia over JSON-RPC. Same baseline-chat trust model as ACP: reaches
         // `claude_*` arms through `rpc::dispatch`, so a device JWT suffices.
         .route("/a2a", post(a2a::a2a_rpc_handler))
-        // Feishu principal-registry admin (`cognia lark …`). Deliberately here
-        // rather than in the public `/integrations/lark` nest: this tier
-        // already accepts the headless brain's loopback-only service token,
-        // which is exactly the trust level an operator channel needs.
-        .route("/api/v1/lark/admin", post(lark_entry::admin_handler))
+        .layer(from_fn_with_state(
+            state.clone(),
+            super::api::require_device_access,
+        ));
+
+    // Compatibility endpoints for released device-JWT clients. Keep this
+    // router explicit so new canonical routes cannot accidentally inherit the
+    // legacy bearer/query-token authentication model.
+    let legacy_terminal_routes = Router::new()
+        .route("/api/v1/_rpc/{name}", post(rpc::rpc_handler))
+        .route("/ws/v1/events", any(ws::legacy_ws_handler))
         .route(
-            "/api/v1/lark/admin/{request_id}",
-            get(lark_entry::admin_poll_handler),
+            "/ws/v1/terminal",
+            any(ws_terminal::legacy_ws_terminal_handler),
+        )
+        .route(
+            "/api/v1/terminal/socket-ticket",
+            post(ws_terminal::issue_ticket_handler),
         )
         .layer(from_fn_with_state(
             state.clone(),
             middleware::require_device_jwt,
         ));
 
-    // v2 keeps the v1 RPC payload shape for one compatibility release, but
-    // replaces its authentication and authorization completely: short-lived
-    // key-bound access token, per-request DPoP proof, manifest capability,
-    // transport target, and UUID idempotency enforcement.
-    let v2_protected_routes = Router::new()
-        .route("/api/v2/_rpc/{name}", post(super::v2::rpc_handler))
-        .layer(from_fn_with_state(
-            state.clone(),
-            super::v2::require_device_access,
-        ));
-    let v2_owner_routes = Router::new()
-        .route("/api/v2/devices", get(super::v2::devices_handler))
+    // Released mobile builds still use the pair-JWT `/api/v1` surface. Keep
+    // only the scoped binary media read here; canonical device-key clients use
+    // `/api/sessions/...` above.
+    let legacy_media_routes = Router::new()
         .route(
-            "/api/v2/devices/{device_id}",
-            delete(super::v2::revoke_device_handler),
-        )
-        .route("/api/v2/invitations", post(super::v2::invitation_handler))
-        .route(
-            "/api/v2/policies",
-            get(super::v2::policies_handler).post(super::v2::create_policy_handler),
+            "/api/v1/sessions/{session_id}/media/{hash}",
+            get(super::session_media::session_media_handler),
         )
         .layer(from_fn_with_state(
             state.clone(),
-            super::v2::require_owner_access,
+            middleware::require_device_jwt,
         ));
+
+    let owner_routes = Router::new()
+        .route("/api/devices", get(super::api::devices_handler))
+        .route(
+            "/api/devices/{device_id}",
+            delete(super::api::revoke_device_handler),
+        )
+        .route("/api/invitations", post(super::api::invitation_handler))
+        .route(
+            "/api/policies",
+            get(super::api::policies_handler).post(super::api::create_policy_handler),
+        )
+        .layer(from_fn_with_state(
+            state.clone(),
+            super::api::require_owner_access,
+        ));
+
+    // Loopback/service-token traffic is deliberately isolated from the device
+    // plane. It retains its service-principal authentication while sharing the
+    // same command execution authority.
+    let internal_routes = Router::new()
+        .route("/internal/bridge", any(ws_bridge::ws_bridge_handler))
+        .route("/internal/events", any(ws::internal_ws_handler))
+        .route("/internal/_rpc/{name}", post(rpc::rpc_handler))
+        .layer(from_fn_with_state(
+            state.clone(),
+            middleware::require_device_jwt,
+        ));
+
+    let operator_admin_routes = Router::new()
+        .route("/operator/lark/admin", post(lark_entry::admin_handler))
+        .route(
+            "/operator/lark/admin/{request_id}",
+            get(lark_entry::admin_poll_handler),
+        )
+        .layer(from_fn(middleware::require_loopback_operator));
 
     // Lark dual-entry public surface (plan 2026-07-24) — cloned handle so the
     // headless-only nest below can outlive the `with_state` move.
     let lark_entry_state = state.clone();
 
     let mut router = Router::new()
-        .merge(metered_pre_auth_routes)
         .merge(unmetered_public_routes)
+        .merge(legacy_pairing_routes)
         .merge(operator_routes)
-        .merge(super::v2::router())
-        .route("/ws/v2/events", any(ws::ws_v2_handler))
-        .merge(v2_protected_routes)
-        .merge(v2_owner_routes)
+        .merge(operator_admin_routes)
+        .merge(super::api::router())
+        .route("/ws/events", any(ws::ws_handler))
+        .merge(device_routes)
+        .merge(legacy_terminal_routes)
+        .merge(legacy_media_routes)
+        .merge(owner_routes)
+        .merge(internal_routes)
         // Browser stream upgrades authenticate with a 60-second, single-use
         // ticket obtained through the protected route above. Long-lived JWTs
         // are deliberately never placed in the WebSocket URL.
         .route(
-            "/ws/v1/browser/{session_id}",
+            "/ws/browser/{session_id}",
             any(super::browser_gateway::browser_ws_handler),
         )
         // Terminal upgrades use the same single-use-ticket pattern as the
         // browser stream, so a long-lived device JWT never enters the URL.
         .route("/ws/terminal", any(ws_terminal::ws_terminal_handler))
-        .merge(protected_routes)
         .with_state(state.clone());
 
     // Fleet ingress (`/api/v1/fleet/*`) — its own auth tier: loopback-source
@@ -509,11 +529,11 @@ fn build_router_for_mode(state: SharedState, mode: super::deployment::Deployment
     // the handler additionally requires a loopback-only service-scope token.
     let content_router = Router::new()
         .route(
-            "/api/v1/ide/content",
+            "/ide/content",
             post(crate::codeserver::content_bridge::upload_content),
         )
         .route(
-            "/api/v1/ide/content/{handle_id}",
+            "/ide/content/{handle_id}",
             get(crate::codeserver::content_bridge::redeem_content),
         )
         .layer(RequestBodyLimitLayer::new(64 * 1024 * 1024))
@@ -531,7 +551,7 @@ async fn reject_mutations_while_draining(request: Request, next: Next) -> Respon
         request.method(),
         &Method::GET | &Method::HEAD | &Method::OPTIONS
     );
-    let maintenance = request.uri().path() == "/api/v1/maintenance/backups";
+    let maintenance = request.uri().path() == "/operator/maintenance/backups";
     if !mutating || maintenance {
         return next.run(request).await;
     }
@@ -737,6 +757,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn released_terminal_ticket_route_is_mounted_and_authenticated() {
+        use tower::ServiceExt as _;
+
+        let response = build_router_for_mode(
+            test_state(),
+            crate::companion_api::deployment::DeploymentMode::SingleUser,
+        )
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/v1/terminal/socket-ticket")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn canonical_routes_are_unversioned_and_released_v1_aliases_remain_compatible() {
+        use tower::ServiceExt as _;
+
+        async fn status(path: &str, method: &str) -> StatusCode {
+            let mut request = axum::http::Request::builder()
+                .method(method)
+                .uri(path)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from("{}"))
+                .unwrap();
+            request.extensions_mut().insert(axum::extract::ConnectInfo(
+                std::net::SocketAddr::from(([127, 0, 0, 1], 34567)),
+            ));
+            build_router(test_state())
+                .oneshot(request)
+                .await
+                .unwrap()
+                .status()
+        }
+
+        for (path, method) in [
+            ("/healthz", "GET"),
+            ("/api/auth/device/challenge", "POST"),
+            ("/api/_rpc/claude_sidecar_status", "POST"),
+            ("/ws/events", "GET"),
+            ("/api/v1/_rpc/claude_sidecar_status", "POST"),
+            ("/ws/v1/events", "GET"),
+        ] {
+            assert_ne!(status(path, method).await, StatusCode::NOT_FOUND, "{path}");
+        }
+
+        for (path, method) in [
+            ("/api/v1/healthz", "GET"),
+            ("/api/v2/auth/device/challenge", "POST"),
+            ("/api/v2/_rpc/claude_sidecar_status", "POST"),
+            ("/ws/v2/events", "GET"),
+        ] {
+            assert_eq!(status(path, method).await, StatusCode::NOT_FOUND, "{path}");
+        }
+    }
+
+    #[tokio::test]
     async fn legacy_terminal_websocket_route_remains_mounted() {
         use tower::ServiceExt as _;
 
@@ -751,6 +834,26 @@ mod tests {
             .unwrap();
 
         assert_ne!(response.status(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn session_media_routes_require_device_authentication() {
+        use tower::ServiceExt as _;
+
+        for path in [
+            format!("/api/sessions/s1/media/{}", "a".repeat(64)),
+            format!("/api/v1/sessions/s1/media/{}", "a".repeat(64)),
+        ] {
+            let mut request = axum::http::Request::builder()
+                .uri(path)
+                .body(axum::body::Body::empty())
+                .unwrap();
+            request.extensions_mut().insert(axum::extract::ConnectInfo(
+                std::net::SocketAddr::from(([127, 0, 0, 1], 34567)),
+            ));
+            let response = build_router(test_state()).oneshot(request).await.unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+        }
     }
 
     /// ADR-0059 F4/R12: the public `/connectors` ingress mounts only on

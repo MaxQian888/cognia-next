@@ -42,6 +42,20 @@ describe("oauth-tauri wrappers", () => {
     expect(await mcpOAuthLoadEntry("srv")).toEqual({ accessToken: "t", expiresAtMs: 9 })
   })
 
+  it("falls back to the one-release legacy name key", async () => {
+    callMock.mockResolvedValueOnce(null).mockResolvedValueOnce({ access_token: "legacy" })
+    expect(await mcpOAuthLoadEntry("mcp-id", "old-name")).toEqual({
+      accessToken: "legacy",
+      expiresAtMs: undefined,
+    })
+    expect(callMock).toHaveBeenNthCalledWith(1, "mcp_oauth_load_entry", {
+      serverName: "mcp-id",
+    })
+    expect(callMock).toHaveBeenNthCalledWith(2, "mcp_oauth_load_entry", {
+      serverName: "old-name",
+    })
+  })
+
   const desc = { transport: "http" as const, config: { url: "https://x" } }
 
   it("mcpOAuthRefresh projects the refreshed token and resolves the helper path", async () => {

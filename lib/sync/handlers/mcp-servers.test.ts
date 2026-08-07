@@ -4,6 +4,8 @@
 import "fake-indexeddb/auto"
 
 import type { Transport } from "@/lib/tauri/transport-types"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 
 import { syncMcpServers } from "./mcp-servers"
 
@@ -19,6 +21,12 @@ function makeTransport(): Transport {
 }
 
 describe("syncMcpServers", () => {
+  const dbFixture = createDbTestFixture()
+
+  beforeAll(dbFixture.initialize)
+  beforeEach(dbFixture.restore)
+  afterAll(dbFixture.dispose)
+
   it("calls sync_pull with table=mcpServers", async () => {
     const tx = makeTransport()
     const out = await syncMcpServers(tx, { since: 0 })
@@ -27,5 +35,34 @@ describe("syncMcpServers", () => {
     expect(out.ok).toBe(true)
     if (!out.ok) return
     expect(out.result.nextSince).toBe(12)
+  })
+
+  it("persists only the redacted mobile projection from legacy full rows", async () => {
+    const tx = makeTransport()
+    ;(tx.call as jest.Mock).mockResolvedValueOnce({
+      rows: [
+        {
+          id: "mcp-1",
+          name: "github",
+          displayName: "GitHub",
+          transport: "http",
+          enabled: true,
+          updatedAt: 12,
+          config: { headers: { Authorization: "secret" } },
+        },
+      ],
+      deleted_ids: [],
+      next_since: 12,
+    })
+
+    await syncMcpServers(tx, { since: 0 })
+    expect(await getDb().mcpServerSummaries.get("mcp-1")).toEqual({
+      id: "mcp-1",
+      displayName: "GitHub",
+      transport: "http",
+      enabled: true,
+      trustState: "legacy",
+      updatedAt: 12,
+    })
   })
 })

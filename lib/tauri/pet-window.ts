@@ -93,6 +93,17 @@ export async function getPetWindowPosition(): Promise<{ x: number; y: number } |
   }
 }
 
+/** Read the global cursor position for local-only gaze tracking. */
+export async function getPetCursorPosition(): Promise<{ x: number; y: number } | null> {
+  if (!isTauri()) return null
+  try {
+    return await invoke<{ x: number; y: number }>("pet_window_get_cursor_position")
+  } catch (err) {
+    console.warn("getPetCursorPosition failed", err)
+    return null
+  }
+}
+
 /**
  * Work area of the monitor the pet window sits on (physical px + scale
  * factor). Mirrors the Rust `PetWorkArea` DTO. `null` off Tauri / headless.

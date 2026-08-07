@@ -1,10 +1,9 @@
-//! WebSocket event bridge — `GET /ws/v1/events`.
+//! WebSocket event bridge — `GET /ws/events`.
 //!
 //! # Connection lifecycle
 //!
-//! 1. Client opens `wss://<host>/ws/v1/events?token=<jwt>&since=<seq>`.
-//!    The `require_device_jwt` middleware verifies the JWT and injects
-//!    [`DeviceContext`] into request extensions *before* this handler runs.
+//! 1. A device redeems a one-shot ticket at `wss://<host>/ws/events`, while
+//!    the loopback headless brain uses `/internal/events?token=<service-jwt>`.
 //! 2. If `since` is too old, the server sends `{"type":"resync_required"}` and
 //!    closes the connection immediately.
 //! 3. Any buffered frames with `seq > since` are replayed in order.
@@ -26,7 +25,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::time::{interval, Duration, Instant};
 
-use super::{event_bus::SubscribeResult, middleware::DeviceContext, SharedState};
+use super::{event_bus::SubscribeResult, SharedState};
 
 // ---------------------------------------------------------------------------
 // Timing constants
@@ -45,14 +44,12 @@ const IDLE_TIMEOUT_SECS: u64 = 90;
 /// Query parameters accepted by the WS upgrade endpoint.
 #[derive(Debug, Deserialize)]
 pub struct WsParams {
-    /// Last sequence number the client received.  Omit (or pass `0`) for a
-    /// fresh subscription with no replay.
+    pub ticket: String,
     pub since: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct WsV2Params {
-    pub ticket: String,
+pub struct InternalWsParams {
     pub since: Option<u64>,
 }
 
@@ -60,35 +57,12 @@ pub struct WsV2Params {
 // Handler
 // ---------------------------------------------------------------------------
 
-/// Axum handler for `GET /ws/v1/events`.
-///
-/// The `require_device_jwt` middleware runs before this handler and injects
-/// [`DeviceContext`] into the request extensions.  We read it from the
-/// extensions *before* calling `ws.on_upgrade` because axum's
-/// `WebSocketUpgrade` extractor consumes the request parts and extensions are
-/// not forwarded into the async closure.
+/// Canonical Companion event stream. The 60-second socket ticket is path- and
+/// audience-bound, single-use, and re-checks the device's live revocation
+/// state in SQLite before the upgrade is accepted.
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     Query(params): Query<WsParams>,
-    State(state): State<SharedState>,
-    request: axum::extract::Request,
-) -> Response {
-    // Read DeviceContext before the upgrade consumes the request.
-    let device_id = request
-        .extensions()
-        .get::<DeviceContext>()
-        .map(|ctx| ctx.device_id.clone())
-        .unwrap_or_default();
-
-    upgrade_events_ws(ws, params.since, None, device_id, state)
-}
-
-/// Companion API v2 event stream. The 60-second socket ticket is path- and
-/// audience-bound, single-use, and re-checks the device's live revocation
-/// state in SQLite before the upgrade is accepted.
-pub async fn ws_v2_handler(
-    ws: WebSocketUpgrade,
-    Query(params): Query<WsV2Params>,
     State(state): State<SharedState>,
 ) -> Response {
     let Some(store) = super::security_store::security_store() else {
@@ -108,7 +82,7 @@ pub async fn ws_v2_handler(
     };
     let identity = match store.redeem_socket_ticket(
         &params.ticket,
-        "/ws/v2/events",
+        "/ws/events",
         "events",
         unix_time_secs(),
     ) {
@@ -136,6 +110,85 @@ pub async fn ws_v2_handler(
         identity.device_id,
         state,
     )
+}
+
+/// Headless brain event stream. Authentication is supplied by the internal
+/// route's JWT middleware; unlike the public device stream this socket uses a
+/// loopback-only service token because the Node brain has no device key/DPoP
+/// identity and cannot attach an Authorization header to a WHATWG WebSocket.
+pub async fn internal_ws_handler(
+    ws: WebSocketUpgrade,
+    Query(params): Query<InternalWsParams>,
+    State(state): State<SharedState>,
+    request: axum::extract::Request,
+) -> Response {
+    let Some(context) = request
+        .extensions()
+        .get::<super::middleware::DeviceContext>()
+        .cloned()
+    else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({
+                "error": "missing_device_context",
+                "message": "JWT middleware did not run"
+            })),
+        )
+            .into_response();
+    };
+    if context.scope != "service" {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "service_scope_required",
+                "message": "the internal event stream requires a headless service token"
+            })),
+        )
+            .into_response();
+    }
+    upgrade_events_ws(
+        ws,
+        params.since,
+        Some(context.account_id),
+        context.device_id,
+        state,
+    )
+}
+
+/// Deprecated event stream retained for released mobile clients. The legacy
+/// JWT middleware authenticates the query token before this handler runs.
+/// New clients must redeem a single-use ticket against `/ws/events` instead.
+pub async fn legacy_ws_handler(
+    ws: WebSocketUpgrade,
+    Query(params): Query<InternalWsParams>,
+    State(state): State<SharedState>,
+    request: axum::extract::Request,
+) -> Response {
+    let Some(context) = request
+        .extensions()
+        .get::<super::middleware::DeviceContext>()
+        .cloned()
+    else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({
+                "code": "missing_device_context",
+                "message": "JWT middleware did not run"
+            })),
+        )
+            .into_response();
+    };
+    if context.scope != "device" {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "code": "device_scope_required",
+                "message": "the deprecated v1 event stream requires a device token"
+            })),
+        )
+            .into_response();
+    }
+    upgrade_events_ws(ws, params.since, None, context.device_id, state)
 }
 
 fn upgrade_events_ws(

@@ -21,7 +21,7 @@ import type {
   StoredMessage,
   ChatSession,
   Character,
-  McpServer,
+  McpServerSummary,
 } from "@cognia/agent-config-types"
 import { CROSS_PLATFORM_SETTING_KEYS } from "@cognia/agent-config-types/settings-sync"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
@@ -308,13 +308,8 @@ async function readAdapterInstancesDelta(since: number): Promise<SyncDelta<unkno
   return finalizeDelta("adapterInstances", rows as UpdatedAtRow[], since)
 }
 
-async function readMcpServersDelta(since: number): Promise<SyncDelta<McpServer>> {
-  // mcpServers carries `updatedAt` (set on every create/update) but the index
-  // is `id, name, enabled` — no `updatedAt` index — so we read all and filter,
-  // mirroring readPluginsDelta. The configured-server set is small. The mobile
-  // `/me/mcp` page is a read-only viewer, so deltas only ever flow desktop→phone.
-  const all = await getDb().mcpServers.toArray()
-  const rows = all.filter((row) => Number(row.updatedAt ?? 0) > since)
+async function readMcpServersDelta(since: number): Promise<SyncDelta<McpServerSummary>> {
+  const rows = await getDb().mcpServerSummaries.where("updatedAt").above(since).toArray()
   return finalizeDelta("mcpServers", rows, since)
 }
 

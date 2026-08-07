@@ -16,7 +16,137 @@
  * helper never touches the keyring or any config file.
  */
 import nodeHttp from "node:http"
+import nodeDns from "node:dns"
 import { spawn } from "node:child_process"
+import { Agent } from "undici"
+
+function parseIpv4(hostname) {
+  const parts = hostname.split(".")
+  if (parts.length !== 4) return null
+  const bytes = parts.map(Number)
+  return bytes.every((part) => Number.isInteger(part) && part >= 0 && part <= 255) ? bytes : null
+}
+
+/** Fail-closed classification shared by configured, discovered, and token URLs. */
+export function isPrivateOrReservedHost(hostname) {
+  const host = String(hostname)
+    .replace(/^\[|\]$/g, "")
+    .toLowerCase()
+  if (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host === "::" ||
+    host === "::1" ||
+    host === "0:0:0:0:0:0:0:1"
+  ) {
+    return true
+  }
+  if (
+    host.startsWith("fc") ||
+    host.startsWith("fd") ||
+    host.startsWith("fe8") ||
+    host.startsWith("fe9") ||
+    host.startsWith("fea") ||
+    host.startsWith("feb") ||
+    host.startsWith("ff") ||
+    host.startsWith("2001:db8:") ||
+    host.startsWith("::ffff:")
+  ) {
+    return true
+  }
+  const ip = parseIpv4(host)
+  if (!ip) return false
+  const [a, b, c] = ip
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 0) ||
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) ||
+    (a === 203 && b === 0 && c === 113) ||
+    a >= 224
+  )
+}
+
+export function validateRemoteUrl(value, allowPrivateNetwork = false) {
+  let url
+  try {
+    url = value instanceof URL ? value : new URL(String(value))
+  } catch {
+    throw new Error("MCP OAuth endpoint is not a valid URL")
+  }
+  const privateTarget = isPrivateOrReservedHost(url.hostname)
+  if (url.protocol !== "https:" && !(allowPrivateNetwork && privateTarget)) {
+    throw new Error("MCP OAuth endpoints require HTTPS")
+  }
+  if (privateTarget && !allowPrivateNetwork) {
+    throw new Error("MCP OAuth endpoint resolves to a private or reserved address")
+  }
+  return url
+}
+
+function guardedLookup(allowPrivateNetwork, lookup = nodeDns.lookup) {
+  return (hostname, options, callback) => {
+    lookup(hostname, { ...options, all: true }, (error, addresses) => {
+      if (error) {
+        callback(error)
+        return
+      }
+      const rows = Array.isArray(addresses) ? addresses : []
+      if (rows.length === 0) {
+        callback(new Error(`MCP OAuth DNS lookup returned no addresses for ${hostname}`))
+        return
+      }
+      if (!allowPrivateNetwork && rows.some((row) => isPrivateOrReservedHost(row.address))) {
+        callback(
+          new Error(`MCP OAuth DNS lookup blocked a private or reserved address for ${hostname}`)
+        )
+        return
+      }
+      if (options?.all) callback(null, rows)
+      else callback(null, rows[0].address, rows[0].family)
+    })
+  }
+}
+
+/**
+ * Build one fetch seam for every transport, discovery, registration, refresh,
+ * and token request. The socket's actual DNS lookup is guarded by the Undici
+ * dispatcher, avoiding a validate-then-resolve rebinding window.
+ */
+export function createEgressGuard({
+  allowPrivateNetwork = false,
+  fetchImpl = globalThis.fetch,
+  lookup = nodeDns.lookup,
+  AgentCtor = Agent,
+} = {}) {
+  let dispatcher
+  const getDispatcher = () => {
+    if (allowPrivateNetwork) return undefined
+    dispatcher ??= new AgentCtor({ connect: { lookup: guardedLookup(false, lookup) } })
+    return dispatcher
+  }
+  return {
+    fetch: (input, init = {}) => {
+      const value = typeof Request !== "undefined" && input instanceof Request ? input.url : input
+      validateRemoteUrl(value, allowPrivateNetwork)
+      const activeDispatcher = getDispatcher()
+      return fetchImpl(input, {
+        ...init,
+        redirect: "error",
+        ...(activeDispatcher ? { dispatcher: activeDispatcher } : {}),
+      })
+    },
+    close: async () => {
+      await dispatcher?.close?.()
+    },
+  }
+}
 
 /** Parse the OAuth redirect query into a result object. (Pure — tested.) */
 export function parseCallback(requestUrl) {
@@ -170,14 +300,17 @@ async function loadSdk() {
   return { Client, StreamableHTTPClientTransport, SSEClientTransport }
 }
 
-function buildTransport(sdk, server, authProvider) {
-  const url = new URL(String(server.config?.url ?? ""))
+function buildTransport(sdk, server, authProvider, guardedFetch) {
+  const allowPrivateNetwork = server.config?.allowPrivateNetwork === true
+  const url = validateRemoteUrl(server.config?.url, allowPrivateNetwork)
   const headers =
     server.config?.headers && typeof server.config.headers === "object"
       ? server.config.headers
       : undefined
-  const opts = {}
-  if (headers) opts.requestInit = { headers }
+  const opts = {
+    fetch: guardedFetch,
+    requestInit: { ...(headers ? { headers } : {}), redirect: "error" },
+  }
   if (authProvider) opts.authProvider = authProvider
   const Ctor =
     server.transport === "sse" ? sdk.SSEClientTransport : sdk.StreamableHTTPClientTransport
@@ -202,18 +335,44 @@ export async function runFlow({ server, entry, mode }, deps = {}) {
     }
   }
   const state = { ...(entry ?? {}) }
+  const allowPrivateNetwork = server?.config?.allowPrivateNetwork === true
+  let egress
+  try {
+    validateRemoteUrl(server?.config?.url, allowPrivateNetwork)
+    egress = (deps.createEgressGuard ?? createEgressGuard)({
+      allowPrivateNetwork,
+      ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+      ...(deps.lookup ? { lookup: deps.lookup } : {}),
+      ...(deps.AgentCtor ? { AgentCtor: deps.AgentCtor } : {}),
+    })
+  } catch (err) {
+    return {
+      result: { ok: false, status: "error", message: `egress blocked: ${msg(err)}` },
+      entry: state,
+    }
+  }
   const start = deps.startCallbackServer ?? startCallbackServer
   const open = deps.openBrowser ?? openBrowser
   const onAuthUrl =
     deps.onAuthUrl ?? ((url) => process.stdout.write(JSON.stringify({ open: url }) + "\n"))
   const timeoutMs = deps.timeoutMs ?? 180_000
-  const sdk = deps.sdk ?? (await loadSdk())
+  let sdk
+  try {
+    sdk = deps.sdk ?? (await loadSdk())
+  } catch (err) {
+    await egress.close().catch(() => undefined)
+    return {
+      result: { ok: false, status: "error", message: `SDK load failed: ${msg(err)}` },
+      entry: state,
+    }
+  }
   const csrf = (deps.randomState ?? randomState)()
 
   let callback
   try {
     callback = await start()
   } catch (err) {
+    await egress.close().catch(() => undefined)
     return {
       result: { ok: false, status: "error", message: `callback server: ${msg(err)}` },
       entry: state,
@@ -227,11 +386,12 @@ export async function runFlow({ server, entry, mode }, deps = {}) {
       scope: server.config?.scope,
       state: csrf,
       onRedirect: async (url) => {
-        onAuthUrl(url.href)
-        if (mode === "authenticate") open(url.href)
+        const authorizationUrl = validateRemoteUrl(url, allowPrivateNetwork)
+        onAuthUrl(authorizationUrl.href)
+        if (mode === "authenticate") open(authorizationUrl.href)
       },
     })
-    const transport = buildTransport(sdk, server, provider)
+    const transport = buildTransport(sdk, server, provider, egress.fetch)
     client = new sdk.Client({ name: "cognia-mcp-oauth", version: "1.0.0" }, { capabilities: {} })
 
     try {
@@ -293,6 +453,7 @@ export async function runFlow({ server, entry, mode }, deps = {}) {
   } finally {
     await client?.close?.().catch(() => undefined)
     callback.close()
+    await egress.close().catch(() => undefined)
   }
 }
 

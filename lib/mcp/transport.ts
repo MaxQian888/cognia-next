@@ -12,6 +12,13 @@
  * (`await import`) so the static-exported renderer never bundles it.
  */
 import type { McpServer } from "@cognia/agent-config-types"
+import { hasMcpSecretRefs, resolveMcpSecrets } from "./credentials"
+import {
+  evaluateMcpPolicy,
+  validateMcpRemoteEgress,
+  type McpExecutionGrant,
+  type McpExecutionSurface,
+} from "./policy"
 
 /** Identity reported to the MCP server during `initialize`. */
 export interface McpClientInfo {
@@ -24,7 +31,11 @@ const DEFAULT_CLIENT_INFO: McpClientInfo = { name: "cognia", version: "1.0.0" }
 /** The slice of the SDK `Client` callers use. */
 export interface McpClientLike {
   connect(transport: unknown): Promise<void>
-  callTool(params: { name: string; arguments?: Record<string, unknown> }): Promise<{
+  callTool(
+    params: { name: string; arguments?: Record<string, unknown> },
+    resultSchema?: unknown,
+    options?: { signal?: AbortSignal; timeout?: number }
+  ): Promise<{
     isError?: boolean
     content?: unknown[]
     structuredContent?: unknown
@@ -42,6 +53,7 @@ export interface McpClientLike {
       arguments?: Array<{ name: string; description?: string; required?: boolean }>
     }>
   }>
+  setNotificationHandler?(schema: unknown, handler: () => void | Promise<void>): void
   close(): Promise<void>
 }
 
@@ -70,6 +82,14 @@ export interface OpenMcpOptions {
   /** Receives the stdio child's captured stderr (diagnostics). No-op for remote
    * servers, which have no stderr stream. Omit to drain and discard. */
   onStderr?: McpStderrSink
+  /** Execution context used by the common trust policy. Defaults to non-interactive CLI. */
+  surface?: McpExecutionSurface
+  interactive?: boolean
+  grant?: McpExecutionGrant
+  toolName?: string
+  fingerprint?: string
+  /** Capability cache invalidation hook for notifications/tools/list_changed. */
+  onToolsChanged?: () => void | Promise<void>
 }
 
 /** How the spawned stdio child's stderr is wired. Matches the SDK's IOType. */
@@ -87,6 +107,13 @@ export interface McpTransportCtors {
   Sse: new (url: URL, opts?: Record<string, unknown>) => unknown
 }
 
+type McpRemoteFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+
+interface McpEgressGuard {
+  fetch: McpRemoteFetch
+  close(): Promise<void>
+}
+
 /**
  * Build the transport for a server. Pure given the constructors. stdio carries
  * command/args/env; sse/http carry the URL plus optional static `headers`
@@ -95,13 +122,13 @@ export interface McpTransportCtors {
 export function buildMcpTransport(
   server: McpServer,
   ctors: McpTransportCtors,
-  opts: { authProvider?: unknown } = {}
+  opts: { authProvider?: unknown; fetch?: McpRemoteFetch } = {}
 ): unknown {
-  const cfg = server.config
+  const cfg = server.config as unknown as Record<string, unknown>
   if (server.transport === "stdio") {
     return new ctors.Stdio({
       command: String(cfg.command ?? ""),
-      args: Array.isArray(cfg.args) ? (cfg.args as string[]) : [],
+      args: Array.isArray(cfg.args) ? cfg.args.map(String) : [],
       env: (cfg.env as Record<string, string>) ?? undefined,
       // The SDK spawns the child with `stdio: ["pipe", "pipe", stderr ?? "inherit"]`.
       // Left to default, the server's stderr streams straight to our terminal and
@@ -110,16 +137,21 @@ export function buildMcpTransport(
       stderr: "pipe",
     })
   }
-  const url = new URL(String(cfg.url ?? ""))
+  const url = validateMcpRemoteEgress(String(cfg.url ?? ""), cfg.allowPrivateNetwork === true)
   const headers =
     cfg.headers && typeof cfg.headers === "object"
       ? (cfg.headers as Record<string, string>)
       : undefined
   const transportOpts: Record<string, unknown> = {}
-  if (headers) transportOpts.requestInit = { headers }
+  // Redirects are denied so Authorization cannot be forwarded to an unreviewed host.
+  transportOpts.requestInit = { ...(headers ? { headers } : {}), redirect: "error" }
   if (opts.authProvider) transportOpts.authProvider = opts.authProvider
+  if (opts.fetch) {
+    transportOpts.fetch = opts.fetch
+    if (server.transport === "sse") transportOpts.eventSourceInit = { fetch: opts.fetch }
+  }
   const Ctor = server.transport === "sse" ? ctors.Sse : ctors.Http
-  return new Ctor(url, Object.keys(transportOpts).length > 0 ? transportOpts : undefined)
+  return new Ctor(url, transportOpts)
 }
 
 /** Lazily load the SDK client + transport classes. */
@@ -129,17 +161,20 @@ async function loadSdk(): Promise<{
     opts: { capabilities: object }
   ) => McpClientLike
   ctors: McpTransportCtors
+  toolsListChangedSchema?: unknown
 }> {
   const [
     { Client },
     { StdioClientTransport },
     { StreamableHTTPClientTransport },
     { SSEClientTransport },
+    { ToolListChangedNotificationSchema },
   ] = await Promise.all([
     import("@modelcontextprotocol/sdk/client/index.js"),
     import("@modelcontextprotocol/sdk/client/stdio.js"),
     import("@modelcontextprotocol/sdk/client/streamableHttp.js"),
     import("@modelcontextprotocol/sdk/client/sse.js"),
+    import("@modelcontextprotocol/sdk/types.js"),
   ])
   return {
     Client: Client as never,
@@ -148,12 +183,20 @@ async function loadSdk(): Promise<{
       Http: StreamableHTTPClientTransport as never,
       Sse: SSEClientTransport as never,
     },
+    toolsListChangedSchema: ToolListChangedNotificationSchema,
   }
 }
 
 export interface OpenMcpDeps {
   /** Override the SDK loader (tests). */
   load?: typeof loadSdk
+  resolveConfig?: typeof resolveMcpSecrets
+  createEgressGuard?: (allowPrivateNetwork: boolean) => Promise<McpEgressGuard>
+}
+
+async function createDefaultEgressGuard(allowPrivateNetwork: boolean): Promise<McpEgressGuard> {
+  const { createEgressGuard } = await import("../../sidecar/mcp-oauth-helper.mjs")
+  return createEgressGuard({ allowPrivateNetwork }) as McpEgressGuard
 }
 
 /** The slice of a Node readable stream the stderr drain touches. */
@@ -200,20 +243,62 @@ function drainStderr(transport: unknown, sink?: McpStderrSink): void {
  */
 export async function createMcpConnection(
   server: McpServer,
-  opts: { authProvider?: unknown; clientInfo?: McpClientInfo; onStderr?: McpStderrSink } = {},
+  opts: OpenMcpOptions = {},
   deps: OpenMcpDeps = {}
-): Promise<{ client: McpClientLike; transport: OpenedMcp["transport"] }> {
-  const { Client, ctors } = await (deps.load ?? loadSdk)()
+): Promise<{
+  client: McpClientLike
+  transport: OpenedMcp["transport"]
+  closeEgressGuard?: () => Promise<void>
+}> {
+  const policy = evaluateMcpPolicy({
+    server,
+    surface: opts.surface ?? "cli",
+    interactive: opts.interactive ?? false,
+    grant: opts.grant,
+    toolName: opts.toolName,
+    fingerprint: opts.fingerprint,
+  })
+  if (policy.decision !== "allow") {
+    throw new Error(`MCP execution ${policy.decision}: ${policy.reason}`)
+  }
+  const effectiveServer = hasMcpSecretRefs(server.config)
+    ? {
+        ...server,
+        config: (await (deps.resolveConfig ?? resolveMcpSecrets)(server.config)) as never,
+      }
+    : server
+  const { Client, ctors, toolsListChangedSchema } = await (deps.load ?? loadSdk)()
   const info = opts.clientInfo ?? DEFAULT_CLIENT_INFO
   const client = new Client({ name: info.name, version: info.version }, { capabilities: {} })
-  const transport = buildMcpTransport(server, ctors, {
-    authProvider: opts.authProvider,
-  }) as OpenedMcp["transport"]
+  if (opts.onToolsChanged && toolsListChangedSchema && client.setNotificationHandler) {
+    client.setNotificationHandler(toolsListChangedSchema, opts.onToolsChanged)
+  }
+  const remote = effectiveServer.transport !== "stdio"
+  const allowPrivateNetwork =
+    remote &&
+    (effectiveServer.config as unknown as Record<string, unknown>).allowPrivateNetwork === true
+  const egressGuard = remote
+    ? await (deps.createEgressGuard ?? createDefaultEgressGuard)(allowPrivateNetwork)
+    : undefined
+  let transport: OpenedMcp["transport"]
+  try {
+    transport = buildMcpTransport(effectiveServer, ctors, {
+      authProvider: opts.authProvider,
+      fetch: egressGuard?.fetch,
+    }) as OpenedMcp["transport"]
+  } catch (error) {
+    await egressGuard?.close().catch(() => undefined)
+    throw error
+  }
   // Capture the stdio child's stderr away from the terminal. The SDK exposes the
   // piped stream immediately (a PassThrough built in its ctor), so this attaches
   // before connect and never misses the child's startup diagnostics.
   drainStderr(transport, opts.onStderr)
-  return { client, transport }
+  return {
+    client,
+    transport,
+    closeEgressGuard: egressGuard ? () => egressGuard.close() : undefined,
+  }
 }
 
 /**
@@ -228,19 +313,22 @@ export async function openMcpClient(
   opts: OpenMcpOptions = {},
   deps: OpenMcpDeps = {}
 ): Promise<OpenedMcp> {
-  const { client, transport } = await createMcpConnection(
-    server,
-    { authProvider: opts.authProvider, clientInfo: opts.clientInfo, onStderr: opts.onStderr },
-    deps
-  )
+  const { client, transport, closeEgressGuard } = await createMcpConnection(server, opts, deps)
 
-  const onAbort = () => void client.close().catch(() => undefined)
+  let closed = false
+  const closeResources = async () => {
+    if (closed) return
+    closed = true
+    await client.close().catch(() => undefined)
+    await closeEgressGuard?.().catch(() => undefined)
+  }
+  const onAbort = () => void closeResources()
   if (opts.signal) opts.signal.addEventListener("abort", onAbort, { once: true })
   try {
     await client.connect(transport)
   } catch (err) {
     if (opts.signal) opts.signal.removeEventListener("abort", onAbort)
-    await client.close().catch(() => undefined)
+    await closeResources()
     throw err
   }
   return {
@@ -248,7 +336,7 @@ export async function openMcpClient(
     transport,
     close: async () => {
       if (opts.signal) opts.signal.removeEventListener("abort", onAbort)
-      await client.close().catch(() => undefined)
+      await closeResources()
     },
   }
 }

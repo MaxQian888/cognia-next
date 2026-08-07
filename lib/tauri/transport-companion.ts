@@ -5,7 +5,12 @@ import { isCapacitor, isTauri } from "@/lib/platform/detect"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import { getCommandDescriptor } from "./command-descriptors"
 import { type CompanionConfig, companionStorage } from "./companion-storage"
-import type { Transport, TransportCallOptions } from "./transport-types"
+import type {
+  Transport,
+  TransportBinaryResource,
+  TransportBinaryResponse,
+  TransportCallOptions,
+} from "./transport-types"
 import { pinnedFetch } from "./pinned-fetch"
 import { remoteEventResyncCoordinator } from "./resync-coordinator"
 import { TransportRtc, type TransportRtcOptions } from "./transport-rtc"
@@ -221,6 +226,9 @@ const WS_CLOSE_GRACE_MS = 30_000
 /** HTTP call timeout (ms). */
 const CALL_TIMEOUT_MS = 30_000
 
+/** Canonical chat images share the composer's existing 10 MiB input ceiling. */
+const MAX_SESSION_MEDIA_BYTES = 10 * 1024 * 1024
+
 /** Jitter randomness source — overridable so reconnect-timing tests stay
  * deterministic while production gets real spread. */
 let backoffRandom: () => number = Math.random
@@ -323,9 +331,19 @@ export class CompanionTransport implements Transport {
    * The wire shape is unchanged; mobile/web instances pass nothing.
    */
   private readonly configProvider: (() => CompanionConfig | null) | null
+  private readonly rpcPath: string
+  private readonly eventsPath: string
 
-  constructor(opts: { configProvider?: () => CompanionConfig | null } = {}) {
+  constructor(
+    opts: {
+      configProvider?: () => CompanionConfig | null
+      rpcPath?: string
+      eventsPath?: string
+    } = {}
+  ) {
     this.configProvider = opts.configProvider ?? null
+    this.rpcPath = opts.rpcPath ?? "/api/v1/_rpc"
+    this.eventsPath = opts.eventsPath ?? "/ws/v1/events"
     this.attachNetworkListeners()
   }
 
@@ -338,6 +356,63 @@ export class CompanionTransport implements Transport {
 
   public getConnectionState(): ConnectionState {
     return this.connectionState
+  }
+
+  /**
+   * Fetch a session-scoped media variant as raw bytes. The endpoint performs
+   * the session-to-hash authorization check; this client validates the opaque
+   * identifiers and response budget before retaining anything in memory.
+   */
+  public async readBinary(resource: TransportBinaryResource): Promise<TransportBinaryResponse> {
+    const config = this.config()
+    if (!config) {
+      throw new CompanionError({
+        code: "not_paired",
+        message: "companion not paired",
+        retryable: false,
+      })
+    }
+    if (
+      resource.kind !== "session-media" ||
+      resource.sessionId.length === 0 ||
+      resource.sessionId.length > 512 ||
+      !/^[a-f0-9]{64}$/.test(resource.hash) ||
+      !["thumbnail", "canonical", "original"].includes(resource.variant)
+    ) {
+      throw new CompanionError({
+        code: "invalid_binary_resource",
+        message: "invalid session media resource",
+        retryable: false,
+      })
+    }
+
+    if (this.rtc && this.rtc.getState() === "open" && !this.isOnConnectedLan()) {
+      try {
+        return await this.rtc.readBinary(resource)
+      } catch (error) {
+        const code =
+          error && typeof error === "object" ? String((error as { code?: unknown }).code ?? "") : ""
+        if (
+          [
+            "INVALID_PARAMS",
+            "MEDIA_NOT_FOUND",
+            "device_revoked",
+            "rate_limited",
+            "binary_resource_too_large",
+          ].includes(code)
+        ) {
+          throw error
+        }
+        // Read-only resource requests are safe to retry over authenticated
+        // HTTPS. Do not log the session id, hash, or resource URL.
+      }
+    }
+
+    const baseUrl = config.baseUrl.replace(/\/+$/, "")
+    const url = `${baseUrl}/api/v1/sessions/${encodeURIComponent(resource.sessionId)}/media/${resource.hash}?variant=${resource.variant}`
+    return this.fetchBinaryWithRetry(url, {
+      Authorization: `Bearer ${config.deviceJwt}`,
+    })
   }
 
   public onConnectionStateChange(handler: (state: ConnectionState) => void): () => void {
@@ -388,7 +463,7 @@ export class CompanionTransport implements Transport {
       }
     }
 
-    const url = `${config.baseUrl}/api/v1/_rpc/${encodeURIComponent(name)}`
+    const url = `${config.baseUrl}${this.rpcPath}/${encodeURIComponent(name)}`
 
     const headers: Record<string, string> = {
       Authorization: `Bearer ${config.deviceJwt}`,
@@ -927,6 +1002,93 @@ export class CompanionTransport implements Transport {
     )
   }
 
+  private async fetchBinaryWithRetry(
+    url: string,
+    headers: Record<string, string>
+  ): Promise<TransportBinaryResponse> {
+    let lastError: CompanionError | null = null
+
+    for (let attempt = 0; attempt <= HTTP_BACKOFF_MS.length; attempt++) {
+      if (attempt > 0) await sleep(HTTP_BACKOFF_MS[attempt - 1])
+
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS)
+      let response: Response
+      try {
+        response = await pinnedFetch(url, {
+          method: "GET",
+          headers,
+          signal: controller.signal,
+          serverFingerprint: this.config()?.serverFingerprint,
+        })
+      } catch (err: unknown) {
+        if (isAbortError(err)) {
+          throw new CompanionError({
+            code: "timeout",
+            message: "session media request timed out",
+            retryable: true,
+          })
+        }
+        lastError = new CompanionError({
+          code: "network",
+          message: "session media network request failed",
+          retryable: true,
+        })
+        if (attempt < HTTP_BACKOFF_MS.length) continue
+        throw lastError
+      } finally {
+        clearTimeout(timeoutId)
+      }
+
+      if (response.ok) {
+        const declaredSize = Number(response.headers.get("content-length") ?? "0")
+        if (Number.isFinite(declaredSize) && declaredSize > MAX_SESSION_MEDIA_BYTES) {
+          throw new CompanionError({
+            code: "binary_resource_too_large",
+            message: "session media exceeds the 10 MiB response budget",
+            retryable: false,
+          })
+        }
+        const bytes = new Uint8Array(await response.arrayBuffer())
+        if (bytes.byteLength > MAX_SESSION_MEDIA_BYTES) {
+          throw new CompanionError({
+            code: "binary_resource_too_large",
+            message: "session media exceeds the 10 MiB response budget",
+            retryable: false,
+          })
+        }
+        return {
+          bytes,
+          mediaType: response.headers.get("content-type") ?? "application/octet-stream",
+          ...(response.headers.get("etag") ? { etag: response.headers.get("etag")! } : {}),
+        }
+      }
+
+      if (response.status === 401) this.setConnectionState("unauthenticated")
+      if (response.status >= 400 && response.status < 500) {
+        const body = await safeJson(response)
+        throw new CompanionError({
+          code: (body?.code as string) ?? `http_${response.status}`,
+          message: (body?.message as string) ?? `HTTP ${response.status}`,
+          retryable: false,
+        })
+      }
+
+      const body = await safeJson(response)
+      lastError = new CompanionError({
+        code: "server_error",
+        message: (body?.message as string) ?? `HTTP ${response.status}`,
+        retryable: true,
+      })
+      if (attempt >= HTTP_BACKOFF_MS.length) throw lastError
+    }
+
+    throw (
+      lastError ??
+      new CompanionError({ code: "network", message: "binary request failed", retryable: true })
+    )
+  }
+
   // ── Private: WebSocket lifecycle ───────────────────────────────────────────
 
   private openWebSocket(): void {
@@ -946,7 +1108,7 @@ export class CompanionTransport implements Transport {
     const since = maxSeq > 0 ? String(maxSeq) : ""
     const wsBase = config.baseUrl.replace(/^https?/, "wss")
     const sinceParam = since ? `&since=${since}` : ""
-    const wsUrl = `${wsBase}/ws/v1/events?token=${encodeURIComponent(config.deviceJwt)}${sinceParam}`
+    const wsUrl = `${wsBase}${this.eventsPath}?token=${encodeURIComponent(config.deviceJwt)}${sinceParam}`
 
     this.wsState = "connecting"
     this.setConnectionState("reconnecting")

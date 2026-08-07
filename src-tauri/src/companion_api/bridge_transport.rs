@@ -9,7 +9,7 @@
 //!     (today's behavior, byte-identical). The desktop WebView listens for the
 //!     Tauri event and resolves the matching oneshot via its response command.
 //!   - a socket implementation (ADR-0059 W3, added in a later slice) — the
-//!     headless Node brain over `/ws/v1/bridge`; the frame carries the SAME
+//!     headless Node brain over `/internal/bridge`; the frame carries the SAME
 //!     channel name + payload, so the TS listener code is shared between
 //!     `listen()` (desktop) and WS frames (headless).
 //!

@@ -100,7 +100,7 @@ enum CliCommand {
         #[arg(long, default_value_t = app_lib::companion_api::server::DEFAULT_PORT)]
         port: u16,
     },
-    /// Boot the HTTPS companion server. Binds 0.0.0.0:<port>.
+    /// Boot the HTTPS companion server. Binds 0.0.0.0:<port> by default.
     Serve {
         #[arg(long, default_value_t = app_lib::companion_api::server::DEFAULT_PORT)]
         port: u16,
@@ -112,6 +112,10 @@ enum CliCommand {
         /// devices that also hold the terminal control grant.
         #[arg(long, default_value_t = false)]
         allow_remote_terminal: bool,
+        /// Bind only to 127.0.0.1. Intended for process-local development
+        /// and automatic local-debug authentication.
+        #[arg(long, default_value_t = false)]
+        bind_loopback: bool,
     },
     /// Re-encrypt the secret store under a new master key (ADR-0059 R9).
     /// The old key comes from COGNIA_MASTER_KEY(_FILE); stored values —
@@ -185,7 +189,7 @@ enum CliCommand {
 
 #[derive(Debug, Subcommand)]
 enum DevicesCommand {
-    /// Create a one-time Companion API v2 Owner invitation. This command is
+    /// Create a one-time Companion API Owner invitation. This command is
     /// the single-user trust root and must be run by an OS-authorized operator.
     InviteOwner {
         #[arg(long, default_value = "local_acct_a")]
@@ -193,12 +197,12 @@ enum DevicesCommand {
         #[arg(long, default_value_t = 600)]
         ttl_seconds: i64,
     },
-    /// List Companion API v2 devices for a tenant.
+    /// List Companion API devices for a tenant.
     List {
         #[arg(long, default_value = "local_acct_a")]
         tenant_id: String,
     },
-    /// Revoke a Companion API v2 device through the local OS trust root.
+    /// Revoke a Companion API device through the local OS trust root.
     ///
     /// Unlike the remote Owner API, this may revoke the last Owner so a lost
     /// deployment can be recovered with a fresh invitation.
@@ -425,13 +429,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             port,
             advertise_url,
             allow_remote_terminal,
+            bind_loopback,
         } => {
             if allow_remote_terminal {
                 let mut settings = app_lib::terminal_host_service::load_terminal_host_settings()?;
                 settings.allow_remote_access = true;
                 app_lib::terminal_host_service::save_terminal_host_settings(&settings)?;
             }
-            run_serve(&store, &tls_material, port, advertise_url).await
+            run_serve(&store, &tls_material, port, advertise_url, bind_loopback).await
         }
         CliCommand::IssueServiceToken => {
             let signing_secret = secret::load_or_generate()?;
@@ -748,6 +753,7 @@ async fn run_serve(
     tls_material: &tls::TlsMaterial,
     port: u16,
     advertise_url: Option<String>,
+    bind_loopback: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Install the headless AppStore — the DEGRADED data plane, serving only
     // while no brain is connected (ADR-0059 D3/R4).
@@ -951,18 +957,28 @@ async fn run_serve(
     // /metrics uptime baseline (D9) — anchor before the server starts.
     app_lib::companion_api::metrics::init();
 
-    // LAN bind (false) so the headless server is reachable on every
-    // interface — the typical deployment puts this behind a reverse proxy
-    // or VPN; binding to loopback in a server context defeats the purpose.
-    let handle =
-        server::spawn_server(port, false, tls_material.clone(), Arc::clone(&shared)).await?;
+    // Production/headless deployments remain LAN-bound by default. Local
+    // debugging opts into loopback so its ephemeral credential cannot be
+    // presented over a remote socket.
+    let handle = server::spawn_server(
+        port,
+        bind_loopback,
+        tls_material.clone(),
+        Arc::clone(&shared),
+    )
+    .await?;
     // Publish the bind port for the public /healthz endpoint so emulator
     // probes can confirm the right server (matches the test+production
     // path used by CompanionServerState::start in mod.rs).
     set_advertised_port(handle.bound_port);
     let public_url = resolve_advertise_url(advertise_url, handle.bound_port);
+    let bind_host = if bind_loopback {
+        "127.0.0.1"
+    } else {
+        "0.0.0.0"
+    };
     println!(
-        "[cognia-server] HTTPS listening on https://0.0.0.0:{}",
+        "[cognia-server] HTTPS listening on https://{bind_host}:{}",
         handle.bound_port
     );
     println!("[cognia-server] advertised base URL: {public_url}");
@@ -1102,6 +1118,18 @@ mod tests {
             cli.command,
             CliCommand::Serve {
                 allow_remote_terminal: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn serve_can_bind_to_loopback_for_local_debugging() {
+        let cli = Cli::try_parse_from(["cognia-server", "serve", "--bind-loopback"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            CliCommand::Serve {
+                bind_loopback: true,
                 ..
             }
         ));

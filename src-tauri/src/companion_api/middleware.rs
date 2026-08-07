@@ -1,15 +1,17 @@
 //! JWT verifier middleware for the companion API.
 //!
-//! Applied to every `/api/v1/*` route **except** the pre-auth pair endpoints.
-//! Uses [`axum::middleware::from_fn_with_state`] so the handler receives the
-//! full [`SharedState`] (signing secret + deny list).
+//! Applied to explicit legacy device routes and the loopback Headless service
+//! plane. Canonical device-key routes use the separate DPoP middleware in
+//! `api.rs`. Uses [`axum::middleware::from_fn_with_state`] so the handler
+//! receives the full [`SharedState`] (signing secret + deny list).
 //!
 //! # Token extraction order
 //!
 //! 1. `Authorization: Bearer <jwt>` header — standard REST path.
-//! 2. Legacy `?token=<jwt>` query parameters are disabled by default. They are
-//!    available only behind `COGNIA_ALLOW_LEGACY_QUERY_TOKEN=1` during the
-//!    one-release v1 migration window; v2 uses single-use socket tickets.
+//! 2. Legacy `?token=<jwt>` query parameters are accepted only on the released
+//!    `/ws/v1/events` and `/ws/v1/terminal` compatibility routes, or behind
+//!    `COGNIA_ALLOW_LEGACY_QUERY_TOKEN=1`. Canonical sockets use single-use
+//!    tickets; loopback Headless sockets require a service token.
 //!
 //! If both are present, the header takes precedence.
 //!
@@ -44,11 +46,14 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use super::{
-    jwt::{verify, JwtError},
+    jwt::{verify, JwtError, SERVICE_DEVICE_ID},
     oidc::{self, OidcAuthenticator},
     rate_limit::RateLimitDecision,
     SharedState,
 };
+
+const LOCAL_DEBUG_TOKEN_ENV: &str = "COGNIA_LOCAL_DEBUG_TOKEN";
+const LOCAL_DEBUG_ACCOUNT_ID: &str = "local_acct_a";
 
 // ---------------------------------------------------------------------------
 // Device context (injected into request extensions)
@@ -113,7 +118,10 @@ pub async fn require_device_jwt(
             }
         },
     };
-    authenticate_request(state, oidc, request, next).await
+    let local_debug_token = std::env::var(LOCAL_DEBUG_TOKEN_ENV)
+        .ok()
+        .filter(|token| token.len() >= 32);
+    authenticate_request(state, oidc, local_debug_token, request, next).await
 }
 
 /// Operator-only surface for metrics and local diagnostics. The real socket
@@ -197,6 +205,7 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 async fn authenticate_request(
     state: SharedState,
     oidc: Option<Arc<OidcAuthenticator>>,
+    local_debug_token: Option<String>,
     mut request: Request,
     next: Next,
 ) -> Response {
@@ -222,15 +231,26 @@ async fn authenticate_request(
     let legacy_query_tokens_enabled = std::env::var("COGNIA_ALLOW_LEGACY_QUERY_TOKEN")
         .ok()
         .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "yes"));
-    let query_token: Option<String> = legacy_query_tokens_enabled
-        .then(|| {
-            request
-                .uri()
-                .query()
-                .and_then(|q| serde_urlencoded::from_str::<TokenQuery>(q).ok())
-                .and_then(|tq| tq.token)
-        })
-        .flatten();
+    // Node's WHATWG WebSocket cannot attach an Authorization header. Admit a
+    // query token on the loopback-only headless sockets and on the explicitly
+    // deprecated v1 compatibility sockets used by released mobile clients.
+    // Canonical public sockets keep using short-lived, single-use tickets.
+    let internal_service_socket = peer_is_loopback
+        && matches!(
+            request.uri().path(),
+            "/internal/bridge" | "/internal/events"
+        );
+    let released_v1_socket = matches!(request.uri().path(), "/ws/v1/events" | "/ws/v1/terminal");
+    let query_token: Option<String> =
+        (legacy_query_tokens_enabled || internal_service_socket || released_v1_socket)
+            .then(|| {
+                request
+                    .uri()
+                    .query()
+                    .and_then(|q| serde_urlencoded::from_str::<TokenQuery>(q).ok())
+                    .and_then(|tq| tq.token)
+            })
+            .flatten();
 
     // Header takes precedence over query string.
     let token = match header_token.or(query_token) {
@@ -242,6 +262,33 @@ async fn authenticate_request(
             );
         }
     };
+
+    // Local development may replace the persistent service JWT with one
+    // process-scoped random token. Keep the bypass narrower than the normal
+    // service principal: only verified loopback peers and service-only routes
+    // are eligible. The token never authenticates the legacy/device API.
+    let local_debug_route = request.uri().path().starts_with("/internal/")
+        || request.uri().path() == "/ide/content"
+        || request.uri().path().starts_with("/ide/content/");
+    if local_debug_route
+        && local_debug_token
+            .as_deref()
+            .is_some_and(|expected| constant_time_eq(token.as_bytes(), expected.as_bytes()))
+    {
+        if !peer_is_loopback {
+            return error_response(
+                "local_debug_token_remote",
+                "local debug tokens are only honored from loopback",
+            );
+        }
+        request.extensions_mut().insert(DeviceContext {
+            device_id: SERVICE_DEVICE_ID.to_string(),
+            account_id: LOCAL_DEBUG_ACCOUNT_ID.to_string(),
+            scope: "service".to_string(),
+            granted_scopes: Vec::new(),
+        });
+        return next.run(request).await;
+    }
 
     // ── 1b. OIDC mode (ADR-0059 cloud/headless) ──────────────────────────────
     // Once configured, OIDC is authoritative. Falling through to a self-issued
@@ -524,7 +571,11 @@ mod tests {
 
     /// Minimal handler that echoes the device_id from the extension.
     async fn echo_device(Extension(ctx): Extension<DeviceContext>) -> impl IntoResponse {
-        Json(json!({ "device_id": ctx.device_id, "account_id": ctx.account_id }))
+        Json(json!({
+            "device_id": ctx.device_id,
+            "account_id": ctx.account_id,
+            "scope": ctx.scope,
+        }))
     }
 
     fn build_router(state: SharedState) -> Router {
@@ -532,6 +583,79 @@ mod tests {
             .route("/protected", get(echo_device))
             .layer(from_fn_with_state(state.clone(), require_device_jwt))
             .with_state(state)
+    }
+
+    fn build_local_debug_router(state: SharedState, token: &'static str) -> Router {
+        Router::new()
+            .route("/internal/test", get(echo_device))
+            .route("/api/v1/test", get(echo_device))
+            .layer(from_fn(move |req, next| {
+                let state = state.clone();
+                async move {
+                    authenticate_request(state, None, Some(token.to_string()), req, next).await
+                }
+            }))
+    }
+
+    fn local_debug_request(path: &str, ip: &str) -> Request<Body> {
+        let mut req = Request::builder()
+            .uri(path)
+            .header(
+                "Authorization",
+                "Bearer local-debug-token-with-at-least-32-bytes",
+            )
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(ConnectInfo(
+            format!("{ip}:54321").parse::<SocketAddr>().unwrap(),
+        ));
+        req
+    }
+
+    #[tokio::test]
+    async fn local_debug_token_authenticates_loopback_internal_requests_as_service() {
+        let router =
+            build_local_debug_router(test_state(), "local-debug-token-with-at-least-32-bytes");
+        let response = router
+            .oneshot(local_debug_request("/internal/test", "127.0.0.1"))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(
+            body["device_id"],
+            crate::companion_api::jwt::SERVICE_DEVICE_ID
+        );
+        assert_eq!(body["scope"], "service");
+    }
+
+    #[tokio::test]
+    async fn local_debug_token_is_rejected_for_remote_internal_requests() {
+        let router =
+            build_local_debug_router(test_state(), "local-debug-token-with-at-least-32-bytes");
+        let response = router
+            .oneshot(local_debug_request("/internal/test", "192.0.2.50"))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            body_json(response).await["code"],
+            "local_debug_token_remote"
+        );
+    }
+
+    #[tokio::test]
+    async fn local_debug_token_does_not_authenticate_legacy_device_routes() {
+        let router =
+            build_local_debug_router(test_state(), "local-debug-token-with-at-least-32-bytes");
+        let response = router
+            .oneshot(local_debug_request("/api/v1/test", "127.0.0.1"))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     async fn body_json(resp: axum::response::Response) -> serde_json::Value {
@@ -704,6 +828,25 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 401);
         let body = body_json(resp).await;
         assert_eq!(body["code"], "missing_authorization");
+    }
+
+    #[tokio::test]
+    async fn released_v1_socket_accepts_its_legacy_query_token() {
+        let state = test_state();
+        let router = Router::new()
+            .route("/ws/v1/events", get(echo_device))
+            .layer(from_fn_with_state(state.clone(), require_device_jwt))
+            .with_state(state);
+        let jwt = device_jwt("legacy-mobile");
+        let req = Request::builder()
+            .uri(format!("/ws/v1/events?token={jwt}"))
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status().as_u16(), 200);
+        let body = body_json(resp).await;
+        assert_eq!(body["device_id"], "legacy-mobile");
     }
 
     // ── Pre-auth rate limit ──────────────────────────────────────────────────
@@ -880,7 +1023,7 @@ mod tests {
             .layer(from_fn(move |req, next| {
                 let state = state.clone();
                 let authn = authn.clone();
-                async move { authenticate_request(state, Some(authn), req, next).await }
+                async move { authenticate_request(state, Some(authn), None, req, next).await }
             }))
     }
 

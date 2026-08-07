@@ -1,4 +1,4 @@
-//! Rust-owned security and execution ledger for Companion API v2.
+//! Rust-owned security and execution ledger for the canonical Companion API.
 //!
 //! Authorization state is transactional SQLite data. UI databases may cache
 //! projections, but they are never consulted as an authority.
@@ -79,6 +79,16 @@ pub struct HostPolicySummary {
     pub policy: serde_json::Value,
     pub expires_at: Option<i64>,
     pub created_at: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationSummary {
+    pub operation_id: String,
+    pub status: String,
+    pub receipt: Option<serde_json::Value>,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 pub struct SecurityStore {
@@ -586,6 +596,49 @@ impl SecurityStore {
         } else {
             Err(SecurityStoreError::InvalidRunTransition)
         }
+    }
+
+    pub fn operation(
+        &self,
+        tenant_id: &str,
+        device_id: &str,
+        operation_id: &str,
+    ) -> Result<Option<OperationSummary>, SecurityStoreError> {
+        let row: Option<(String, String, Option<String>, i64, i64)> = self
+            .conn
+            .lock()
+            .query_row(
+                "SELECT operation_id, status, receipt_json, created_at, updated_at
+                 FROM idempotency_records
+                 WHERE tenant_id = ?1 AND device_id = ?2 AND operation_id = ?3",
+                params![tenant_id, device_id, operation_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        row.map(
+            |(operation_id, status, receipt_json, created_at, updated_at)| {
+                let receipt = receipt_json
+                    .map(|value| serde_json::from_str(&value))
+                    .transpose()
+                    .map_err(|_| SecurityStoreError::InvalidRunTransition)?;
+                Ok(OperationSummary {
+                    operation_id,
+                    status,
+                    receipt,
+                    created_at,
+                    updated_at,
+                })
+            },
+        )
+        .transpose()
     }
 
     pub fn complete_idempotent_operation(

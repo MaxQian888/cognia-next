@@ -1,9 +1,9 @@
-//! Companion API v2 device-key authentication endpoints.
+//! Canonical Companion device-key authentication and API adapters.
 
 use axum::{
     extract::{ConnectInfo, Path, Request, State},
     http::{header::AUTHORIZATION, HeaderMap, StatusCode},
-    middleware::Next,
+    middleware::{from_fn, Next},
     response::{IntoResponse, Response},
     routing::post,
     Extension, Json, Router,
@@ -18,7 +18,7 @@ use super::{
     command_manifest::{CommandApproval, CommandIdempotency, CommandTarget, CommandTransport},
     deployment::{deployment_mode, DeploymentMode},
     middleware::DeviceContext,
-    security_store::{security_store, IdempotencyDecision, SecurityStore, SecurityStoreError},
+    security_store::{security_store, SecurityStore, SecurityStoreError},
     SharedState,
 };
 
@@ -33,10 +33,11 @@ const MAX_POLICY_COMMANDS: usize = 64;
 
 pub fn router() -> Router<SharedState> {
     Router::new()
-        .route("/api/v2/auth/device/challenge", post(challenge_handler))
-        .route("/api/v2/auth/device/register", post(register_handler))
-        .route("/api/v2/auth/token", post(token_handler))
-        .route("/api/v2/auth/socket-ticket", post(socket_ticket_handler))
+        .route("/api/auth/device/challenge", post(challenge_handler))
+        .route("/api/auth/device/register", post(register_handler))
+        .route("/api/auth/token", post(token_handler))
+        .route("/api/auth/socket-ticket", post(socket_ticket_handler))
+        .layer(from_fn(super::middleware::pre_auth_rate_limit))
 }
 
 pub async fn require_device_access(
@@ -67,12 +68,27 @@ pub async fn require_owner_access(
     }
 }
 
+/// Return the authenticated device identity and the currently pinned host
+/// identity. Authentication is performed by [`require_device_access`].
+pub(crate) async fn whoami_handler(Extension(context): Extension<DeviceContext>) -> Response {
+    (
+        StatusCode::OK,
+        Json(json!({
+            "deviceId": context.device_id,
+            "accountId": context.account_id,
+            "serverVersion": env!("CARGO_PKG_VERSION"),
+            "tlsFingerprint": super::tls_fingerprint(),
+        })),
+    )
+        .into_response()
+}
+
 fn authenticate_owner_request(
     state: &SharedState,
     request: &Request,
 ) -> Result<DeviceContext, ApiError> {
     if deployment_mode() == DeploymentMode::SingleUser
-        && request.uri().path() == "/api/v2/invitations"
+        && request.uri().path() == "/api/invitations"
         && !request
             .extensions()
             .get::<ConnectInfo<SocketAddr>>()
@@ -138,7 +154,7 @@ fn authenticate_owner_request(
     Ok(DeviceContext {
         device_id: access.sub,
         account_id: access.tenant_id,
-        scope: "owner_v2".to_string(),
+        scope: "owner".to_string(),
         granted_scopes: Vec::new(),
     })
 }
@@ -234,6 +250,26 @@ pub(crate) async fn revoke_device_handler(
     Ok(Json(DeviceRevocationResponse {
         revoked_device_id: device_id,
     }))
+}
+
+pub(crate) async fn operation_handler(
+    Path(operation_id): Path<String>,
+    Extension(context): Extension<DeviceContext>,
+) -> Response {
+    match store().and_then(|store| {
+        store
+            .operation(&context.account_id, &context.device_id, &operation_id)
+            .map_err(store_error)
+    }) {
+        Ok(Some(operation)) => (StatusCode::OK, Json(operation)).into_response(),
+        Ok(None) => ApiError::new(
+            StatusCode::NOT_FOUND,
+            "operation_not_found",
+            "the requested operation does not exist for this device",
+        )
+        .into_response(),
+        Err(error) => error.into_response(),
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -353,98 +389,6 @@ fn validate_policy_request(request: &CreatePolicyRequest, now: i64) -> Result<()
     Ok(())
 }
 
-fn authorize_command_approval(
-    context: &DeviceContext,
-    descriptor: &super::command_manifest::CommandDescriptor,
-    command: &str,
-    args: &serde_json::Value,
-    now: i64,
-) -> Result<(), ApiError> {
-    match descriptor.approval {
-        CommandApproval::None => Ok(()),
-        CommandApproval::Interactive if command == "host_admin_lease_issue" => {
-            if args.get("confirmed").and_then(serde_json::Value::as_bool) == Some(true) {
-                Ok(())
-            } else {
-                Err(ApiError::new(
-                    StatusCode::PRECONDITION_REQUIRED,
-                    "interactive_approval_required",
-                    "explicit host confirmation is required",
-                ))
-            }
-        }
-        CommandApproval::Interactive => {
-            let lease = args
-                .get("adminLease")
-                .or_else(|| args.get("admin_lease"))
-                .and_then(serde_json::Value::as_str);
-            super::admin_lease::validate(&context.device_id, command, lease).map_err(|_| {
-                ApiError::new(
-                    StatusCode::PRECONDITION_REQUIRED,
-                    "interactive_approval_required",
-                    "a current device-bound approval lease is required",
-                )
-            })
-        }
-        CommandApproval::SignedPolicy => {
-            let policy_id = args
-                .get("policyId")
-                .or_else(|| args.get("policy_id"))
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| {
-                    ApiError::new(
-                        StatusCode::PRECONDITION_REQUIRED,
-                        "signed_policy_required",
-                        "an active host policy is required",
-                    )
-                })?;
-            let policy = store()?
-                .authorize_host_policy(
-                    &context.account_id,
-                    policy_id,
-                    &descriptor.capability,
-                    command,
-                    now,
-                )
-                .map_err(store_error)?;
-            let constraints = policy
-                .get("constraints")
-                .unwrap_or(&serde_json::Value::Null);
-            if json_subset_matches(constraints, args) {
-                Ok(())
-            } else {
-                Err(ApiError::new(
-                    StatusCode::FORBIDDEN,
-                    "policy_constraints_mismatch",
-                    "the request exceeds the active host policy",
-                ))
-            }
-        }
-    }
-}
-
-fn json_subset_matches(expected: &serde_json::Value, actual: &serde_json::Value) -> bool {
-    json_subset_matches_at_depth(expected, actual, 0)
-}
-
-fn json_subset_matches_at_depth(
-    expected: &serde_json::Value,
-    actual: &serde_json::Value,
-    depth: usize,
-) -> bool {
-    match (expected, actual) {
-        (serde_json::Value::Object(expected), serde_json::Value::Object(actual)) => {
-            (depth == 0 || expected.len() == actual.len())
-                && expected.iter().all(|(key, value)| {
-                    actual.get(key).is_some_and(|actual| {
-                        json_subset_matches_at_depth(value, actual, depth.saturating_add(1))
-                    })
-                })
-        }
-        _ => expected == actual,
-    }
-}
-
 pub async fn rpc_handler(
     Path(name): Path<String>,
     Extension(context): Extension<DeviceContext>,
@@ -452,158 +396,64 @@ pub async fn rpc_handler(
     State(state): State<SharedState>,
     Json(args): Json<serde_json::Value>,
 ) -> Response {
-    let Some(descriptor) = super::command_manifest::descriptor(&name) else {
-        return ApiError::new(
-            StatusCode::NOT_FOUND,
-            "unknown_command",
-            "the requested command is not registered",
-        )
-        .into_response();
-    };
-    if let Err(error) =
-        authorize_command_approval(&context, descriptor, &name, &args, unix_time_secs())
-    {
-        return error.into_response();
-    }
-    if descriptor.idempotency != CommandIdempotency::Required {
-        return rpc_result_response(
-            super::rpc::rpc_handler(
-                Path(name),
-                Extension(context),
-                headers,
-                State(state),
-                Json(args),
-            )
-            .await,
-        );
-    }
-
-    let Some(idempotency_key) = headers
+    let idempotency_key = headers
         .get("idempotency-key")
         .and_then(|value| value.to_str().ok())
-        .map(str::to_owned)
-    else {
-        return ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "idempotency_key_required",
-            "a UUID Idempotency-Key is required for this command",
-        )
-        .into_response();
-    };
-    let request_hash = {
-        let payload =
-            serde_json::to_vec(&json!({ "command": name, "args": args })).unwrap_or_default();
-        hex::encode(Sha256::digest(payload))
-    };
-    let security = match store() {
-        Ok(security) => security,
-        Err(error) => return error.into_response(),
-    };
-    let operation_id = match security.begin_idempotent_operation(
-        &context.account_id,
-        &context.device_id,
-        &local_host_id(),
-        &idempotency_key,
-        &request_hash,
-        unix_time_secs(),
-    ) {
-        Ok(IdempotencyDecision::InProgress { operation_id }) => {
-            return (
-                StatusCode::ACCEPTED,
-                Json(json!({
-                    "operationId": operation_id,
-                    "status": "running"
-                })),
-            )
-                .into_response();
-        }
-        Ok(IdempotencyDecision::Completed { receipt_json, .. }) => {
-            let receipt: serde_json::Value =
-                serde_json::from_str(&receipt_json).unwrap_or_else(|_| json!({}));
-            let status = receipt
-                .get("httpStatus")
-                .and_then(serde_json::Value::as_u64)
-                .and_then(|value| u16::try_from(value).ok())
-                .and_then(|value| StatusCode::from_u16(value).ok())
-                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-            return (
-                status,
-                Json(receipt.get("body").cloned().unwrap_or_else(|| json!({}))),
-            )
-                .into_response();
-        }
-        Ok(IdempotencyDecision::Started { operation_id }) => operation_id,
-        Err(error) => return store_error(error).into_response(),
-    };
-    if let Err(error) =
-        security.mark_operation_running(&context.account_id, &operation_id, unix_time_secs())
-    {
-        return store_error(error).into_response();
-    }
-
-    let result = super::rpc::rpc_handler(
-        Path(name),
-        Extension(context.clone()),
-        headers,
-        State(state),
-        Json(args),
-    )
-    .await;
-    let (status, body, succeeded) = match result {
-        Ok(Json(value)) => (StatusCode::OK, value, true),
-        Err((status, Json(error))) => (
-            status,
-            json!({
-                "error": {
-                    "code": error.code,
-                    "message": error.message,
-                    "requestId": uuid::Uuid::new_v4().to_string(),
-                    "retryable": status.is_server_error(),
-                    "details": {}
-                }
-            }),
-            false,
-        ),
-    };
-    let receipt = json!({ "httpStatus": status.as_u16(), "body": body });
-    if security
-        .complete_idempotent_operation(
-            &context.account_id,
-            &context.device_id,
-            &idempotency_key,
-            &receipt.to_string(),
-            succeeded,
-            unix_time_secs(),
-        )
-        .is_err()
-    {
-        return ApiError::unavailable(
-            "the operation completed but its durable receipt could not be recorded",
-        )
-        .into_response();
-    }
-    (status, Json(body)).into_response()
-}
-
-fn rpc_result_response(
-    result: Result<Json<serde_json::Value>, (StatusCode, Json<super::rpc::RpcError>)>,
-) -> Response {
-    match result {
-        Ok(body) => body.into_response(),
-        Err((status, Json(error))) => (
-            status,
+        .map(str::to_owned);
+    let request = super::remote_execution::ExecutionRequest::new(
+        name,
+        args,
+        context,
+        super::remote_execution::ExecutionTransport::Http,
+        idempotency_key,
+    );
+    match super::remote_execution::execute(&state, request).await {
+        Ok(super::remote_execution::ExecutionOutcome::Completed {
+            request_id,
+            operation_id,
+            result,
+            replayed,
+        }) => (
+            StatusCode::OK,
             Json(json!({
-                "error": {
-                    "code": error.code,
-                    "message": error.message,
-                    "requestId": uuid::Uuid::new_v4().to_string(),
-                    "retryable": status.is_server_error(),
-                    "details": {}
-                }
+                "requestId": request_id,
+                "operationId": operation_id,
+                "replayed": replayed,
+                "result": result,
             })),
         )
             .into_response(),
+        Ok(super::remote_execution::ExecutionOutcome::Accepted {
+            request_id,
+            operation_id,
+        }) => (
+            StatusCode::ACCEPTED,
+            Json(json!({
+                "requestId": request_id,
+                "operationId": operation_id,
+                "status": "running",
+            })),
+        )
+            .into_response(),
+        Err(error) => execution_error_response(error),
     }
+}
+
+fn execution_error_response(error: super::remote_execution::ExecutionError) -> Response {
+    (
+        error.status,
+        Json(json!({
+            "error": {
+                "code": error.code,
+                "message": error.message,
+                "requestId": error.request_id,
+                "retryable": error.retryable,
+                "details": error.details,
+                "operationId": error.operation_id,
+            }
+        })),
+    )
+        .into_response()
 }
 
 fn authenticate_device_request(
@@ -632,65 +482,50 @@ fn authenticate_device_request(
     }
 
     let path = request.uri().path();
-    let command_name = path
-        .strip_prefix("/api/v2/_rpc/")
+    if let Some(command_name) = path
+        .strip_prefix("/api/_rpc/")
         .filter(|name| !name.is_empty())
-        .ok_or_else(|| {
+    {
+        let descriptor = super::command_manifest::descriptor(command_name).ok_or_else(|| {
             ApiError::new(
                 StatusCode::NOT_FOUND,
-                "unknown_v2_route",
-                "the requested v2 route is not available",
+                "unknown_command",
+                "the requested command is not registered",
             )
         })?;
-    let descriptor = super::command_manifest::descriptor(command_name).ok_or_else(|| {
-        ApiError::new(
-            StatusCode::NOT_FOUND,
-            "unknown_command",
-            "the requested command is not registered",
-        )
-    })?;
-    if descriptor.target == CommandTarget::Client
-        || descriptor.target == CommandTarget::Service
-        || !descriptor.transports.contains(&CommandTransport::Http)
-    {
-        return Err(ApiError::new(
-            StatusCode::FORBIDDEN,
-            "command_transport_forbidden",
-            "the command cannot run through a device HTTP transport",
-        ));
-    }
-    if !security
-        .has_capability(&access.tenant_id, &access.sub, &descriptor.capability)
-        .map_err(store_error)?
-    {
-        return Err(ApiError::new(
-            StatusCode::FORBIDDEN,
-            "missing_capability",
-            "the device is not authorized for this command",
-        ));
-    }
-    if descriptor.idempotency == CommandIdempotency::Required {
-        let valid_idempotency_key = request
-            .headers()
-            .get("idempotency-key")
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| uuid::Uuid::parse_str(value).is_ok());
-        if !valid_idempotency_key {
+        if descriptor.target == CommandTarget::Client
+            || descriptor.target == CommandTarget::Service
+            || !descriptor.transports.contains(&CommandTransport::Http)
+        {
             return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "idempotency_key_required",
-                "a UUID Idempotency-Key is required for this command",
+                StatusCode::FORBIDDEN,
+                "command_transport_forbidden",
+                "the command cannot run through a device HTTP transport",
             ));
         }
-    }
-    if descriptor.idempotency == CommandIdempotency::Forbidden
-        && request.headers().contains_key("idempotency-key")
-    {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "idempotency_key_forbidden",
-            "this command does not accept an Idempotency-Key",
-        ));
+        if descriptor.idempotency == CommandIdempotency::Required {
+            let valid_idempotency_key = request
+                .headers()
+                .get("idempotency-key")
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| uuid::Uuid::parse_str(value).is_ok());
+            if !valid_idempotency_key {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "idempotency_key_required",
+                    "a UUID Idempotency-Key is required for this command",
+                ));
+            }
+        }
+        if descriptor.idempotency == CommandIdempotency::Forbidden
+            && request.headers().contains_key("idempotency-key")
+        {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "idempotency_key_forbidden",
+                "this command does not accept an Idempotency-Key",
+            ));
+        }
     }
     let proof = request
         .headers()
@@ -723,7 +558,7 @@ fn authenticate_device_request(
     Ok(DeviceContext {
         device_id: access.sub,
         account_id: access.tenant_id,
-        scope: "device_v2".to_string(),
+        scope: "device".to_string(),
         granted_scopes: Vec::new(),
     })
 }
@@ -847,7 +682,7 @@ async fn register_handler(
         &request.proof,
         &request.challenge_nonce,
         "POST",
-        "/api/v2/auth/device/register",
+        "/api/auth/device/register",
         unix_time_secs(),
     )?;
     let thumbprint = hex::encode(Sha256::digest(request.public_key_pem.as_bytes()));
@@ -951,7 +786,7 @@ async fn token_handler(
         &request.proof,
         &request.challenge_nonce,
         "POST",
-        "/api/v2/auth/token",
+        "/api/auth/token",
         unix_time_secs(),
     )?;
     security
@@ -967,7 +802,7 @@ async fn token_handler(
     let claims = AccessClaims {
         sub: request.device_id,
         tenant_id,
-        scope: "device_v2".into(),
+        scope: "device".into(),
         iat: now,
         exp: now.saturating_add(ACCESS_TOKEN_TTL_SECS),
         jti: uuid::Uuid::new_v4().to_string(),
@@ -997,8 +832,27 @@ async fn token_handler(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SocketTicketRequest {
-    path: String,
-    audience: String,
+    channel: SocketChannel,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum SocketChannel {
+    Events,
+    Terminal,
+    Browser,
+    Acp,
+}
+
+impl SocketChannel {
+    fn binding(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Events => ("/ws/events", "events"),
+            Self::Terminal => ("/ws/terminal", "terminal"),
+            Self::Browser => ("/ws/browser", "browser"),
+            Self::Acp => ("/ws/acp", "acp"),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -1013,13 +867,7 @@ async fn socket_ticket_handler(
     headers: HeaderMap,
     Json(request): Json<SocketTicketRequest>,
 ) -> ApiResult<SocketTicketResponse> {
-    if !request.path.starts_with('/') || request.path.contains("..") {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_socket_path",
-            "socket ticket path is invalid",
-        ));
-    }
+    let (path, audience) = request.channel.binding();
     let token = bearer_token(&headers)?;
     let access = decode_access_token(&state, token)?;
     let (public_key, active_thumbprint) = store()?
@@ -1054,7 +902,7 @@ async fn socket_ticket_handler(
         proof,
         &access.jti,
         "POST",
-        "/api/v2/auth/socket-ticket",
+        "/api/auth/socket-ticket",
         unix_time_secs(),
     )?;
     let security = store()?;
@@ -1071,8 +919,8 @@ async fn socket_ticket_handler(
         .issue_socket_ticket(
             &access.tenant_id,
             &access.sub,
-            &request.path,
-            &request.audience,
+            path,
+            audience,
             unix_time_secs(),
             SOCKET_TICKET_TTL_SECS,
         )
@@ -1099,7 +947,7 @@ fn decode_access_token(state: &SharedState, token: &str) -> Result<AccessClaims,
         )
     })?
     .claims;
-    if access.scope != "device_v2" {
+    if access.scope != "device" {
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "invalid_access_scope",
@@ -1309,21 +1157,19 @@ fn unix_time_secs() -> i64 {
         .as_secs() as i64
 }
 
-fn local_host_id() -> String {
-    std::env::var("COGNIA_HOST_ID")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "local-host".to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn socket_paths_reject_traversal() {
-        assert!(!"/ws/v2/events".contains(".."));
-        assert!("../ws".contains(".."));
+    fn socket_channels_have_server_owned_bindings() {
+        assert_eq!(SocketChannel::Events.binding(), ("/ws/events", "events"));
+        assert_eq!(
+            SocketChannel::Terminal.binding(),
+            ("/ws/terminal", "terminal")
+        );
+        assert_eq!(SocketChannel::Browser.binding(), ("/ws/browser", "browser"));
+        assert_eq!(SocketChannel::Acp.binding(), ("/ws/acp", "acp"));
     }
 
     #[test]
@@ -1354,7 +1200,7 @@ mod tests {
 
         let service_command = CreatePolicyRequest {
             capability: "process.spawn".into(),
-            commands: vec!["test_mcp_server".into()],
+            commands: vec!["keyring_secret_get".into()],
             constraints: json!({}),
             expires_at: 200,
         };
@@ -1371,7 +1217,7 @@ mod tests {
 
     #[test]
     fn policy_constraints_are_a_strict_json_subset() {
-        assert!(json_subset_matches(
+        assert!(crate::companion_api::remote_execution::json_subset_matches(
             &json!({
                 "executable": "/usr/bin/git",
                 "cwd": "/workspace",
@@ -1392,17 +1238,23 @@ mod tests {
                 "network": false,
             }),
         ));
-        assert!(!json_subset_matches(
-            &json!({ "env": { "LANG": "C" } }),
-            &json!({ "env": { "LANG": "C", "LD_PRELOAD": "/tmp/inject.dylib" } }),
-        ));
-        assert!(!json_subset_matches(
-            &json!({ "args": ["status"] }),
-            &json!({ "args": ["status", "--short"] }),
-        ));
-        assert!(!json_subset_matches(
-            &json!({ "network": false }),
-            &json!({ "network": true }),
-        ));
+        assert!(
+            !crate::companion_api::remote_execution::json_subset_matches(
+                &json!({ "env": { "LANG": "C" } }),
+                &json!({ "env": { "LANG": "C", "LD_PRELOAD": "/tmp/inject.dylib" } }),
+            )
+        );
+        assert!(
+            !crate::companion_api::remote_execution::json_subset_matches(
+                &json!({ "args": ["status"] }),
+                &json!({ "args": ["status", "--short"] }),
+            )
+        );
+        assert!(
+            !crate::companion_api::remote_execution::json_subset_matches(
+                &json!({ "network": false }),
+                &json!({ "network": true }),
+            )
+        );
     }
 }

@@ -26,6 +26,38 @@ jest.mock("@/components/logging", () => ({
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
+const mockOperations = {
+  generatedAt: 2_000,
+  servers: [
+    {
+      serverId: "srv-1",
+      displayName: "Docs",
+      events: 4,
+      failures: 1,
+      failureRate: 0.25,
+      connectP95Ms: 80,
+      capabilityUpdatedAt: 1_000,
+      lastErrorCode: "connect-failed",
+    },
+  ],
+  sync: [
+    {
+      agentId: "claude-code",
+      status: "retrying",
+      lagMs: 5_000,
+      attempts: 2,
+      errorCode: "sync-failed",
+    },
+  ],
+}
+jest.mock("dexie-react-hooks", () => ({ useLiveQuery: () => mockOperations }))
+jest.mock("@/lib/mcp/operations", () => ({ loadMcpOperationsSnapshot: jest.fn() }))
+
+const downloadFile = jest.fn()
+jest.mock("@/lib/files/download", () => ({
+  downloadFile: (...args: unknown[]) => downloadFile(...args),
+}))
+
 const getMcpServerStatus = jest.fn()
 jest.mock("@/lib/external-bridge/tauri-control", () => ({
   getMcpServerStatus: () => getMcpServerStatus(),
@@ -36,6 +68,25 @@ const clearMcpAuditLog = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/db/mcp-audit-log", () => ({
   listMcpAuditLog: (...a: unknown[]) => listMcpAuditLog(...a),
   clearMcpAuditLog: () => clearMcpAuditLog(),
+}))
+
+const mockRuntimeMetrics = {
+  connectionAttempts: 3,
+  successfulConnections: 2,
+  failedConnections: 1,
+  connectionLatencyMs: 40,
+  warmReuses: 7,
+  capabilityCacheHits: 5,
+  retries: 1,
+  toolCalls: 8,
+  timeouts: 2,
+  policyDenials: 4,
+}
+jest.mock("@/lib/mcp/runtime-gateway", () => ({
+  defaultMcpRuntimeGateway: {
+    getMetricsSnapshot: () => mockRuntimeMetrics,
+    subscribeMetrics: () => () => undefined,
+  },
 }))
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
@@ -98,6 +149,7 @@ beforeEach(() => {
   getLogs.mockResolvedValue(mcpLogs)
   onLogsUpdated.mockClear()
   clearMcpAuditLog.mockClear()
+  downloadFile.mockClear()
 })
 
 describe("McpHealthTab", () => {
@@ -118,6 +170,26 @@ describe("McpHealthTab", () => {
     expect(within(overview).getByText("statServers")).toBeInTheDocument()
     expect(getLogs).toHaveBeenCalled()
     expect(onLogsUpdated).toHaveBeenCalled()
+  })
+
+  it("shows normalized runtime performance and policy counters", async () => {
+    render(<McpHealthTab />)
+    const metrics = await screen.findByTestId("mcp-runtime-metrics")
+    expect(within(metrics).getByText("7")).toBeInTheDocument()
+    expect(within(metrics).getByText("5")).toBeInTheDocument()
+    expect(within(metrics).getByText("20ms")).toBeInTheDocument()
+    expect(within(metrics).getByText("metricDenials")).toBeInTheDocument()
+  })
+
+  it("shows persisted per-server failure rate and Agent sync lag", async () => {
+    render(<McpHealthTab />)
+    const operations = await screen.findByTestId("mcp-persisted-operations")
+    expect(within(operations).getByText("Docs")).toBeInTheDocument()
+    expect(within(operations).getByText("25%")).toBeInTheDocument()
+    expect(within(operations).getByText("80ms")).toBeInTheDocument()
+    expect(within(operations).getByText("connect-failed")).toBeInTheDocument()
+    expect(within(operations).getByText("claude-code")).toBeInTheDocument()
+    expect(within(operations).getByText('syncLagValue:{"seconds":5}')).toBeInTheDocument()
   })
 
   it("embeds the shared LogPanel scoped to the mcp source", async () => {
@@ -150,6 +222,18 @@ describe("McpHealthTab", () => {
     await waitFor(() => expect(screen.getByText("wiki_search")).toBeInTheDocument())
     fireEvent.click(screen.getByText("clearLog"))
     await waitFor(() => expect(clearMcpAuditLog).toHaveBeenCalled())
+  })
+
+  it("exports the complete redacted audit view", async () => {
+    render(<McpHealthTab />)
+    await waitFor(() => expect(screen.getByText("wiki_search")).toBeInTheDocument())
+    fireEvent.click(screen.getByText("exportLog"))
+    await waitFor(() => expect(listMcpAuditLog).toHaveBeenCalledWith({ deniedOnly: false }))
+    expect(downloadFile).toHaveBeenCalledWith(
+      expect.stringMatching(/^cognia-mcp-audit-\d{4}-\d{2}-\d{2}\.json$/),
+      expect.stringContaining('"wiki_search"'),
+      "application/json"
+    )
   })
 
   it("shows desktop-only notices off Tauri and skips the log query", async () => {

@@ -69,6 +69,35 @@ describe("LarkWhoamiPanel", () => {
     })
   })
 
+  it("offers a stable Cognia portrait download and Feishu console handoff", async () => {
+    await getDb().adapterInstances.put(
+      baseRow({
+        displayName: "Research bot",
+        lastWhoamiResult: {
+          botName: "Research bot",
+          appId: "cli_avatar",
+          openId: "ou_avatar",
+        },
+      })
+    )
+    render(<LarkWhoamiPanel adapterId="lark-wh" />)
+
+    const avatar = await screen.findByTestId("lark-recommended-avatar")
+    expect(avatar).toHaveAttribute("data-avatar-id", "researcher")
+    expect(screen.getByTestId("lark-avatar-download")).toHaveAttribute(
+      "href",
+      "/icons/cognia-agent-team/webp/researcher.webp"
+    )
+    expect(screen.getByTestId("lark-avatar-download")).toHaveAttribute(
+      "download",
+      "cognia-researcher.webp"
+    )
+    expect(screen.getByTestId("lark-developer-console")).toHaveAttribute(
+      "href",
+      "https://open.feishu.cn/app/cli_avatar"
+    )
+  })
+
   it("renders the missing-scopes warning when chat-management calls recorded gaps", async () => {
     await getDb().adapterInstances.put(
       baseRow({ lastMissingScopes: ["im:chat:create", "contact:user.id:readonly"] })

@@ -310,6 +310,30 @@ describe("configProvider injection", () => {
     expect(loadCompanionConfig()).toBeNull()
   })
 
+  it("uses isolated internal endpoints for the headless service transport", async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse({ ok: true }, 200))
+    transport = new CompanionTransport({
+      configProvider: () => ({
+        baseUrl: "https://127.0.0.1:7999",
+        deviceJwt: "service-token",
+        deviceId: "brain-local_acct_a",
+        serverVersion: "headless",
+      }),
+      rpcPath: "/internal/_rpc",
+      eventsPath: "/internal/events",
+    })
+
+    await transport.call("claude_sidecar_status")
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+      "https://127.0.0.1:7999/internal/_rpc/claude_sidecar_status"
+    )
+
+    transport.subscribe("claude://message", jest.fn())
+    expect(MockWebSocket.lastInstance?.url).toBe(
+      "wss://127.0.0.1:7999/internal/events?token=service-token"
+    )
+  })
+
   it("a provider returning null yields not_paired", async () => {
     transport = new CompanionTransport({ configProvider: () => null })
     await expect(transport.call("anything")).rejects.toMatchObject({ code: "not_paired" })
@@ -593,6 +617,63 @@ describe("managed IDE raw content transport", () => {
     expect(fetchSpy.mock.calls[0][0]).toBe(
       "https://192.168.1.42:7890/api/v1/ide/content/handle%2Fopaque"
     )
+  })
+})
+
+describe("readBinary() — session media", () => {
+  it("fetches authenticated media bytes without JSON or base64 expansion", async () => {
+    await setConfig()
+    const hash = "a".repeat(64)
+    const bytes = new Uint8Array([137, 80, 78, 71])
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: {
+        get: (name: string) =>
+          name.toLowerCase() === "content-type"
+            ? "image/png"
+            : name.toLowerCase() === "etag"
+              ? '"hash-thumb"'
+              : null,
+      },
+      arrayBuffer: async () => bytes.buffer,
+    })
+    transport = new CompanionTransport()
+
+    const result = await transport.readBinary({
+      kind: "session-media",
+      sessionId: "session/one",
+      hash,
+      variant: "thumbnail",
+    })
+
+    expect(result).toEqual({
+      bytes,
+      mediaType: "image/png",
+      etag: '"hash-thumb"',
+    })
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(
+      `https://192.168.1.42:7890/api/v1/sessions/session%2Fone/media/${hash}?variant=thumbnail`
+    )
+    expect(init.method).toBe("GET")
+    expect(init.headers).toEqual({ Authorization: "Bearer test.jwt.token" })
+    expect(init.body).toBeUndefined()
+  })
+
+  it("rejects invalid resource identifiers before issuing a request", async () => {
+    await setConfig()
+    transport = new CompanionTransport()
+
+    await expect(
+      transport.readBinary({
+        kind: "session-media",
+        sessionId: "s1",
+        hash: "../secret",
+        variant: "canonical",
+      })
+    ).rejects.toMatchObject({ code: "invalid_binary_resource", retryable: false })
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 })
 
@@ -1435,6 +1516,10 @@ function makeFakeRtc(opts: FakeRtcOpts = {}) {
   return {
     getState: () => "open" as const,
     call: jest.fn(async () => "RTC_RESULT"),
+    readBinary: jest.fn(async () => ({
+      bytes: Uint8Array.from([4, 5, 6]),
+      mediaType: "image/png",
+    })),
     subscribe: jest.fn(() => () => undefined),
     getSelectedCandidateKind: jest.fn(async () => opts.kind ?? "host"),
     onStateChange: () => () => undefined,
@@ -1530,6 +1615,72 @@ describe("call() — LAN-first gate", () => {
       (init.headers as Record<string, string>)["Idempotency-Key"]
     )
     expect(rtcArgs).not.toHaveProperty("idempotencyKey")
+  })
+})
+
+describe("readBinary() — LAN-first gate", () => {
+  it("uses raw DataChannel frames when LAN HTTPS is unavailable", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = makeFakeRtc()
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    const resource = {
+      kind: "session-media" as const,
+      sessionId: "s1",
+      hash: "a".repeat(64),
+      variant: "canonical" as const,
+    }
+
+    await expect(transport.readBinary(resource)).resolves.toEqual({
+      bytes: Uint8Array.from([4, 5, 6]),
+      mediaType: "image/png",
+    })
+    expect(fakeRtc.readBinary).toHaveBeenCalledWith(resource)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("falls back to authenticated HTTPS when the binary DataChannel read fails", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = makeFakeRtc()
+    fakeRtc.readBinary.mockRejectedValueOnce(new Error("channel closed"))
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: { get: () => "image/png" },
+      arrayBuffer: async () => Uint8Array.from([7, 8]).buffer,
+    })
+
+    await expect(
+      transport.readBinary({
+        kind: "session-media",
+        sessionId: "s1",
+        hash: "b".repeat(64),
+        variant: "thumbnail",
+      })
+    ).resolves.toEqual(expect.objectContaining({ bytes: Uint8Array.from([7, 8]) }))
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not retry a definitive RTC media miss over HTTPS", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = makeFakeRtc()
+    fakeRtc.readBinary.mockRejectedValueOnce(
+      Object.assign(new Error("missing"), { code: "MEDIA_NOT_FOUND" })
+    )
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+
+    await expect(
+      transport.readBinary({
+        kind: "session-media",
+        sessionId: "s1",
+        hash: "c".repeat(64),
+        variant: "canonical",
+      })
+    ).rejects.toMatchObject({ code: "MEDIA_NOT_FOUND" })
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 })
 

@@ -17,6 +17,8 @@ import { useLiveQuery } from "dexie-react-hooks"
 import {
   AlertTriangleIcon,
   CheckCircle2Icon,
+  DownloadIcon,
+  ExternalLinkIcon,
   LoaderIcon,
   RefreshCwIcon,
   XCircleIcon,
@@ -29,6 +31,8 @@ import { getDb } from "@/lib/db/schema"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { isTauri } from "@/lib/tauri"
 import { LarkWhoamiError, probeBotIdentity } from "@/lib/connectors/adapters/lark/whoami"
+import { AgentTeamAvatar } from "@/components/agent/workspace/agent-team-avatar"
+import { getAgentTeamAvatarPath, resolveAgentTeamAvatarId } from "@/lib/agent-team/avatar"
 
 const ACTIVATE_STATUS_KEYS: Record<number, string> = {
   0: "uninitialized",
@@ -76,6 +80,19 @@ export function LarkWhoamiPanel({ adapterId }: LarkWhoamiPanelProps) {
 
   const whoami = row?.lastWhoamiResult
   const lastAt = row?.lastWhoamiAt
+  const avatarSubject = row
+    ? {
+        id: `lark-bot-${row.id}`,
+        name: whoami?.botName ?? row.displayName,
+      }
+    : null
+  const recommendedAvatarId = avatarSubject ? resolveAgentTeamAvatarId(avatarSubject) : null
+  const recommendedAvatarPath = recommendedAvatarId
+    ? getAgentTeamAvatarPath(recommendedAvatarId)
+    : null
+  const developerConsoleUrl = whoami?.appId
+    ? `https://open.feishu.cn/app/${encodeURIComponent(whoami.appId)}`
+    : "https://open.feishu.cn/app"
 
   return (
     <Card data-testid="lark-whoami-panel">
@@ -107,8 +124,14 @@ export function LarkWhoamiPanel({ adapterId }: LarkWhoamiPanelProps) {
               {whoami.botAvatar ? (
                 <AvatarImage src={whoami.botAvatar} alt={whoami.botName} />
               ) : null}
-              <AvatarFallback className="text-sm">
-                {whoami.botName?.slice(0, 2).toUpperCase() ?? "??"}
+              <AvatarFallback className="p-0">
+                {avatarSubject ? (
+                  <AgentTeamAvatar subject={avatarSubject} className="size-full" />
+                ) : (
+                  <span className="text-sm">
+                    {whoami.botName?.slice(0, 2).toUpperCase() ?? "??"}
+                  </span>
+                )}
               </AvatarFallback>
             </Avatar>
             <div className="flex-1 min-w-0 space-y-1">
@@ -161,6 +184,52 @@ export function LarkWhoamiPanel({ adapterId }: LarkWhoamiPanelProps) {
             {t("unknown")}
           </p>
         )}
+        {avatarSubject && recommendedAvatarId && recommendedAvatarPath ? (
+          <div
+            className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/30 p-3"
+            data-testid="lark-avatar-recommendation"
+          >
+            <div
+              className="size-14 shrink-0 overflow-hidden rounded-xl bg-background ring-1 ring-inset ring-border/70"
+              data-testid="lark-recommended-avatar"
+              data-avatar-id={recommendedAvatarId}
+            >
+              <AgentTeamAvatar subject={avatarSubject} decorative={false} className="size-full" />
+            </div>
+            <div className="min-w-0 flex-1 space-y-0.5">
+              <p className="text-xs font-medium">{t("recommendedAvatarTitle")}</p>
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                {t("recommendedAvatarHint")}
+              </p>
+              <p className="text-[10px] leading-relaxed text-muted-foreground">
+                {t("avatarPublishHint")}
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-col gap-1.5">
+              <Button asChild type="button" size="sm" variant="outline">
+                <a
+                  href={recommendedAvatarPath}
+                  download={`cognia-${recommendedAvatarId}.webp`}
+                  data-testid="lark-avatar-download"
+                >
+                  <DownloadIcon className="size-3.5" />
+                  {t("downloadAvatar")}
+                </a>
+              </Button>
+              <Button asChild type="button" size="sm" variant="outline">
+                <a
+                  href={developerConsoleUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  data-testid="lark-developer-console"
+                >
+                  <ExternalLinkIcon className="size-3.5" />
+                  {t("openDeveloperConsole")}
+                </a>
+              </Button>
+            </div>
+          </div>
+        ) : null}
         {(row?.lastMissingScopes?.length ?? 0) > 0 && (
           <div
             className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"

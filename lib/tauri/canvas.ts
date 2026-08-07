@@ -3,7 +3,7 @@
  */
 
 import { transport } from "@/lib/tauri"
-import { getPluginEventHooks } from "@/lib/plugin"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 
 export interface PythonExecResult {
   stdout: string
