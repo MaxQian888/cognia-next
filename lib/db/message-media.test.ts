@@ -110,6 +110,25 @@ describe("putMessageMedia", () => {
     const row = await getDb().messageMedia.get("touch")
     expect(row?.lastUsedAt).toBe(5_000)
   })
+
+  it("upgrades a remote thumbnail cache entry when canonical bytes arrive", async () => {
+    await putMessageMedia(
+      makeRow({
+        hash: "remote",
+        byteSize: 3,
+        canonicalAvailable: false,
+        thumbBlob: new Blob(["thumb"]),
+      })
+    )
+
+    await putMessageMedia(
+      makeRow({ hash: "remote", byteSize: 100, canonicalAvailable: true, lastUsedAt: 2_000 })
+    )
+
+    const row = await getDb().messageMedia.get("remote")
+    expect(row).toMatchObject({ canonicalAvailable: true, byteSize: 100, lastUsedAt: 2_000 })
+    expect(row?.thumbBlob).toBeDefined()
+  })
 })
 
 describe("reads", () => {

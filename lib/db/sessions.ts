@@ -10,6 +10,7 @@ import { deleteLoopsForSession } from "./loops"
 import { deleteGoalsForSession } from "./goals"
 import { resolveScopeProjectId } from "./project-scope"
 import { markSessionRemoved } from "@/lib/chat/search/indexer"
+import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events"
 
 function newId() {
   return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -153,6 +154,35 @@ export async function updateSession(
       .sessions.update(id, { ...patch, updatedAt: Date.now() })
       .then(() => undefined)
   )
+}
+
+/** Persist the selected sibling for one branch group and invalidate summaries. */
+export async function setSessionActiveBranchSelection(
+  sessionId: string,
+  branchGroupId: string,
+  messageId: string
+): Promise<void> {
+  if (!sessionId || !branchGroupId || !messageId) return
+  const db = getDb()
+  let revision: number | null = null
+  await withDbReopenRetry(() =>
+    db.transaction("rw", db.sessions, async () => {
+      const session = await db.sessions.get(sessionId)
+      if (!session) return
+      if (session.activeBranchByGroup?.[branchGroupId] === messageId) return
+      const nextRevision = (session.transcriptRevision ?? 0) + 1
+      await db.sessions.update(sessionId, {
+        activeBranchByGroup: {
+          ...(session.activeBranchByGroup ?? {}),
+          [branchGroupId]: messageId,
+        },
+        transcriptRevision: nextRevision,
+        updatedAt: Date.now(),
+      })
+      revision = nextRevision
+    })
+  )
+  if (revision !== null) await publishTranscriptRevision(sessionId, revision)
 }
 
 /**

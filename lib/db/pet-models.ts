@@ -15,7 +15,9 @@
  */
 
 import { getDb } from "./schema"
-import type { Live2dMotionOverrides, Live2dTransform } from "@/types/pet"
+import type { Live2dMotionOverrides, Live2dParameterMapping, Live2dTransform } from "@/types/pet"
+import type { Live2dCompatibilitySummary } from "@/lib/pet/live2d/types"
+import { validateLive2dImport } from "@/lib/pet/live2d/import-validate"
 
 /** Metadata row for one stored Live2D model. */
 export interface PetModelRow {
@@ -47,6 +49,10 @@ export interface PetModelRow {
    * absent = naming-convention mapping only).
    */
   motionOverrides?: Live2dMotionOverrides
+  /** Optional parameter-role overrides; null disables a role. */
+  parameterMapping?: Live2dParameterMapping
+  /** Versioned import/revalidation result (non-indexed, additive). */
+  compatibility?: Live2dCompatibilitySummary
 }
 
 /** Blob row for one Live2D model asset. */
@@ -74,7 +80,69 @@ export async function listPetModels(): Promise<PetModelRow[]> {
 
 /** Fetch a single model's metadata. Returns undefined if absent. */
 export async function getPetModel(id: string): Promise<PetModelRow | undefined> {
-  return getDb().petModels.get(id)
+  const row = await getDb().petModels.get(id)
+  if (!row || row.compatibility?.version === 1) return row
+  return revalidatePetModelCompatibility(id)
+}
+
+/** Lazily upgrade a legacy row's non-indexed compatibility summary once. */
+export async function revalidatePetModelCompatibility(
+  id: string
+): Promise<PetModelRow | undefined> {
+  const db = getDb()
+  const row = await db.petModels.get(id)
+  if (!row || row.compatibility?.version === 1) return row
+  const files = await db.petModelFiles.where("modelId").equals(id).toArray()
+  const result = await validateLive2dImport(
+    files.map((file) => ({ path: file.path, blob: file.blob }))
+  )
+  if (!result.ok) {
+    const compatibility: Live2dCompatibilitySummary = {
+      version: 1,
+      status: "invalid",
+      diagnostics: [
+        {
+          code: result.code,
+          severity: "error",
+          ...(result.detail ? { path: result.detail } : {}),
+        },
+      ],
+      usableMotionGroups: [],
+      usableExpressionIds: [],
+      usableParameterIds: [],
+      resourceCost: {
+        totalBytes: row.totalBytes,
+        fileCount: files.length,
+        textureBytes: 0,
+      },
+    }
+    await db.petModels.update(id, { compatibility })
+    return { ...row, compatibility }
+  }
+
+  const { manifest, compatibility, entries } = result.model
+  await db.transaction("rw", db.petModels, db.petModelFiles, async () => {
+    await db.petModels.update(id, {
+      compatibility,
+      motionGroups: manifest.motionGroups,
+      expressionIds: manifest.expressionIds,
+      totalBytes: result.model.totalBytes,
+    })
+    const settings = entries.find((entry) => entry.path === manifest.settingsPath)
+    if (settings) {
+      await db.petModelFiles.update(`${id}:${manifest.settingsPath}`, {
+        blob: settings.blob,
+        mime: "application/json",
+      })
+    }
+  })
+  return {
+    ...row,
+    compatibility,
+    motionGroups: manifest.motionGroups,
+    expressionIds: manifest.expressionIds,
+    totalBytes: result.model.totalBytes,
+  }
 }
 
 /**
@@ -111,10 +179,43 @@ export async function addPetModel(
  */
 export async function deletePetModel(id: string): Promise<void> {
   const db = getDb()
-  await db.transaction("rw", db.petModels, db.petModelFiles, async () => {
-    await db.petModels.delete(id)
-    await db.petModelFiles.where("modelId").equals(id).delete()
-  })
+  await db.transaction(
+    "rw",
+    db.petModels,
+    db.petModelFiles,
+    db.settings,
+    db.petCharacterBindings,
+    async () => {
+      const settings = await db.settings.get("singleton")
+      if (settings?.petSettings?.activeLive2dModelId === id) {
+        await db.settings.put({
+          ...settings,
+          updatedAt: Date.now(),
+          petSettings: {
+            ...settings.petSettings,
+            skinId: "svg",
+            activeLive2dModelId: undefined,
+          },
+        })
+      }
+      const bindings = await db.petCharacterBindings.toArray()
+      for (const binding of bindings) {
+        const legacyMatch = binding.live2dModelId === id
+        const typedMatch = binding.skin?.skinId === "live2d" && binding.skin.modelId === id
+        if (!legacyMatch && !typedMatch) continue
+        await db.petCharacterBindings.put({
+          ...binding,
+          live2dModelId: undefined,
+          skin: typedMatch ? undefined : binding.skin,
+          updatedAt: new Date().toISOString(),
+        })
+      }
+      await db.petModels.delete(id)
+      await db.petModelFiles.where("modelId").equals(id).delete()
+    }
+  )
+  const { invalidatePetSkinAsset } = await import("@/lib/pet/skin-assets")
+  invalidatePetSkinAsset({ skinId: "live2d", modelId: id })
 }
 
 /**
@@ -124,7 +225,11 @@ export async function deletePetModel(id: string): Promise<void> {
  */
 export async function updatePetModelCustomization(
   id: string,
-  patch: { transform?: Live2dTransform; motionOverrides?: Live2dMotionOverrides }
+  patch: {
+    transform?: Live2dTransform
+    motionOverrides?: Live2dMotionOverrides
+    parameterMapping?: Live2dParameterMapping
+  }
 ): Promise<void> {
   await getDb().petModels.update(id, patch)
 }

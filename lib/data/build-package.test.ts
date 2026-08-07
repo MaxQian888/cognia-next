@@ -196,7 +196,7 @@ async function seedAll() {
     id: "m-1",
     name: "test",
     transport: "stdio",
-    config: {},
+    config: { command: "tool", env: { API_KEY: "mcp-secret", COLOR: "blue" } },
     enabled: true,
     createdAt: 1,
     updatedAt: 1,
@@ -342,6 +342,14 @@ describe("buildBackupPackage", () => {
     expect(pkg.payload.messages?.map((m) => m.id)).toEqual(["msg-1"])
     expect(pkg.payload.sessionState?.map((s) => s.sessionId)).toEqual(["sess-1"])
     expect(pkg.payload.trustedWorkspaces?.map((w) => w.path)).toEqual(["/some/dir"])
+    expect(pkg.payload.mcpServers?.[0].config).toEqual({
+      command: "tool",
+      env: { API_KEY: { secretRef: "mcp/m-1/env/API_KEY" }, COLOR: "blue" },
+    })
+    expect(pkg.payload.mcpCredentialManifest).toEqual([
+      { serverId: "m-1", references: ["mcp/m-1/env/API_KEY"] },
+    ])
+    expect(JSON.stringify(pkg.payload)).not.toContain("mcp-secret")
     // Secret-bearing tables never leave the credential seam. Legacy packages
     // carrying this optional field remain importable, but new exports omit it.
     expect(pkg.payload.ttsProviderKeys).toBeUndefined()

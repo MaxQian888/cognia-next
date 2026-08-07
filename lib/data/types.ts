@@ -85,6 +85,7 @@ export interface BackupPayloadV3 {
   teams?: Team[]
   promptPresets?: SystemPromptPreset[]
   mcpServers?: McpServer[]
+  mcpCredentialManifest?: Array<{ serverId: string; references: string[] }>
   sessions?: ChatSession[]
   messages?: StoredMessage[]
   sessionState?: SessionStateRow[]

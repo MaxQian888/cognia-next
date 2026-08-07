@@ -10,6 +10,26 @@ import { IntegrityCheckFailedError } from "./types"
 
 const PBKDF2_ITERATIONS = 600_000
 
+export interface BackupChunkEncryptionConfig {
+  enabled: true
+  format: "aes-gcm-chunks-v1"
+  algorithm: "AES-GCM"
+  kdf: {
+    algorithm: "PBKDF2"
+    hash: "SHA-256"
+    iterations: number
+    salt: string
+  }
+  /** Base64-encoded eight-byte prefix; the record sequence supplies four more IV bytes. */
+  noncePrefix: string
+}
+
+export interface BackupChunkCipher {
+  config: BackupChunkEncryptionConfig
+  seal(sequence: number, plainText: string, additionalData: string): Promise<string>
+  open(sequence: number, cipherText: string, additionalData: string): Promise<string>
+}
+
 function encodeBase64(bytes: Uint8Array): string {
   if (typeof btoa === "function") {
     let binary = ""
@@ -88,6 +108,79 @@ async function deriveAesKey(
     false,
     ["encrypt", "decrypt"]
   )
+}
+
+function chunkIv(prefix: Uint8Array, sequence: number): Uint8Array {
+  if (!Number.isSafeInteger(sequence) || sequence < 0 || sequence > 0xffff_ffff) {
+    throw new RangeError("Backup chunk sequence exceeds the AES-GCM nonce range")
+  }
+  if (prefix.length !== 8) throw new TypeError("Backup chunk nonce prefix must be eight bytes")
+  const iv = new Uint8Array(12)
+  iv.set(prefix)
+  new DataView(iv.buffer).setUint32(8, sequence)
+  return iv
+}
+
+/** Create a record-level cipher whose deterministic IVs remain unique within one backup. */
+export async function createBackupChunkCipher(
+  passphrase: string,
+  existing?: BackupChunkEncryptionConfig
+): Promise<BackupChunkCipher> {
+  const salt = existing ? decodeBase64(existing.kdf.salt) : randomBytes(16)
+  const noncePrefix = existing ? decodeBase64(existing.noncePrefix) : randomBytes(8)
+  const iterations = existing?.kdf.iterations ?? PBKDF2_ITERATIONS
+  if (salt.length !== 16) throw new TypeError("Backup chunk KDF salt must be sixteen bytes")
+  if (noncePrefix.length !== 8) {
+    throw new TypeError("Backup chunk nonce prefix must be eight bytes")
+  }
+  if (!Number.isSafeInteger(iterations) || iterations < 100_000 || iterations > 2_000_000) {
+    throw new RangeError("Backup chunk PBKDF2 iteration count is outside the supported range")
+  }
+  const key = await deriveAesKey(passphrase, salt, iterations)
+  const config: BackupChunkEncryptionConfig = existing ?? {
+    enabled: true,
+    format: "aes-gcm-chunks-v1",
+    algorithm: "AES-GCM",
+    kdf: {
+      algorithm: "PBKDF2",
+      hash: "SHA-256",
+      iterations,
+      salt: encodeBase64(salt),
+    },
+    noncePrefix: encodeBase64(noncePrefix),
+  }
+
+  const crypt = async (
+    mode: "encrypt" | "decrypt",
+    sequence: number,
+    value: string,
+    additionalData: string
+  ): Promise<string> => {
+    const subtle = getSubtleCrypto()
+    const params: AesGcmParams = {
+      name: "AES-GCM",
+      iv: toBufferSource(chunkIv(noncePrefix, sequence)),
+      additionalData: toBufferSource(new TextEncoder().encode(additionalData)),
+    }
+    if (mode === "encrypt") {
+      const result = await subtle.encrypt(
+        params,
+        key,
+        toBufferSource(new TextEncoder().encode(value))
+      )
+      return encodeBase64(new Uint8Array(result))
+    }
+    const result = await subtle.decrypt(params, key, toBufferSource(decodeBase64(value)))
+    return new TextDecoder().decode(result)
+  }
+
+  return {
+    config,
+    seal: (sequence, plainText, additionalData) =>
+      crypt("encrypt", sequence, plainText, additionalData),
+    open: (sequence, cipherText, additionalData) =>
+      crypt("decrypt", sequence, cipherText, additionalData),
+  }
 }
 
 function randomBytes(length: number): Uint8Array {

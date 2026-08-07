@@ -185,6 +185,12 @@ describe("getDb", () => {
     expect(db.settings).toBeDefined()
     expect(db.promptPresets).toBeDefined()
     expect(db.mcpServers).toBeDefined()
+    expect(db.mcpSyncJobs).toBeDefined()
+    expect(db.mcpCapabilityCache).toBeDefined()
+    expect(db.mcpServerSummaries).toBeDefined()
+    expect(db.messageMediaRefs).toBeDefined()
+    expect(db.chatTurnSummaries).toBeDefined()
+    expect(db.chatTranscriptIndexState).toBeDefined()
     expect(db.characters).toBeDefined()
     expect(db.skills).toBeDefined()
     expect(db.skillResources).toBeDefined()
@@ -593,6 +599,88 @@ describe("getDb", () => {
     expect(
       (await upgraded.agentTraces.orderBy("startTime").reverse().toArray()).map((row) => row.id)
     ).toEqual(["new", "old"])
+
+    upgraded.close()
+    await Dexie.delete(name)
+  }, 30_000)
+
+  it("v151 governs legacy MCP rows and blocks duplicate namespaces", async () => {
+    const name = `cognia-mcp-control-v151-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(150).stores({ mcpServers: "id, name, enabled" })
+    await legacy.open()
+    await legacy.table("mcpServers").bulkPut([
+      {
+        id: "mcp_first",
+        name: "GitHub",
+        transport: "stdio",
+        config: { command: "node" },
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "mcp_duplicate",
+        name: "github",
+        transport: "stdio",
+        config: { command: "node" },
+        enabled: true,
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ])
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBeGreaterThanOrEqual(151)
+    expect(await upgraded.mcpServers.get("mcp_first")).toMatchObject({
+      schemaVersion: 1,
+      revision: 1,
+      credentialVersion: 0,
+      trust: { state: "legacy" },
+      enabled: true,
+    })
+    expect(await upgraded.mcpServers.get("mcp_duplicate")).toMatchObject({
+      trust: { state: "blocked" },
+      enabled: false,
+    })
+    expect(await upgraded.mcpServerSummaries.count()).toBe(2)
+
+    upgraded.close()
+    await Dexie.delete(name)
+  }, 30_000)
+
+  it("v152 adds the message media reference ledger and turn indexes", async () => {
+    const name = `cognia-message-media-refs-v152-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(151).stores({
+      messages:
+        "id, sessionId, [sessionId+createdAt], senderId, platformMessageId, [createdAt+id], projectId, [projectId+createdAt]",
+      messageMedia: "&hash, lastUsedAt, createdAt",
+    })
+    await legacy.open()
+    await legacy.table("messages").put({
+      id: "legacy-message",
+      sessionId: "session-1",
+      role: "user",
+      parts: [],
+      createdAt: 1,
+    })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    expect(upgraded.verno).toBeGreaterThanOrEqual(152)
+    expect(upgraded.messageMediaRefs.schema.primKey.name).toBe("[messageId+hash]")
+    expect(upgraded.messageMediaRefs.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["sessionId", "messageId", "hash", "[sessionId+hash]"])
+    )
+    expect(upgraded.messages.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["turnKey", "[sessionId+turnKey]"])
+    )
+    expect(await upgraded.messages.get("legacy-message")).toBeDefined()
 
     upgraded.close()
     await Dexie.delete(name)

@@ -1,6 +1,7 @@
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import type {
   WorkflowDeployment,
+  WorkflowDependencyBinding,
   WorkflowEntrypoint,
   WorkflowExecutionBinding,
   WorkflowVersion,
@@ -42,36 +43,20 @@ export interface ResolvedWorkflowDeployment {
   binding: WorkflowExecutionBinding
 }
 
-/** Resolve an active pointer and hydrate exactly the immutable graph it selects. */
-export async function resolveWorkflowDeployment(
-  workflowId: string,
-  environment = "production",
-  provenance: { entrypoint?: WorkflowEntrypoint; caller?: string; idempotencyKey?: string } = {}
-): Promise<ResolvedWorkflowDeployment | undefined> {
-  const deployment = await getWorkflowDeployment(workflowId, environment)
-  if (!deployment || deployment.status !== "active") return undefined
-  const version = await getWorkflowVersion(deployment.versionId)
-  if (!version || version.workflowId !== workflowId || version.accountId !== deployment.accountId) {
-    throw new Error(`Workflow deployment ${deployment.id} points to an invalid version`)
-  }
-  const binding: WorkflowExecutionBinding = {
-    versionId: version.id,
-    deploymentId: deployment.id,
-    deploymentRevision: deployment.revision,
-    entrypoint: provenance.entrypoint ?? "trigger",
-    caller: provenance.caller ?? "internal",
-    ...(provenance.idempotencyKey ? { idempotencyKey: provenance.idempotencyKey } : {}),
-  }
-  return { deployment, version, workflow: version.definition, binding }
+type DeploymentProvenance = {
+  entrypoint?: WorkflowEntrypoint
+  caller?: string
+  idempotencyKey?: string
 }
 
-export async function resolveWorkflowDeploymentById(
-  deploymentId: string,
-  provenance: { entrypoint?: WorkflowEntrypoint; caller?: string; idempotencyKey?: string } = {}
+async function hydrateWorkflowDeployment(
+  deployment: WorkflowDeployment | undefined,
+  versionId: string | undefined,
+  provenance: DeploymentProvenance,
+  defaults: { entrypoint: WorkflowEntrypoint; caller: string }
 ): Promise<ResolvedWorkflowDeployment | undefined> {
-  const deployment = await getWorkflowDeploymentById(deploymentId)
-  if (!deployment || deployment.status !== "active") return undefined
-  const version = await getWorkflowVersion(deployment.versionId)
+  if (!deployment || !versionId) return undefined
+  const version = await getWorkflowVersion(versionId)
   if (
     !version ||
     version.workflowId !== deployment.workflowId ||
@@ -80,16 +65,61 @@ export async function resolveWorkflowDeploymentById(
     throw new Error(`Workflow deployment ${deployment.id} points to an invalid version`)
   }
   return {
-    deployment,
+    deployment: { ...deployment, versionId, revision: deployment.revision },
     version,
     workflow: version.definition,
     binding: {
       versionId: version.id,
       deploymentId: deployment.id,
       deploymentRevision: deployment.revision,
-      entrypoint: provenance.entrypoint ?? "http",
-      caller: provenance.caller ?? "anonymous",
+      entrypoint: provenance.entrypoint ?? defaults.entrypoint,
+      caller: provenance.caller ?? defaults.caller,
       ...(provenance.idempotencyKey ? { idempotencyKey: provenance.idempotencyKey } : {}),
     },
   }
+}
+
+/** Resolve an active pointer and hydrate exactly the immutable graph it selects. */
+export async function resolveWorkflowDeployment(
+  workflowId: string,
+  environment = "production",
+  provenance: { entrypoint?: WorkflowEntrypoint; caller?: string; idempotencyKey?: string } = {}
+): Promise<ResolvedWorkflowDeployment | undefined> {
+  const deployment = await getWorkflowDeployment(workflowId, environment)
+  if (!deployment || deployment.status !== "active") return undefined
+  return hydrateWorkflowDeployment(deployment, deployment.versionId, provenance, {
+    entrypoint: "trigger",
+    caller: "internal",
+  })
+}
+
+export async function resolveWorkflowDeploymentById(
+  deploymentId: string,
+  provenance: { entrypoint?: WorkflowEntrypoint; caller?: string; idempotencyKey?: string } = {}
+): Promise<ResolvedWorkflowDeployment | undefined> {
+  const deployment = await getWorkflowDeploymentById(deploymentId)
+  if (!deployment || deployment.status !== "active") return undefined
+  return hydrateWorkflowDeployment(deployment, deployment.versionId, provenance, {
+    entrypoint: "http",
+    caller: "anonymous",
+  })
+}
+
+/** Hydrate the exact version selected by an already-admitted parent run. */
+export async function resolveLockedWorkflowDeployment(
+  locked: WorkflowDependencyBinding,
+  provenance: DeploymentProvenance = {}
+): Promise<ResolvedWorkflowDeployment | undefined> {
+  const deployment = await getWorkflowDeploymentById(locked.deploymentId)
+  if (!deployment || deployment.workflowId !== locked.workflowId) return undefined
+  const resolved = await hydrateWorkflowDeployment(
+    { ...deployment, revision: locked.deploymentRevision },
+    locked.versionId,
+    provenance,
+    { entrypoint: "subworkflow", caller: "internal" }
+  )
+  if (resolved && locked.dependencyLock) {
+    resolved.binding.dependencyLock = locked.dependencyLock
+  }
+  return resolved
 }

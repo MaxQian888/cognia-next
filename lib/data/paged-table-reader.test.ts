@@ -1,4 +1,4 @@
-import { createPagedTableReader } from "./paged-table-reader"
+import { createPagedTablePageIterator, createPagedTableReader } from "./paged-table-reader"
 
 function fakeTable<T extends { id: number }>(
   rows: T[],
@@ -57,5 +57,17 @@ describe("createPagedTableReader", () => {
   it("rejects invalid page and concurrency limits", () => {
     expect(() => createPagedTableReader({ pageSize: 0, concurrency: 1 })).toThrow(/pageSize/)
     expect(() => createPagedTableReader({ pageSize: 1, concurrency: 0 })).toThrow(/concurrency/)
+  })
+})
+
+describe("createPagedTablePageIterator", () => {
+  it("yields bounded pages without retaining rows from prior pages", async () => {
+    const rows = Array.from({ length: 7 }, (_, id) => ({ id }))
+    const iterate = createPagedTablePageIterator({ pageSize: 3, concurrency: 1 })
+    const pages: Array<Array<{ id: number }>> = []
+
+    for await (const page of iterate(fakeTable(rows))) pages.push(page)
+
+    expect(pages.map((page) => page.map((row) => row.id))).toEqual([[0, 1, 2], [3, 4, 5], [6]])
   })
 })

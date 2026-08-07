@@ -92,6 +92,35 @@ describe("pet sprite pack CRUD", () => {
     await expect(listPetSpritePacks()).resolves.toEqual([expect.objectContaining({ id: "nori" })])
   })
 
+  it("clears global and per-character selection when deleting an active pack", async () => {
+    await addPetSpritePack(pack("momo"), 100)
+    await getDb().settings.put({
+      id: "singleton",
+      petSettings: {
+        enabled: true,
+        anchor: "bottom-right",
+        motion: "auto",
+        mutedBubbles: false,
+        size: 96,
+        skinId: "sprite-v2",
+        activeSpritePackId: "momo",
+      },
+    } as never)
+    await getDb().petCharacterBindings.put({
+      characterId: "sprite-character",
+      skin: { skinId: "sprite-v2", packId: "momo" },
+      updatedAt: "old",
+    })
+
+    await deletePetSpritePack("momo")
+
+    expect((await getDb().settings.get("singleton"))?.petSettings).toMatchObject({ skinId: "svg" })
+    expect(
+      (await getDb().settings.get("singleton"))?.petSettings?.activeSpritePackId
+    ).toBeUndefined()
+    expect((await getDb().petCharacterBindings.get("sprite-character"))?.skin).toBeUndefined()
+  })
+
   it("reports pack count and total persisted sprite bytes", async () => {
     await expect(getPetSpritePackStorageUsage()).resolves.toEqual({ packs: 0, totalBytes: 0 })
     await addPetSpritePack(pack("momo", "Momo", "12345"), 100)

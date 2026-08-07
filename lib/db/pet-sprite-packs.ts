@@ -62,7 +62,33 @@ export async function addPetSpritePack(
 
 /** Delete one pack. A missing id is intentionally a no-op. */
 export async function deletePetSpritePack(id: string): Promise<void> {
-  await getDb().petSpritePacks.delete(id)
+  const db = getDb()
+  await db.transaction("rw", db.petSpritePacks, db.settings, db.petCharacterBindings, async () => {
+    const settings = await db.settings.get("singleton")
+    if (settings?.petSettings?.activeSpritePackId === id) {
+      await db.settings.put({
+        ...settings,
+        updatedAt: Date.now(),
+        petSettings: {
+          ...settings.petSettings,
+          skinId: "svg",
+          activeSpritePackId: undefined,
+        },
+      })
+    }
+    const bindings = await db.petCharacterBindings.toArray()
+    for (const binding of bindings) {
+      if (binding.skin?.skinId !== "sprite-v2" || binding.skin.packId !== id) continue
+      await db.petCharacterBindings.put({
+        ...binding,
+        skin: undefined,
+        updatedAt: new Date().toISOString(),
+      })
+    }
+    await db.petSpritePacks.delete(id)
+  })
+  const { invalidatePetSkinAsset } = await import("@/lib/pet/skin-assets")
+  invalidatePetSkinAsset({ skinId: "sprite-v2", packId: id })
 }
 
 /** Aggregate persisted atlas storage without loading blob payloads elsewhere. */

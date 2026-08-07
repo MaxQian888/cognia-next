@@ -9,6 +9,7 @@ import {
   createSession,
   getSession,
   updateSession,
+  setSessionActiveBranchSelection,
   listSessions,
   listScopedSessions,
   deleteSession,
@@ -270,6 +271,19 @@ describe("createSession — default preset auto-apply", () => {
 })
 
 describe("updateSession + listSessions", () => {
+  it("persists branch selection and increments the transcript revision", async () => {
+    const session = await createSession({ title: "Branches" })
+
+    await setSessionActiveBranchSelection(session.id, "group-1", "message-2")
+
+    expect(await getSession(session.id)).toMatchObject({
+      activeBranchByGroup: { "group-1": "message-2" },
+      transcriptRevision: 1,
+    })
+    await setSessionActiveBranchSelection(session.id, "group-1", "message-2")
+    expect((await getSession(session.id))?.transcriptRevision).toBe(1)
+  })
+
   it("round-trips a patch", async () => {
     const session = await createSession({ title: "Test" })
     await updateSession(session.id, { title: "Renamed" })

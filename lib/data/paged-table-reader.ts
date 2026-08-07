@@ -16,13 +16,7 @@ export interface PagedTableReaderOptions {
   concurrency?: number
 }
 
-/**
- * Build a reader whose concurrency budget is shared across every table read
- * started through it. The returned arrays are required by BackupPayloadV3,
- * but transient IndexedDB result pages stay bounded instead of materializing
- * dozens of complete tables concurrently.
- */
-export function createPagedTableReader(options: PagedTableReaderOptions = {}) {
+export function createPagedTablePageIterator(options: PagedTableReaderOptions = {}) {
   const pageSize = Math.floor(options.pageSize ?? 500)
   const concurrency = Math.floor(options.concurrency ?? 4)
   if (pageSize <= 0) throw new RangeError("pageSize must be greater than zero")
@@ -44,8 +38,9 @@ export function createPagedTableReader(options: PagedTableReaderOptions = {}) {
     }
   }
 
-  return async function readTablePaged<T, TKey>(table: PagedReadable<T, TKey>): Promise<T[]> {
-    const rows: T[] = []
+  return async function* iterateTablePages<T, TKey>(
+    table: PagedReadable<T, TKey>
+  ): AsyncIterable<T[]> {
     let lastPrimaryKey: TKey | undefined
     for (;;) {
       const page: T[] = []
@@ -59,8 +54,23 @@ export function createPagedTableReader(options: PagedTableReaderOptions = {}) {
           lastPrimaryKey = cursor.primaryKey
         })
       })
-      rows.push(...page)
-      if (page.length < pageSize) return rows
+      yield page
+      if (page.length < pageSize) return
     }
+  }
+}
+
+/**
+ * Build a reader whose concurrency budget is shared across every table read
+ * started through it. The returned arrays are required by BackupPayloadV3,
+ * but transient IndexedDB result pages stay bounded instead of materializing
+ * dozens of complete tables concurrently.
+ */
+export function createPagedTableReader(options: PagedTableReaderOptions = {}) {
+  const iteratePages = createPagedTablePageIterator(options)
+  return async function readTablePaged<T, TKey>(table: PagedReadable<T, TKey>): Promise<T[]> {
+    const rows: T[] = []
+    for await (const page of iteratePages(table)) rows.push(...page)
+    return rows
   }
 }

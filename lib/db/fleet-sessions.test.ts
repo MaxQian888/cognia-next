@@ -9,6 +9,7 @@ import {
   listFleetHistory,
   mergeHistoryRow,
   pruneFleetHistory,
+  reconcileFleetHistory,
   recordFleetHistory,
   type FleetSessionHistoryRow,
 } from "./fleet-sessions"
@@ -147,5 +148,19 @@ describe("fleet-sessions persistence", () => {
     expect(removed).toBe(1)
     const list = await listFleetHistory()
     expect(list.map((r) => r.sessionId)).toEqual(["b"])
+  })
+
+  it("detaches active rows missing from an authoritative snapshot", async () => {
+    await recordFleetHistory(row({ id: "missing", sessionId: "missing", outcome: "active" }))
+    await recordFleetHistory(row({ id: "live", sessionId: "live", outcome: "active" }))
+    await recordFleetHistory(
+      row({ id: "ended", sessionId: "ended", outcome: "ended", endedAt: 500 })
+    )
+
+    await reconcileFleetHistory([row({ id: "live", sessionId: "live", updatedAt: 2_000 })], 2_000)
+
+    expect((await getDb().fleetSessions.get("missing"))?.outcome).toBe("detached")
+    expect((await getDb().fleetSessions.get("live"))?.outcome).toBe("active")
+    expect((await getDb().fleetSessions.get("ended"))?.outcome).toBe("ended")
   })
 })

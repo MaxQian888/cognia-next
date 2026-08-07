@@ -14,7 +14,10 @@ import type {
   AppSettings,
   Character,
   ChatSession,
+  McpCapabilityCacheRow,
   McpServer,
+  McpServerSummary,
+  McpSyncJob,
   SessionFolder,
   Skill,
   SkillResource,
@@ -352,6 +355,10 @@ export class CogniaDB extends Dexie {
   settings!: Table<AppSettings, "singleton">
   promptPresets!: Table<SystemPromptPreset, string>
   mcpServers!: Table<McpServer, string>
+  // v151 — MCP control-plane governance and durable runtime metadata.
+  mcpSyncJobs!: Table<McpSyncJob, string>
+  mcpCapabilityCache!: Table<McpCapabilityCacheRow, string>
+  mcpServerSummaries!: Table<McpServerSummary, string>
   characters!: Table<Character, string>
   skills!: Table<Skill, string>
   skillResources!: Table<SkillResource, string>
@@ -477,6 +484,20 @@ export class CogniaDB extends Dexie {
   integrationAudit!: Table<IntegrationAuditRow, string>
   // v128 — Content-addressed chat image store. See `lib/db/message-media.ts`.
   messageMedia!: Table<import("./message-media").MessageMediaRow, string>
+  // v152 — Message-to-media authorization and lifecycle ledger.
+  messageMediaRefs!: Table<
+    import("./message-media-refs").MessageMediaRefRow,
+    [string, string]
+  >
+  // v153 — lazily materialized transcript summaries and resumable watermark.
+  chatTurnSummaries!: Table<
+    import("./chat-transcript-index").ChatTurnSummaryRow,
+    [string, string]
+  >
+  chatTranscriptIndexState!: Table<
+    import("./chat-transcript-index").ChatTranscriptIndexStateRow,
+    string
+  >
   // v134 — chat-history search projections + backfill watermark (ADR-0099).
   // See `lib/db/chat-search-text.ts`.
   chatSearchText!: Table<import("./chat-search-text").ChatSearchTextRow, string>
@@ -3581,6 +3602,67 @@ export class CogniaDB extends Dexie {
     this.version(150).stores({
       agentTraces:
         "&id, startTime, sessionId, [sessionId+startTime], traceId, [traceId+startTime], parentSpanId, surface, projectId, [projectId+startTime]",
+    })
+
+    // v151 — MCP control plane. Legacy definitions stay operational, while
+    // newly-created definitions use pending trust and host-owned credentials.
+    // Duplicate legacy namespaces are fail-closed instead of silently
+    // overwriting each other in the SDK's name-keyed map.
+    this.version(151)
+      .stores({
+        mcpSyncJobs: "&id, status, nextAttemptAt, updatedAt",
+        mcpCapabilityCache: "&id, serverId, expiresAt, updatedAt",
+        mcpServerSummaries: "&id, updatedAt, trustState",
+      })
+      .upgrade(async (tx) => {
+        const table = tx.table("mcpServers")
+        const rows = (await table.toArray()) as McpServer[]
+        const seen = new Set<string>()
+        const summaries: McpServerSummary[] = []
+        for (const row of rows.sort(
+          (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)
+        )) {
+          const normalized = row.name.trim().toLocaleLowerCase("en-US")
+          const duplicate = seen.has(normalized)
+          seen.add(normalized)
+          const builtin = row.name === A2UI_BRIDGE_SERVER_NAME
+          row.displayName = row.displayName?.trim() || row.name
+          row.schemaVersion = 1
+          row.revision = row.revision ?? 1
+          row.credentialVersion = row.credentialVersion ?? 0
+          row.origin = row.origin ?? (builtin ? "builtin" : row.pluginId ? "plugin" : "manual")
+          row.trust = duplicate
+            ? { state: "blocked" }
+            : (row.trust ?? { state: builtin ? "trusted" : "legacy" })
+          if (duplicate) row.enabled = false
+          summaries.push({
+            id: row.id,
+            displayName: row.displayName,
+            transport: row.transport,
+            enabled: row.enabled,
+            trustState: row.trust.state,
+            updatedAt: row.updatedAt,
+          })
+        }
+        if (rows.length > 0) await table.bulkPut(rows)
+        if (summaries.length > 0) await tx.table("mcpServerSummaries").bulkPut(summaries)
+      })
+
+    // v152 — Keep binary media outside message payloads while retaining a
+    // small, indexed authorization/lifecycle ledger. Turn indexes support the
+    // lazy transcript projection without rewriting legacy rows.
+    this.version(152).stores({
+      messages:
+        "id, sessionId, [sessionId+createdAt], senderId, platformMessageId, [createdAt+id], projectId, [projectId+createdAt], turnKey, [sessionId+turnKey]",
+      messageMediaRefs: "[messageId+hash], sessionId, messageId, hash, [sessionId+hash]",
+    })
+
+    // v153 — Empty-on-upgrade lazy transcript index. First access writes only
+    // the newest bounded page; older pages are added as the user scrolls.
+    this.version(153).stores({
+      chatTurnSummaries:
+        "[sessionId+turnKey], sessionId, turnKey, [sessionId+order], revision, updatedAt",
+      chatTranscriptIndexState: "sessionId, revision, updatedAt",
     })
 
     // First full-chain construction under Jest: cache the merged spec so every

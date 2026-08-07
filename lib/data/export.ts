@@ -11,3 +11,5 @@ export async function buildExportEnvelope(opts: ExportOptions): Promise<BackupPa
 }
 
 export { defaultExportFileName, serializePackage, buildBackupPackage }
+export { buildBackupStream, buildBackupSections } from "./build-stream"
+export { readBackupStream } from "./stream-format"

@@ -4,6 +4,7 @@ import {
   getWorkflowDeployment,
   getWorkflowDeploymentById,
   listWorkflowVersions,
+  resolveLockedWorkflowDeployment,
   resolveWorkflowDeployment,
 } from "./workflow-deployments"
 import { publishWorkflow, rollbackWorkflow } from "@/lib/workflow/publish/publish-workflow"
@@ -51,6 +52,27 @@ describe("workflow deployments", () => {
       first.versionId,
       second.versionId,
     ])
+  })
+
+  it("resolves an admitted dependency lock after the deployment pointer moves", async () => {
+    const workflow = await createWorkflow({ name: "First child", nodes: [], edges: [] })
+    const first = await publishWorkflow(workflow.id, 10)
+    const lockedDeployment = await getWorkflowDeployment(workflow.id)
+    expect(lockedDeployment).toBeDefined()
+
+    await updateWorkflow(workflow.id, { name: "Second child" })
+    await publishWorkflow(workflow.id, 20)
+
+    const resolved = await resolveLockedWorkflowDeployment({
+      workflowId: workflow.id,
+      versionId: first.versionId,
+      deploymentId: first.deploymentId,
+      deploymentRevision: lockedDeployment!.revision,
+    })
+
+    expect(resolved?.version.id).toBe(first.versionId)
+    expect(resolved?.workflow.name).toBe("First child")
+    expect(resolved?.binding.deploymentRevision).toBe(lockedDeployment!.revision)
   })
 
   it("does not resolve a deployment id owned by another account", async () => {

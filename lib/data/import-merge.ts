@@ -19,6 +19,8 @@
 
 import type { ImportedConversation } from "./importers/types"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
+import { normalizeStoredMessageMedia } from "@/lib/chat/media/normalize-message-media"
+import { collectUnreferencedMessageMedia, messageMediaRefRows } from "@/lib/db/message-media-refs"
 import { getDb } from "@/lib/db/schema"
 
 type Db = ReturnType<typeof getDb>
@@ -82,22 +84,58 @@ export async function applyImportedMerged(
 
   let sessionsWritten = 0
   let messagesWritten = 0
+  const orphanCandidates = new Set<string>()
 
-  await db.transaction("rw", [db.sessions, db.messages], async () => {
+  // Image decoding/storage opens its own short Dexie transactions, so it must
+  // happen before the atomic sessions/messages/ref write below. Skip rows that
+  // are already frozen to avoid ingesting media for a conversation Cognia no
+  // longer mirrors. The transaction re-checks the guard before committing.
+  const prepared = await Promise.all(
+    conversations.map(async (conversation) => {
+      const existing = await db.sessions.get(conversation.session.id)
+      if (existing?.importFrozen) return null
+      return {
+        conversation,
+        messages: await Promise.all(conversation.messages.map(normalizeStoredMessageMedia)),
+      }
+    })
+  )
+
+  await db.transaction("rw", [db.sessions, db.messages, db.messageMediaRefs], async () => {
     const sessionRows: ChatSession[] = []
     const messageRows: StoredMessage[] = []
-    for (const conv of conversations) {
+    for (const entry of prepared) {
+      if (!entry) continue
+      const { conversation: conv } = entry
       const existing = await db.sessions.get(conv.session.id)
       // Frozen: the user continued this import in Cognia — leave it untouched.
       if (existing?.importFrozen) continue
-      sessionRows.push(mergeImportedSession(conv.session, existing))
-      for (const m of conv.messages) messageRows.push(m)
+      const merged = mergeImportedSession(conv.session, existing)
+      sessionRows.push({
+        ...merged,
+        transcriptRevision: (existing?.transcriptRevision ?? merged.transcriptRevision ?? 0) + 1,
+      })
+      for (const message of entry.messages) messageRows.push(message)
     }
     if (sessionRows.length > 0) await db.sessions.bulkPut(sessionRows)
-    if (messageRows.length > 0) await db.messages.bulkPut(messageRows)
+    if (messageRows.length > 0) {
+      const messageIds = messageRows.map((message) => message.id)
+      const oldRefs = await db.messageMediaRefs.where("messageId").anyOf(messageIds).toArray()
+      for (const ref of oldRefs) orphanCandidates.add(ref.hash)
+      await db.messages.bulkPut(messageRows)
+      await db.messageMediaRefs.where("messageId").anyOf(messageIds).delete()
+      const replacementRefs = messageRows.flatMap((message) =>
+        messageMediaRefRows(message.id, message.sessionId, message.parts)
+      )
+      if (replacementRefs.length > 0) await db.messageMediaRefs.bulkPut(replacementRefs)
+    }
     sessionsWritten = sessionRows.length
     messagesWritten = messageRows.length
   })
+
+  if (orphanCandidates.size > 0) {
+    await collectUnreferencedMessageMedia(orphanCandidates)
+  }
 
   return { sessions: sessionsWritten, messages: messagesWritten }
 }

@@ -26,6 +26,7 @@ import { listAllCanvasCommentRows } from "@/lib/db/context-comments"
 import { exportStoredProfilesRedacted } from "@/lib/db/provider-profiles"
 import { deepStripSecrets } from "@/lib/settings/profile-transfer"
 import { createPagedTableReader } from "./paged-table-reader"
+import { redactMcpServerForExport } from "@/lib/mcp/credentials"
 
 const APP_VERSION = "0.1.0"
 
@@ -159,6 +160,7 @@ export async function buildBackupPackage(
     ? plugins
     : plugins.filter((plugin) => plugin.source !== "builtin")
   const keptPluginIds = new Set(filteredPlugins.map((plugin) => plugin.id))
+  const redactedMcp = mcpServers.map(redactMcpServerForExport)
 
   const payload: BackupPayloadV3 = {
     settings,
@@ -167,7 +169,10 @@ export async function buildBackupPackage(
     skillResources: filteredSkillResources,
     teams: filteredTeams,
     promptPresets,
-    mcpServers,
+    mcpServers: redactedMcp.map((entry) => entry.server),
+    mcpCredentialManifest: redactedMcp
+      .filter((entry) => entry.references.length > 0)
+      .map((entry) => ({ serverId: entry.server.id, references: entry.references })),
     trustedWorkspaces,
     canvasDocuments,
     canvasVersions,
@@ -214,6 +219,7 @@ export async function buildBackupPackage(
       "teams",
       "promptPresets",
       "mcpServers",
+      "mcpCredentialManifest",
       "trustedWorkspaces",
       "ttsProviderKeys",
       "canvasDocuments",
