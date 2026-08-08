@@ -5046,6 +5046,13 @@
       "webLabel": "Web",
       "workflowRefs": {
         "removeAria": "移除对 {label} 的引用"
+      },
+      "smartSnapshot": {
+        "captureAria": "截取智能快照",
+        "captureFailed": "智能快照失败",
+        "captureTooltip": "智能快照",
+        "captured": "已附加智能快照：{appName}",
+        "switchPrompt": "请切换到目标应用，Cognia 稍后会截取它。"
       }
     },
     "concurrent": {

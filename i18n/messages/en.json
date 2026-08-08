@@ -5046,6 +5046,13 @@
       "webLabel": "Web",
       "workflowRefs": {
         "removeAria": "Remove reference to {label}"
+      },
+      "smartSnapshot": {
+        "captureAria": "Capture smart snapshot",
+        "captureFailed": "Smart snapshot failed",
+        "captureTooltip": "Smart snapshot",
+        "captured": "Smart snapshot attached: {appName}",
+        "switchPrompt": "Switch to the target app now; Cognia will capture it in a moment."
       }
     },
     "concurrent": {
