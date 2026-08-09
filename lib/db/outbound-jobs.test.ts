@@ -4,6 +4,8 @@
 
 import {
   enqueueOutbound,
+  enqueueOutboundMany,
+  listDueNow,
   pickNextDue,
   peekNextWakeAt,
   subscribeOutboundEnqueued,
@@ -19,7 +21,9 @@ import {
   sweepTerminalOutboundRows,
   findDeliveredByIdempotencyKey,
   findOlderActiveOutboundSibling,
+  findNextActiveOutboundSibling,
   OUTBOUND_TERMINAL_RETENTION_MS,
+  OUTBOUND_DUE_BATCH_SIZE,
   STALE_SENDING_GRACE_MS,
   __setOutboundQueueSoftCapForTesting,
   type EnqueueInput,
@@ -64,6 +68,49 @@ describe("outbound-jobs", () => {
     expect(row.nextAttemptAt).toBeGreaterThan(0)
     expect(row.idempotencyKey).toBe("key_1")
     expect(row.createdAt).toBeGreaterThan(0)
+    expect(row.orderSeq).toBe(1)
+  })
+
+  it("enqueueOutboundMany keeps a stable FIFO for 1,000 same-millisecond jobs", async () => {
+    const now = 123_456
+    const requests = Array.from({ length: 1_001 }, (_, index) => ({
+      adapterId: "adp_1",
+      conversationKey: index === 1_000 ? "conv_other" : "conv_batch",
+      request: makeRequest(`batch-${index}`),
+      source: "workflow" as const,
+    }))
+
+    const rows = await enqueueOutboundMany(requests, { now })
+
+    expect(new Set(rows.map((row) => row.createdAt))).toEqual(new Set([now]))
+    expect(rows.slice(0, 1_000).map((row) => row.orderSeq)).toEqual(
+      Array.from({ length: 1_000 }, (_, index) => index + 1)
+    )
+    expect(rows[1_000].orderSeq).toBe(1)
+    const storedIds = (
+      await getDb()
+        .outboundQueue.where("[conversationKey+orderSeq]")
+        .between(["conv_batch", 0], ["conv_batch", Infinity])
+        .toArray()
+    ).map((row) => row.id)
+    expect(storedIds).toEqual(rows.slice(0, 1_000).map((row) => row.id))
+  })
+
+  it("bounds due reads and uses the injected clock", async () => {
+    await enqueueOutboundMany(
+      Array.from({ length: OUTBOUND_DUE_BATCH_SIZE + 20 }, (_, index) => ({
+        adapterId: "adp_1",
+        conversationKey: `conv-${index}`,
+        request: makeRequest(`due-${index}`),
+        source: "ai-run" as const,
+        nextAttemptAt: 500,
+      })),
+      { now: 100 }
+    )
+
+    expect(await listDueNow({ now: 499 })).toHaveLength(0)
+    expect(await listDueNow({ now: 500 })).toHaveLength(OUTBOUND_DUE_BATCH_SIZE)
+    expect((await listDueNow({ now: 500, limit: 17 })).length).toBeLessThanOrEqual(17)
   })
 
   it("pickNextDue returns undefined when queue is empty", async () => {
@@ -687,11 +734,10 @@ describe("outbound-jobs", () => {
         conversationKey: "conv_claim",
         request: makeRequest(),
       })
-      const before = Date.now()
-      await markSending(row.id)
+      await markSending(row.id, 777)
       const stored = (await getDb().outboundQueue.get(row.id)) as
         ({ claimedAt?: number } & typeof row) | undefined
-      expect(stored?.claimedAt).toBeGreaterThanOrEqual(before)
+      expect(stored?.claimedAt).toBe(777)
     })
 
     it("flips a stale sending row back to failed, retryable now", async () => {
@@ -845,6 +891,22 @@ describe("outbound-jobs", () => {
       await getDb().outboundQueue.update(older.id, { status: "sent" })
       expect(await findOlderActiveOutboundSibling(newer)).toBeUndefined()
       expect(await findOlderActiveOutboundSibling(older)).toBeUndefined()
+    })
+
+    it("finds the next active orderSeq sibling after a terminal head", async () => {
+      const [head, next, last] = await enqueueOutboundMany(
+        ["head", "next", "last"].map((key) => ({
+          adapterId: "adp_1",
+          conversationKey: "conv_next_fifo",
+          request: makeRequest(key),
+          source: "ai-run" as const,
+        })),
+        { now: 5_000 }
+      )
+      await getDb().outboundQueue.update(head.id, { status: "sent" })
+      await getDb().outboundQueue.update(next.id, { status: "deadlettered" })
+
+      expect((await findNextActiveOutboundSibling(head))?.id).toBe(last.id)
     })
 
     it("does not cross conversation boundaries", async () => {

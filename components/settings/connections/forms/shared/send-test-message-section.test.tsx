@@ -4,10 +4,19 @@
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
-const mockSendOutbound = jest.fn()
+const mockEnqueue = jest.fn()
+const mockSendDiagnostic = jest.fn()
+const mockWaitForOutboundTerminal = jest.fn()
 
-jest.mock("@/lib/connectors/bus", () => ({
-  getBus: () => ({ sendOutbound: mockSendOutbound }),
+jest.mock("@/lib/connectors/delivery-gateway", () => ({
+  getConnectorDeliveryGateway: () => ({
+    enqueue: mockEnqueue,
+    sendDiagnostic: mockSendDiagnostic,
+  }),
+}))
+
+jest.mock("@/lib/db/outbound-jobs", () => ({
+  waitForOutboundTerminal: (...args: unknown[]) => mockWaitForOutboundTerminal(...args),
 }))
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
@@ -15,7 +24,13 @@ jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
 import { SendTestMessageSection } from "./send-test-message-section"
 
 beforeEach(() => {
-  mockSendOutbound.mockReset()
+  mockEnqueue.mockReset().mockResolvedValue({ id: "job-1" })
+  mockSendDiagnostic.mockReset()
+  mockWaitForOutboundTerminal.mockReset().mockResolvedValue({
+    id: "job-1",
+    status: "sent",
+    platformMessageId: "msg-42",
+  })
 })
 
 describe("SendTestMessageSection", () => {
@@ -32,30 +47,38 @@ describe("SendTestMessageSection", () => {
     expect(screen.getByTestId("send-test-button")).not.toBeDisabled()
   })
 
-  it("calls bus.sendOutbound with the right conversationRef and a text segment", async () => {
-    mockSendOutbound.mockResolvedValue({ ok: true, platformMessageId: "msg-42" })
+  it("enqueues the default test through governed delivery", async () => {
     render(<SendTestMessageSection adapterId="tg-1" platform="telegram" />)
     fireEvent.change(screen.getByTestId("send-test-chat-id"), { target: { value: "98765" } })
     fireEvent.click(screen.getByTestId("send-test-button"))
     await waitFor(() => {
-      expect(mockSendOutbound).toHaveBeenCalledWith(
-        "tg-1",
+      expect(mockEnqueue).toHaveBeenCalledWith(
         expect.objectContaining({
-          conversationRef: expect.objectContaining({
-            platform: "telegram",
-            adapterId: "tg-1",
-            chatId: "98765",
-            channelId: "98765",
+          adapterId: "tg-1",
+          conversationKey: "telegram:tg-1:98765",
+          source: "manual",
+          request: expect.objectContaining({
+            conversationRef: expect.objectContaining({
+              platform: "telegram",
+              adapterId: "tg-1",
+              chatId: "98765",
+              channelId: "98765",
+            }),
+            segments: [expect.objectContaining({ type: "text" })],
+            metadata: expect.objectContaining({ idempotencyKey: expect.any(String) }),
           }),
-          segments: [expect.objectContaining({ type: "text" })],
-          metadata: expect.objectContaining({ idempotencyKey: expect.any(String) }),
         })
       )
     })
+    expect(mockWaitForOutboundTerminal).toHaveBeenCalledWith("job-1", 30_000)
   })
 
-  it("shows the success result when sendOutbound resolves ok", async () => {
-    mockSendOutbound.mockResolvedValue({ ok: true, platformMessageId: "abc" })
+  it("shows the success result when the governed job reaches sent", async () => {
+    mockWaitForOutboundTerminal.mockResolvedValue({
+      id: "job-1",
+      status: "sent",
+      platformMessageId: "abc",
+    })
     render(<SendTestMessageSection adapterId="dc-1" platform="discord" />)
     fireEvent.change(screen.getByTestId("send-test-chat-id"), { target: { value: "1234567890" } })
     fireEvent.click(screen.getByTestId("send-test-button"))
@@ -65,10 +88,12 @@ describe("SendTestMessageSection", () => {
     })
   })
 
-  it("shows the error result when sendOutbound returns ok: false", async () => {
-    mockSendOutbound.mockResolvedValue({
-      ok: false,
-      error: { code: "platform_4xx", message: "Chat not found", retryable: false },
+  it("shows the terminal queue error", async () => {
+    mockWaitForOutboundTerminal.mockResolvedValue({
+      id: "job-1",
+      status: "deadlettered",
+      lastErrorCode: "platform_4xx",
+      lastError: "Chat not found",
     })
     render(<SendTestMessageSection adapterId="sl-1" platform="slack" />)
     fireEvent.change(screen.getByTestId("send-test-chat-id"), { target: { value: "C-XXX" } })
@@ -81,7 +106,7 @@ describe("SendTestMessageSection", () => {
   })
 
   it("translates a thrown exception into an error result", async () => {
-    mockSendOutbound.mockRejectedValue(new Error("bus offline"))
+    mockEnqueue.mockRejectedValue(new Error("bus offline"))
     render(<SendTestMessageSection adapterId="lk-1" platform="lark" />)
     fireEvent.change(screen.getByTestId("send-test-chat-id"), {
       target: { value: "oc_test" },
@@ -97,6 +122,20 @@ describe("SendTestMessageSection", () => {
     render(<SendTestMessageSection adapterId="tg-1" platform="telegram" />)
     fireEvent.change(screen.getByTestId("send-test-chat-id"), { target: { value: "   " } })
     expect(screen.getByTestId("send-test-button")).toBeDisabled()
+  })
+
+  it("uses OneBot chatKey identity for governed queue policy lookup", async () => {
+    render(<SendTestMessageSection adapterId="ob-1" platform="onebot" />)
+    fireEvent.change(screen.getByTestId("send-test-chat-id"), {
+      target: { value: "group:10001" },
+    })
+    fireEvent.click(screen.getByTestId("send-test-button"))
+
+    await waitFor(() => {
+      expect(mockEnqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ conversationKey: "onebot:ob-1:g:10001" })
+      )
+    })
   })
 
   it.each([
@@ -176,20 +215,21 @@ describe("SendTestMessageSection", () => {
   ] as const)(
     "builds a %s conversationRef that its adapter runtime can address",
     async (platform, adapterId, target, expectedRef) => {
-      mockSendOutbound.mockResolvedValue({ ok: true, platformMessageId: "msg-42" })
       render(<SendTestMessageSection adapterId={adapterId} platform={platform} />)
 
       fireEvent.change(screen.getByTestId("send-test-chat-id"), { target: { value: target } })
       fireEvent.click(screen.getByTestId("send-test-button"))
 
       await waitFor(() => {
-        expect(mockSendOutbound).toHaveBeenCalledWith(
-          adapterId,
+        expect(mockEnqueue).toHaveBeenCalledWith(
           expect.objectContaining({
-            conversationRef: expect.objectContaining({
-              platform,
-              adapterId,
-              ...expectedRef,
+            adapterId,
+            request: expect.objectContaining({
+              conversationRef: expect.objectContaining({
+                platform,
+                adapterId,
+                ...expectedRef,
+              }),
             }),
           })
         )
@@ -204,6 +244,26 @@ describe("SendTestMessageSection", () => {
     })
 
     expect(screen.getByTestId("send-test-button")).toBeDisabled()
-    expect(mockSendOutbound).not.toHaveBeenCalled()
+    expect(mockEnqueue).not.toHaveBeenCalled()
+    expect(mockSendDiagnostic).not.toHaveBeenCalled()
+  })
+
+  it("keeps the advanced transport probe explicit and direct", async () => {
+    mockSendDiagnostic.mockResolvedValue({ ok: true, platformMessageId: "probe-1" })
+    render(<SendTestMessageSection adapterId="sl-1" platform="slack" />)
+    fireEvent.change(screen.getByTestId("send-test-chat-id"), { target: { value: "C123" } })
+
+    fireEvent.click(screen.getByText(/advanced/i))
+    fireEvent.click(screen.getByTestId("send-test-transport-probe"))
+
+    await waitFor(() => {
+      expect(mockSendDiagnostic).toHaveBeenCalledWith(
+        "sl-1",
+        expect.objectContaining({
+          conversationRef: expect.objectContaining({ channelId: "C123" }),
+        })
+      )
+    })
+    expect(mockEnqueue).not.toHaveBeenCalled()
   })
 })

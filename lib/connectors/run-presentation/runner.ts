@@ -1,6 +1,7 @@
 import { liveQuery, type Subscription } from "dexie"
 import { getDb } from "@/lib/db/schema"
-import { enqueueOutbound, waitForOutboundTerminal } from "@/lib/db/outbound-jobs"
+import { waitForOutboundTerminal } from "@/lib/db/outbound-jobs"
+import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { listExecutionRunBindings, updateExecutionRunBinding } from "@/lib/db/execution-runs"
 import { getRunningAdapter } from "@/lib/connectors/lifecycle"
 import type {

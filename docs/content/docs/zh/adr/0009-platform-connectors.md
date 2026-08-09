@@ -210,6 +210,31 @@ Schema 在 v18 → v38 之间增加了三个内容：
 
 ---
 
+## 修订版 — 2026-08-06（治理与有界运行时）
+
+本次在保留 `PlatformAdapter` 与 `getBus()` 兼容门面的前提下，收紧连接器的发送和生命周期边界：
+
+- **受治理发送：** AI、Workflow、Skill、Plugin、人工发送、草稿批准、Remote Control、Inbox
+  与通知发送统一进入 `ConnectorDeliveryGateway.enqueue()`，批量扇出使用事务化的
+  `enqueueMany()`。自动化来源通过深层 PII gate fail-closed；人工审阅来源保持原语义并记录
+  provenance。直接 adapter send 仅用于明确标注的传输诊断。旧 Plugin `send` / `sendText`
+  仅保留一个迁移周期，并写入 `delivery.legacy_direct` waiver audit。
+- **单一生命周期所有者：** `ConnectorRuntimeSupervisor` 统一拥有内置和 Plugin transport。
+  每个 adapter 使用串行 operation lane、generation fencing、全局 4 路启动 semaphore、真实的
+  desired/observed snapshot，以及 stop 失败时的 fail-closed 行为。凭证轮换、人工重启、resume
+  和 row fingerprint reconcile 全部进入同一条 lane。
+- **有界队列调度：** Dexie schema v151 增加单调 `orderSeq`、
+  `[conversationKey+orderSeq]`、`[status+claimedAt]` 与 inbound `[status+updatedAt]` 索引。
+  Runner 每批最多读取 128 条 due job，最多执行 16 个平台发送，每个会话只保留 head job，并在
+  空闲时回收 lane。`enqueueMany()` 在单个 Dexie 事务中分配稳定序列区间，且只唤醒一次 runner。
+- **保留与健康状态：** terminal inbound payload 立即压缩；成功、仅历史与已忽略 job 保留 7 天，
+  failed 与 recovery-required 保留 30 天。Audit 按 security 30 天、operational 14 天、diagnostic
+  7 天分级保留；heartbeat pruning 移入 housekeeping；backlog 包含 pending、failed、sending。
+  Settings Health 读取 supervisor generation/state 和全局 connector ExecutionBroker snapshot。
+- **投递歧义契约：** Slack 调整为 `reconciliation_required`，Lark 保持
+  `remote_idempotent`。Contract test 强制任何声明远端幂等的 adapter serializer 必须实际传递稳定
+  idempotency key。
+
 ## 参考文献
 
 - 原始规格：`C:\Users\qwdma\.claude\plans\d-project-agentforge-astrbot-fluttering-cerf.md`

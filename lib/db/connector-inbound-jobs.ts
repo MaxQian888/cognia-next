@@ -4,6 +4,58 @@ import type { ConnectorInboundJobRow } from "./connector-types"
 import { getDb, withDbReopenRetry } from "./schema"
 
 const PENDING_STATUSES = new Set<ConnectorInboundJobRow["status"]>(["queued", "steering"])
+const COMPLETABLE_STATUSES = new Set<ConnectorInboundJobRow["status"]>([
+  "queued",
+  "running",
+  "steering",
+])
+
+export const INBOUND_HISTORY_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000
+export const INBOUND_RECOVERY_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000
+export const INBOUND_RETENTION_SWEEP_BATCH = 500
+
+function compactTerminalEvent(
+  event: NormalizedInboundEvent,
+  options: { retainRecoveryChannelData?: boolean } = {}
+): NormalizedInboundEvent {
+  const { raw: _raw, channelData, ...identity } = event
+  const segments = event.segments.map((segment) => {
+    if (segment.type !== "image" || segment.dataBase64 === undefined) return segment
+    const { dataBase64: _dataBase64, ...withoutInlineBytes } = segment
+    return withoutInlineBytes
+  })
+  const compacted = {
+    ...identity,
+    segments,
+    ...(options.retainRecoveryChannelData && channelData ? { channelData } : {}),
+  }
+  // Active jobs always carry `raw`; terminal rows intentionally do not. The
+  // shared event type remains unchanged so every adapter parser keeps one
+  // strict input contract, while this persistence-only projection is smaller.
+  return compacted as NormalizedInboundEvent
+}
+
+async function updateTerminalJob(
+  id: string,
+  changes: Partial<ConnectorInboundJobRow>,
+  options: {
+    retainRecoveryChannelData?: boolean
+    allowedStatuses?: ReadonlySet<ConnectorInboundJobRow["status"]>
+  } = {}
+): Promise<void> {
+  await withDbReopenRetry(async () => {
+    const db = getDb()
+    await db.transaction("rw", db.connectorInboundJobs, async () => {
+      const current = await db.connectorInboundJobs.get(id)
+      if (!current) return
+      if (options.allowedStatuses && !options.allowedStatuses.has(current.status)) return
+      await db.connectorInboundJobs.update(id, {
+        ...changes,
+        event: compactTerminalEvent(current.event, options),
+      })
+    })
+  })
+}
 
 function scopedPlatformMessageId(event: NormalizedInboundEvent): string {
   return `${event.conversationKey}\u001f${event.messageId}`
@@ -31,7 +83,7 @@ export async function ensureConnectorInboundJob(
     platformMessageId,
     sourceMessageId: event.messageId,
     conversationKey: event.conversationKey,
-    event,
+    event: options.historyOnly ? compactTerminalEvent(event) : event,
     dispatchMode,
     status: options.historyOnly ? "history_only" : dispatchMode === "steer" ? "steering" : "queued",
     attempts: 0,
@@ -180,20 +232,7 @@ export async function completeConnectorInboundJob(
     updatedAt: options.now ?? Date.now(),
   }
   if (options.executionRunId !== undefined) changes.executionRunId = options.executionRunId
-  await withDbReopenRetry(() =>
-    // One Collection.modify transaction provides the compare-and-set without
-    // inheriting a caller's Dexie transaction context.
-    getDb()
-      .connectorInboundJobs.where("id")
-      .equals(id)
-      .filter(
-        (current) =>
-          current.status === "queued" ||
-          current.status === "running" ||
-          current.status === "steering"
-      )
-      .modify(changes)
-  )
+  await updateTerminalJob(id, changes, { allowedStatuses: COMPLETABLE_STATUSES })
 }
 
 /**
@@ -247,15 +286,13 @@ export async function markConnectorInboundJobHistoryOnly(
   reason: string,
   options: { now?: number } = {}
 ): Promise<void> {
-  await withDbReopenRetry(() =>
-    getDb().connectorInboundJobs.update(id, {
-      status: "history_only",
-      recoveryReason: reason,
-      leaseOwner: undefined,
-      leaseExpiresAt: undefined,
-      updatedAt: options.now ?? Date.now(),
-    })
-  )
+  await updateTerminalJob(id, {
+    status: "history_only",
+    recoveryReason: reason,
+    leaseOwner: undefined,
+    leaseExpiresAt: undefined,
+    updatedAt: options.now ?? Date.now(),
+  })
 }
 
 export async function markConnectorInboundJobRecoveryRequired(
@@ -263,15 +300,17 @@ export async function markConnectorInboundJobRecoveryRequired(
   reason: string,
   options: { error?: string; now?: number } = {}
 ): Promise<void> {
-  await withDbReopenRetry(() =>
-    getDb().connectorInboundJobs.update(id, {
+  await updateTerminalJob(
+    id,
+    {
       status: "recovery_required",
       recoveryReason: reason,
       lastError: options.error,
       leaseOwner: undefined,
       leaseExpiresAt: undefined,
       updatedAt: options.now ?? Date.now(),
-    })
+    },
+    { retainRecoveryChannelData: true }
   )
 }
 
@@ -299,6 +338,7 @@ export async function recoverStaleConnectorInboundJobs(
       leaseOwner: undefined,
       leaseExpiresAt: undefined,
       updatedAt: now,
+      event: compactTerminalEvent(row.event, { retainRecoveryChannelData: true }),
     })
   }
   return stale.length
@@ -376,7 +416,49 @@ export async function dismissConnectorInboundJobRecovery(
       status: "dismissed",
       recoveryReason: "operator_dismissed",
       updatedAt: options.now ?? Date.now(),
+      event: compactTerminalEvent(current.event),
     })
     return true
   })
+}
+
+/** Delete terminal inbound history using the 7/30-day retention tiers. */
+export async function sweepTerminalConnectorInboundJobs(
+  options: {
+    now?: number
+    historyRetentionMs?: number
+    recoveryRetentionMs?: number
+    batchLimit?: number
+  } = {}
+): Promise<number> {
+  const now = options.now ?? Date.now()
+  const historyCutoff = now - (options.historyRetentionMs ?? INBOUND_HISTORY_RETENTION_MS)
+  const recoveryCutoff = now - (options.recoveryRetentionMs ?? INBOUND_RECOVERY_RETENTION_MS)
+  const batchLimit = options.batchLimit ?? INBOUND_RETENTION_SWEEP_BATCH
+  const db = getDb()
+  const candidates: ConnectorInboundJobRow[] = []
+  const collect = async (status: ConnectorInboundJobRow["status"], cutoff: number) => {
+    if (candidates.length >= batchLimit) return
+    candidates.push(
+      ...(await db.connectorInboundJobs
+        .where("[status+updatedAt]")
+        .between([status, -Infinity], [status, cutoff], true, true)
+        .limit(batchLimit - candidates.length)
+        .toArray())
+    )
+  }
+  for (const status of ["completed", "history_only", "dismissed"] as const) {
+    await collect(status, historyCutoff)
+  }
+  for (const status of ["failed", "recovery_required"] as const) {
+    await collect(status, recoveryCutoff)
+  }
+  const victims = candidates
+    .filter((row) => row.leaseExpiresAt === undefined || row.leaseExpiresAt <= now)
+    .sort((left, right) => left.updatedAt - right.updatedAt)
+    .slice(0, batchLimit)
+  if (victims.length > 0) {
+    await db.connectorInboundJobs.bulkDelete(victims.map((row) => row.id))
+  }
+  return victims.length
 }

@@ -6,12 +6,13 @@
  * After an adapter is configured the operator needs an "is this end-to-end
  * working?" affordance. The existing `AdapterWhoamiPanel` already verifies
  * credentials (Task 3.1's probe leg); this component fills in the other
- * half: drive a real outbound send through the bus and surface the result.
+ * half: drive a governed queue send and surface the terminal result.
  *
  * Reuse:
- *   - `getBus().sendOutbound(adapterId, req)` is the single entry point —
- *     identical to what the outbound runner uses, so any success here
- *     proves the entire serialize → Tauri http → platform pipeline works.
+ *   - The default action uses `ConnectorDeliveryGateway.enqueue()` and waits
+ *     for the durable job to settle, proving queue governance end to end.
+ *   - The advanced probe explicitly bypasses queue policy and calls
+ *     `sendDiagnostic()` for transport-only troubleshooting.
  *   - `newIdempotencyKey()` is the same helper enqueueOutbound uses.
  *   - i18n keys live in `settings.connections.sendTest.*` shared across
  *     every platform.
@@ -28,12 +29,14 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { getBus } from "@/lib/connectors/bus"
+import { getConnectorDeliveryGateway } from "@/lib/connectors/delivery-gateway"
+import { waitForOutboundTerminal } from "@/lib/db/outbound-jobs"
 import { newIdempotencyKey } from "@/types/connectors/outbound"
 import { isTauri } from "@/lib/tauri"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import type { OutboundResult } from "@/types/connectors/outbound"
 import type { ConversationReference } from "@/types/connectors/event"
+import { buildConversationKey } from "@/types/connectors/event"
 
 export interface SendTestMessageSectionProps {
   adapterId: string
@@ -129,19 +132,68 @@ export function SendTestMessageSection({ adapterId, platform }: SendTestMessageS
   const desktop = isTauri()
   const sendUnsupported = REPLY_ONLY_PLATFORMS.has(platform)
 
+  const requestForTarget = () => {
+    const trimmedBody = body.trim() || t("defaultBody")
+    const conversationRef = buildConversationRef(platform, adapterId, chatId)
+    return {
+      conversationRef,
+      segments: [{ type: "text" as const, text: trimmedBody }],
+      metadata: { idempotencyKey: newIdempotencyKey() },
+    }
+  }
+
   const handleSend = async () => {
     if (!chatId.trim() || sendUnsupported) return
     setSending(true)
     setResult(null)
     try {
-      const trimmedBody = body.trim() || t("defaultBody")
-      const conversationRef = buildConversationRef(platform, adapterId, chatId)
-      const sendResult = await getBus().sendOutbound(adapterId, {
-        conversationRef,
-        segments: [{ type: "text", text: trimmedBody }],
-        metadata: { idempotencyKey: newIdempotencyKey() },
+      const target = parseTarget(chatId)
+      const request = requestForTarget()
+      const remoteChatId =
+        typeof request.conversationRef.chatKey === "string"
+          ? request.conversationRef.chatKey
+          : target.id
+      const job = await getConnectorDeliveryGateway().enqueue({
+        adapterId,
+        conversationKey: buildConversationKey(platform, adapterId, remoteChatId),
+        request,
+        source: "manual",
       })
-      setResult(sendResult)
+      const terminal = await waitForOutboundTerminal(job.id, 30_000)
+      if (terminal?.status === "sent") {
+        setResult({ ok: true, platformMessageId: terminal.platformMessageId })
+      } else {
+        setResult({
+          ok: false,
+          error: {
+            code: terminal?.lastErrorCode ?? "delivery_pending",
+            message: terminal?.lastError ?? t("pendingResult"),
+            retryable:
+              terminal !== undefined &&
+              !["deadlettered", "delivery_unknown"].includes(terminal.status),
+          },
+        })
+      }
+    } catch (err) {
+      setResult({
+        ok: false,
+        error: {
+          code: "unexpected",
+          message: err instanceof Error ? err.message : String(err),
+          retryable: false,
+        },
+      })
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const handleTransportProbe = async () => {
+    if (!chatId.trim() || sendUnsupported) return
+    setSending(true)
+    setResult(null)
+    try {
+      setResult(await getConnectorDeliveryGateway().sendDiagnostic(adapterId, requestForTarget()))
     } catch (err) {
       setResult({
         ok: false,
@@ -225,6 +277,22 @@ export function SendTestMessageSection({ adapterId, platform }: SendTestMessageS
             </span>
           )}
         </div>
+
+        <details className="rounded-md border px-3 py-2 text-xs">
+          <summary className="cursor-pointer font-medium">{t("advancedTitle")}</summary>
+          <p className="mt-2 text-muted-foreground">{t("advancedDescription")}</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            onClick={() => void handleTransportProbe()}
+            disabled={disabled}
+            data-testid="send-test-transport-probe"
+          >
+            {t("probeButton")}
+          </Button>
+        </details>
 
         {result && (
           <div

@@ -23117,10 +23117,28 @@
             "half_open": "半开",
             "open": "已打开"
           },
+          "connectorExecutions": "连接器 AI",
+          "desiredObserved": "期望 / 实际",
+          "desiredState": {
+            "disabled": "已禁用",
+            "enabled": "已启用",
+            "suspended": "已挂起"
+          },
+          "executionCounts": "运行 {running}，等待 {waiting}",
+          "generation": "代次",
           "lastError": "最近错误",
           "lastOk": "最近成功",
           "nextRetry": "下次重试",
           "noData": "暂无数据",
+          "observedState": {
+            "building": "构建中",
+            "degraded": "降级",
+            "failed": "失败",
+            "retry_wait": "等待重试",
+            "running": "运行中",
+            "starting": "启动中",
+            "stopped": "已停止"
+          },
           "pendingOutbound": "待发出站",
           "rateBucketAvailable": "{available}/{capacity} 令牌",
           "rateBucketLabel": "限流桶",
@@ -23133,6 +23151,9 @@
           },
           "reconnectNow": "立即重连",
           "reconnectQueued": "重连已入队。",
+          "restartReason": "重启原因",
+          "retryEta": "重试时间",
+          "retryInSeconds": "{seconds} 秒后",
           "runtimeTitle": "出站运行时",
           "state": {
             "degraded": "降级",
@@ -24203,6 +24224,8 @@
         "title": "运行操作员"
       },
       "sendTest": {
+        "advancedDescription": "直接传输探测会绕过静默时段、FIFO、重试、限流和熔断器；仅用于定位适配器或凭证故障。",
+        "advancedTitle": "高级传输诊断",
         "bodyLabel": "内容",
         "chatIdHelp": {
           "dingtalk": "单聊：发送者的 staffId（或 single:'<'staffId>）；群聊：group:'<'conversationId>（来自入站回调）。",
@@ -24220,8 +24243,10 @@
         "chatIdLabel": "目标聊天 / 频道 id",
         "defaultBody": "[cognia] 来自 Adapters → Config 的测试消息。",
         "desktopOnly": "发送测试需要桌面运行时，以保证适配器已注册到 bus。",
-        "intro": "通过 bus 走完整的出站路径发一条测试消息，可以确认适配器、凭证和出站管线全链路可用。运行器使用的就是这条路径。",
-        "sendButton": "发送测试",
+        "intro": "排入一条受治理的端到端测试并等待交付，覆盖静默时段、FIFO、重试、限流和熔断器。",
+        "pendingResult": "任务仍在排队或重试中，请到“出站”页签查看进度。",
+        "probeButton": "运行直接传输探测",
+        "sendButton": "发送受治理测试",
         "sentError": "发送失败（{code}）：{message}",
         "sentSuccess": "已发送。platform_message_id = {messageId}",
         "targetPlaceholder": {

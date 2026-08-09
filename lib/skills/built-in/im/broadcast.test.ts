@@ -6,8 +6,12 @@ jest.mock("@/lib/connectors/session-bindings", () => ({
   findSessionByConversationKey: jest.fn(),
 }))
 
-jest.mock("@/lib/db/outbound-jobs", () => ({
-  enqueueOutbound: jest.fn().mockResolvedValue({ id: "job" }),
+jest.mock("@/lib/connectors/delivery-gateway", () => ({
+  enqueueGovernedMany: jest
+    .fn()
+    .mockImplementation(async (inputs: unknown[]) =>
+      inputs.map((_, index) => ({ id: `job-${index}` }))
+    ),
 }))
 
 jest.mock("@/lib/connectors/audit", () => ({
@@ -18,12 +22,12 @@ import { getSharedBuiltInSkillRegistry } from "../registry"
 import "./broadcast"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { findSessionByConversationKey } from "@/lib/connectors/session-bindings"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { enqueueGovernedMany } from "@/lib/connectors/delivery-gateway"
 import { appendAudit } from "@/lib/connectors/audit"
 
 const mPii = hasNoLeakingPiiDeep as jest.Mock
 const mFind = findSessionByConversationKey as jest.Mock
-const mEnqueue = enqueueOutbound as jest.Mock
+const mEnqueueMany = enqueueGovernedMany as jest.Mock
 const mAudit = appendAudit as jest.Mock
 
 function skill() {
@@ -53,15 +57,16 @@ describe("im.broadcast", () => {
       { sessionId: "s" }
     )) as { enqueued: number; skipped: number }
     expect(out).toMatchObject({ enqueued: 3, skipped: 0 })
-    expect(mEnqueue).toHaveBeenCalledTimes(3)
-    const idemKeys = mEnqueue.mock.calls.map(
-      (c) =>
-        (c[0] as { request: { metadata: { idempotencyKey: string } } }).request.metadata
-          .idempotencyKey
-    )
+    expect(mEnqueueMany).toHaveBeenCalledTimes(1)
+    const batch = mEnqueueMany.mock.calls[0][0] as Array<{
+      adapterId: string
+      source: string
+      request: { metadata: { idempotencyKey: string }; conversationRef: unknown }
+    }>
+    const idemKeys = batch.map((input) => input.request.metadata.idempotencyKey)
     expect(new Set(idemKeys).size).toBe(3)
     // Per-target adapterId parsed from the key, source stamped "skill".
-    expect(mEnqueue.mock.calls[2][0]).toMatchObject({ adapterId: "a2", source: "skill" })
+    expect(batch[2]).toMatchObject({ adapterId: "a2", source: "skill" })
     expect(mAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "broadcast.enqueued",
@@ -77,7 +82,7 @@ describe("im.broadcast", () => {
       { sessionId: "s" }
     )) as { status: string; reason: string }
     expect(out).toMatchObject({ status: "denied", reason: "pii_blocked" })
-    expect(mEnqueue).not.toHaveBeenCalled()
+    expect(mEnqueueMany).not.toHaveBeenCalled()
   })
 
   it("skips-and-reports invalid keys and unbound conversations, auditing partial failure", async () => {
@@ -104,7 +109,7 @@ describe("im.broadcast", () => {
 
   it("reuses the bound session's conversationRef when available", async () => {
     await skill().execute({ conversationKeys: ["lark:a1:oc_1"], message: "hi" }, { sessionId: "s" })
-    expect(mEnqueue.mock.calls[0][0]).toMatchObject({
+    expect(mEnqueueMany.mock.calls[0][0][0]).toMatchObject({
       request: {
         conversationRef: { platform: "lark", adapterId: "a1", channelId: "oc_1" },
       },

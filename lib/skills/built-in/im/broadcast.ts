@@ -66,11 +66,12 @@ const skill: BuiltInSkill<typeof schema> = {
 
     const { parseConversationKey } = await import("@/types/connectors/event")
     const { findSessionByConversationKey } = await import("@/lib/connectors/session-bindings")
-    const { enqueueOutbound } = await import("@/lib/db/outbound-jobs")
+    const { enqueueGovernedMany } = await import("@/lib/connectors/delivery-gateway")
     const { newIdempotencyKey } = await import("@/types/connectors/outbound")
     const { appendAudit } = await import("@/lib/connectors/audit")
 
     const outcomes: TargetOutcome[] = []
+    const batch: Array<Parameters<typeof enqueueGovernedMany>[0][number]> = []
     for (const key of args.conversationKeys) {
       let parsed
       try {
@@ -89,7 +90,7 @@ const skill: BuiltInSkill<typeof schema> = {
         adapterId: parsed.adapterId,
         channelId: parsed.remoteChatId,
       }
-      await enqueueOutbound({
+      batch.push({
         adapterId: parsed.adapterId,
         conversationKey: key,
         request: {
@@ -103,6 +104,8 @@ const skill: BuiltInSkill<typeof schema> = {
       })
       outcomes.push({ conversationKey: key, status: "enqueued" })
     }
+
+    await enqueueGovernedMany(batch)
 
     const enqueued = outcomes.filter((o) => o.status === "enqueued").length
     const skipped = outcomes.length - enqueued

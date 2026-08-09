@@ -16,6 +16,7 @@
 import type { PlatformAdapter } from "@/types/connectors/adapter"
 import { onCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { appendAudit } from "@/lib/connectors/audit"
+import { getConnectorRuntimeSupervisor } from "@/lib/connectors/runtime-supervisor"
 
 export interface AdapterRuntimeEntry {
   adapter: PlatformAdapter
@@ -59,6 +60,8 @@ export function unregisterRunningAdapter(adapterId: string): void {
   const entry = entries.get(adapterId)
   entries.delete(adapterId)
   if (!entry) return
+  const managed = getConnectorRuntimeSupervisor().getRunningAdapter(adapterId)
+  if (managed?.adapter === entry.adapter) return
   // Stop is best-effort — the caller may already be in teardown.
   void stopEntry(adapterId, entry)
 }
@@ -80,8 +83,11 @@ export function listRunningAdapters(): AdapterRuntimeEntry[] {
 export function suspendRunningAdaptersByOwner(
   owner: NonNullable<AdapterRuntimeEntry["owner"]>
 ): void {
+  const supervisor = getConnectorRuntimeSupervisor()
+  void supervisor.suspendOwner(owner)
   for (const [adapterId, entry] of entries) {
     if (entry.owner !== owner) continue
+    if (supervisor.hasDefinition(adapterId)) continue
     entries.delete(adapterId)
     suspendedEntries.set(adapterId, {
       entry,
@@ -99,6 +105,7 @@ export function suspendRunningAdaptersByOwner(
 export async function resumeSuspendedAdaptersByOwner(
   owner: NonNullable<AdapterRuntimeEntry["owner"]>
 ): Promise<void> {
+  await getConnectorRuntimeSupervisor().resumeOwner(owner)
   const candidates = Array.from(suspendedEntries.entries()).filter(
     ([, suspended]) => suspended.entry.owner === owner && !suspended.resuming
   )
@@ -137,6 +144,12 @@ export async function resumeSuspendedAdaptersByOwner(
  * longer owned per entry — the bus-scope sweep drives the periodic ones).
  */
 export async function requeueAdapter(adapterId: string): Promise<boolean> {
+  const supervisor = getConnectorRuntimeSupervisor()
+  if (supervisor.hasDefinition(adapterId)) {
+    await supervisor.restartAdapter(adapterId, "manual_restart")
+    const observed = supervisor.getSnapshot(adapterId)?.observedState
+    return observed === "running" || observed === "starting" || observed === "degraded"
+  }
   const entry = entries.get(adapterId)
   if (!entry) return false
   const restart = entry.restart
@@ -184,10 +197,15 @@ export async function requeueAdapter(adapterId: string): Promise<boolean> {
 export function subscribeCredentialsRotatedToLifecycle(): () => void {
   return onCredentialsRotated(({ adapterId, rotatedAt }) => {
     void (async () => {
-      const present = entries.has(adapterId)
+      const supervisor = getConnectorRuntimeSupervisor()
+      const present = entries.has(adapterId) || supervisor.hasDefinition(adapterId)
       if (!present) return
       try {
-        await requeueAdapter(adapterId)
+        if (supervisor.hasDefinition(adapterId)) {
+          await supervisor.restartAdapter(adapterId, "credentials_rotated")
+        } else {
+          await requeueAdapter(adapterId)
+        }
         await appendAudit({
           id: crypto.randomUUID(),
           adapterId,

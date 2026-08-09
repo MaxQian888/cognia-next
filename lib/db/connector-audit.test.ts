@@ -1,8 +1,11 @@
-/**
- * Tests for lib/db/connector-audit.ts — capped audit log for connectors.
- */
-
-import { append, listRecent, __TESTING__ } from "./connector-audit"
+import {
+  append,
+  listRecent,
+  sweepConnectorAuditRetention,
+  CONNECTOR_AUDIT_SECURITY_RETENTION_MS,
+  CONNECTOR_AUDIT_OPERATIONAL_RETENTION_MS,
+  CONNECTOR_AUDIT_DIAGNOSTIC_RETENTION_MS,
+} from "./connector-audit"
 import type { AuditEntry } from "@/types/connectors/audit"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
@@ -26,75 +29,69 @@ function makeEntry(overrides: Partial<AuditEntry> = {}): Omit<AuditEntry, "id"> 
 }
 
 describe("connector-audit", () => {
-  it("append writes a row and returns it with an id", async () => {
-    const entry = makeEntry()
-    const row = await append({ id: crypto.randomUUID(), ...entry })
-    expect(row.id).toBeDefined()
-    expect(row.adapterId).toBe("adp_1")
-    expect(row.kind).toBe("inbound.received")
-  })
-
-  it("append generates an id if not provided", async () => {
-    const row = await append(makeEntry() as AuditEntry)
-    expect(row.id).toBeDefined()
-    expect(typeof row.id).toBe("string")
-  })
-
-  it("listRecent returns rows newest-first", async () => {
-    await append({ id: "1", ...makeEntry({ at: 100 }) })
-    await append({ id: "2", ...makeEntry({ at: 200 }) })
-    await append({ id: "3", ...makeEntry({ at: 300 }) })
-    const rows = await listRecent()
-    expect(rows.map((r) => r.at)).toEqual([300, 200, 100])
-  })
-
-  it("listRecent filters by adapterId", async () => {
+  it("appends rows and lists them newest-first with adapter filtering", async () => {
     await append({ id: "a1", ...makeEntry({ adapterId: "adp_1", at: 100 }) })
     await append({ id: "b1", ...makeEntry({ adapterId: "adp_2", at: 200 }) })
-    await append({ id: "a2", ...makeEntry({ adapterId: "adp_1", at: 300 }) })
-    const rows = await listRecent("adp_1")
-    expect(rows).toHaveLength(2)
-    expect(rows.every((r) => r.adapterId === "adp_1")).toBe(true)
+    const generated = await append(makeEntry({ adapterId: "adp_1", at: 300 }))
+
+    expect(generated.id).toEqual(expect.any(String))
+    expect((await listRecent()).map((row) => row.at)).toEqual([300, 200, 100])
+    expect((await listRecent("adp_1", 1)).map((row) => row.at)).toEqual([300])
   })
 
-  it("listRecent respects limit", async () => {
-    for (let i = 0; i < 10; i++) {
-      await append({ id: String(i), ...makeEntry({ at: 1000 + i }) })
-    }
-    const rows = await listRecent(undefined, 3)
-    expect(rows).toHaveLength(3)
-  })
-
-  it("cap is 5000", () => {
-    expect(__TESTING__.AUDIT_CAP).toBe(5000)
-  })
-
-  it("pruneOldest is a no-op when count <= keep", async () => {
-    await append({ id: "x", ...makeEntry() })
-    const db = getDb()
-    await db.transaction("rw", db.connectorAudit, async () => {
-      await __TESTING__.pruneOldest(10)
+  it("retains security evidence longer than high-volume diagnostics", async () => {
+    const day = 24 * 60 * 60 * 1_000
+    const now = 40 * day
+    await Promise.all(
+      Array.from({ length: 30 }, (_, index) =>
+        append({
+          id: `diag-${index}`,
+          ...makeEntry({ kind: "inbound.received", at: now - 10 * day }),
+        })
+      )
+    )
+    await append({
+      id: "security-young",
+      ...makeEntry({ kind: "callback.forbidden", at: now - 20 * day }),
     })
-    expect(await getDb().connectorAudit.count()).toBe(1)
-  })
-
-  it("pruneOldest trims down to exactly `keep` keeping newest rows", async () => {
-    for (let i = 0; i < 10; i++) {
-      await append({ id: String(i), ...makeEntry({ at: 1000 + i }) })
-    }
-    const db = getDb()
-    await db.transaction("rw", db.connectorAudit, async () => {
-      await __TESTING__.pruneOldest(3)
+    await append({
+      id: "security-old",
+      ...makeEntry({
+        kind: "delivery.error",
+        reason: "delivery_unknown",
+        at: now - CONNECTOR_AUDIT_SECURITY_RETENTION_MS - 1,
+      }),
     })
-    const remaining = await listRecent()
-    expect(remaining).toHaveLength(3)
-    expect(remaining.map((r) => r.at)).toEqual([1009, 1008, 1007])
+    await append({
+      id: "operational-old",
+      ...makeEntry({
+        kind: "adapter.started",
+        at: now - CONNECTOR_AUDIT_OPERATIONAL_RETENTION_MS - 1,
+      }),
+    })
+
+    await sweepConnectorAuditRetention({ now, batchLimit: 60 })
+
+    expect(await getDb().connectorAudit.get("security-young")).toBeDefined()
+    expect(await getDb().connectorAudit.get("security-old")).toBeUndefined()
+    expect(await getDb().connectorAudit.get("operational-old")).toBeUndefined()
+    expect(
+      await getDb()
+        .connectorAudit.where("at")
+        .below(now - CONNECTOR_AUDIT_DIAGNOSTIC_RETENTION_MS)
+        .count()
+    ).toBe(11)
   })
 
-  it("append enforces cap on overflow (5003 writes → 5000 rows)", async () => {
-    for (let i = 0; i < 5003; i++) {
-      await append({ id: crypto.randomUUID(), ...makeEntry({ at: i }) })
+  it("caps work per sweep while giving every retention tier a quota", async () => {
+    const now = 100 * 24 * 60 * 60 * 1_000
+    for (let index = 0; index < 12; index++) {
+      await append({
+        id: `old-${index}`,
+        ...makeEntry({ kind: "inbound.received", at: 1 }),
+      })
     }
-    expect(await getDb().connectorAudit.count()).toBe(__TESTING__.AUDIT_CAP)
-  }, 120_000)
+    await expect(sweepConnectorAuditRetention({ now, batchLimit: 3 })).resolves.toBe(1)
+    expect(await getDb().connectorAudit.count()).toBe(11)
+  })
 })

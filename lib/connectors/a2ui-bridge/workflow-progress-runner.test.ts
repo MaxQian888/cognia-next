@@ -149,9 +149,14 @@ interface MockEnqueueOpts {
 
 function makeMockEnqueue(opts: MockEnqueueOpts = {}): {
   enqueue: (input: EnqueueInput) => Promise<import("@/lib/db/connector-types").OutboundJobRow>
+  enqueueMany: (
+    inputs: readonly EnqueueInput[]
+  ) => Promise<import("@/lib/db/connector-types").OutboundJobRow[]>
+  batchSizes: number[]
   jobs: CapturedJob[]
 } {
   const jobs: CapturedJob[] = []
+  const batchSizes: number[] = []
   const ids = opts.jobIdSequence ?? []
   let i = 0
   const enqueue = async (
@@ -198,7 +203,11 @@ function makeMockEnqueue(opts: MockEnqueueOpts = {}): {
     }
     return stubRow
   }
-  return { enqueue, jobs }
+  const enqueueMany = async (inputs: readonly EnqueueInput[]) => {
+    batchSizes.push(inputs.length)
+    return Promise.all(inputs.map((input) => enqueue(input)))
+  }
+  return { enqueue, enqueueMany, batchSizes, jobs }
 }
 
 async function waitFor(
@@ -569,9 +578,10 @@ describe("workflow-progress-runner — fan-out mirroring (Phase 7)", () => {
       createdBy: "settings-ui",
     })
 
-    const { enqueue, jobs } = makeMockEnqueue()
+    const { enqueue, enqueueMany, batchSizes, jobs } = makeMockEnqueue()
     const stop = startWorkflowProgressRunner({
       enqueue,
+      enqueueMany,
       adapterSupportsEdit: () => false, // all append-mode for simplicity
     })
 
@@ -582,6 +592,7 @@ describe("workflow-progress-runner — fan-out mirroring (Phase 7)", () => {
     expect(channels.has("wecom:a")).toBe(true) // originator
     expect(channels.has("lark:ops")).toBe(true) // subscription #1
     expect(channels.has("wecom:audit")).toBe(true) // subscription #2
+    expect(batchSizes).toContain(3)
     stop()
   })
 

@@ -17,7 +17,7 @@ import {
 } from "@/lib/connectors/entry/deep-links"
 import { hashOpenId, resolveConnectorPrincipal } from "@/lib/connectors/principal/resolve"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import type { LarkBotMenuOutcome } from "./parse"
 
 export interface MenuActionDependencies {

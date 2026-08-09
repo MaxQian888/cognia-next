@@ -14,7 +14,7 @@
  * ai-run reply.
  */
 
-import { liveQuery, type Table } from "dexie"
+import Dexie, { liveQuery, type Table } from "dexie"
 import type {
   OutboundJobRow,
   OutboundJobSource,
@@ -87,13 +87,10 @@ export const OUTBOUND_RETENTION_SWEEP_BATCH = 1000
  */
 export const STALE_SENDING_GRACE_MS = 5 * 60_000
 
-/**
- * Claim-timestamp extension written by {@link markSending}. Non-indexed
- * column — IndexedDB stores extra keys transparently, so no schema bump is
- * required (same pattern as `platformMessageId`). Declared locally rather
- * than on the shared row type because only the queue layer reads it.
- */
-type ClaimStampedOutboundJobRow = OutboundJobRow & { claimedAt?: number }
+/** Maximum rows returned by one due-queue read. */
+export const OUTBOUND_DUE_BATCH_SIZE = 128
+/** Maximum legacy rows inspected during one stale-claim compatibility scan. */
+const STALE_LEGACY_SCAN_BATCH = 128
 
 function newId(): string {
   return "oqj_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -161,36 +158,80 @@ export interface EnqueueInput {
 }
 
 export async function enqueueOutbound(input: EnqueueInput): Promise<OutboundJobRow> {
-  const now = Date.now()
-  // Workspace isolation (Dexie v86): attribute the job to the conversation's
-  // workspace (via its override row), falling back to the active project.
-  const override = await getDb()
-    .conversationOverrides.where("conversationKey")
-    .equals(input.conversationKey)
-    .first()
-  const projectId = override?.projectId ?? (await resolveScopeProjectId())
-  const row: OutboundJobRow = {
-    id: newId(),
-    adapterId: input.adapterId,
-    projectId,
-    conversationKey: input.conversationKey,
-    request: input.request,
-    status: "pending",
-    attempts: 0,
-    createdAt: now,
-    nextAttemptAt: input.nextAttemptAt ?? now,
-    idempotencyKey: input.request.metadata.idempotencyKey,
-    source: input.source,
-    ...(input.source === "workflow" && input.sourceWorkflow
-      ? { sourceWorkflow: input.sourceWorkflow }
-      : {}),
-  }
-  await getDb().outboundQueue.add(row)
-  await enforceQueueSoftCap(now)
-  // Wake the runner — `row.nextAttemptAt` defaults to `now`, so this is
-  // immediately actionable unless the caller scheduled it for the future.
-  emitOutboundEnqueued()
-  return row
+  return (await enqueueOutboundMany([input]))[0]
+}
+
+/**
+ * Persist a fan-out in one transaction and emit one wake. Sequence allocation
+ * is conversation-local and transactional, so rows created in the same
+ * millisecond still have a deterministic FIFO order.
+ */
+export async function enqueueOutboundMany(
+  inputs: readonly EnqueueInput[],
+  options: { now?: number } = {}
+): Promise<OutboundJobRow[]> {
+  if (inputs.length === 0) return []
+  // AI/workflow callers may inherit a Dexie zone whose transaction completed
+  // while awaiting model or plugin work. Keep every scope read and the write
+  // transaction outside that stale ambient zone or the send can be lost with
+  // TransactionInactiveError.
+  return Dexie.ignoreTransaction(async () => {
+    const now = options.now ?? Date.now()
+    const db = getDb()
+    const conversationKeys = Array.from(new Set(inputs.map((input) => input.conversationKey)))
+    const overrides = await db.conversationOverrides
+      .where("conversationKey")
+      .anyOf(conversationKeys)
+      .toArray()
+    const projectByConversation = new Map(
+      overrides.map((override) => [override.conversationKey, override.projectId])
+    )
+    const fallbackProjectId = await resolveScopeProjectId()
+
+    const rows = await db.transaction("rw", db.outboundQueue, () =>
+      Dexie.Promise.all(
+        conversationKeys.map((conversationKey) =>
+          db.outboundQueue
+            .where("[conversationKey+orderSeq]")
+            .between([conversationKey, -Infinity], [conversationKey, Infinity])
+            .last()
+        )
+      ).then((newestRows) => {
+        const nextSequence = new Map(
+          conversationKeys.map((conversationKey, index) => [
+            conversationKey,
+            newestRows[index]?.orderSeq ?? 0,
+          ])
+        )
+        const created = inputs.map((input) => {
+          const orderSeq = (nextSequence.get(input.conversationKey) ?? 0) + 1
+          nextSequence.set(input.conversationKey, orderSeq)
+          return {
+            id: newId(),
+            adapterId: input.adapterId,
+            projectId: projectByConversation.get(input.conversationKey) ?? fallbackProjectId,
+            conversationKey: input.conversationKey,
+            request: input.request,
+            status: "pending" as const,
+            attempts: 0,
+            createdAt: now,
+            orderSeq,
+            nextAttemptAt: input.nextAttemptAt ?? now,
+            idempotencyKey: input.request.metadata.idempotencyKey,
+            source: input.source,
+            ...(input.source === "workflow" && input.sourceWorkflow
+              ? { sourceWorkflow: input.sourceWorkflow }
+              : {}),
+          } satisfies OutboundJobRow
+        })
+        return db.outboundQueue.bulkAdd(created).then(() => created)
+      })
+    )
+
+    await enforceQueueSoftCap(now)
+    emitOutboundEnqueued()
+    return rows
+  })
 }
 
 /** Terminal outbound statuses — the job will never transition again. */
@@ -310,9 +351,11 @@ async function enforceQueueSoftCap(now: number): Promise<void> {
   const total = await db.outboundQueue.where("status").anyOf("pending", "failed", "sending").count()
   if (total <= outboundQueueSoftCap) return
   const overflow = total - outboundQueueSoftCap
-  const oldestPending = await db.outboundQueue.where("status").equals("pending").toArray()
-  oldestPending.sort((a, b) => a.createdAt - b.createdAt)
-  const victims = oldestPending.slice(0, overflow)
+  const victims = await db.outboundQueue
+    .orderBy("createdAt")
+    .filter((row) => row.status === "pending")
+    .limit(overflow)
+    .toArray()
   for (const job of victims) {
     await db.outboundQueue.update(job.id, {
       status: "deadlettered",
@@ -386,11 +429,21 @@ export async function recoverStaleSendingJobs(
   graceMs: number = STALE_SENDING_GRACE_MS
 ): Promise<OutboundJobRow[]> {
   const db = getDb()
-  const sending = (await db.outboundQueue
+  const cutoff = now - graceMs
+  const indexed = await db.outboundQueue
+    .where("[status+claimedAt]")
+    .between(["sending", -Infinity], ["sending", cutoff], true, true)
+    .limit(OUTBOUND_DUE_BATCH_SIZE)
+    .toArray()
+  // Imported rows can still omit claimedAt after the v151 migration. Keep a
+  // bounded compatibility scan until every supported backup has crossed v151.
+  const legacy = await db.outboundQueue
     .where("status")
     .equals("sending")
-    .toArray()) as ClaimStampedOutboundJobRow[]
-  const cutoff = now - graceMs
+    .filter((row) => row.claimedAt === undefined && row.createdAt <= cutoff)
+    .limit(STALE_LEGACY_SCAN_BATCH)
+    .toArray()
+  const sending = [...indexed, ...legacy]
   const recovered: OutboundJobRow[] = []
   for (const row of sending) {
     if ((row.claimedAt ?? row.createdAt) > cutoff) continue
@@ -441,19 +494,51 @@ export async function findDeliveredByIdempotencyKey(
  * before delivering a due job so per-conversation FIFO holds ACROSS drain
  * passes, not just within one: a deferred older retry must resolve
  * (deliver or dead-letter) before a newer sibling may go out. Bounded
- * index range on `[conversationKey+createdAt]`.
+ * index range on `[conversationKey+orderSeq]`, with a legacy createdAt fallback.
  */
 export async function findOlderActiveOutboundSibling(
-  job: Pick<OutboundJobRow, "id" | "conversationKey" | "createdAt">
+  job: Pick<OutboundJobRow, "id" | "conversationKey" | "createdAt" | "orderSeq">
 ): Promise<OutboundJobRow | undefined> {
-  const older = await getDb()
-    .outboundQueue.where("[conversationKey+createdAt]")
-    .between([job.conversationKey, -Infinity], [job.conversationKey, job.createdAt], true, false)
-    .toArray()
-  return older.find(
-    (r) =>
-      r.id !== job.id && (r.status === "pending" || r.status === "failed" || r.status === "sending")
-  )
+  if (job.orderSeq === undefined) {
+    return getDb()
+      .outboundQueue.where("[conversationKey+createdAt]")
+      .between([job.conversationKey, -Infinity], [job.conversationKey, job.createdAt], true, false)
+      .filter(
+        (row) =>
+          row.id !== job.id &&
+          (row.status === "pending" || row.status === "failed" || row.status === "sending")
+      )
+      .first()
+  }
+  return getDb()
+    .outboundQueue.where("[conversationKey+orderSeq]")
+    .between([job.conversationKey, -Infinity], [job.conversationKey, job.orderSeq], true, false)
+    .filter(
+      (row) =>
+        row.id !== job.id &&
+        (row.status === "pending" || row.status === "failed" || row.status === "sending")
+    )
+    .first()
+}
+
+/** Return the next active FIFO sibling after a terminal conversation head. */
+export async function findNextActiveOutboundSibling(
+  job: Pick<OutboundJobRow, "conversationKey" | "createdAt" | "orderSeq">
+): Promise<OutboundJobRow | undefined> {
+  const active = (row: OutboundJobRow) =>
+    row.status === "pending" || row.status === "failed" || row.status === "sending"
+  if (job.orderSeq === undefined) {
+    return getDb()
+      .outboundQueue.where("[conversationKey+createdAt]")
+      .between([job.conversationKey, job.createdAt], [job.conversationKey, Infinity], false, true)
+      .filter(active)
+      .first()
+  }
+  return getDb()
+    .outboundQueue.where("[conversationKey+orderSeq]")
+    .between([job.conversationKey, job.orderSeq], [job.conversationKey, Infinity], false, true)
+    .filter(active)
+    .first()
 }
 
 /**
@@ -468,8 +553,8 @@ export async function findOlderActiveOutboundSibling(
  * and never enter either range, so the query cost tracks the number of *due*
  * jobs, not the table size.
  */
-export async function pickNextDue(): Promise<OutboundJobRow | undefined> {
-  return (await listDueNow())[0]
+export async function pickNextDue(now: number = Date.now()): Promise<OutboundJobRow | undefined> {
+  return (await listDueNow({ now, limit: 2 }))[0]
 }
 
 /**
@@ -478,20 +563,65 @@ export async function pickNextDue(): Promise<OutboundJobRow | undefined> {
  * per-conversation lanes in one pass per wake, instead of re-querying for one
  * job per poll tick. Same `[status+nextAttemptAt]` index as `pickNextDue`.
  */
-export async function listDueNow(): Promise<OutboundJobRow[]> {
-  const now = Date.now()
+export async function listDueNow(
+  options: {
+    now?: number
+    limit?: number
+  } = {}
+): Promise<OutboundJobRow[]> {
+  const now = options.now ?? Date.now()
+  const limit = Math.max(
+    1,
+    Math.min(options.limit ?? OUTBOUND_DUE_BATCH_SIZE, OUTBOUND_DUE_BATCH_SIZE)
+  )
+  const pendingLimit = Math.ceil(limit / 2)
+  const failedLimit = Math.floor(limit / 2)
   const db = getDb()
-  const [pending, failed] = await Promise.all([
+  const [pendingHead, failedHead] = await Promise.all([
     db.outboundQueue
       .where("[status+nextAttemptAt]")
       .between(["pending", -Infinity], ["pending", now], true, true)
+      .limit(pendingLimit)
       .toArray(),
-    db.outboundQueue
-      .where("[status+nextAttemptAt]")
-      .between(["failed", -Infinity], ["failed", now], true, true)
-      .toArray(),
+    failedLimit === 0
+      ? Promise.resolve([] as OutboundJobRow[])
+      : db.outboundQueue
+          .where("[status+nextAttemptAt]")
+          .between(["failed", -Infinity], ["failed", now], true, true)
+          .limit(failedLimit)
+          .toArray(),
   ])
-  return [...pending, ...failed].sort((a, b) => a.createdAt - b.createdAt)
+  const pending = [...pendingHead]
+  const failed = [...failedHead]
+  const remaining = limit - pending.length - failed.length
+  if (remaining > 0 && pending.length === pendingLimit) {
+    pending.push(
+      ...(await db.outboundQueue
+        .where("[status+nextAttemptAt]")
+        .between(["pending", -Infinity], ["pending", now], true, true)
+        .offset(pending.length)
+        .limit(remaining)
+        .toArray())
+    )
+  } else if (remaining > 0 && failed.length === failedLimit) {
+    failed.push(
+      ...(await db.outboundQueue
+        .where("[status+nextAttemptAt]")
+        .between(["failed", -Infinity], ["failed", now], true, true)
+        .offset(failed.length)
+        .limit(remaining)
+        .toArray())
+    )
+  }
+  return [...pending, ...failed]
+    .sort(
+      (a, b) =>
+        a.nextAttemptAt - b.nextAttemptAt ||
+        a.createdAt - b.createdAt ||
+        (a.orderSeq ?? 0) - (b.orderSeq ?? 0) ||
+        a.id.localeCompare(b.id)
+    )
+    .slice(0, limit)
 }
 
 /**
@@ -503,8 +633,7 @@ export async function listDueNow(): Promise<OutboundJobRow[]> {
  * Rows due at-or-before `now` are intentionally excluded — those are handled
  * by `pickNextDue`; this answers only "when is the next *future* wake?".
  */
-export async function peekNextWakeAt(): Promise<number | undefined> {
-  const now = Date.now()
+export async function peekNextWakeAt(now: number = Date.now()): Promise<number | undefined> {
   const db = getDb()
   const [pending, failed] = await Promise.all([
     db.outboundQueue
@@ -523,13 +652,13 @@ export async function peekNextWakeAt(): Promise<number | undefined> {
 }
 
 /**
- * Return all pending rows for a conversation, ordered by createdAt (FIFO).
+ * Return all pending rows for a conversation, ordered by stable orderSeq FIFO.
  */
 export async function listPendingForConversation(
   conversationKey: string
 ): Promise<OutboundJobRow[]> {
   return getDb()
-    .outboundQueue.where("[conversationKey+createdAt]")
+    .outboundQueue.where("[conversationKey+orderSeq]")
     .between([conversationKey, -Infinity], [conversationKey, Infinity])
     .filter((r) => r.status === "pending")
     .toArray()
@@ -543,9 +672,9 @@ export async function listPendingForConversation(
  * UPDATE` claim. Without the transaction two runners (e.g. a second `main`
  * webview) could both read `pending` and both send the same message.
  */
-export async function markSending(jobId: string): Promise<boolean> {
+export async function markSending(jobId: string, now: number = Date.now()): Promise<boolean> {
   const db = getDb()
-  const queue = db.outboundQueue as Table<ClaimStampedOutboundJobRow, string>
+  const queue = db.outboundQueue as Table<OutboundJobRow, string>
   return db.transaction("rw", db.outboundQueue, async () => {
     const row = await queue.get(jobId)
     if (!row || (row.status !== "pending" && row.status !== "failed")) {
@@ -556,7 +685,7 @@ export async function markSending(jobId: string): Promise<boolean> {
       attempts: (row.attempts ?? 0) + 1,
       // Claim stamp — lets `recoverStaleSendingJobs` distinguish a
       // legitimately in-flight send from a claim orphaned by a crash.
-      claimedAt: Date.now(),
+      claimedAt: now,
     })
     return true
   })

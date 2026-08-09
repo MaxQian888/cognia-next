@@ -32,7 +32,7 @@ import type {
   ConnectorCallbackEvent,
 } from "@/types/connectors/interaction"
 import { parseConversationKey } from "@/types/connectors/event"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { getDb } from "@/lib/db/schema"
 import { getLarkStrictCallbackAuthorizationMode } from "./feature-flags"
 import { hashOpenId, resolveConnectorPrincipal } from "./principal/resolve"

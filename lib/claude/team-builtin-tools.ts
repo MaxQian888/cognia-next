@@ -654,13 +654,17 @@ export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
       // Mirrors the `im.broadcast` enqueue path: durable outbound queue with a
       // fresh idempotency key; per-adapter rate limit / circuit breaker /
       // quiet-hours all apply automatically downstream.
-      const [{ parseConversationKey }, bindings, { enqueueOutbound }, { newIdempotencyKey }] =
-        await Promise.all([
-          import("@/types/connectors/event"),
-          import("@/lib/connectors/session-bindings"),
-          import("@/lib/db/outbound-jobs"),
-          import("@/types/connectors/outbound"),
-        ])
+      const [
+        { parseConversationKey },
+        bindings,
+        { enqueueGoverned: enqueueOutbound },
+        { newIdempotencyKey },
+      ] = await Promise.all([
+        import("@/types/connectors/event"),
+        import("@/lib/connectors/session-bindings"),
+        import("@/lib/connectors/delivery-gateway"),
+        import("@/types/connectors/outbound"),
+      ])
       const parsed = parseConversationKey(input.conversationKey)
       const session = await bindings.findSessionByConversationKey(input.conversationKey)
       const conversationRef = session?.platformBinding?.conversationRef ?? {

@@ -37,7 +37,11 @@
 
 import { liveQuery, type Subscription } from "dexie"
 import { getDb } from "@/lib/db/schema"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import {
+  enqueueGoverned as enqueueOutbound,
+  enqueueGovernedMany as enqueueOutboundMany,
+} from "@/lib/connectors/delivery-gateway"
+import type { EnqueueInput } from "@/lib/db/outbound-jobs"
 import { topoSort } from "@/lib/workflow/runtime/topo-sort"
 import { listForWorkflow as listFanoutForWorkflow } from "@/lib/db/workflow-fanout-subscriptions"
 import type { ConversationDeliveryTarget } from "@/types/connectors/event"
@@ -130,6 +134,8 @@ let started = false
 export interface StartWorkflowProgressRunnerOptions {
   /** Test seam — replaces the production `enqueueOutbound`. */
   enqueue?: typeof enqueueOutbound
+  /** Test seam — replaces the production transactional fan-out enqueue. */
+  enqueueMany?: typeof enqueueOutboundMany
   /**
    * Test seam — override per-adapter edit-support detection. Default
    * looks the adapter up via the bus and checks `typeof adapter.edit ===
@@ -155,6 +161,11 @@ export function startWorkflowProgressRunner(
   if (started) return stop
   started = true
   const enqueue = opts.enqueue ?? enqueueOutbound
+  const enqueueMany =
+    opts.enqueueMany ??
+    (opts.enqueue
+      ? (inputs: readonly EnqueueInput[]) => Promise.all(inputs.map((input) => enqueue(input)))
+      : enqueueOutboundMany)
   const supportsEdit = opts.adapterSupportsEdit ?? defaultSupportsEdit
   const listSubs = opts.listSubscriptions ?? listFanoutForWorkflow
 
@@ -168,7 +179,7 @@ export function startWorkflowProgressRunner(
 
   runsSub = runsObservable.subscribe({
     next(rows) {
-      void reconcileWatchers(rows, enqueue, supportsEdit, listSubs)
+      void reconcileWatchers(rows, enqueue, enqueueMany, supportsEdit, listSubs)
     },
     error(err) {
       console.error("[workflow-progress-runner] runs subscription error", err)
@@ -195,6 +206,7 @@ function stop(): void {
 async function reconcileWatchers(
   rows: WorkflowRunRow[],
   enqueue: typeof enqueueOutbound,
+  enqueueMany: typeof enqueueOutboundMany,
   supportsEdit: (adapterId: string) => boolean,
   listSubs: typeof listFanoutForWorkflow
 ): Promise<void> {
@@ -224,7 +236,7 @@ async function reconcileWatchers(
           // onto a torn-down singleton.
           if (!started) return null
           watchers.set(row.id, w)
-          subscribeRunEvents(w, enqueue)
+          subscribeRunEvents(w, enqueue, enqueueMany)
           return w
         })().finally(() => {
           creatingWatchers.delete(row.id)
@@ -241,7 +253,7 @@ async function reconcileWatchers(
       watcher.status =
         row.status === "succeeded" ? "succeeded" : row.status === "failed" ? "failed" : "cancelled"
       watcher.terminalBody = extractTerminalBody(row)
-      await emitFinal(row, watcher, enqueue)
+      await emitFinal(row, watcher, enqueue, enqueueMany)
       watcher.eventsSub?.unsubscribe()
       watchers.delete(row.id)
     }
@@ -390,7 +402,11 @@ async function createWatcher(
   }
 }
 
-function subscribeRunEvents(watcher: RunWatcher, enqueue: typeof enqueueOutbound): void {
+function subscribeRunEvents(
+  watcher: RunWatcher,
+  enqueue: typeof enqueueOutbound,
+  enqueueMany: typeof enqueueOutboundMany
+): void {
   const events$ = liveQuery(async () => {
     return getDb()
       .workflowRunEvents.where("[runId+ts]")
@@ -399,7 +415,7 @@ function subscribeRunEvents(watcher: RunWatcher, enqueue: typeof enqueueOutbound
   })
   watcher.eventsSub = events$.subscribe({
     next(events) {
-      void emitForAllChannels(watcher, events, enqueue)
+      void emitForAllChannels(watcher, events, enqueue, enqueueMany)
     },
     error(err) {
       console.error(
@@ -509,7 +525,8 @@ function buildStateSnapshot(watcher: RunWatcher): CumulativeStatusState {
 async function emitForAllChannels(
   watcher: RunWatcher,
   events: WorkflowRunEventRow[],
-  enqueue: typeof enqueueOutbound
+  enqueue: typeof enqueueOutbound,
+  enqueueMany: typeof enqueueOutboundMany
 ): Promise<void> {
   const sorted = [...events].sort((a, b) => a.ts - b.ts)
   // 1. Fold every new event into the shared cumulative state — applies
@@ -525,46 +542,56 @@ async function emitForAllChannels(
   if (newEvents.length === 0) return
   watcher.lastEmittedTs = newEvents[newEvents.length - 1].ts
 
-  // 2. Per-channel dispatch.
+  // 2. Cumulative channels retain their per-channel edit coalescers. Append
+  //    channels are flattened into one governed batch so a workflow fan-out
+  //    performs one scope resolution, one Dexie transaction and one wake.
+  const appendChannels: ChannelState[] = []
   for (const channel of watcher.channels.values()) {
     if (channel.mode === "cumulative") {
       if (cumulativeUpdated) {
         await flushCumulativeOnChannel(watcher, channel, enqueue)
       }
     } else {
-      await emitAppendOnChannel(watcher, channel, newEvents, enqueue)
+      appendChannels.push(channel)
     }
   }
+  await emitAppendOnChannels(watcher, appendChannels, newEvents, enqueueMany)
 }
 
 // ── append mode (per-channel) ─────────────────────────────────────────────
 
-async function emitAppendOnChannel(
+async function emitAppendOnChannels(
   watcher: RunWatcher,
-  channel: ChannelState,
+  channels: ChannelState[],
   events: WorkflowRunEventRow[],
-  enqueue: typeof enqueueOutbound
+  enqueueMany: typeof enqueueOutboundMany
 ): Promise<void> {
-  for (const ev of events) {
-    if (ev.type === "step_started" && ev.stepId) {
-      channel.appendStartedAtByStepId.set(ev.stepId, ev.ts)
+  const inputs: EnqueueInput[] = []
+  for (const channel of channels) {
+    for (const ev of events) {
+      if (ev.type === "step_started" && ev.stepId) {
+        channel.appendStartedAtByStepId.set(ev.stepId, ev.ts)
+      }
+      const label = ev.stepId ? watcher.labelByStepId.get(ev.stepId) : undefined
+      const segment = buildProgressSegment(ev, {
+        label,
+        previousStepStartedAt: ev.stepId
+          ? channel.appendStartedAtByStepId.get(ev.stepId)
+          : undefined,
+      })
+      if (!segment) continue
+      const input = buildDispatchInput(
+        watcher,
+        channel,
+        [segment],
+        `progress:${watcher.runId}:${channel.channelKey}:${ev.id}`,
+        ev.stepId ?? "",
+        null
+      )
+      if (input) inputs.push(input)
     }
-    const label = ev.stepId ? watcher.labelByStepId.get(ev.stepId) : undefined
-    const segment = buildProgressSegment(ev, {
-      label,
-      previousStepStartedAt: ev.stepId ? channel.appendStartedAtByStepId.get(ev.stepId) : undefined,
-    })
-    if (!segment) continue
-    await dispatch(
-      watcher,
-      channel,
-      [segment],
-      `progress:${watcher.runId}:${channel.channelKey}:${ev.id}`,
-      ev.stepId ?? "",
-      enqueue,
-      null
-    )
   }
+  await dispatchMany(watcher, inputs, enqueueMany)
 }
 
 // ── cumulative mode (per-channel) ─────────────────────────────────────────
@@ -643,8 +670,10 @@ function extractTerminalBody(row: WorkflowRunRow): string | undefined {
 async function emitFinal(
   row: WorkflowRunRow,
   watcher: RunWatcher,
-  enqueue: typeof enqueueOutbound
+  enqueue: typeof enqueueOutbound,
+  enqueueMany: typeof enqueueOutboundMany
 ): Promise<void> {
+  const appendInputs: EnqueueInput[] = []
   for (const channel of watcher.channels.values()) {
     if (channel.finalEmitted) continue
     channel.finalEmitted = true
@@ -657,17 +686,18 @@ async function emitFinal(
       const surface = buildFinalSurface({ run: row })
       const surfaceId = `wf-final:${row.id}:${channel.channelKey}`
       const segment = buildA2UISegment(surfaceId, surface)
-      await dispatch(
+      const input = buildDispatchInput(
         watcher,
         channel,
         [segment],
         `final:${row.id}:${channel.channelKey}`,
         "",
-        enqueue,
         null
       )
+      if (input) appendInputs.push(input)
     }
   }
+  await dispatchMany(watcher, appendInputs, enqueueMany)
 
   // Proactive completion notification (workflow⇄IM parity). `emitFinal` runs
   // exactly once per terminal IM-triggered run (guarded by `finalEmitted`), so
@@ -710,26 +740,17 @@ async function dispatch(
   enqueue: typeof enqueueOutbound,
   editTargetMessageId: string | null
 ): Promise<OutboundJobRow | null> {
-  const deliveryTarget = channel.deliveryTarget
-  if (!deliveryTarget || deliveryTarget.address.adapterId !== channel.adapterId) return null
+  const input = buildDispatchInput(
+    watcher,
+    channel,
+    segments,
+    idempotencyKey,
+    nodeId,
+    editTargetMessageId
+  )
+  if (!input) return null
   try {
-    const job = await enqueue({
-      adapterId: channel.adapterId,
-      conversationKey: channel.conversationKey,
-      request: {
-        conversationRef: deliveryTarget.conversationRef,
-        deliveryTarget,
-        segments,
-        metadata: { idempotencyKey },
-        ...(editTargetMessageId ? { editTargetMessageId } : {}),
-      },
-      source: "workflow",
-      sourceWorkflow: {
-        workflowId: watcher.workflowId,
-        runId: watcher.runId,
-        nodeId,
-      },
-    })
+    const job = await enqueue(input)
     return job
   } catch (err) {
     console.error(
@@ -737,6 +758,52 @@ async function dispatch(
       err
     )
     return null
+  }
+}
+
+function buildDispatchInput(
+  watcher: RunWatcher,
+  channel: ChannelState,
+  segments: MessageSegment[],
+  idempotencyKey: string,
+  nodeId: string,
+  editTargetMessageId: string | null
+): EnqueueInput | null {
+  const deliveryTarget = channel.deliveryTarget
+  if (!deliveryTarget || deliveryTarget.address.adapterId !== channel.adapterId) return null
+  return {
+    adapterId: channel.adapterId,
+    conversationKey: channel.conversationKey,
+    request: {
+      conversationRef: deliveryTarget.conversationRef,
+      deliveryTarget,
+      segments,
+      metadata: { idempotencyKey },
+      ...(editTargetMessageId ? { editTargetMessageId } : {}),
+    },
+    source: "workflow",
+    sourceWorkflow: {
+      workflowId: watcher.workflowId,
+      runId: watcher.runId,
+      nodeId,
+    },
+  }
+}
+
+async function dispatchMany(
+  watcher: RunWatcher,
+  inputs: readonly EnqueueInput[],
+  enqueueMany: typeof enqueueOutboundMany
+): Promise<OutboundJobRow[]> {
+  if (inputs.length === 0) return []
+  try {
+    return await enqueueMany(inputs)
+  } catch (err) {
+    console.error(
+      `[workflow-progress-runner] batch enqueue failed for run=${watcher.runId} count=${inputs.length}`,
+      err
+    )
+    return []
   }
 }
 

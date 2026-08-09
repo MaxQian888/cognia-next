@@ -68,7 +68,7 @@ import { getSkill as getPluginSkill } from "@/lib/plugin/registries/skill-regist
 import { invokeMcpTool } from "@/lib/mcp/invoke"
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
 import { createTeam, deleteTeam, updateTeam } from "@/lib/db/teams"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { createDraft } from "@/lib/db/connector-drafts"
 import {
   getActiveGoalForSession,

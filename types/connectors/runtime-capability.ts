@@ -66,7 +66,11 @@ const BUILT_IN_OVERRIDES: Partial<Record<PlatformKind, Partial<ConnectorRuntimeC
       messageEditing: true,
       interactiveControls: true,
       suggestedPrompts: true,
-      ambiguousDelivery: "remote_idempotent",
+      // Slack chat.postMessage currently receives no stable client_msg_id
+      // from our serializer, so a lost acknowledgement cannot be retried
+      // safely. Keep reconciliation-required until the wire contract proves
+      // propagation of the request idempotency key.
+      ambiguousDelivery: "reconciliation_required",
     },
     discord: {
       topicIsolation: "native",

@@ -145,7 +145,20 @@ const SESSION_CHILD_TABLES = [
  */
 export async function deleteProjectCascade(projectId: string): Promise<void> {
   const db = getDb()
-  const sessionIds = (await scopedWhere(db.sessions, projectId).primaryKeys()) as string[]
+  const projectSessions = await scopedWhere(db.sessions, projectId).toArray()
+  const sessionIds = projectSessions.map((session) => session.id)
+  const overrideConversationKeys = (await scopedWhere(
+    db.conversationOverrides,
+    projectId
+  ).primaryKeys()) as string[]
+  const inboundConversationKeys = Array.from(
+    new Set([
+      ...overrideConversationKeys,
+      ...projectSessions.flatMap((session) =>
+        session.platformBinding?.conversationKey ? [session.platformBinding.conversationKey] : []
+      ),
+    ])
+  )
 
   // Collect parent ids for the project so child/event tables can be dropped by
   // foreign key (covers child rows that never had a `projectId` stamped).
@@ -163,7 +176,7 @@ export async function deleteProjectCascade(projectId: string): Promise<void> {
     ...CHILD_TABLES.map((c) => c.table),
     ...SESSION_CHILD_TABLES,
   ])
-  const tables = [...tableNames].map((t) => db.table(t))
+  const tables = [...tableNames, "connectorInboundJobs"].map((t) => db.table(t))
 
   await db.transaction("rw", tables, async () => {
     for (const { table, parentTable, fk } of CHILD_TABLES) {
@@ -177,6 +190,9 @@ export async function deleteProjectCascade(projectId: string): Promise<void> {
       for (const t of SESSION_CHILD_TABLES) {
         await db.table(t).where("sessionId").anyOf(sessionIds).delete()
       }
+    }
+    if (inboundConversationKeys.length > 0) {
+      await db.connectorInboundJobs.where("conversationKey").anyOf(inboundConversationKeys).delete()
     }
   })
 

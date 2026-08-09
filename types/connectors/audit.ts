@@ -17,6 +17,8 @@ export type AuditKind =
   // "balanced" so the Outbound tab keeps the paper trail.
   | "delivery.balanced"
   | "delivery.downgraded"
+  | "delivery.diagnostic_direct"
+  | "delivery.legacy_direct"
   | "inbound.received"
   | "inbound.deduped"
   | "inbound.policy_blocked"
