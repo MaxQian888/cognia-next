@@ -9,6 +9,43 @@ including uncommitted concurrent work. A checked item means the runtime path is
 wired and has a focused test; it does not replace the final compose/Kubernetes
 end-to-end gates.
 
+## 2026-08-09 contract and capability update
+
+This update supersedes older gap statements in the matrix and implementation
+order below. The current Headless surface contains 441 canonical commands. All
+441 commands have a committed Draft 2020-12 success-response contract, and the
+generator publishes the same self-contained contract to the internal OpenAPI
+operation and CLI catalog. `companion-api:check` rejects an unclassified
+command, a missing response contract, an unresolved reference, or generated
+artifact drift.
+
+The command inventory now also classifies every one of the 611 client-owned
+commands in `protocol/headless-command-dispositions.json`. A client command must
+be explicitly recorded as `local-only`, `covered-by-headless`,
+`runtime-internal`, or `separate-design-required`; adding an unclassified
+command fails the generator tests. The count differs from the earlier 591-command
+snapshot because the command manifest continued to evolve while this analysis
+was being implemented.
+
+The following items are therefore no longer Headless capability gaps:
+
+- Brain durability and restart recovery are implemented by the managed
+  execution lifecycle and persisted server database path. Further journal or
+  multi-tenant storage work is a scale/reliability evolution, not a missing
+  Headless API surface.
+- Embedded MCP status/start/stop/restart are canonical execution commands.
+- LSP host ensure/request and the server-side VS Code plugin lifecycle are
+  present. Local VS Code discovery, window embedding, and file-opening remain
+  correctly classified as desktop-only behavior.
+- Workspace/code-server execution is represented by the managed project
+  environment and private service broker seams; it does not require a second
+  public RPC family.
+
+The remaining closure work is operational evidence: compose fault injection,
+multi-account isolation, plugin/runtime crash recovery, and complete
+cross-process trace correlation. It must not be interpreted as permission to
+promote client-only or service-internal commands into the Headless surface.
+
 ## Invariants
 
 - The TypeScript business layer remains the single brain implementation.
