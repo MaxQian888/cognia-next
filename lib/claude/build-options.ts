@@ -41,7 +41,11 @@ import {
 import { builtinSkillId, getCatalogSkill } from "@/lib/skills/built-in-catalog"
 import { selectSurfaceSkills, renderSurfaceSkillsSection } from "@/lib/skills/surface-activation"
 import { recordPluginSkillUsage } from "@/lib/db/plugin-skill-usage"
-import { buildMcpServerMapResolved, listEnabledMcpServers } from "@/lib/db/mcp-servers"
+import {
+  buildMcpDisallowedToolNames,
+  buildMcpServerMapResolved,
+  listEnabledMcpServers,
+} from "@/lib/db/mcp-servers"
 import { getTeam } from "@/lib/db/teams"
 import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
@@ -2109,6 +2113,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
 
     if (chosen.length > 0) {
+      const denied = new Set(opts.disallowedTools ?? [])
+      for (const tool of buildMcpDisallowedToolNames(chosen)) denied.add(tool)
+      if (denied.size > 0) opts.disallowedTools = [...denied]
+
       // Desktop injects send-time OAuth bearer headers for remote (sse/http)
       // servers from the keyring; web / CLI stay header-only (no keyring).
       const { isTauri } = await import("@/lib/tauri")

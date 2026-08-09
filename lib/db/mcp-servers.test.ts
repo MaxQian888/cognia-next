@@ -20,6 +20,7 @@ import {
   buildMcpServerMap,
   buildMcpServerMapResolved,
   buildMcpServerMapWithAuth,
+  buildMcpDisallowedToolNames,
   bulkImportMcpServers,
   parseClaudeMcpConfig,
   MCP_TRANSPORTS,
@@ -112,6 +113,19 @@ describe("createMcpServer", () => {
       config: { command: "x" },
     })
     expect(Object.prototype.hasOwnProperty.call(server, "pluginId")).toBe(false)
+  })
+
+  it("persists server-level disallowed tools supplied by a preset", async () => {
+    const server = await createMcpServer({
+      name: "playwright-existing-browser",
+      transport: "stdio",
+      config: { command: "npx" },
+      disallowedTools: ["browser_run_code_unsafe"],
+    })
+    expect(server.disallowedTools).toEqual(["browser_run_code_unsafe"])
+    expect((await getMcpServer(server.id))?.disallowedTools).toEqual([
+      "browser_run_code_unsafe",
+    ])
   })
 
   it("listMcpServersByPlugin returns only that plugin's rows", async () => {
@@ -261,6 +275,38 @@ describe("updateMcpServer", () => {
     await updateMcpServer("does-not-exist", { name: "x" })
     await flushDynamicImport()
     expect(await getDb().mcpSyncJobs.count()).toBe(0)
+  })
+
+  it("requires trust review when server-level disallowed tools change", async () => {
+    const server = await createReviewed({
+      name: "guarded",
+      transport: "stdio",
+      config: { command: "x" },
+      disallowedTools: ["dangerous"],
+    })
+    await updateMcpServer(server.id, { disallowedTools: [] })
+    expect(await getMcpServer(server.id)).toMatchObject({
+      enabled: false,
+      revision: 2,
+      trust: { state: "pending" },
+      disallowedTools: [],
+    })
+  })
+})
+
+describe("buildMcpDisallowedToolNames", () => {
+  it("namespaces each bare deny rule under its selected MCP server", () => {
+    expect(
+      buildMcpDisallowedToolNames([
+        {
+          name: "Playwright-Existing-Browser",
+          disallowedTools: ["browser_run_code_unsafe", " browser_evaluate "],
+        },
+      ])
+    ).toEqual([
+      "mcp__playwright-existing-browser__browser_evaluate",
+      "mcp__playwright-existing-browser__browser_run_code_unsafe",
+    ])
   })
 })
 

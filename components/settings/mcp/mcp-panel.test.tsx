@@ -57,7 +57,17 @@ jest.mock("./mcp-preset-grid", () => ({
     <div data-testid="t-presets" data-existing={JSON.stringify(existingNames)}>
       <button onClick={() => onPresetSelected({ id: "custom" }, {})}>pick-custom</button>
       <button
-        onClick={() => onPresetSelected({ id: "github", name: "GitHub", transport: "stdio" }, {})}
+        onClick={() =>
+          onPresetSelected(
+            {
+              id: "github",
+              name: "GitHub",
+              transport: "stdio",
+              defaultDisallowedTools: ["dangerous_tool"],
+            },
+            {}
+          )
+        }
       >
         pick-real
       </button>
@@ -178,6 +188,7 @@ describe("McpPanel", () => {
     expect((createMcpServer as jest.Mock).mock.calls[0][0]).toMatchObject({
       name: "github",
       transport: "stdio",
+      disallowedTools: ["dangerous_tool"],
     })
     await waitFor(() => expect(useMcpPanelStore.getState().activeTab).toBe("my-servers"))
   })

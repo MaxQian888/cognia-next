@@ -107,6 +107,7 @@ export function McpPanel({ className }: { className?: string }) {
         origin: "preset",
         transport: preset.transport,
         config: applyPresetFields(preset, values),
+        disallowedTools: preset.defaultDisallowedTools,
         enabled: false,
         appsEnabled: seed.appsEnabled,
       })
@@ -243,6 +244,7 @@ function McpEditorHost() {
           config: existing?.config ?? {},
           enabled: existing?.enabled ?? true,
           appsEnabled: existing?.appsEnabled ?? {},
+          disallowedTools: existing?.disallowedTools ?? [],
         }
       : (editorTarget?.seed ?? {
           name: "",
@@ -250,6 +252,7 @@ function McpEditorHost() {
           config: { ...BLANK_CONFIG },
           enabled: false,
           appsEnabled: {},
+          disallowedTools: [],
         })
 
   const onSave = async (data: McpEditorInitial) => {
@@ -260,6 +263,7 @@ function McpEditorHost() {
           transport: data.transport,
           config: data.config,
           enabled: data.enabled,
+          disallowedTools: data.disallowedTools,
         })
         toast.success(tToasts("updated"))
       } else {

@@ -20,6 +20,7 @@ const base: McpEditorInitial = {
   config: { command: "npx", args: ["-y", "server-github"], env: { TOKEN: "t" } },
   enabled: true,
   appsEnabled: {},
+  disallowedTools: ["browser_run_code_unsafe"],
 }
 
 beforeEach(() => {
@@ -62,6 +63,23 @@ describe("McpServerEditor", () => {
     expect(arg.transport).toBe("stdio")
     expect(arg.config.command).toBe("npx")
     expect(arg.config.env).toEqual({ TOKEN: "t" })
+    expect(arg.disallowedTools).toEqual(["browser_run_code_unsafe"])
+  })
+
+  it("edits server-level disallowed tools as one bare name per line", async () => {
+    const onSave = jest.fn().mockResolvedValue(undefined)
+    render(<McpServerEditor initial={base} onCancel={jest.fn()} onSave={onSave} />)
+    const input = screen.getByLabelText("disallowedTools")
+    expect(input).toHaveValue("browser_run_code_unsafe")
+    fireEvent.change(input, {
+      target: { value: "browser_run_code_unsafe\nbrowser_evaluate\nbrowser_evaluate" },
+    })
+    fireEvent.click(screen.getByText("save"))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0].disallowedTools).toEqual([
+      "browser_run_code_unsafe",
+      "browser_evaluate",
+    ])
   })
 
   it("calls onCancel", () => {
@@ -107,6 +125,7 @@ describe("McpServerEditor", () => {
     config: { url: "https://x/mcp", headers: { Authorization: "Bearer y" } },
     enabled: true,
     appsEnabled: {},
+    disallowedTools: [],
   }
 
   it("hydrates and saves an http server with headers", async () => {

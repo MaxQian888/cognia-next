@@ -31,7 +31,7 @@ beforeEach(() => {
 })
 
 describe("playwright-mcp (built-in)", () => {
-  it("activate registers the playwright MCP preset imperatively", async () => {
+  it("activate registers isolated and existing-browser presets imperatively", async () => {
     const { ctx, presets } = makeCtx()
     await playwrightMcp.activate?.(ctx)
     expect(presets).toEqual([
@@ -40,6 +40,15 @@ describe("playwright-mcp (built-in)", () => {
         transport: "stdio",
         config: expect.objectContaining({ command: "npx" }),
       }),
+      expect.objectContaining({
+        id: "playwright-existing-browser",
+        transport: "stdio",
+        config: {
+          command: "npx",
+          args: ["-y", "@playwright/mcp@latest", "--extension"],
+        },
+        defaultDisallowedTools: ["browser_run_code_unsafe"],
+      }),
     ])
   })
 
@@ -47,7 +56,10 @@ describe("playwright-mcp (built-in)", () => {
     const manifest = playwrightMcp.manifest as unknown as {
       mcpServerPresets: Array<{ id: string }>
     }
-    expect(manifest.mcpServerPresets.map((p) => p.id)).toEqual(["playwright"])
+    expect(manifest.mcpServerPresets.map((p) => p.id)).toEqual([
+      "playwright",
+      "playwright-existing-browser",
+    ])
   })
 
   it("has no deactivate — the manager owns command teardown", () => {

@@ -36,6 +36,8 @@ jest.mock("@/lib/db/mcp-servers", () => ({
   listEnabledMcpServers: jest.fn(),
   buildMcpServerMap: jest.fn(),
   buildMcpServerMapResolved: jest.fn(),
+  buildMcpDisallowedToolNames: jest.requireActual("@/lib/db/mcp-servers")
+    .buildMcpDisallowedToolNames,
 }))
 
 jest.mock("@/lib/db/teams", () => ({
@@ -2809,6 +2811,23 @@ describe("resolveSendOptions — surface-aware built-in skills", () => {
 })
 
 describe("resolveSendOptions — MCP subset", () => {
+  it("unions selected servers' namespaced deny rules into disallowedTools", async () => {
+    mListMcp.mockResolvedValue([
+      {
+        id: "live",
+        name: "playwright-existing-browser",
+        disallowedTools: ["browser_run_code_unsafe"],
+      },
+    ])
+    mBuildMap.mockReturnValueOnce({
+      "playwright-existing-browser": { command: "npx" },
+    })
+    const opts = await resolveSendOptions({})
+    expect(opts.disallowedTools).toContain(
+      "mcp__playwright-existing-browser__browser_run_code_unsafe"
+    )
+  })
+
   it("memberOverride.mcpServerIdsOverride filters the enabled list", async () => {
     mListMcp.mockResolvedValue([
       { id: "a", name: "a" },

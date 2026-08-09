@@ -33,12 +33,32 @@ const PLAYWRIGHT_PRESET = defineMcpServerPreset({
   tags: ["web", "browser", "automation"],
 })
 
+const PLAYWRIGHT_EXISTING_BROWSER_PRESET = defineMcpServerPreset({
+  id: "playwright-existing-browser",
+  name: "Playwright — Existing Browser",
+  description:
+    "Control selected Chrome or Edge tabs through the official Playwright extension, reusing the browser's current profile and login state.",
+  icon: "🌐",
+  transport: "stdio",
+  config: {
+    command: "npx",
+    args: ["-y", "@playwright/mcp@latest", "--extension"],
+  },
+  fields: [],
+  defaultDisallowedTools: ["browser_run_code_unsafe"],
+  runtime: "both",
+  docsUrl: "https://github.com/microsoft/playwright/tree/main/packages/extension",
+  tags: ["web", "browser", "automation", "existing-profile"],
+})
+
+const PLAYWRIGHT_PRESETS = [PLAYWRIGHT_PRESET, PLAYWRIGHT_EXISTING_BROWSER_PRESET]
+
 const definition: PluginDefinition = {
   // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
   // hand-written subset here would WIN and silently drop `commands[]`.
   manifest: {
     ...(manifestJson as object),
-    mcpServerPresets: [PLAYWRIGHT_PRESET],
+    mcpServerPresets: PLAYWRIGHT_PRESETS,
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("playwright-mcp plugin activated")
@@ -48,7 +68,9 @@ const definition: PluginDefinition = {
     // call here is a no-op idempotency belt-and-suspenders for users who
     // load the plugin via the dynamic ctx.agent path rather than through
     // the manifest reader.
-    ctx.agent?.registerMcpServerPreset?.(PLAYWRIGHT_PRESET)
+    for (const preset of PLAYWRIGHT_PRESETS) {
+      ctx.agent?.registerMcpServerPreset?.(preset)
+    }
 
     // The slash command is DECLARED in plugin.json (`commands[]`) and handled
     // here — the supported shape per the author-SDK migration table. The

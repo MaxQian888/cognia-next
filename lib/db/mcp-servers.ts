@@ -50,6 +50,8 @@ export async function createMcpServer(
     trust?: McpServerTrust
     /** Optional plugin origin tag (§A-6). Set by the plugin manager only. */
     pluginId?: string
+    /** Bare MCP tool names denied whenever this server is selected. */
+    disallowedTools?: string[]
   }
 ): Promise<McpServer> {
   const now = Date.now()
@@ -72,6 +74,9 @@ export async function createMcpServer(
     // Tag the row only when explicitly provided so user-created rows stay
     // structurally identical to pre-port serialized data.
     ...(partial.pluginId !== undefined ? { pluginId: partial.pluginId } : {}),
+    ...(partial.disallowedTools !== undefined
+      ? { disallowedTools: normalizeDisallowedTools(partial.disallowedTools) }
+      : {}),
     createdAt: now,
     updatedAt: now,
   }
@@ -105,7 +110,16 @@ export async function listMcpServersByPlugin(pluginId: string): Promise<McpServe
 export async function updateMcpServer(
   id: string,
   patch: Partial<
-    Pick<McpServer, "name" | "displayName" | "transport" | "config" | "enabled" | "appsEnabled">
+    Pick<
+      McpServer,
+      | "name"
+      | "displayName"
+      | "transport"
+      | "config"
+      | "enabled"
+      | "appsEnabled"
+      | "disallowedTools"
+    >
   >
 ): Promise<void> {
   const db = getDb()
@@ -125,6 +139,9 @@ export async function updateMcpServer(
     origin: prev.origin ?? "manual",
     trust: prev.trust ?? { state: "legacy" },
     updatedAt: now,
+  }
+  if (patch.disallowedTools !== undefined) {
+    next.disallowedTools = normalizeDisallowedTools(patch.disallowedTools)
   }
   validateMcpDefinition(next)
   assertUniqueMcpNamespace(next.name, await db.mcpServers.toArray(), id)
@@ -284,6 +301,24 @@ export function buildMcpServerMap(servers: McpServer[]): Record<string, Record<s
     out[s.name] = { type: s.transport, ...s.config }
   }
   return out
+}
+
+function normalizeDisallowedTools(tools: readonly string[]): string[] {
+  return [...new Set(tools.map((tool) => tool.trim()).filter(Boolean))].sort()
+}
+
+/** Convert selected servers' bare deny rules into Claude SDK MCP tool names. */
+export function buildMcpDisallowedToolNames(
+  servers: ReadonlyArray<Pick<McpServer, "name" | "disallowedTools">>
+): string[] {
+  const denied = new Set<string>()
+  for (const server of servers) {
+    const namespace = normalizeMcpNamespace(server.name)
+    for (const tool of normalizeDisallowedTools(server.disallowedTools ?? [])) {
+      denied.add(`mcp__${namespace}__${tool}`)
+    }
+  }
+  return [...denied].sort()
 }
 
 async function resolveMcpServerDefinitions(

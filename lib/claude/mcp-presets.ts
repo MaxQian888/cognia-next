@@ -38,6 +38,8 @@ export interface McpPreset {
   config: Record<string, unknown>
   /** Fields the user must fill in before save. */
   fields: McpPresetField[]
+  /** Bare MCP tool names denied when a server row is created from this preset. */
+  defaultDisallowedTools?: string[]
   /** Optional canonical docs URL. */
   docsUrl?: string
   tags?: string[]
@@ -159,6 +161,21 @@ export const MCP_PRESETS: McpPreset[] = [
     fields: [],
     docsUrl: "https://github.com/microsoft/playwright-mcp",
     tags: ["web"],
+  },
+  {
+    id: "playwright-existing-browser",
+    name: "Playwright — Existing Browser",
+    description: "Control selected Chrome or Edge tabs through the official Playwright extension.",
+    icon: "🌐",
+    transport: "stdio",
+    config: {
+      command: "npx",
+      args: ["-y", "@playwright/mcp@latest", "--extension"],
+    },
+    fields: [],
+    defaultDisallowedTools: ["browser_run_code_unsafe"],
+    docsUrl: "https://github.com/microsoft/playwright/tree/main/packages/extension",
+    tags: ["web", "browser"],
   },
   {
     id: "fetch",

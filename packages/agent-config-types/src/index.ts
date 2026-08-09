@@ -4704,6 +4704,8 @@ export interface McpServer {
    * User-created MCP rows leave this field undefined.
    */
   pluginId?: string
+  /** Bare tool names denied whenever this server is attached to an agent run. */
+  disallowedTools?: string[]
   /** Human-facing label; changing it never changes the SDK namespace. */
   displayName?: string
   /** Persisted governance contract version. Legacy rows omit this until migration. */

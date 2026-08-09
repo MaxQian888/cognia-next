@@ -27,6 +27,8 @@ export interface PluginMcpServerPresetDef {
   config: Record<string, unknown>
   /** Fields the user must fill (env vars, URL, headers, arg replacements). */
   fields?: McpPresetField[]
+  /** Bare MCP tool names denied when a server row is created from this preset. */
+  defaultDisallowedTools?: string[]
   /**
    * Which agent runtime this preset is intended for:
    * - "sdk":    Claude Code SDK sidecar path only

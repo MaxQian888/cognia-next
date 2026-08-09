@@ -16,7 +16,7 @@ export interface KvRow {
 /** The minimal server shape the editor round-trips (no id/timestamps). */
 export type McpEditorInitial = Pick<
   McpServer,
-  "name" | "transport" | "config" | "enabled" | "appsEnabled"
+  "name" | "transport" | "config" | "enabled" | "appsEnabled" | "disallowedTools"
 >
 
 export function objectToKvRows(obj: unknown): KvRow[] {
@@ -62,6 +62,7 @@ export function cloneServerDraft(s: McpServer): McpEditorInitial {
     config: structuredClone(s.config),
     enabled: s.enabled,
     appsEnabled: { ...(s.appsEnabled ?? {}) },
+    disallowedTools: [...(s.disallowedTools ?? [])],
   }
 }
 

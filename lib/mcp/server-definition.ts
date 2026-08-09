@@ -126,12 +126,13 @@ function canonical(value: unknown): string {
 
 /** Stable, non-secret-bearing fingerprint for review/cache invalidation. */
 export function fingerprintMcpDefinition(
-  server: Pick<McpServer, "name" | "transport" | "config">
+  server: Pick<McpServer, "name" | "transport" | "config" | "disallowedTools">
 ): string {
   const material = canonical({
     name: normalizeMcpNamespace(server.name),
     transport: server.transport,
     config: server.config,
+    disallowedTools: [...(server.disallowedTools ?? [])].map((tool) => tool.trim()).sort(),
   })
   let first = 0x811c9dc5
   let second = 0x9e3779b9

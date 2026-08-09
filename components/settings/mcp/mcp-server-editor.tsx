@@ -48,6 +48,9 @@ export function McpServerEditor({ initial, onCancel, onSave }: EditorProps) {
   const [name, setName] = useState(initial.name)
   const [transport, setTransport] = useState<McpTransport>(initial.transport)
   const [enabled, setEnabled] = useState(initial.enabled)
+  const [disallowedToolsText, setDisallowedToolsText] = useState(
+    (initial.disallowedTools ?? []).join("\n")
+  )
   const [saving, setSaving] = useState(false)
 
   const [command, setCommand] = useState(
@@ -149,7 +152,15 @@ export function McpServerEditor({ initial, onCancel, onSave }: EditorProps) {
     }
     setSaving(true)
     try {
-      await onSave({ name: name.trim(), transport, config, enabled })
+      const disallowedTools = [
+        ...new Set(
+          disallowedToolsText
+            .split("\n")
+            .map((tool) => tool.trim())
+            .filter(Boolean)
+        ),
+      ]
+      await onSave({ name: name.trim(), transport, config, enabled, disallowedTools })
     } finally {
       setSaving(false)
     }
@@ -262,6 +273,22 @@ export function McpServerEditor({ initial, onCancel, onSave }: EditorProps) {
       )}
 
       <p className="text-[10px] text-muted-foreground">{t("forwardedNote")}</p>
+
+      <div className="space-y-1">
+        <Label htmlFor="mcp-disallowed-tools" className="text-xs">
+          {t("disallowedTools")}
+        </Label>
+        <Textarea
+          id="mcp-disallowed-tools"
+          rows={3}
+          value={disallowedToolsText}
+          onChange={(event) => setDisallowedToolsText(event.target.value)}
+          placeholder={t("placeholderDisallowedTools")}
+          className="font-mono text-xs"
+          spellCheck={false}
+        />
+        <p className="text-[10px] text-muted-foreground">{t("disallowedToolsHint")}</p>
+      </div>
 
       <div className="flex items-center justify-between">
         <label className="flex items-center gap-2 text-xs">
