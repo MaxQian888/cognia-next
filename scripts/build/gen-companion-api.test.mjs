@@ -50,6 +50,46 @@ test("derives stable resources without copying the RPC tree", () => {
   assert.equal(hostResourceForCommand("git_status"), "git")
   assert.equal(hostResourceForCommand("fs_list_workspace_dir"), "workspace-files")
   assert.equal(hostResourceForCommand("remote_notification_publish"), "notifications")
+  assert.equal(hostResourceForCommand("project_environment_execute"), "project-environments")
+})
+
+test("publishes the concrete raw result contract in OpenAPI and the host catalog", () => {
+  const inspected = inspectCommittedContract()
+  const command = inspected.desiredHostCommandCatalog.commands.find(
+    (entry) => entry.name === "session_list",
+  )
+  const responseSchema =
+    inspected.desiredHeadlessSpec.paths["/internal/_rpc/session_list"].post.responses[200].content[
+      "application/json"
+    ].schema
+
+  assert.equal(command.outputTyped, true)
+  assert.equal(command.outputSchemaSource, "contract")
+  assert.deepEqual(command.outputSchema, {
+    type: "object",
+    required: ["rows", "total"],
+    properties: {
+      rows: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["id", "title", "kind", "createdAt", "updatedAt"],
+          properties: {
+            id: { type: "string" },
+            title: { type: "string" },
+            kind: { type: "string" },
+            createdAt: { type: "integer" },
+            updatedAt: { type: "integer" },
+          },
+          additionalProperties: false,
+        },
+      },
+      total: { type: "integer", minimum: 0 },
+      nextOffset: { type: "integer", minimum: 0 },
+    },
+    additionalProperties: false,
+  })
+  assert.deepEqual(responseSchema, command.outputSchema)
 })
 
 test("merges compatible closed-object allOf request schemas", () => {
@@ -117,8 +157,13 @@ test("builds a deterministic host catalog from the generated Headless command se
     ),
     true,
   )
-  assert.equal(first.commands.every((command) => command.outputTyped === false), true)
-  assert.equal(first.commands.every((command) => command.outputSchema === null), true)
+  assert.equal(first.commands.find((command) => command.name === "session_list")?.outputTyped, true)
+  assert.equal(
+    first.commands
+      .filter((command) => command.name !== "session_list")
+      .every((command) => command.outputTyped === false && command.outputSchema === null),
+    true,
+  )
 })
 
 test("compiles every generated Headless input as Draft 2020-12 JSON Schema", () => {

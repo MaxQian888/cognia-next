@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "$defs": {
+    "SessionRow": {
+      "type": "object",
+      "required": ["id", "title", "kind", "createdAt", "updatedAt"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "kind": { "type": "string" },
+        "createdAt": { "type": "integer" },
+        "updatedAt": { "type": "integer" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "commands": {
+    "session_list": {
+      "type": "object",
+      "required": ["rows", "total"],
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SessionRow" }
+        },
+        "total": { "type": "integer", "minimum": 0 },
+        "nextOffset": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

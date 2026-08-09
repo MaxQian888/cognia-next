@@ -17,6 +17,7 @@ const HOST_COMMAND_CATALOG_PATH = "crates/cognia-cli/assets/host-command-catalog
 const ROUTE_CONTRACT_PATH = "protocol/companion-api-routes.json"
 const COMMAND_MANIFEST_PATH = "protocol/companion-commands.json"
 const REQUEST_SCHEMA_CATALOG_PATH = "protocol/companion-request-schemas.json"
+const RESPONSE_SCHEMA_CATALOG_PATH = "protocol/companion-response-schemas.json"
 const ZOD_REQUEST_SCHEMA_PATH = "scripts/build/companion-request-schema-contracts.mjs"
 const RPC_SOURCE_PATH = "src-tauri/src/companion_api/rpc.rs"
 const RUNTIME_ROUTE_SOURCES = [
@@ -38,6 +39,12 @@ const routeContractSchema = z.object({
 
 const requestSchemaCatalogSchema = z.object({
   schemaVersion: z.literal(1),
+  commands: z.record(z.string(), z.record(z.string(), z.unknown())),
+})
+
+const responseSchemaCatalogSchema = z.object({
+  schemaVersion: z.literal(1),
+  $defs: z.record(z.string(), z.record(z.string(), z.unknown())),
   commands: z.record(z.string(), z.record(z.string(), z.unknown())),
 })
 
@@ -242,7 +249,7 @@ const HOST_CATEGORIES = [
     description: "Git, files, terminals, browsers, code-server, and language servers.",
     skill: "cognia-host-development",
     pattern:
-      /^(browser_|codeserver_|fs_|git_|github_workspace_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
+      /^(browser_|codeserver_|fs_|git_|github_workspace_|project_environment_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
   },
   {
     id: "system",
@@ -285,6 +292,7 @@ const HOST_RESOURCE_ALIASES = [
   [/^provider_catalog_/, "provider-catalog"],
   [/^provider_diagnostics_/, "provider-diagnostics"],
   [/^provider_profiles_/, "provider-profiles"],
+  [/^project_environment_/, "project-environments"],
   [/^scheduled_task_/, "scheduled-tasks"],
   [/^(?:skill_|skills_)/, "skills"],
   [/^task_resource_/, "task-resources"],
@@ -346,8 +354,12 @@ export function buildHostCommandCatalog(manifest, remoteNames, headlessSpec) {
       description: operation.description ?? "",
       inputSchemaSource: operation["x-cognia-request-schema-source"],
       inputSchema: operation.requestBody?.content?.["application/json"]?.schema,
-      outputSchema: null,
-      outputTyped: false,
+      outputSchemaSource: operation["x-cognia-response-schema-source"] ?? null,
+      outputSchema:
+        operation["x-cognia-response-schema-source"] === "contract"
+          ? operation.responses?.[200]?.content?.["application/json"]?.schema
+          : null,
+      outputTyped: operation["x-cognia-response-schema-source"] === "contract",
     }
   })
   const categories = HOST_CATEGORIES.map(({ pattern: _pattern, ...category }) => category)
@@ -373,6 +385,32 @@ export function buildHostCommandCatalog(manifest, remoteNames, headlessSpec) {
 
 function renderHostCommandCatalog(catalog) {
   return `${JSON.stringify(catalog, null, 2)}\n`
+}
+
+function materializeResponseSchema(value, definitions, stack = []) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => materializeResponseSchema(entry, definitions, stack))
+  }
+  if (!value || typeof value !== "object") return value
+  if (typeof value.$ref === "string" && value.$ref.startsWith("#/$defs/")) {
+    const name = value.$ref.slice("#/$defs/".length)
+    const definition = definitions[name]
+    if (!definition) throw new Error(`unknown response schema definition: ${name}`)
+    if (stack.includes(name)) {
+      throw new Error(`cyclic response schema definition: ${[...stack, name].join(" -> ")}`)
+    }
+    const { $ref: _ref, ...siblings } = value
+    return {
+      ...materializeResponseSchema(definition, definitions, [...stack, name]),
+      ...materializeResponseSchema(siblings, definitions, stack),
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [
+      key,
+      materializeResponseSchema(child, definitions, stack),
+    ])
+  )
 }
 
 function unwrapRustType(type, wrapper) {
@@ -2145,7 +2183,14 @@ function headlessBaseSpec() {
   }
 }
 
-function buildHeadlessSpec(base, contract, manifest, remoteNames, argumentSchemas) {
+function buildHeadlessSpec(
+  base,
+  contract,
+  manifest,
+  remoteNames,
+  argumentSchemas,
+  responseSchemaCatalog,
+) {
   const classified = classifyCommands(manifest, remoteNames)
   const reconciled = reconcileRpcPaths({
     publicPaths: {},
@@ -2155,6 +2200,15 @@ function buildHeadlessSpec(base, contract, manifest, remoteNames, argumentSchema
     argumentSchemas,
   })
   const paths = reconciled.internalPaths
+  for (const [name, schema] of Object.entries(responseSchemaCatalog.commands)) {
+    const operation = paths[`/internal/_rpc/${name}`]?.post
+    if (!operation) throw new Error(`response schema has no Headless command: ${name}`)
+    operation["x-cognia-response-schema-source"] = "contract"
+    operation.responses[200].content["application/json"].schema = materializeResponseSchema(
+      schema,
+      responseSchemaCatalog.$defs,
+    )
+  }
   for (const route of contract.routes.filter((entry) => entry.document === "headless")) {
     if (!paths[route.path]?.[route.method]) mergePathOperation(paths, route)
   }
@@ -2169,6 +2223,7 @@ function buildHeadlessSpec(base, contract, manifest, remoteNames, argumentSchema
         COMMAND_MANIFEST_PATH,
         ROUTE_CONTRACT_PATH,
         REQUEST_SCHEMA_CATALOG_PATH,
+        RESPONSE_SCHEMA_CATALOG_PATH,
         RPC_SOURCE_PATH,
         ZOD_REQUEST_SCHEMA_PATH,
       ],
@@ -2229,6 +2284,9 @@ export function inspectCommittedContract() {
   const requestSchemaCatalog = requestSchemaCatalogSchema.parse(
     JSON.parse(readRepo(REQUEST_SCHEMA_CATALOG_PATH))
   )
+  const responseSchemaCatalog = responseSchemaCatalogSchema.parse(
+    JSON.parse(readRepo(RESPONSE_SCHEMA_CATALOG_PATH))
+  )
   const publicSource = readRepo(PUBLIC_SPEC_PATH)
   let headlessSource = ""
   try {
@@ -2275,7 +2333,8 @@ export function inspectCommittedContract() {
     contract,
     manifest,
     remoteNames,
-    argumentSchemas
+    argumentSchemas,
+    responseSchemaCatalog,
   )
   const desiredPublicSource = renderSpec(desiredPublicSpec)
   const desiredHeadlessSource = renderSpec(desiredHeadlessSpec)
@@ -2324,6 +2383,11 @@ export function inspectCommittedContract() {
   }
   for (const name of zodRequestSchemas.keys()) {
     if (!classified.byName.has(name)) errors.push(`Zod request schema has no command descriptor: ${name}`)
+  }
+  for (const name of Object.keys(responseSchemaCatalog.commands)) {
+    if (!classified.internalNames.includes(name)) {
+      errors.push(`response schema has no Headless command: ${name}`)
+    }
   }
   return {
     contract,
