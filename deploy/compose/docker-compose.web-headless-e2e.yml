@@ -1,0 +1,164 @@
+# CI-only extension for the real Web ↔ Headless Playwright lane.
+#
+# It deliberately stays outside the production topology: the second Host
+# exists only to prove browser target switching and per-target database
+# isolation against two independent SecurityStore/data volumes.
+services:
+  anthropic-fixture:
+    profiles: [server]
+    image: node:22-alpine
+    command: ["node", "/fixture/anthropic-fixture.mjs"]
+    environment:
+      PORT: "4010"
+    volumes:
+      - ../../tests/real-e2e/anthropic-fixture.mjs:/fixture/anthropic-fixture.mjs:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4010/healthz').then(r=>{if(r.status!==204)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 2s
+
+  oidc-fixture:
+    profiles: [web-headless-e2e]
+    image: node:22-alpine
+    command: ["node", "/fixture/oidc-fixture.mjs"]
+    environment:
+      PORT: "4020"
+      ISSUER: http://oidc-fixture:4020/oidc
+      ALLOWED_ORIGIN: https://cognia.localhost
+    volumes:
+      - ../../tests/real-e2e/oidc-fixture.mjs:/fixture/oidc-fixture.mjs:ro
+    ports:
+      - "127.0.0.1:4020:4020"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4020/healthz').then(r=>{if(r.status!==204)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 2s
+
+  cognia-server:
+    depends_on:
+      anthropic-fixture:
+        condition: service_healthy
+    environment:
+      ANTHROPIC_API_KEY: web-headless-e2e-key
+      ANTHROPIC_BASE_URL: http://anthropic-fixture:4010
+
+  cognia-server-secondary:
+    profiles: [web-headless-e2e]
+    image: ${COGNIA_SERVER_IMAGE:-ghcr.io/maxqian888/cognia-server:latest-full}
+    depends_on:
+      signaling:
+        condition: service_healthy
+      anthropic-fixture:
+        condition: service_healthy
+    environment:
+      COGNIA_DATA_DIR: /data
+      COGNIA_MASTER_KEY: ${COGNIA_SECONDARY_MASTER_KEY:-}
+      COGNIA_PUBLIC_URL: ${COGNIA_SECONDARY_PUBLIC_URL:-https://127.0.0.1:27891}
+      COGNIA_SIGNALING_URL: ${COGNIA_SIGNALING_URL:-ws://signaling:7892/v2/signaling}
+      COGNIA_PUBLIC_SIGNALING_URL: ${COGNIA_PUBLIC_SIGNALING_URL:-}
+      COGNIA_ALLOWED_WEB_ORIGINS: ${COGNIA_ALLOWED_WEB_ORIGINS:-}
+      COGNIA_ALLOW_PRIVATE_NETWORK: ${COGNIA_ALLOW_PRIVATE_NETWORK:-false}
+      ANTHROPIC_API_KEY: web-headless-e2e-key
+      ANTHROPIC_BASE_URL: http://anthropic-fixture:4010
+    volumes:
+      - cognia_secondary_data:/data
+    ports:
+      - "27891:27890"
+    security_opt:
+      - seccomp=./seccomp/cognia-userns.json
+    healthcheck:
+      test: ["CMD", "curl", "-kfsS", "https://localhost:27890/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+
+  cognia-server-oidc-member:
+    profiles: [web-headless-e2e]
+    image: ${COGNIA_SERVER_IMAGE:-ghcr.io/maxqian888/cognia-server:latest-full}
+    depends_on:
+      signaling:
+        condition: service_healthy
+      oidc-fixture:
+        condition: service_healthy
+    environment:
+      COGNIA_DATA_DIR: /data
+      COGNIA_MASTER_KEY: ${COGNIA_OIDC_MEMBER_MASTER_KEY:-}
+      COGNIA_PUBLIC_URL: https://127.0.0.1:27892
+      COGNIA_SIGNALING_URL: ${COGNIA_SIGNALING_URL:-ws://signaling:7892/v2/signaling}
+      COGNIA_PUBLIC_SIGNALING_URL: ${COGNIA_PUBLIC_SIGNALING_URL:-}
+      COGNIA_ALLOWED_WEB_ORIGINS: ${COGNIA_ALLOWED_WEB_ORIGINS:-}
+      COGNIA_ALLOW_PRIVATE_NETWORK: ${COGNIA_ALLOW_PRIVATE_NETWORK:-false}
+      COGNIA_LOGTO_ISSUER: http://oidc-fixture:4020/oidc
+      COGNIA_LOGTO_AUDIENCE: https://cognia.localhost/api
+      COGNIA_LOGTO_WEB_CLIENT_ID: web-headless-member
+      COGNIA_LOGTO_REQUIRED_SCOPES: brain:rpc
+    volumes:
+      - cognia_oidc_member_data:/data
+    ports:
+      - "27892:27890"
+    security_opt:
+      - seccomp=./seccomp/cognia-userns.json
+    healthcheck:
+      test: ["CMD", "curl", "-kfsS", "https://localhost:27890/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+
+  cognia-server-oidc-owner:
+    profiles: [web-headless-e2e]
+    image: ${COGNIA_SERVER_IMAGE:-ghcr.io/maxqian888/cognia-server:latest-full}
+    depends_on:
+      signaling:
+        condition: service_healthy
+      oidc-fixture:
+        condition: service_healthy
+    environment:
+      COGNIA_DATA_DIR: /data
+      COGNIA_MASTER_KEY: ${COGNIA_OIDC_OWNER_MASTER_KEY:-}
+      COGNIA_PUBLIC_URL: https://127.0.0.1:27893
+      COGNIA_SIGNALING_URL: ${COGNIA_SIGNALING_URL:-ws://signaling:7892/v2/signaling}
+      COGNIA_PUBLIC_SIGNALING_URL: ${COGNIA_PUBLIC_SIGNALING_URL:-}
+      COGNIA_ALLOWED_WEB_ORIGINS: ${COGNIA_ALLOWED_WEB_ORIGINS:-}
+      COGNIA_ALLOW_PRIVATE_NETWORK: ${COGNIA_ALLOW_PRIVATE_NETWORK:-false}
+      COGNIA_LOGTO_ISSUER: http://oidc-fixture:4020/oidc
+      COGNIA_LOGTO_AUDIENCE: https://cognia.localhost/api
+      COGNIA_LOGTO_WEB_CLIENT_ID: web-headless-owner
+      COGNIA_LOGTO_REQUIRED_SCOPES: brain:rpc,brain:admin
+    volumes:
+      - cognia_oidc_owner_data:/data
+    ports:
+      - "27893:27890"
+    security_opt:
+      - seccomp=./seccomp/cognia-userns.json
+    healthcheck:
+      test: ["CMD", "curl", "-kfsS", "https://localhost:27890/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  cognia_secondary_data:
+  cognia_oidc_member_data:
+  cognia_oidc_owner_data:

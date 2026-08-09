@@ -133,6 +133,25 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify standard build includes Paddle OCR
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { spawnSync } from "node:child_process";
+          const cargo = spawnSync("cargo", ["metadata", "--no-deps", "--format-version", "1"], {
+            encoding: "utf8",
+          });
+          if (cargo.status !== 0) throw new Error(cargo.stderr || "cargo metadata failed");
+          const metadata = JSON.parse(cargo.stdout);
+          const app = metadata.packages.find((pkg) => pkg.name === "cognia-next");
+          if (!app?.features?.default?.includes("ocr-paddle")) {
+            throw new Error("release blocked: cognia-next default features do not include ocr-paddle");
+          }
+          if (!app.features["ocr-paddle"]?.includes("cognia-ocr/ocr-paddle")) {
+            throw new Error("release blocked: ocr-paddle does not bind the real cognia-ocr backend");
+          }
+          NODE
+
       # tauri-action runs `pnpm build` (beforeBuildCommand) → `tauri build`,
       # signs the updater bundles with TAURI_SIGNING_PRIVATE_KEY, applies
       # Developer ID signing + notarization on tagged macOS builds, and — when

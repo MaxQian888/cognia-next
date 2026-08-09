@@ -1,0 +1,116 @@
+# syntax=docker/dockerfile:1.12
+# Test-only assembly path: reuse the already Linux-compiled Rust builder while
+# rebuilding the current Brain and runtime layers from this working tree.
+FROM cognia-server-builder:ci AS builder
+
+FROM node:26-bookworm AS brain-builder
+ARG PNPM_VERSION=11.18.0
+ARG NPM_CONFIG_REGISTRY
+ENV HUSKY=0 \
+    CI=1
+# The real E2E assembly is intentionally network-independent: the named
+# `pnpm-host` build context points at the same pinned pnpm package used by the
+# checked-out workspace on the host.
+COPY --from=pnpm-host / /opt/pnpm
+RUN ln -s /opt/pnpm/bin/pnpm /usr/local/bin/pnpm \
+    && test "$(pnpm --version)" = "${PNPM_VERSION}"
+WORKDIR /work
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages ./packages
+COPY docs/package.json ./docs/package.json
+COPY mobile/package.json ./mobile/package.json
+COPY scripts/postinstall.mjs ./scripts/postinstall.mjs
+COPY patches ./patches
+RUN if [ -n "${NPM_CONFIG_REGISTRY}" ]; then \
+      registry="${NPM_CONFIG_REGISTRY%/}"; \
+      sed -i "s#https://registry.npmjs.org/#${registry}/#g" pnpm-lock.yaml; \
+      pnpm config set registry "${registry}"; \
+    fi
+RUN --mount=type=cache,id=cognia-pnpm-store,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --fetch-retries=5 --fetch-timeout=300000 --network-concurrency=16
+COPY sidecar/package.json sidecar/pnpm-lock.yaml sidecar/pnpm-workspace.yaml ./sidecar/
+RUN --mount=type=cache,id=cognia-pnpm-store,target=/root/.local/share/pnpm/store \
+    if [ -n "${NPM_CONFIG_REGISTRY}" ]; then \
+      registry="${NPM_CONFIG_REGISTRY%/}"; \
+      sed -i "s#https://registry.npmjs.org/#${registry}/#g" sidecar/pnpm-lock.yaml; \
+      pnpm config set registry "${registry}"; \
+    fi \
+    && mv pnpm-workspace.yaml pnpm-workspace.root.yaml \
+    && pnpm --dir sidecar install --frozen-lockfile --fetch-retries=5 --fetch-timeout=300000 --network-concurrency=16 \
+    && mv pnpm-workspace.root.yaml pnpm-workspace.yaml
+COPY tmp-cognia-e2e-zip.py /usr/local/bin/zip
+RUN chmod +x /usr/local/bin/zip
+COPY . .
+COPY --from=builder /work/target/release/cognia-external-agent-launcher ./target/release/cognia-external-agent-launcher
+COPY --from=vscode-host /dist ./sidecar/vscode-ext-host/dist
+COPY --from=vscode-host /node_modules ./sidecar/vscode-ext-host/node_modules
+COPY --from=webclone-host /dist ./sidecar/webclone/dist
+COPY --from=webclone-host /node_modules ./sidecar/webclone/node_modules
+COPY --from=tui-host /node_modules /opt/cognia-tui-deps/node_modules
+COPY tmp-cognia-e2e-npm /opt/cognia-e2e-bin/npm
+RUN chmod +x /opt/cognia-e2e-bin/npm
+RUN PATH=/opt/cognia-e2e-bin:$PATH NODE_OPTIONS=--max-old-space-size=8192 \
+    node scripts/build/build-cli-binary.mjs --layout-only
+
+FROM node:26-bookworm-slim AS codeserver-preload
+ARG TARGETARCH
+ARG CODE_SERVER_VERSION=4.128.0
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && case "$TARGETARCH" in \
+         amd64) digest=79ba26bf186e5268a22b7c17b30a5f288a16c37791f0b86c27859e8fef103188 ;; \
+         arm64) digest=f8f02c2a81d1a433a4d132716a6f0405f690f6d70dd955942e95e87356db8a10 ;; \
+         *) echo "unsupported code-server architecture: $TARGETARCH" >&2; exit 1 ;; \
+       esac \
+    && asset="code-server-${CODE_SERVER_VERSION}-linux-${TARGETARCH}.tar.gz" \
+    && curl --fail --location --proto '=https' --tlsv1.2 \
+         "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/${asset}" \
+         --output "/tmp/${asset}" \
+    && echo "${digest}  /tmp/${asset}" | sha256sum --check --strict \
+    && mkdir -p "/opt/cognia/code-server/${CODE_SERVER_VERSION}" \
+    && tar -xzf "/tmp/${asset}" --strip-components=1 \
+         -C "/opt/cognia/code-server/${CODE_SERVER_VERSION}" \
+    && rm -f "/tmp/${asset}"
+
+FROM node:26.3.1-bookworm-slim AS plugin-node-runtime
+RUN node --version
+
+FROM node:26-bookworm-slim AS runtime-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       ca-certificates libssl3 curl git \
+       libgtk-3-0 libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 \
+       libsoup-3.0-0 libayatana-appindicator3-1 librsvg2-2 libpipewire-0.3-0 libgbm1 \
+    && rm -rf /var/lib/apt/lists/*
+RUN groupadd --system --gid 10001 cognia \
+    && useradd --system --uid 10001 --gid cognia --home-dir /data --shell /usr/sbin/nologin cognia \
+    && mkdir -p /data \
+    && chown -R cognia:cognia /data
+COPY --from=builder /work/target/release/cognia-server /usr/local/bin/cognia-server
+COPY --from=builder /work/target/release/cognia /usr/local/bin/cognia
+COPY --from=brain-builder /work/cli/dist/bin/cognia-agent-layout /app/brain
+COPY --from=brain-builder /work/sidecar/codeserver-agent-ext/cognia-agent-bridge.vsix /opt/cognia/codeserver-agent-ext/cognia-agent-bridge.vsix
+COPY --from=codeserver-preload /opt/cognia/code-server /opt/cognia/code-server
+COPY --from=plugin-node-runtime /usr/local/bin/node /opt/cognia/plugin-node/bin/node
+COPY scripts/smoke/stub-acp-agent.mjs /opt/cognia/smoke/stub-acp-agent.mjs
+ENV COGNIA_DATA_DIR=/data \
+    COGNIA_BRAIN_ENTRY=/app/brain/cli.mjs \
+    COGNIA_PLUGIN_NODE_PATH=/opt/cognia/plugin-node/bin/node \
+    COGNIA_SIDECAR_SCRIPT=/app/brain/sidecar/claude-host.mjs \
+    COGNIA_VSCODE_EXT_HOST_SCRIPT=/app/brain/sidecar/vscode-ext-host/dist/host.js \
+    COGNIA_MCP_SIDECAR_PATH=/app/brain/sidecar/cognia-mcp.mjs
+ENV COGNIA_CODE_SERVER_BIN=/opt/cognia/code-server/4.128.0/bin/code-server \
+    COGNIA_CODE_SERVER_AGENT_VSIX=/opt/cognia/codeserver-agent-ext/cognia-agent-bridge.vsix
+VOLUME /data
+EXPOSE 27890
+USER 10001:10001
+ENTRYPOINT ["/usr/local/bin/cognia-server"]
+CMD ["serve", "--port", "27890"]
+
+FROM runtime-slim AS runtime-full
+USER root
+COPY deploy/runner/install-agents.sh /tmp/install-agents.sh
+RUN bash /tmp/install-agents.sh \
+    && rm -f /tmp/install-agents.sh \
+    && rm -rf /var/lib/apt/lists/*
+USER 10001:10001

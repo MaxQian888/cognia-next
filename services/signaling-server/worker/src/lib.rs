@@ -13,7 +13,7 @@
 //! The application-level ECDSA-authenticated AES-GCM envelope inside
 //! `Relay.payload` is opaque to the Worker and verified end-to-end by peers.
 
-use cognia_signaling_core::policy::is_origin_allowed;
+use cognia_signaling_core::policy::{is_origin_allowed, is_valid_allowed_origin};
 use worker::*;
 
 mod room;
@@ -39,9 +39,10 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 }
 
 /// Parse the comma-separated `SIGNALING_ALLOWED_ORIGINS` env var into a list.
-/// Unset / blank yields an empty list (allow all).
-fn allowed_origins(env: &Env) -> Vec<String> {
-    env.var("SIGNALING_ALLOWED_ORIGINS")
+/// Unset / blank yields an empty list (same-origin only).
+fn allowed_origins(env: &Env) -> Result<Vec<String>> {
+    let origins = env
+        .var("SIGNALING_ALLOWED_ORIGINS")
         .map(|v| {
             v.to_string()
                 .split(',')
@@ -49,7 +50,16 @@ fn allowed_origins(env: &Env) -> Vec<String> {
                 .filter(|o| !o.is_empty())
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if let Some(invalid) = origins
+        .iter()
+        .find(|origin| !is_valid_allowed_origin(origin))
+    {
+        return Err(Error::RustError(format!(
+            "SIGNALING_ALLOWED_ORIGINS entry must be an exact HTTPS origin: {invalid}"
+        )));
+    }
+    Ok(origins)
 }
 
 /// Resolve the room Durable Object from `?rid=` and forward the WebSocket
@@ -61,12 +71,15 @@ async fn route_signaling(req: Request, env: Env) -> Result<Response> {
         return Response::error("expected websocket upgrade", 426);
     }
 
-    // Origin allowlist (opt-in). Empty allowlist or a missing Origin (native
-    // clients never send one) passes; only a present-but-unlisted browser
-    // Origin is refused. Mirrors the axum server's `ws_upgrade` check via the
-    // shared `is_origin_allowed`.
+    // Native clients omit Origin. Browser clients must be same-origin or match
+    // the explicit HTTPS split-origin allowlist. Mirrors the axum server.
     let origin = req.headers().get("Origin")?;
-    if !is_origin_allowed(origin.as_deref(), &allowed_origins(&env)) {
+    let request_origin = req.url()?.origin().ascii_serialization();
+    if !is_origin_allowed(
+        origin.as_deref(),
+        Some(&request_origin),
+        &allowed_origins(&env)?,
+    ) {
         return Response::error("origin not allowed", 403);
     }
 

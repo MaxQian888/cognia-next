@@ -36,8 +36,13 @@ COGNIA_SMOKE_EXEC="kubectl -n cognia-kind exec -i cognia-server-0 --" \
 
 - **Public URL is mandatory**: the base wires `COGNIA_PUBLIC_URL` from the
   `cognia-config` ConfigMap key `publicUrl` (kustomize `configMapGenerator`
-  in every overlay). `cognia-server pair` embeds it in the `cgnp2` payload;
+  in every overlay). `cognia-server pair` embeds it in the `cgnp3` payload;
   leaving it unset used to advertise an unreachable loopback default.
+- **Signaling has internal and public URLs**: set `signalingUrl` to the
+  cluster-internal `ws://signaling:7892/v2/signaling`, and derive
+  `publicSignalingUrl` from `publicUrl` as
+  `wss://<public-host>/v2/signaling`. The base Ingress sends that path to the
+  `signaling:7892` Service before the `/` fallback to `cognia-server`.
 - **Sandboxed runtime**: apply `cluster/runtimeclass-gvisor.yaml` (or kata)
   and set `runtimeClassName: gvisor` on the cognia-server pod spec via the
   tenant overlay. Requires containerd + runsc on the nodes — see the gVisor

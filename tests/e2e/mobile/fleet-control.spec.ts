@@ -10,6 +10,10 @@ import { expect, test, type Page, type WebSocketRoute } from "@/tests/e2e/fixtur
 
 import { bootstrapCogniaMobile } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
+import {
+  companionConfigSecureStorage,
+  provisionMockCompanionConfig,
+} from "./companion-fixture"
 
 const PERMISSION_SESSION_ID = "fleet-e2e-permission"
 const WORKING_SESSION_ID = "fleet-e2e-working"
@@ -64,10 +68,10 @@ async function installFleetDesktop(page: Page): Promise<{
   let socket: WebSocketRoute | null = null
   const baseUrl = mockV2BaseUrl()
 
-  await page.routeWebSocket(/\/ws\/v1\/events(?:\?|$)/, (route) => {
+  await page.routeWebSocket(/\/ws\/events(?:\?|$)/, (route) => {
     socket = route
   })
-  await page.route(`${baseUrl}/api/v1/_rpc/**`, async (route) => {
+  await page.route(`${baseUrl}/api/_rpc/**`, async (route) => {
     const request = route.request()
     const command = new URL(request.url()).pathname.split("/").pop() ?? ""
     const body = (request.postDataJSON() ?? {}) as Record<string, unknown>
@@ -139,18 +143,14 @@ test.describe("mobile — Agent Fleet control", () => {
     page,
   }) => {
     const desktop = await installFleetDesktop(page)
-    const companionConfig = {
-      baseUrl: mockV2BaseUrl(),
-      deviceJwt: "e2e-fleet-jwt",
-      deviceId: "device-e2e-fleet",
-      serverVersion: "1.0.0",
-    }
+    const companionConfig = await provisionMockCompanionConfig(
+      mockV2BaseUrl(),
+      "device-e2e-fleet"
+    )
     await injectCapacitor(page, {
       platform: "android",
       network: { connected: true, connectionType: "wifi" },
-      secureStorage: {
-        "cognia.companion.config.v1": JSON.stringify(companionConfig),
-      },
+      secureStorage: companionConfigSecureStorage(companionConfig),
     })
     await page.goto("/welcome")
     await bootstrapCogniaMobile(page, "paired")

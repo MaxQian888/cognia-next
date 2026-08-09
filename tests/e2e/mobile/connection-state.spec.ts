@@ -8,15 +8,19 @@
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
-import { createMockV2Server, type MockV2Server } from "./mock-v2-server"
+import { createMockCompanionServer, type MockCompanionServer } from "./mock-v2-server"
+import {
+  companionConfigSecureStorage,
+  provisionMockCompanionConfig,
+} from "./companion-fixture"
 import { injectCapacitor } from "../helpers/inject-capacitor"
 import { resetCogniaDb } from "../helpers/db-reset"
 
-let server: MockV2Server
-const COMPANION_CONFIG_KEY = "cognia.companion.config.v1"
+let server: MockCompanionServer
+const COMPANION_BOOK_KEY = "cognia.companion.hosts.v2"
 
 test.beforeAll(async () => {
-  server = createMockV2Server()
+  server = createMockCompanionServer()
   await server.start(0)
 })
 
@@ -27,17 +31,11 @@ test.afterAll(async () => {
 test.beforeEach(async ({ page }) => {
   server.reset()
   server.setStatusResponse("ok")
+  const config = await provisionMockCompanionConfig(server.baseUrl, "device-connection-state")
   await injectCapacitor(page, {
     platform: "android",
     biometricAvailable: true,
-    secureStorage: {
-      [COMPANION_CONFIG_KEY]: JSON.stringify({
-        baseUrl: server.baseUrl,
-        deviceJwt: "device.jwt.value",
-        deviceId: "device_abc",
-        serverVersion: "1.0.0",
-      }),
-    },
+    secureStorage: companionConfigSecureStorage(config),
   })
   await page.goto("/")
   await resetCogniaDb(page)
@@ -83,7 +81,7 @@ test.describe("mobile — paired step + connection state", () => {
         }
       ).__cogniaCapMock
       return mock.secureStorageSnapshot()[key] ?? null
-    }, COMPANION_CONFIG_KEY)
+    }, COMPANION_BOOK_KEY)
     expect(persisted).toBeNull()
   })
 
@@ -112,7 +110,7 @@ test.describe("mobile — paired step + connection state", () => {
         }
       ).__cogniaCapMock
       return mock.secureStorageSnapshot()[key] ?? null
-    }, COMPANION_CONFIG_KEY)
+    }, COMPANION_BOOK_KEY)
     expect(persisted).not.toBeNull()
   })
 })

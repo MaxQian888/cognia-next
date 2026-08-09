@@ -3,7 +3,7 @@
  *
  * Each command goes through the real path: enqueue while offline → network
  * restored → queue runner drains → `CompanionTransport.call()` POSTs
- * `/api/v1/_rpc/<command>` against the shared MockV2Server → row flips to
+ * `/api/_rpc/<command>` against the canonical Companion mock → row flips to
  * "sent". The seed helper inserts a row directly into mobileOutboundQueue so
  * we don't depend on the calling UI surface (which is exercised separately
  * in its dedicated spec, e.g. workflow-surface for workflow_trigger_manual).
@@ -27,6 +27,7 @@
 import { expect, test } from "@/tests/e2e/fixtures/test"
 import { readDexieRow, resetCogniaDb, setCogniaSettings } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
+import { provisionMockCompanionConfig } from "./companion-fixture"
 
 interface QueueRowView {
   status: string
@@ -82,27 +83,21 @@ test.describe("mobile — outbound queue per command", () => {
     // Pair the companion transport with the mock server AFTER the reset
     // (resetCogniaDb wipes storage). Without a companion config the runner's
     // transport.call rejects with not_paired and every row deadletters.
+    const companionConfig = await provisionMockCompanionConfig(
+      mockV2BaseUrl(),
+      `e2e-outbound-queue-${crypto.randomUUID()}`
+    )
     await page.evaluate(
       async (cfg) => {
         const w = window as Window & {
-          __cogniaSaveCompanionConfig?: (c: {
-            baseUrl: string
-            deviceJwt: string
-            deviceId: string
-            serverVersion: string
-          }) => Promise<void>
+          __cogniaSaveCompanionConfig?: (c: unknown) => Promise<void>
         }
         if (typeof w.__cogniaSaveCompanionConfig !== "function") {
           throw new Error("__cogniaSaveCompanionConfig bridge missing — is NEXT_PUBLIC_E2E=1 set?")
         }
         await w.__cogniaSaveCompanionConfig(cfg)
       },
-      {
-        baseUrl: mockV2BaseUrl(),
-        deviceJwt: "e2e-device-jwt",
-        deviceId: "e2e-outbound-queue-device",
-        serverVersion: "1.0.0",
-      }
+      companionConfig
     )
   })
 

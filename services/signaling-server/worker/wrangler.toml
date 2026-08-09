@@ -52,10 +52,9 @@ SIGNALING_MAX_DESKTOPS = "1"
 # by default (home desktop + mobile often share one public IP); the global
 # per-IP defense is the edge Rate Limiting rule documented above.
 SIGNALING_MAX_CONN_PER_IP_PER_ROOM = "4"
-# Comma-separated WebSocket Origin allowlist. Empty = allow all (native clients
-# send no Origin and are always allowed). Set to your web + mobile origins to
-# refuse cross-origin browser connections, e.g.
-# "https://app.cognia.cn,capacitor://localhost,https://localhost".
+# Comma-separated exact HTTPS WebSocket Origin allowlist. Empty = same-origin
+# browser access only; native clients send no Origin and remain allowed. Add
+# only explicit split-origin web deployments, e.g. "https://app.cognia.cn".
 SIGNALING_ALLOWED_ORIGINS = ""
 # 1-in-N Analytics Engine sampling for hot events (relay + per-frame
 # rejections) so a flood can't amplify AE writes. State changes are unsampled.

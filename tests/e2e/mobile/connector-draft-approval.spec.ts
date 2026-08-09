@@ -7,6 +7,10 @@
 import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 import { bootstrapCogniaMobile, readDexieRow, readDexieRows } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
+import {
+  companionConfigSecureStorage,
+  provisionMockCompanionConfig,
+} from "./companion-fixture"
 
 interface DraftRowView {
   status: string
@@ -111,18 +115,14 @@ async function openDraftsWithoutReload(page: Page): Promise<void> {
 
 test.describe("mobile — connector draft approval", () => {
   test.beforeEach(async ({ page }) => {
-    const companionConfig = {
-      baseUrl: mockV2BaseUrl(),
-      deviceJwt: "e2e-device-jwt",
-      deviceId: "e2e-draft-approval-device",
-      serverVersion: "1.0.0",
-    }
+    const companionConfig = await provisionMockCompanionConfig(
+      mockV2BaseUrl(),
+      "e2e-draft-approval-device"
+    )
     await injectCapacitor(page, {
       platform: "android",
       network: { connected: false, connectionType: "none" },
-      secureStorage: {
-        "cognia.companion.config.v1": JSON.stringify(companionConfig),
-      },
+      secureStorage: companionConfigSecureStorage(companionConfig),
     })
     await page.goto("/welcome")
     await bootstrapCogniaMobile(page, "paired")
@@ -138,7 +138,7 @@ test.describe("mobile — connector draft approval", () => {
       content: "Pending reply",
     })
 
-    const rpcUrl = `${mockV2BaseUrl()}/api/v1/_rpc/connector_approve_draft`
+    const rpcUrl = `${mockV2BaseUrl()}/api/_rpc/connector_approve_draft`
     const idempotencyKeys: string[] = []
     let attempts = 0
     await page.route(rpcUrl, async (route) => {

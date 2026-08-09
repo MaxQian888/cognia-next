@@ -82,14 +82,20 @@ services:
       # ── OIDC / Logto (ADR-0059 cloud multi-user) — OFF unless BOTH issuer
       # and audience are set. When present, the companion gateway
       # (src-tauri/src/companion_api/oidc.rs) accepts Logto-issued JWT access
-      # tokens (validated via JWKS) in addition to the local HS256 device
-      # tokens. CRITICAL: COGNIA_LOGTO_ISSUER must equal the token `iss` claim,
+      # tokens (validated via JWKS) for OIDC device registration. Steady-state
+      # device calls use short-lived P-256 DPoP-bound tokens. CRITICAL:
+      # COGNIA_LOGTO_ISSUER must equal the token `iss` claim,
       # i.e. `${LOGTO_ENDPOINT}/oidc`, and be reachable FROM this container —
       # see LOGTO.md for the issuer-consistency footgun.
       COGNIA_LOGTO_ISSUER: ${COGNIA_LOGTO_ISSUER:-}
       COGNIA_LOGTO_AUDIENCE: ${COGNIA_LOGTO_AUDIENCE:-}
+      COGNIA_LOGTO_WEB_CLIENT_ID: ${COGNIA_LOGTO_WEB_CLIENT_ID:-}
       COGNIA_LOGTO_REQUIRED_SCOPES: ${COGNIA_LOGTO_REQUIRED_SCOPES:-}
       COGNIA_LOGTO_JWKS_TTL_SECS: ${COGNIA_LOGTO_JWKS_TTL_SECS:-}
+      COGNIA_SIGNALING_URL: ${COGNIA_SIGNALING_URL:-ws://signaling:7892/v2/signaling}
+      COGNIA_PUBLIC_SIGNALING_URL: ${COGNIA_PUBLIC_SIGNALING_URL:-}
+      COGNIA_ALLOWED_WEB_ORIGINS: ${COGNIA_ALLOWED_WEB_ORIGINS:-}
+      COGNIA_ALLOW_PRIVATE_NETWORK: ${COGNIA_ALLOW_PRIVATE_NETWORK:-false}
     volumes:
       - cognia_data:/data
     ports:
@@ -102,7 +108,7 @@ services:
       # stock container. On AppArmor hosts (Ubuntu) also add: apparmor=unconfined.
       - seccomp=./seccomp/cognia-userns.json
     healthcheck:
-      test: ["CMD", "curl", "-kfsS", "https://localhost:27890/api/v1/healthz"]
+      test: ["CMD", "curl", "-kfsS", "https://localhost:27890/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -111,9 +117,17 @@ services:
 
   caddy:
     profiles: [tls]
-    image: caddy:2.10
+    image: ${COGNIA_WEB_IMAGE:-ghcr.io/maxqian888/cognia-web:latest}
+    build:
+      context: ../../
+      dockerfile: deploy/compose/Dockerfile.web
+      args:
+        NEXT_PUBLIC_E2E: ${NEXT_PUBLIC_E2E:-}
+        NEXT_PUBLIC_ACCOUNT_GATE: ${NEXT_PUBLIC_ACCOUNT_GATE:-}
     depends_on:
       cognia-server:
+        condition: service_healthy
+      signaling:
         condition: service_healthy
     environment:
       COGNIA_DOMAIN: ${COGNIA_DOMAIN:-localhost}
@@ -123,7 +137,6 @@ services:
       - "443:443"
       - "443:443/udp"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - cognia_data:/cognia-data:ro
       - caddy_data:/data
       - caddy_config:/config

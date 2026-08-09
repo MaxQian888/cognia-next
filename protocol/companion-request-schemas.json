@@ -751,7 +751,7 @@
           "description": "Remember the allow/deny for this session's matching tuple."
         },
         "prompt": {
-          "description": "Optional prompt echo so a persisted grant keys on the right tuple.",
+          "description": "Deprecated prompt echo accepted for compatibility and ignored by the broker.",
           "oneOf": [
             {
               "type": "object",
@@ -761,9 +761,18 @@
               "type": "null"
             }
           ]
+        },
+        "grantDurationMs": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0
         }
       },
       "additionalProperties": false
+    },
+    "automation_consent_pending": {
+      "type": "object",
+      "description": "Empty body. Returns all unexpired broker requests with remaining timeout budgets."
     },
     "companion_can_control": {
       "type": "object",
@@ -1479,6 +1488,67 @@
     },
     "connectors_health": {
       "type": "object"
+    },
+    "secret_store_get": {
+      "type": "object",
+      "required": ["input"],
+      "properties": {
+        "input": {
+          "type": "object",
+          "required": ["namespace", "key"],
+          "properties": {
+            "namespace": { "type": "string", "minLength": 1 },
+            "key": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "remote_notification_publish": {
+      "type": "object",
+      "required": ["title", "body"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "body": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "level": { "type": "string", "enum": ["info", "success", "warning", "error"] },
+        "href": { "type": "string", "pattern": "^/(?!/)" }
+      },
+      "additionalProperties": false
+    },
+    "secret_store_set": {
+      "type": "object",
+      "required": ["input"],
+      "properties": {
+        "input": {
+          "type": "object",
+          "required": ["namespace", "key", "value"],
+          "properties": {
+            "namespace": { "type": "string", "minLength": 1 },
+            "key": { "type": "string", "minLength": 1 },
+            "value": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "secret_store_delete": {
+      "type": "object",
+      "required": ["input"],
+      "properties": {
+        "input": {
+          "type": "object",
+          "required": ["namespace", "key"],
+          "properties": {
+            "namespace": { "type": "string", "minLength": 1 },
+            "key": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     },
     "keyring_secret_get": {
       "type": "object",
@@ -4835,6 +4905,65 @@
           "type": "string"
         }
       },
+      "additionalProperties": false
+    },
+    "browser_runtime_status": {
+      "type": "object",
+      "properties": { "workspaceId": { "type": "string", "minLength": 1 } },
+      "additionalProperties": false
+    },
+    "ocr_list_native_backends": { "type": "object" },
+    "ocr_list_available_backends": { "type": "object" },
+    "ocr_model_status": {
+      "type": "object",
+      "required": ["backend"],
+      "properties": {
+        "backend": { "type": "string", "minLength": 1 },
+        "variant": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "ocr_extract_native": {
+      "type": "object",
+      "required": ["payload"],
+      "properties": {
+        "payload": {
+          "type": "object",
+          "required": ["backend", "bytes", "mime_type", "languages"],
+          "properties": {
+            "backend": { "type": "string", "minLength": 1 },
+            "bytes": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 0, "maximum": 255 },
+              "maxItems": 52428800
+            },
+            "mime_type": { "type": "string", "minLength": 1 },
+            "languages": { "type": "array", "items": { "type": "string" } },
+            "model_variant": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "ocr_download_model": {
+      "type": "object",
+      "required": ["backend"],
+      "properties": {
+        "backend": { "type": "string", "minLength": 1 },
+        "variant": { "type": ["string", "null"] },
+        "requestId": { "type": ["string", "null"] },
+        "request_id": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "ocr_cancel_model_download": {
+      "type": "object",
+      "properties": {
+        "requestId": { "type": "string", "minLength": 1 },
+        "request_id": { "type": "string", "minLength": 1 }
+      },
+      "anyOf": [{ "required": ["requestId"] }, { "required": ["request_id"] }],
       "additionalProperties": false
     },
     "lark_metrics_record": {

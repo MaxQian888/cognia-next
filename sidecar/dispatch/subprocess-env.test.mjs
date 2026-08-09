@@ -55,7 +55,7 @@ test("spec sessions strip every inherited credential/route/proxy var", () => {
   }
 })
 
-test("the spec env overlay is authoritative and re-adds only what it declares", () => {
+test("the spec env overlay cannot introduce a per-session proxy escape hatch", () => {
   const env = buildSubprocessEnv(
     {
       execution,
@@ -69,8 +69,32 @@ test("the spec env overlay is authoritative and re-adds only what it declares", 
   )
   assert.equal(env.ANTHROPIC_API_KEY, "sk-cognia-rt-ticket")
   assert.equal(env.ANTHROPIC_BASE_URL, "http://127.0.0.1:47823/v1")
-  assert.equal(env.HTTPS_PROXY, "http://spec-approved-proxy:1")
+  assert.equal(env.HTTPS_PROXY, undefined)
   assert.equal(env.OPENAI_API_KEY, undefined)
+})
+
+test("a host-managed proxy is inherited by spec subprocesses and outranks the overlay", () => {
+  const env = buildSubprocessEnv(
+    {
+      execution,
+      env: {
+        ANTHROPIC_API_KEY: "sk-cognia-rt-ticket",
+        HTTPS_PROXY: "http://renderer-override.invalid:1",
+      },
+    },
+    {
+      ...hostileParent,
+      COGNIA_MANAGED_NETWORK_PROXY: "1",
+      HTTP_PROXY: "http://managed.proxy:8080",
+      HTTPS_PROXY: "http://managed.proxy:8080",
+      NO_PROXY: "localhost,127.0.0.0/8,::1",
+    }
+  )
+
+  assert.equal(env.HTTP_PROXY, "http://managed.proxy:8080")
+  assert.equal(env.HTTPS_PROXY, "http://managed.proxy:8080")
+  assert.equal(env.NO_PROXY, "localhost,127.0.0.0/8,::1")
+  assert.equal(env.COGNIA_MANAGED_NETWORK_PROXY, undefined)
 })
 
 test("legacy sessions (no execution spec) keep the historical spread", () => {

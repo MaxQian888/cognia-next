@@ -10,6 +10,10 @@ import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 
 import { bootstrapCogniaMobile, readDexieRows } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
+import {
+  companionConfigSecureStorage,
+  provisionMockCompanionConfig,
+} from "./companion-fixture"
 
 const CONTEXT_SERVER_ID = "mcp-e2e-context"
 const FILESYSTEM_SERVER_ID = "mcp-e2e-filesystem"
@@ -67,7 +71,7 @@ async function installMcpDesktop(page: Page): Promise<{
     },
   ]
 
-  await page.route(`${baseUrl}/api/v1/_rpc/**`, async (route) => {
+  await page.route(`${baseUrl}/api/_rpc/**`, async (route) => {
     const request = route.request()
     const command = new URL(request.url()).pathname.split("/").pop() ?? ""
     const body = (request.postDataJSON() ?? {}) as Record<string, unknown>
@@ -104,18 +108,14 @@ test.describe("mobile — MCP server settings", () => {
     page,
   }) => {
     const desktop = await installMcpDesktop(page)
-    const companionConfig = {
-      baseUrl: mockV2BaseUrl(),
-      deviceJwt: "e2e-mcp-jwt",
-      deviceId: "device-e2e-mcp",
-      serverVersion: "1.0.0",
-    }
+    const companionConfig = await provisionMockCompanionConfig(
+      mockV2BaseUrl(),
+      "device-e2e-mcp"
+    )
     await injectCapacitor(page, {
       platform: "android",
       network: { connected: true, connectionType: "wifi" },
-      secureStorage: {
-        "cognia.companion.config.v1": JSON.stringify(companionConfig),
-      },
+      secureStorage: companionConfigSecureStorage(companionConfig),
     })
     await page.goto("/welcome")
     await bootstrapCogniaMobile(page, "paired")

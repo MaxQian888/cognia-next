@@ -81,6 +81,9 @@ export const ENV_STRIP_PATTERNS = [
   /_TOKEN$/i,
 ]
 
+const PROXY_ENV_RE = /^(HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$/i
+const MANAGED_PROXY_MARKER = "COGNIA_MANAGED_NETWORK_PROXY"
+
 export function isStrippedName(name) {
   return ENV_STRIP_PATTERNS.some((pattern) => pattern.test(name))
 }
@@ -154,21 +157,23 @@ export function childTelemetryEnv(sendOptions, parentEnv = process.env) {
  * Build the subprocess env for a send.
  *
  * With a frozen spec: allowlisted parent vars + child telemetry + the
- * `sendOptions.env` overlay (the spec's env is authoritative — proxy vars or
- * credentials come back ONLY if the resolver put them there). Without one: the
- * legacy spread.
+ * `sendOptions.env` overlay. Provider credentials remain spec-authoritative,
+ * while network proxy vars come only from a Rust-host-marked process policy;
+ * the renderer cannot introduce a per-session proxy override. Without one:
+ * the legacy spread.
  *
  * The telemetry block sits BETWEEN the allowlist and the overlay: it is a host
  * decision, so it beats whatever leaked through the allowlist, and the
  * spec-approved overlay still beats it — a resolver that deliberately sets an
- * OTel variable stays authoritative.
+ * OTel variable stays authoritative. The managed proxy block is applied last
+ * because routing is a host policy rather than a session credential.
  *
  * @param {Record<string, any>} sendOptions
  * @param {NodeJS.ProcessEnv} [parentEnv]
  * @returns {Record<string, string>}
  */
 export function buildSubprocessEnv(sendOptions, parentEnv = process.env) {
-  const overlay = sendOptions?.env ?? {}
+  const rawOverlay = sendOptions?.env ?? {}
   const claudeTempEnv =
     process.platform === "darwin" && typeof parentEnv.TMPDIR === "string" && parentEnv.TMPDIR !== ""
       ? { CLAUDE_CODE_TMPDIR: parentEnv.TMPDIR }
@@ -178,7 +183,22 @@ export function buildSubprocessEnv(sendOptions, parentEnv = process.env) {
     // spread already passes the parent's OTEL_* through anyway. On macOS,
     // redirect Claude's hard-coded /tmp base to the app's writable per-user
     // temp directory; an explicit session overlay remains authoritative.
-    return { ...parentEnv, ...claudeTempEnv, ...overlay }
+    return { ...parentEnv, ...claudeTempEnv, ...rawOverlay }
+  }
+  // The renderer is not allowed to select a one-off proxy or shuttle proxy
+  // credentials back into the sidecar. Only the Rust host can mark the
+  // process-level proxy env as managed; those values then apply to every
+  // frozen execution and override any renderer-provided proxy keys.
+  const overlay = Object.fromEntries(
+    Object.entries(rawOverlay).filter(([name]) => !PROXY_ENV_RE.test(name))
+  )
+  const managedProxy = {}
+  if (parentEnv[MANAGED_PROXY_MARKER] === "1") {
+    for (const [name, value] of Object.entries(parentEnv)) {
+      if (PROXY_ENV_RE.test(name) && typeof value === "string" && value !== "") {
+        managedProxy[name] = value
+      }
+    }
   }
   const base = {}
   for (const name of Object.keys(parentEnv)) {
@@ -191,6 +211,7 @@ export function buildSubprocessEnv(sendOptions, parentEnv = process.env) {
     ...childTelemetryEnv(sendOptions, parentEnv),
     ...claudeTempEnv,
     ...overlay,
+    ...managedProxy,
   }
 }
 

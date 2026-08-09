@@ -6,6 +6,7 @@
     { "path": "/readyz", "method": "get", "document": "public" },
     { "path": "/.well-known/agent-card.json", "method": "get", "document": "public" },
 
+    { "path": "/api/auth/config", "method": "get", "document": "public" },
     { "path": "/api/auth/device/challenge", "method": "post", "document": "public" },
     { "path": "/api/auth/device/register", "method": "post", "document": "public" },
     { "path": "/api/auth/token", "method": "post", "document": "public" },
@@ -24,6 +25,11 @@
     { "path": "/api/workflow-runs/{run_id}/cancel", "method": "post", "document": "public" },
     { "path": "/api/devices", "method": "get", "document": "public" },
     { "path": "/api/devices/{device_id}", "method": "delete", "document": "public" },
+    {
+      "path": "/api/devices/{device_id}/capabilities",
+      "method": "put",
+      "document": "public"
+    },
     { "path": "/api/invitations", "method": "post", "document": "public" },
     { "path": "/api/policies", "method": "get", "document": "public" },
     { "path": "/api/policies", "method": "post", "document": "public" },
@@ -41,15 +47,6 @@
       "method": "get",
       "document": "public"
     },
-
-    { "path": "/api/v1/auth/pair/issue", "method": "post", "document": "public" },
-    { "path": "/api/v1/auth/pair", "method": "post", "document": "public" },
-    { "path": "/api/v1/auth/pair/redeem-code", "method": "post", "document": "public" },
-    { "path": "/api/v1/_rpc/{name}", "method": "post", "document": "public" },
-    { "path": "/api/v1/terminal/socket-ticket", "method": "post", "document": "public" },
-    { "path": "/api/v1/sessions/{session_id}/media/{hash}", "method": "get", "document": "public" },
-    { "path": "/ws/v1/events", "method": "get", "document": "public" },
-    { "path": "/ws/v1/terminal", "method": "get", "document": "public" },
 
     { "path": "/internal/_rpc/{name}", "method": "post", "document": "headless" },
     { "path": "/internal/events", "method": "get", "document": "headless" },

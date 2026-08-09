@@ -1,5 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import { LOCAL_PROVIDER_NAMES } from "../../../packages/provider-types/src/local-provider.ts"
 import {
   BUILTIN_PROTOCOL_NAMES,
   PROVIDER_PROTOCOL,
@@ -63,7 +64,7 @@ test("PROVIDER_PROTOCOL is the de-drifted union of every prior copy", () => {
     assert.equal(PROVIDER_PROTOCOL[id], "openai", id)
   }
   // Every local engine maps to openai.
-  for (const id of ["ollama", "lmstudio", "llamacpp", "vllm", "localai", "jan", "koboldcpp"]) {
+  for (const id of LOCAL_PROVIDER_NAMES) {
     assert.equal(PROVIDER_PROTOCOL[id], "openai", id)
   }
   // Native families.
