@@ -92,6 +92,41 @@ Live2D/SVG rig but never spoke.
   (`clear`/`getStats`/`getCacheSize`) has no UI consumer yet. `TTSNormalizedError`
   is unused and superseded by the structured fields on `TTSResponse`.
 
+### Provider and transport repair (2026-08-08)
+
+- `local-openai-compatible` is the single stable local provider id. It does
+  not bundle an engine: LocalAI, Kokoro-FastAPI, Piper, or another server is
+  supported only when it exposes the OpenAI-compatible `POST /audio/speech`
+  contract. Model and voice are manual because that contract defines no
+  universal voice-discovery endpoint. The optional API key stays in the TTS
+  keyring and never participates in cache identity.
+- Its host transport accepts only HTTP(S) loopback targets (`localhost`,
+  `127.0.0.0/8`, and `::1`) and never follows redirects. Normal desktop cloud
+  calls also run host-side with credential injection; the renderer receives
+  credential presence for the active provider, not stored secrets. Pure web
+  calls remain best-effort and subject to explicit CORS/security warnings.
+- Before any text reaches a cloud TTS adapter, the app host applies the shared
+  outbound PII gate and returns a structured `pii-blocked` failure when the
+  text is unsafe. Device system TTS and the loopback-only local provider never
+  leave the device and are exempt from this cloud boundary.
+- Buffered adapters accept `AbortSignal` and native request ids. `stop()`
+  cancels active synthesis, retry backoff, and prefetch through
+  `tts_proxy_cancel`; stale/cancelled results cannot play or enter the cache.
+  The cache seam preserves the structured `TTSResponse` and stores successful
+  audio only.
+- Buffered HTTP providers no longer claim transport streaming. The persisted
+  `ttsStreamingEnabled` flag is retained for compatibility but means “preload
+  next segment”. Mobile playback always resolves to device system TTS; a cloud
+  selection on mobile configures the desktop host only.
+- Raw PCM is removed from ordinary buffered selectors. Legacy PCM settings
+  normalize to MP3; headerless PCM is a structured unsupported-format error.
+  MIME types are normalized from `Content-Type` with parameters removed; the
+  selected format is used as fallback only for generic binary responses.
+- ElevenLabs loads real account voice ids while retaining manual-id entry. A
+  legacy saved name migrates only when it uniquely matches a discovered voice.
+  Provider tests disable fallback and the test action becomes Cancel while a
+  request is active.
+
 ## Consequences
 
 Read-aloud narrates clean prose and starts sooner. Two structurally-unsound

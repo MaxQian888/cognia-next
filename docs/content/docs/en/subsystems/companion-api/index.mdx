@@ -40,6 +40,7 @@ authority.
 | --- | --- |
 | Health and readiness | `GET /healthz`, `GET /livez`, `GET /readyz` |
 | Device bootstrap | `POST /api/auth/device/challenge`, `POST /api/auth/device/register` |
+| Browser deployment config | `GET /api/auth/config` |
 | Short-lived credential | `POST /api/auth/token` |
 | WebSocket ticket | `POST /api/auth/socket-ticket` |
 | RPC dispatch | `POST /api/_rpc/{name}` |
@@ -47,8 +48,8 @@ authority.
 | Event stream | `GET /ws/events?ticket=…&since=…` |
 | Terminal and browser sockets | `/ws/terminal/*`, `/ws/browser/{session_id}` |
 
-`/api/v1/*` and `/ws/v1/*` are explicitly deprecated compatibility routes for released clients.
-New callers must use the canonical routes and DPoP flow.
+No `/api/v1/*`, `/ws/v1/*`, `cgnp2`, or bearer-device-JWT compatibility surface is mounted. Older
+clients must complete a new `cgnp3` pairing and use the DPoP flow.
 
 ## Generated contract
 
@@ -65,7 +66,7 @@ against the dispatcher. A route, descriptor, or allowlist change therefore canno
 committed OpenAPI files stale.
 
 <Cards>
-  <Card title="Server and authentication" href="./server-and-auth" description="DPoP registration, access tokens, socket tickets, and legacy compatibility." />
+  <Card title="Server and authentication" href="./server-and-auth" description="cgnp3, DPoP registration, access tokens, socket tickets, and OIDC." />
   <Card title="RPC command manifest" href="./rpc-manifest" description="How the generated public and Headless command inventories are classified." />
   <Card title="Headless service plane" href="./headless-service-plane" description="Start and debug all agent capabilities without rendering the frontend." />
   <Card title="Events and WebSockets" href="./events-ws-push" description="Canonical ticket-authenticated sockets and replay semantics." />

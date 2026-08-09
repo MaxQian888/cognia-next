@@ -1,77 +1,45 @@
 openapi: 3.1.0
 info:
-  title: Cognia External Bridge — MCP HTTP transport
-  version: "0.1.0"
+  title: Cognia External Bridge — MCP Streamable HTTP
+  version: "0.2.0"
   license:
     name: MIT
     identifier: MIT
-  summary: Local axum HTTP server forwarding MCP JSON-RPC envelopes to the bundled node sidecar.
+  summary: Canonical loopback MCP Streamable HTTP endpoint backed by the bundled Node sidecar.
   description: |
-    cognia-next exposes its generated wikis, vector RAG, and runtime
-    entities (skills / characters / twins / plugins / agent teams) to
-    external coding agents (Claude Code, Cursor, Cline, Codex) via the
-    Model Context Protocol. The transport is a node sidecar speaking MCP
-    over stdio; this HTTP server is a thin pass-through that forwards
-    JSON-RPC envelopes to the sidecar and returns the response verbatim.
+    Cognia exposes its inbound External Bridge through one MCP transport:
+    `GET|POST|DELETE /mcp/stream`. The legacy `/mcp` and `/mcp/sse`
+    facades are not mounted.
 
-    ## Bind strategy
+    The listener is loopback-only and rejects non-loopback Host or Origin
+    values. Each client has an independent credential verifier, identity,
+    expiry, and scope set. The authenticated client is bound to every MCP
+    session; a session ID cannot be reused by another client.
 
-    The listener always binds **127.0.0.1** only. There is no LAN toggle,
-    no IP allowlist (unnecessary because of loopback-only). Multi-tenant
-    isolation is by bearer token alone — every concrete external agent
-    pastes its own bearer when configuring an MCP server entry.
-
-    ## Bearer token
-
-    A static string compared in constant time
-    (`subtle::ConstantTimeEq`). Length mismatch is revealed (early-out);
-    content compare is always constant-time so a token oracle attack via
-    response timing is not possible.
-
-    Tokens rotate via the renderer's
-    `ExternalBridgeSettings.bearerToken` setting; the server is restarted
-    when the token changes.
-
-    ## Body limit
-
-    1 MiB (`tower_http::limit::RequestBodyLimitLayer`). MCP envelopes can
-    legitimately be large (file contents, embedding payloads), so the cap
-    is generous compared to the 64 KiB cap on the mobile companion API.
-
-    ## SSE
-
-    `POST /mcp/sse` is wired but returns 501 in this build. SSE streaming
-    lands in Phase 2 of the External Bridge plan. Until then, every
-    streamed MCP response is delivered as the result of a single
-    `POST /mcp` round-trip.
-
+    An initialize request without `Mcp-Session-Id` creates a session. Active
+    sessions are capped at 128 and idle sessions are reclaimed after five
+    minutes. Requests above capacity fail with an explicit 503 overload error.
+    Request bodies are limited to 1 MiB.
 servers:
   - url: http://127.0.0.1:{port}
-    description: Loopback bind (port chosen by the renderer; random ephemeral by default).
+    description: Loopback bind managed by the Cognia host.
     variables:
       port:
         default: "47920"
-        description: Bound port; reported back via the `mcp_server_status` Tauri command.
-
+        description: Bound port reported by the External Bridge status API.
 tags:
   - name: health
-    description: Liveness probe (no auth required).
+    description: Liveness probe; no bearer credential required.
   - name: mcp
-    description: JSON-RPC pass-through to the bundled sidecar.
-
+    description: MCP Streamable HTTP transport.
 security:
   - bearerAuth: []
-
 paths:
   /healthz:
     get:
       operationId: mcpHealth
       tags: [health]
-      summary: Liveness probe — no auth required.
-      description: |
-        Always returns 200 with `{ ok: true, version }`. Used by external
-        agents to verify the server is reachable before sending an
-        `initialize` envelope. Explicitly exempted from bearer-auth.
+      summary: Liveness probe.
       security: []
       responses:
         "200":
@@ -81,133 +49,174 @@ paths:
               schema: { $ref: "#/components/schemas/HealthResponse" }
               examples:
                 ok: { value: { ok: true, version: "0.1.0" } }
+        "403":
+          description: Non-loopback Host or Origin was rejected.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
 
-  /mcp:
+  /mcp/stream:
     post:
-      operationId: mcpPost
+      operationId: mcpStreamPost
       tags: [mcp]
-      summary: Forward a JSON-RPC envelope to the MCP sidecar and return its response.
+      summary: Create a session or send a JSON-RPC request within an existing session.
       description: |
-        The body must be valid UTF-8 JSON. The exact shape is the
-        Model Context Protocol's JSON-RPC 2.0 envelope (see
-        https://modelcontextprotocol.io/specification). Common methods:
-        `initialize`, `notifications/initialized`, `tools/list`,
-        `tools/call`, `resources/list`, `resources/read`,
-        `prompts/list`, `prompts/get`.
-
-        The Rust handler does not parse or rewrite the envelope — it is a
-        line-protocol pass-through to the sidecar's stdin/stdout. The
-        sidecar's response is forwarded verbatim as the JSON body of this
-        response.
+        Send `initialize` without `Mcp-Session-Id` to create a session. The
+        response includes the new session ID. All later requests carry the
+        same header. Notifications without a JSON-RPC `id` return 202.
+        Requests accepting `text/event-stream` receive SSE through the matching
+        response; other requests receive one JSON response.
+      parameters:
+        - $ref: "#/components/parameters/McpSessionIdOptional"
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/JsonRpcRequest" }
-            examples:
-              initialize:
-                value:
-                  jsonrpc: "2.0"
-                  id: 1
-                  method: "initialize"
-                  params:
-                    protocolVersion: "2024-11-05"
-                    capabilities: {}
-                    clientInfo: { name: "claude-code", version: "1.0.0" }
-              toolsList:
-                value: { jsonrpc: "2.0", id: 2, method: "tools/list" }
-              toolsCallWikiSearch:
-                value:
-                  jsonrpc: "2.0"
-                  id: 3
-                  method: "tools/call"
-                  params:
-                    name: "wiki_search"
-                    arguments: { query: "vector store schema" }
       responses:
         "200":
-          description: |
-            JSON-RPC response from the sidecar. The handler does not validate
-            the response shape; whatever the sidecar wrote is forwarded.
+          description: JSON-RPC response or SSE stream. New sessions include `Mcp-Session-Id`.
+          headers:
+            Mcp-Session-Id:
+              $ref: "#/components/headers/McpSessionId"
           content:
             application/json:
               schema: { $ref: "#/components/schemas/JsonRpcResponse" }
-              examples:
-                resultOk:
-                  value:
-                    jsonrpc: "2.0"
-                    id: 2
-                    result:
-                      tools:
-                        - { name: "wiki_search", description: "Search the indexed wiki." }
-                        - { name: "wiki_read", description: "Read a specific wiki page." }
-                        - { name: "rag_search", description: "Vector-search the wiki + chunks." }
-                        - { name: "runtime_query", description: "Inspect a runtime entity." }
-                error:
-                  value:
-                    jsonrpc: "2.0"
-                    id: 99
-                    error: { code: -32601, message: "Method not found" }
+            text/event-stream:
+              schema: { type: string }
+        "202":
+          description: Notification accepted; no JSON-RPC response is expected.
+          headers:
+            Mcp-Session-Id:
+              $ref: "#/components/headers/McpSessionId"
         "400":
-          description: Body was non-UTF-8 or empty.
+          description: Invalid JSON, empty body, or missing session ID for a non-initialize request.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SimpleError" }
-              examples:
-                empty: { value: { error: "request body required" } }
-                notUtf8: { value: { error: "request body must be UTF-8" } }
         "401":
-          description: Missing or wrong bearer token.
+          description: Missing, invalid, or expired client credential.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SimpleError" }
-              examples:
-                missing: { value: { error: "missing bearer token" } }
-                wrong: { value: { error: "invalid token" } }
+        "403":
+          description: Cross-origin request or session/client identity mismatch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+        "404":
+          description: Unknown or reclaimed session ID.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
         "413":
           description: Request body exceeded 1 MiB.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/SimpleError" }
         "502":
-          description: |
-            Sidecar process error — failed to spawn, IO error, or terminated mid-roundtrip.
+          description: The session sidecar could not start or accept the request.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SimpleError" }
-              examples:
-                spawn:
-                  value: { error: "sidecar error: spawn node: ENOENT" }
-
-  /mcp/sse:
-    post:
-      operationId: mcpSse
+        "503":
+          description: The 128-session admission limit has been reached.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+              example: { error: "MCP session capacity exceeded (maximum 128 active sessions)" }
+        "504":
+          description: Timed out waiting for the matching sidecar response.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+    get:
+      operationId: mcpStreamGet
       tags: [mcp]
-      summary: SSE streaming (Phase 2 — currently returns 501).
-      description: |
-        Stub for the streaming MCP transport. Phase 1 returns 501 with a
-        message pointing the caller at `POST /mcp`.
+      summary: Open the server-to-client SSE stream for an existing session.
+      parameters:
+        - $ref: "#/components/parameters/McpSessionIdRequired"
       responses:
-        "501":
-          description: Not implemented.
+        "200":
+          description: Long-lived SSE stream of JSON-RPC messages.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400":
+          description: Missing session ID.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SimpleError" }
-              examples:
-                notImplemented:
-                  value: { error: "SSE streaming is not implemented in Phase 1; use POST /mcp" }
+        "401":
+          description: Missing, invalid, or expired client credential.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+        "403":
+          description: Session belongs to another client, or request is non-local.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+        "404":
+          description: Unknown or reclaimed session ID.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+    delete:
+      operationId: mcpStreamDelete
+      tags: [mcp]
+      summary: Close an existing session.
+      parameters:
+        - $ref: "#/components/parameters/McpSessionIdRequired"
+      responses:
+        "204":
+          description: Session closed.
+        "400":
+          description: Missing session ID.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+        "401":
+          description: Missing, invalid, or expired client credential.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+        "403":
+          description: Request is non-local.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+        "404":
+          description: Unknown session ID or a session owned by another client.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
 
 components:
+  parameters:
+    McpSessionIdOptional:
+      name: Mcp-Session-Id
+      in: header
+      required: false
+      schema: { type: string, format: uuid }
+      description: Omit only for the initial `initialize` request.
+    McpSessionIdRequired:
+      name: Mcp-Session-Id
+      in: header
+      required: true
+      schema: { type: string, format: uuid }
+      description: Session identifier returned by the initial `initialize` response.
+  headers:
+    McpSessionId:
+      description: Newly created MCP session identifier.
+      schema: { type: string, format: uuid }
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: opaque
       description: |
-        Static bearer string compared in constant time. Configured via
-        the renderer's `ExternalBridgeSettings.bearerToken`. Rotation is
-        a tear-down + restart of the server; in-flight requests are not
-        invalidated mid-call.
+        One-time-visible per-client credential. The server stores only its
+        SHA-256 verifier, compares supplied credentials in constant time, and
+        binds the resulting client identity and canonical scopes to the MCP
+        session. Rotation, revocation, or expiry closes established sessions.
 
   schemas:
     HealthResponse:

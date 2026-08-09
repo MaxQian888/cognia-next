@@ -167,3 +167,16 @@ follow-tail. Chrome is budgeted across the 100/60/40-column and 12-row breakpoin
 Native-scrollback resize replay is capped at 10,000 rendered rows by default
 (`render.terminalResizeReplayMaxRows`; `0` means unlimited). This limits terminal
 repaint only: `/transcript`, export, and session storage remain complete.
+
+## 2026-08 correctness follow-up — authoritative viewports and input ownership
+
+Fullscreen overlays now consume the region height measured by Ink/Yoga after the
+fixed bottom chrome is allocated. Panel bodies derive content rows from that
+viewport, dynamic lists keep their active row visible, the multiline composer
+uses its existing row budget, and width-dependent transcript rendering receives
+the root's reactive columns. Unicode editing is grapheme-safe and `useCursor`
+anchors IME at the painted caret. A single active input provider dispatches by
+priority and stops on handled input, preventing modal keys from leaking into the
+composer. Jest component tests remain fast, while a child-process probe imports
+real Ink/Yoga and the production `TuiViewportFrame`; the PTY harness mounts the
+production `App` with a deterministic agent session.

@@ -38,6 +38,7 @@ description: 当前的配对设备与无渲染服务契约、鉴权边界、自�
 | --- | --- |
 | 健康与就绪 | `GET /healthz`、`GET /livez`、`GET /readyz` |
 | 设备初始化 | `POST /api/auth/device/challenge`、`POST /api/auth/device/register` |
+| 浏览器部署配置 | `GET /api/auth/config` |
 | 短期凭据 | `POST /api/auth/token` |
 | WebSocket ticket | `POST /api/auth/socket-ticket` |
 | RPC dispatch | `POST /api/_rpc/{name}` |
@@ -45,8 +46,8 @@ description: 当前的配对设备与无渲染服务契约、鉴权边界、自�
 | 事件流 | `GET /ws/events?ticket=…&since=…` |
 | 终端与浏览器 socket | `/ws/terminal/*`、`/ws/browser/{session_id}` |
 
-`/api/v1/*` 与 `/ws/v1/*` 仅用于已发布客户端的显式弃用兼容。新客户端必须采用规范路由和
-DPoP 流程。
+服务端不挂载 `/api/v1/*`、`/ws/v1/*`、`cgnp2` 或 bearer device JWT 兼容入口。旧客户端必须
+重新完成 `cgnp3` 配对并使用 DPoP 流程。
 
 ## 自动生成契约
 
@@ -62,7 +63,7 @@ pnpm companion-api:lint
 dispatcher 逐项比较，因此路由、descriptor 或 allowlist 变化不会让已提交 OpenAPI 静默过期。
 
 <Cards>
-  <Card title="服务器与鉴权" href="./server-and-auth" description="DPoP 注册、access token、socket ticket 与旧版兼容。" />
+  <Card title="服务器与鉴权" href="./server-and-auth" description="cgnp3、DPoP 注册、access token、socket ticket 与 OIDC。" />
   <Card title="RPC 命令 manifest" href="./rpc-manifest" description="如何生成公开与 Headless 命令清单。" />
   <Card title="Headless service plane" href="./headless-service-plane" description="不渲染前端，启动全部 agent 能力并进行本地调试。" />
   <Card title="事件与 WebSocket" href="./events-ws-push" description="规范 ticket 鉴权 socket 与 replay 语义。" />

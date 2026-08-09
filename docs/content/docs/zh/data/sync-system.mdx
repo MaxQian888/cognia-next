@@ -32,7 +32,7 @@ flowchart TB
 
   subgraph Desktop["💻 桌面 (Tauri)"]
     direction TB
-    DeskHTTP[axum POST /api/v1/_rpc/sync_pull]
+    DeskHTTP[axum POST /api/_rpc/sync_pull]
     Bridge[companion_api/sync_bridge.rs]
     Registry[companion_api/sync_registry.rs<br/>ALLOWED 白名单]
     Source[lib/sync/desktop-sync-source.ts<br/>installDesktopSyncSource]
@@ -117,7 +117,7 @@ sequenceDiagram
     Orch->>H: syncXxx(transport, { since: cursor })
     H->>B: runSyncHandler<TRow>(opts, transport, cursor)
     B->>T: transport.call("sync_pull", { table, since })
-    T->>R: HTTP POST /api/v1/_rpc/sync_pull
+    T->>R: HTTP POST /api/_rpc/sync_pull
     R->>Reg: validateTable(table)
     alt 表不在白名单
       Reg-->>T: 404 Not Implemented

@@ -13,7 +13,7 @@ description: "一个分层的计划，用于在桌面、移动端、浏览器和
 
 ## 背景
 
-每个工作流运行都只在一个桌面WebView中执行。Rust（`src-tauri/src/workflow/`）拥有“工作流程何时开始”（cron daemon、webhook router、UIA watcher）和崩溃恢复;TS编曲者（`lib/workflow/runtime/orchestrator.ts`）拥有所有步骤的执行权。目前存在的每一个“远程”接口——远程控制API（`start-from-remote.ts`）、伴随`workflow_trigger_manual` RPC IM触发器——都是*远程触发本地执行*。
+每个工作流运行都只在一个桌面WebView中执行。Rust（`src-tauri/src/workflow/`）拥有“工作流程何时开始”（cron daemon、webhook router、UIA watcher）和崩溃恢复;TS编曲者（`lib/workflow/runtime/orchestrator.ts`）拥有所有步骤的执行权。目前存在的每一个“远程”接口——Companion `workflow_trigger_manual` RPC 与 IM 触发器——都是*远程触发本地执行*。
 
 对底质的研究（2026-07-02）发现：
 

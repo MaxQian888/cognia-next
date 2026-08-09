@@ -1,14 +1,21 @@
 ---
-title: ADR-0005 — 远程控制子系统
-description: 用本地 127.0.0.1 axum HTTP 监听器、HMAC 签名的出站投递以及专门的设置区，补完半成品的 webhook + 事件触发能力。
+title: ADR-0005 — 远程控制子系统（已废止）
+description: 已移除 Remote Control 子系统的历史设计；现由 Companion 控制面与规范 Webhooks 设置取代。
 ---
 
-# 远程控制子系统
+# 远程控制子系统（已废止）
 
-| 状态 | 已接受 · **已于 2026-06-03 激活**                                                                                       |
+| 状态 | **已于 2026-08-09 废止**                                                                                              |
 | ---- | --------------------------------------------------------------------------------------------------------------------- |
 | 日期 | 2026-05-03                                                                                                            |
 | 取代 | `components/scheduler/task-form.tsx` 中半成品的 webhook 通道 + 自由文本事件触发 UI（本 ADR 之前）。                     |
+
+> **历史记录。** 独立的 Remote Control 监听器、渲染端 receiver、store、路由与
+> `?section=remote-control` 设置页均已移除。宿主控制现统一走带鉴权的
+> [Companion API](../subsystems/companion-api) 控制面，以及
+> [ADR-0110](./0110-mcp-control-plane-governance) 所治理的 MCP / External Bridge。
+> 出站 Standard Webhooks 已迁移到 `lib/webhooks/`、`stores/webhooks/` 与规范的
+> `?section=webhooks` 设置页。下文仅用于说明已退役的历史设计。
 
 ## 激活更新（2026-06-03）
 

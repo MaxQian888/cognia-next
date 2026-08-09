@@ -404,4 +404,12 @@ MCP/插件/技能管理、计划捕获、limits、doctor——都有可用的 CL
 ## 测试
 
 `input/`、`state/`、`commands/`、`runtime/`、`format/`、`markdown/`、`mention/` 下的每个纯模块都有
-同目录 `*.test.ts`；Ink 组件用 `ink-testing-library` 测试。用 `pnpm cli:test` 运行整套。
+同目录 `*.test.ts`；Ink 组件使用 DOM-backed Jest mock 做快速行为测试，并由真实 Ink/Yoga
+子进程探针通过生产 `TuiViewportFrame` 运行，并由通过确定性 session 挂载 `App` 的可选 native PTY 尺寸矩阵补充。用 `pnpm cli:test` 运行整套。
+
+## 视口与输入不变量
+
+根节点的终端尺寸是唯一权威来源。全屏弹层在固定底部 chrome 分配后测量高度，panel 内容
+在该预算内窗口化，输入框在密度档位的行预算内持续显示 grapheme-safe 光标。唯一 active
+输入 provider 按 critical、modal、global、composer 优先级路由，并在按键被消费后停止。
+真实 Ink/Yoga 帧探针与 `App` 使用同一个生产 frame；PTY 尺寸矩阵则直接挂载 `App`，共同补充 DOM mock 下的快速组件测试。

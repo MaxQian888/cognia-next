@@ -23,7 +23,7 @@ Outbound consumption, external-Agent projection, built-in hosting, and the inbou
 6. `McpRuntimeGateway` owns client-managed workflow/plan/CLI connections. Pool keys include scope, server, definition revision, and credential version. Reuse never crosses chat sessions or workflow runs. Connect/discovery concurrency is four; connect/list timeout is 15 seconds; calls are capped at 60 seconds; connects retry once; tool calls never retry; repeated connection failures open a bounded circuit.
 7. Capabilities are cached for five minutes by fingerprint. GUI and custom-mode selection consume one normalized runtime/capability snapshot.
 8. Paired mobile receives only `McpServerSummary`. Default backups contain redacted definitions and a missing-credential manifest. Durable audit rows never contain arguments, results, headers, or secrets and are retained for 30 days / 10,000 rows.
-9. The inbound External Bridge stays separate. It preserves its client identity, scope intersection, session binding, loopback/rebinding protection, and default-deny policy, while sharing the content-free audit vocabulary.
+9. The inbound External Bridge stays separate. Its only MCP URL is `GET|POST|DELETE /mcp/stream`; `/mcp` and `/mcp/sse` are deleted rather than redirected. It uses per-client credential verifiers, scope intersection, client-bound session IDs, loopback/rebinding protection, and default-deny policy while sharing the content-free audit vocabulary. Active sessions are capped at 128, idle sessions are reclaimed, and overload fails explicitly.
 10. Settings capability discovery uses the sidecar `mcp-discover` feature operation; the hand-written Rust probe and its Companion/Tauri command surface are retired.
 11. Anthropic remote servers are presented to the Agent SDK as SDK-managed stdio relays. The relay owns the guarded upstream HTTP/SSE socket, so DNS resolution is checked at connect time rather than only before SDK handoff.
 12. `loadMcpOperationsSnapshot` derives persistent per-server failure rate/connect p95/capability freshness and Agent sync lag from the existing audit, cache, and sync tables; it does not introduce a second log.
@@ -34,6 +34,7 @@ Outbound consumption, external-Agent projection, built-in hosting, and the inbou
 - A namespace rename is an explicit projection change; a display-name edit is not.
 - Literal credentials enter an Agent file only after explicit target selection and host-side resolution.
 - Legacy SSE uses the 2024-11-05 fallback; current stdio and Streamable HTTP advertise 2025-11-25.
+- The inbound bridge has no single-token HTTP facade or compatibility route; clients must use a scoped client credential and `/mcp/stream`.
 - The Registry, Sync Coordinator, and Runtime Gateway are independently reversible seams.
 
 ## References

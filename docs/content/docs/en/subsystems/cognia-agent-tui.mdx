@@ -497,5 +497,15 @@ run/inspect/replay, MCP/plugin/skill management, plan capture, limits, doctor â€
 ## Testing
 
 Every pure module under `input/`, `state/`, `commands/`, `runtime/`, `format/`, `markdown/`, and
-`mention/` has a co-located `*.test.ts`; Ink components are tested with `ink-testing-library`. Run the
-suite with `pnpm cli:test`.
+`mention/` has a co-located `*.test.ts`; Ink components use a DOM-backed Jest mock for fast behavior
+tests, plus a real Ink/Yoga child-process probe over the production `TuiViewportFrame` and an optional native PTY matrix that mounts `App` with a deterministic session. Run the suite with
+`pnpm cli:test`.
+
+## Viewport and input invariants
+
+The root terminal size is authoritative. Fullscreen overlay height is measured
+after fixed bottom chrome, panel content is windowed inside that allocation, and
+the composer keeps its grapheme-safe caret visible within the density tier's row
+budget. One active input provider routes critical, modal, global, and composer
+handlers by priority and stops after a handler consumes the key. Real Ink/Yoga
+frame probes exercise the same production frame as `App`; the PTY matrix mounts `App` itself. Both complement the DOM-backed component suite.

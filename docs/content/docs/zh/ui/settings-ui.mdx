@@ -75,7 +75,7 @@ export type SettingsSectionId =
   | "scheduled-tasks"
   | "logs"
   | "diagnostics"
-  | "remote-control"
+  | "webhooks"
   | "external-bridge"
   | "companion"
   | "network"
@@ -100,7 +100,7 @@ interface NavItem {
 }
 ```
 
-`desktopOnly: true` 的条目（如 `subscription`、`ccswitch`、`hooks`、`tools`、`connections`、`remote-control`、`companion`、`desktop`）在 `usePlatform() === "web" | "mobile"` 时被侧栏自动过滤。这是单一开关，section 内部不需要重复判断。
+`desktopOnly: true` 的条目（如 `subscription`、`ccswitch`、`hooks`、`tools`、`connections`、`webhooks`、`companion`、`desktop`）在 `usePlatform() === "web" | "mobile"` 时被侧栏自动过滤。这是单一开关，section 内部不需要重复判断。
 
 ## 分组语义
 
@@ -111,7 +111,7 @@ interface NavItem {
 | `interface`     | 视觉与交互             | appearance、speech、presets、artifacts、canvas                      |
 | `data`          | 数据生命周期           | data（备份/导出）、workflows、scheduled-tasks                       |
 | `observability` | 排错与监控             | logs、diagnostics                                                   |
-| `system`        | 系统级集成             | remote-control、external-bridge、companion、network、desktop、about |
+| `system`        | 系统级集成             | webhooks、external-bridge、companion、network、desktop、about       |
 
 顺序由 `SETTINGS_GROUP_ORDER` 控制，**不**按字母排。
 
@@ -404,7 +404,7 @@ const MySection = dynamic(() => import("./my-area/my-section").then((m) => m.MyS
     href="../subsystems/external-bridge"
     description="?section=external-bridge 的 MCP 服务器对外暴露"
   />
-  <Card title="远程控制" href="../subsystems/remote-control" description="?section=remote-control 的设备链接" />
+  <Card title="Webhooks" href="/settings?section=webhooks" description="Standard Webhooks 签名与出站端点" />
   <Card
     title="伴生端 API"
     href="../subsystems/companion-api"

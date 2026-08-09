@@ -287,6 +287,8 @@ ghcr.io/maxqian888/cognia-runner        # T2 每 agent 一容器的 runner 镜�
 - **冒烟** —— `scripts/smoke/compose-smoke.mjs` 按 tier（`services` / `server` / `tls`）驱动运行中的栈；`compose-e2e.yml` 在每个触及套件的 PR 上跑它。
 - 完整架构与隔离/拓扑阶梯：ADR-0059（英文版：`docs/content/docs/en/adr/0059-cloud-deployment-headless-brain.md`）。
 
+headless host 明确区分两个信令 URL。`COGNIA_SIGNALING_URL` 是宿主内部的会合端点（Compose 与 Kubernetes 均为 `ws://signaling:7892/v2/signaling`）；`COGNIA_PUBLIC_SIGNALING_URL` 是从部署公开 URL 推导出的客户端可见端点（`https` 转为 `wss`，路径固定为 `/v2/signaling`）。Caddy 与 Kubernetes Ingress 将该公开路径路由到 `signaling:7892` Service，其余应用路径仍由 `cognia-server` 处理。
+
 ### 浏览器 Companion 安全要求
 
 生产环境的 Web 客户端只接受以下 Companion 通道：
@@ -299,7 +301,7 @@ ghcr.io/maxqian888/cognia-runner        # T2 每 agent 一容器的 runner 镜�
 
 Web Origin 必须按完整 HTTPS Origin（`scheme://host[:port]`）精确授权。带认证的接口禁止使用 `*`；methods、headers 和 preflight 保持最小范围，Private Network Access 也只能放行管理员明确配置的 Origin。排障时分别识别证书不受信、Origin/CORS、PNA、JWT 过期或撤销、缺少 TURN、宿主离线，不能统一显示为“网络错误”。
 
-同一浏览器账号可以保存多个加密 Companion 目标，但一次只激活一个。Provider key、device JWT、OIDC token 与 signaling 私钥只进入浏览器 Vault，公开目标簿只保存连接元数据；每个目标还拥有独立 IndexedDB 数据库和 outbound queue 作用域。
+同一浏览器账号可以保存多个加密 Companion 目标，但一次只激活一个。Provider key、设备私钥与 signaling 私钥只进入浏览器 Vault；OIDC token 与五分钟 DPoP access token 仅保留在内存。公开目标簿只保存连接元数据；每个目标还拥有独立 IndexedDB 数据库和 outbound queue 作用域。
 
 ## CI/CD
 

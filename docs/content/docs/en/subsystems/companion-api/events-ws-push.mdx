@@ -1,6 +1,6 @@
 ---
 title: Events, WebSockets & Push
-description: Canonical socket-ticket authentication, event replay, terminal and browser channels, and the released v1 compatibility sockets.
+description: Canonical socket-ticket authentication, event replay, and terminal, browser, and ACP channels.
 ---
 
 # Events, WebSockets & Push
@@ -11,8 +11,7 @@ description: Canonical socket-ticket authentication, event replay, terminal and 
   Canonical WebSockets never carry the five-minute DPoP token in the URL. A device authenticates an
   HTTP request to `POST /api/auth/socket-ticket`, then spends the returned 60-second single-use
   ticket on the exact event, terminal, browser, or ACP path. Event connections may send `since` to
-  replay the retained sequence gap. The `/ws/v1/*?token=…` sockets exist only for released-client
-  compatibility.
+  replay the retained sequence gap. No query-string bearer socket is mounted.
 </TLDR>
 
 ## Ticket flow
@@ -52,8 +51,5 @@ Push notification registration and revocation are RPC commands governed by the s
 manifest. Push is an offline hint, not an authoritative state channel. When a device already has an
 active event socket, the server suppresses redundant push delivery.
 
-## Released v1 compatibility
-
-`GET /ws/v1/events?token=<device-jwt>` and `GET /ws/v1/terminal?token=<device-jwt>` remain mounted
-for the released mobile transport. They are deprecated because query-string bearer credentials are
-long-lived and can leak through logs or intermediaries. New clients must use socket tickets.
+Legacy `/ws/v1/*?token=…` sockets are intentionally not mounted. Clients from before the `cgnp3`
+upgrade must re-pair and use single-use socket tickets.

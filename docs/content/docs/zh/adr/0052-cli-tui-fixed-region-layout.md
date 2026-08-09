@@ -84,3 +84,12 @@ resize 和高度校正会保留读者锚点；`End`/`G` 恢复 follow-tail。chr
 native scrollback resize replay 默认上限为 10,000 个渲染行
 （`render.terminalResizeReplayMaxRows`；`0` 表示不限）。该限制只影响终端重绘；
 `/transcript`、export 与 session storage 仍保持完整。
+
+## 2026-08 正确性跟进——权威视口与输入所有权
+
+全屏弹层现在使用 Ink/Yoga 在固定底部 chrome 分配后测得的真实区域高度。各 panel 从该
+viewport 派生内容行数，动态列表始终保留活动行，多行输入框真正使用既有行预算，所有依赖
+宽度的 transcript 渲染都接收根节点的响应式列数。Unicode 编辑以 grapheme 为边界，
+`useCursor` 为 IME 锚定到可见光标。单一 active 输入 provider 按优先级分发并在 handled
+后停止，避免 modal 按键泄漏到输入框。Jest 组件测试继续保持快速，同时子进程探针加载真实
+Ink/Yoga 与生产 `TuiViewportFrame`，PTY harness 则通过确定性 agent session 挂载生产 `App`。

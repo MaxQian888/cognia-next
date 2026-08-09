@@ -197,8 +197,8 @@ mac-only `dirs`/`libc` deps (extracted on Windows where `scheduler/macos.rs` nev
 | `cognia-plugin-runtime` | 15.2k | plugin runtime; **wasmtime/cranelift** | `set_sidecar_dir_resolver` (claude::sidecar), registered in `run()`; canonical WIT stays at `src-tauri/wit/` (bindgen uses a relative path — the plugin-sdk sync/gate scripts depend on that location) |
 | `cognia-skills` | 2.1k | skills scan/install/registry | none (zero coupling) |
 | `cognia-tts` | 0.9k | Edge TTS, provider keyring, proxied fetch | none |
-| `cognia-remote-control` | 2.0k | LAN control API primitives | none |
-| `cognia-gateway` | 6.6k | OpenAI-compatible local gateway | none (reuses cognia-remote-control) |
+| `cognia-remote-control` (retired 2026-08-09) | — | Replaced by the Companion control plane | — |
+| `cognia-gateway` | 6.6k | OpenAI-compatible local gateway | none |
 | `cognia-ccswitch` | 2.4k | provider-relay switcher | none (uses cognia-subscription discovery) |
 | `cognia-mcp-server` | 3.9k | embedded MCP server (streamable HTTP) | none (uses cognia-automation dispatcher) |
 | `cognia-external-agent` | 4.9k | exec backends; **bollard**/**kube** behind crate features (`container-exec`/`k8s-exec` now forward from app_lib) | `BusAgentEmitter` impl relocated to `companion_api::rpc` behind the crate's `AgentEventEmitter` trait; env-mutating tests got a crate-local lock replacing the borrowed `ws_bridge` test lock |

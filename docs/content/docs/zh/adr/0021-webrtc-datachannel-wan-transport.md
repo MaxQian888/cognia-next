@@ -51,7 +51,7 @@ ICE在`setRemoteDescription`之前收到，按顺序保留，最多可达256个�
 - 全抖动`1/2/4/8/16/30s`重新连接后退;
 - 只有在持续健康连接后才重置。
 
-连接WebSocket有八秒的截止时间;挑战和订阅各有五秒的截止时间。缺少对立角色称为`awaiting-peer`，而非连接失败。
+连接 WebSocket 有八秒的截止时间；challenge 和 subscribe 各有五秒的截止时间。缺少另一角色时进入 `awaiting-peer`，而非连接失败。每个浏览器信令会话最多串行处理 64 个执行中或排队的出站操作；溢出只关闭当前会话并进入既有重连阶梯，旧会话的操作不能阻塞或写入替代会话。
 
 ## 数据与RPC合同
 
@@ -61,8 +61,10 @@ DataChannel携带JSON RPC、事件重放控制和有界块帧：
 - 逻辑消息：最大1 MiB;
 - 8次并发重组和4次MiB总保留内存;
 - 15秒assembly/send截止时间;
-- 高水位1 MiB/低水位256 KiB的浏览器背压;
+- 浏览器与 Rust 发送端统一采用 1 MiB 高水位、256 KiB 低水位的背压;
 - 每个节点有32个并发RPCs和128个排队的入站帧。
+
+每个 peer 只接受一个有序、完全可靠的 `cognia.v2` 主通道。无序、部分可靠或重复的主通道会在注册回调前关闭；`cognia.terminal` 保持独立且行为不变。
 
 RPC请求使用`{id, method, params, idempotencyKey, protocolVersion: 2}`。命令行为来自共享命令清单。HTTPS和RTC共享一个由`(deviceId, method, idempotencyKey)`键的持久24小时账本及参数摘要。完成的结果会被重放;不同的参数返回`idempotency_conflict`;崩溃后留下的待处理记录返回`idempotency_indeterminate`。
 

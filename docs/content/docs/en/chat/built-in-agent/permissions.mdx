@@ -71,7 +71,7 @@ The resolver is a deliberately **weaker** JS mirror of `ruleset.ts`: `splitBash`
 The `permission_request` case (`use-claude-chat.ts:1267-1362`):
 
 1. **Always-allow list** (`:1269`) — pre-existing per-session grants.
-2. **Inactive/remote session** (`:1277`) — remote-control routing with a backstop deny; not Auto-mode.
+2. **Inactive/remote session** (`:1277`) — Companion routing with a backstop deny; not Auto-mode.
 3. **Auto-mode** (`:1316`): builds the judge client (`buildUtilityLlmClient`, featureId `command-safety`, `:1318`), calls `runAutoModeForTool` (`:1324`) with `pluginRules: getPluginCommandRulesets()`. `allow` → `approveTool(..., "allow")` (`:1333`); `deny` → `approveTool(..., "deny", reason)` (`:1337`); `try/catch` fail-open (`:1345`).
 4. `ask`/`null` → the manual modal `pushApproval` (`:1360`).
 

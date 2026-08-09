@@ -67,6 +67,68 @@ curl --insecure \
 完整生成契约位于 `docs/api/headless-service-api.openapi.yaml`。它与配对设备 spec 刻意分离，避免
 service-only 命令被误认为公开移动端接口。
 
+## Agent-first 运维 CLI
+
+Rust `cognia` 二进制内嵌生成的 Headless 命令目录，并通过 `cognia host` 暴露。命令发现、
+schema 查看、skills 和 dry-run 均可离线工作；实际调用和事件流始终受 loopback service-token
+边界约束。
+
+```bash
+cognia host categories
+cognia host resources --category development
+cognia host skills list
+cognia host skills list --kind workflow
+cognia host skills install --scope project
+cognia host skills read cognia-host-development
+cognia host commands --query session
+cognia host commands --resource git --operation read
+cognia host schema session_list
+cognia host call session_list --data '{"limit":20,"offset":0}'
+cognia host events --event claude://message
+```
+
+未设置 `COGNIA_SERVICE_TOKEN` 时，CLI 会调用同机的
+`cognia-server issue-service-token`，令牌只保留在内存。CLI 信任 `COGNIA_DATA_DIR` 中持久化的
+自签证书，不提供跳过 TLS 校验的选项。high 和 critical 风险命令需要交互确认，或使用已经由
+用户明确批准的全局 `--yes`；该确认只是运维防误触层，不是第二套授权系统。
+
+生成的 catalog 会把每个命令严格归入一个稳定领域：`sessions`、`agents`、`tasks`、
+`automation`、`connectors`、`extensions`、`knowledge`、`development` 或 `system`。
+`cognia host categories` 会输出各领域的操作数、风险分布及对应内嵌 skill。
+`cognia host resources` 会列出各领域中由生成器确定的资源组，`commands --resource <id>` 可以在
+不复制、也不猜测 RPC 树的前提下进一步缩小搜索范围。`cognia-host` skill 维护共用安全和输出
+规则，另有九个领域 skill 负责聚焦命令选择，以及六个 workflow skill 覆盖只读观测、安全 Git、
+agent 事故处理、备份恢复、扩展发布和 connector 投递。可通过
+`skills list --kind core|domain|workflow` 过滤清单。
+
+### 安装内嵌 Agent Skills
+
+安装过程完全离线，并且必须明确指定目标 scope：
+
+```bash
+# 对当前用户的兼容 Agent 生效。
+cognia host skills install --scope user
+
+# 安装到最近的 Git worktree 根；不在 Git 中时使用当前目录。
+cognia host skills install --scope project
+```
+
+两个 scope 分别使用 `$HOME/.agents/skills` 和 `<project>/.agents/skills` 这一共享 Agent
+Skills 布局，因此 Codex、Gemini CLI、OpenCode 及其他兼容客户端可以发现同一组 16 个 skills。
+安装后应刷新客户端的 skill 清单或重启会话。该命令不会连接 `cognia-server`，也不会读取凭据。
+
+隐藏文件 `.cognia-host-manifest.json` 会记录 CLI bundle 版本以及每个受管文件的 SHA-256
+哈希。后续安装只会更新或删除仍与上次 manifest 一致的文件。写入前会预检整个 bundle；被修改或
+未登记的受管文件、损坏的 manifest，以及以符号链接存在的 `.agents`、skills 根目录或受管目标
+都会返回 `skill_install_conflict`，且不会写入任何文件。仅当 Cognia 遗留的完整临时文件与当前
+bundle 完全一致时，下一次成功重试才会恢复它；其他临时内容会报告冲突而不会被删除，并且 manifest
+始终最后替换。应先把有意保留的修改移到别处，再通过
+`cognia host skills read <skill> [path]` 恢复报错路径；也可以把全部 Cognia 受管目录和
+manifest 一并移走后重试。安装器刻意不提供强制覆盖或部分安装模式。
+
+在 Compose 或 Kubernetes 中，应在 server 容器或同一 Pod 内执行 `cognia host`。独立管理
+Pod 不受支持，因为非 loopback peer 提交的 service token 会被服务端拒绝。
+
 ## 契约维护
 
 Headless RPC 路径与公开 spec 共享命令 manifest 和 Rust allowlist 作为生成来源：

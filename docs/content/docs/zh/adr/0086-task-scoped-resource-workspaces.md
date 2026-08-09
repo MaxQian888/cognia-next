@@ -25,13 +25,15 @@ Cognia 已有 Workspace Dock、项目编辑器、Git 审查、Companion transpor
 
 settle 为文件、符号链接、权限位、二进制替换、创建、删除和重命名生成 forward/inverse 补丁。应用先原子预检，再基于 baseline hash 三方合并；支持按文件和文本 hunk 选择。撤销只应用已记录贡献的 inverse patch，遇到漂移进入冲突而不会丢弃主工作区其它修改。冲突必须显式选择重试合并、应用任务版本或保留当前版本。
 
-敏感路径只公开锁定元数据；每次读取或下载正文都要显式授权，Companion 还必须具备既有 remote-control/service capability。HTML/SVG 静态预览先净化；显式运行进入 opaque iframe，CSP/sandbox 默认禁止网络、剪贴板、导航、额外目录和下载。
+敏感路径只公开锁定元数据；每次读取或下载正文都要显式授权，Companion 还必须具备对应的 control/service capability。HTML/SVG 静态预览先净化；显式运行进入 opaque iframe，CSP/sandbox 默认禁止网络、剪贴板、导航、额外目录和下载。
 
 产品界面只升级现有 Workspace Dock。存在任务时默认显示“当前任务”，可按 session 恢复持久化任务；父任务聚合子运行但保留 run/Agent 归因，并提供 Source、Preview、Diff、文件/hunk 应用、精确撤销、上传下载和移动端审查。
 
 ## 兼容与发布
 
 旧 `code_adoption` 命令保留一个兼容周期；存在任务账本时，持久化指标由权威的 Agent-origin 资源投影得到。`fs_read_workspace_file` 暂时保留，但编辑器无上限读取不再被静默截断；任务预览统一使用结构化资源接口。
+
+采用结果由现有 Task Workspace 审阅动作最终确定：Apply 与 Partial Apply 记录成功应用的文件/区块选择，Undo 将该选择标记为已撤销，Keep Current 将其标记为拒绝。行采用率为已采用的新增行与删除行之和除以建议的新增行与删除行之和；文件采用率为已采用文件数除以建议文件数。待审阅记录和仅有旧指纹归因的记录不进入这两个分母；跟踪缺失或被截断时报告覆盖情况，不推断为拒绝。
 
 实验开关保持关闭，直到内置聊天、ACP/Codex/Claude/OpenCode、Agent Team、Tauri、Companion、headless、Docker 和 Kubernetes PVC 通过同一 DTO、权限、重连、隔离和补丁语义。系统不引入第二个 AgentServer 或 WebSocket 协议。
 

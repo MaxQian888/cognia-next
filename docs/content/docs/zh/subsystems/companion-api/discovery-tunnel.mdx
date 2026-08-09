@@ -10,7 +10,7 @@ description: 当前 Companion listener 的健康与就绪接口、LAN 发现、T
 <TLDR>
   Companion listener 默认通过 TLS 监听 `27890`。LAN discovery 广播 listener 与证书身份；
   `GET /healthz` 确认服务进程，`/livez` 与 `/readyz` 分别表达存活和依赖就绪。Tunnel 或受管
-  front door 仍保留规范 `/api/*` 与 `/ws/*` 路径；旧 `/api/v1/healthz` 不是规范 discovery 路由。
+  front door 仍保留规范 `/api/*` 与 `/ws/*` 路径，不提供版本化兼容别名。
 </TLDR>
 
 ## Probe 接口
@@ -44,7 +44,9 @@ socket-ticket 绑定所使用的原始 request path。
 原生运行时持有证书，并通过 discovery 元数据暴露 fingerprint。客户端在发送注册材料前，应按部署
 策略 pin 或校验该身份。Tunnel 的公开证书不会自动授权另一台 Companion 实例。
 
-## 兼容说明
+## 浏览器 front door
 
-已发布 v1 RPC 与 socket alias 是文档明确的兼容入口。Discovery 仍应返回规范 base URL；客户端仅因
-自身 transport 版本选择旧路径，而不是因为服务器广播 `/api/v1` base path。
+主部署路径从同一个 HTTPS origin 提供静态 export、API、WebSocket 与 signaling。split-origin 必须
+在 `COGNIA_ALLOWED_WEB_ORIGINS` 中显式列出精确 HTTPS Origin；PNA 还必须设置
+`COGNIA_ALLOW_PRIVATE_NETWORK=true`。服务端不会启用通配 Origin 或 cookie credentials，浏览器
+WebSocket upgrade 与 HTTP 使用同一套 Origin 判定。

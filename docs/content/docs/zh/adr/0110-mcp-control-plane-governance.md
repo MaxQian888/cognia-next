@@ -23,7 +23,7 @@ description: 在不合并入站 External Bridge 的前提下，统一治理出�
 6. `McpRuntimeGateway` 管理 workflow/plan/CLI 的 client-managed 连接。池键包含 scope、server、定义 revision 与 credential version；绝不跨 chat session 或 workflow run 复用。连接/发现并发上限为 4，连接/列表超时 15 秒，工具调用上限 60 秒；连接重试一次，工具调用不自动重试，连续连接失败进入有上限的熔断。
 7. 能力按 fingerprint 缓存 5 分钟。GUI 与 custom-mode 选择器消费同一份规范化 runtime/capability 快照。
 8. 配对移动端只接收 `McpServerSummary`。默认备份只含脱敏定义和缺失凭证清单。持久审计不保存参数、结果、header 或 secret，并按 30 天 / 10,000 行保留。
-9. 入站 External Bridge 保持独立，继续保留其 client identity、scope 交集、session binding、loopback/DNS rebinding 防护和默认拒绝；只共享无内容审计词汇。
+9. 入站 External Bridge 保持独立。其唯一 MCP URL 为 `GET|POST|DELETE /mcp/stream`；`/mcp` 与 `/mcp/sse` 直接删除而不重定向。它保留按 client 的 credential verifier、scope 交集、client-bound session ID、loopback/DNS rebinding 防护和默认拒绝，并只共享无内容审计词汇。活动 session 上限为 128，空闲 session 会回收，过载会明确失败。
 10. 设置页能力发现使用 sidecar `mcp-discover` feature operation；手写 Rust 探针及其 Companion/Tauri 命令面退役。
 11. Anthropic 远程服务器以 SDK-managed stdio relay 的形式交给 Agent SDK。Relay 负责受防护的上游 HTTP/SSE socket，使 DNS 在实际连接时校验，而不是只在 SDK handoff 前校验。
 12. `loadMcpOperationsSnapshot` 从既有 audit、cache 与 sync 表派生持久化的按服务器失败率、连接 P95、能力新鲜度与 Agent 同步延迟，不创建第二套日志。
@@ -34,6 +34,7 @@ description: 在不合并入站 External Bridge 的前提下，统一治理出�
 - 命名空间重命名会触发投射变更；display name 修改不会。
 - 只有用户显式选择目标且宿主成功解析后，字面量凭证才会进入 Agent 文件。
 - Legacy SSE 使用 2024-11-05 回退；当前 stdio 与 Streamable HTTP 使用 2025-11-25。
+- 入站 Bridge 不提供 single-token HTTP facade 或兼容路由；客户端必须使用 scoped client credential 与 `/mcp/stream`。
 - Registry、Sync Coordinator 与 Runtime Gateway 均是可独立回滚的边界。
 
 ## 参考

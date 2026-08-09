@@ -5,7 +5,7 @@ description: "记录了自主长期记忆子系统（Dexie v65 + v118治理、�
 
 # ADR-0069 — 长期记忆子系统与外部 API 接口
 
-**状态**：已接受（2026-07-14），修订（2026-07-19）**作者**：Max Qian + Claude Fable 5 **基于**基础：数字孪生运行时（ADR-0003，共享embedding/vector后端）、外部桥接MCP服务器（ADR-0008）、配套远程控制接口（ADR-0005 / ADR-0060 / Wave 4.1）、插件权限模型（ADR-0032，`goal:read`/`goal:write`前例）以及可视化工作流内存节点（ADR-0011）。
+**状态**：已接受（2026-07-14），修订（2026-07-19）**作者**：Max Qian + Claude Fable 5 **基于**基础：数字孪生运行时（ADR-0003，共享embedding/vector后端）、外部桥接MCP服务器（ADR-0008）、Companion 控制面（ADR-0061 / Wave 4.1）、插件权限模型（ADR-0032，`goal:read`/`goal:write`前例）以及可视化工作流内存节点（ADR-0011）。
 
 ## 背景
 

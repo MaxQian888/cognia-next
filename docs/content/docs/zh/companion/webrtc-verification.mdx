@@ -28,9 +28,9 @@ description: WebRTC 移动端 ↔ 桌面端通道（ADR-0021）真机烟测清�
 
 1. 在桌面端点击 设置 → Mobile companion → Pair device → Generate QR
    生成配对二维码。
-2. 在手机上跑应用内配对流程：发现 → 配对 → 扫码。手机通过
-   `POST /api/v1/auth/pair` 兑换 JWT，返回 `RoomDescriptorV2`，并安装
-   non-extractable mobile 角色私钥。
+2. 在手机上跑应用内配对流程：发现 → 配对 → 扫描 `cgnp3`。手机通过
+   challenge + P-256 流程调用 `POST /api/auth/device/register`，返回
+   `RoomDescriptorV2`，并把独立的 mobile 角色信令私钥写入安全存储。
 3. 大约 5 秒内，桌面 WebRTC 卡片应当显示新设备依次经过
    **offline → awaiting → negotiating → connected**。
 4. 移动端的设置面板上，Transport 一行应当落在

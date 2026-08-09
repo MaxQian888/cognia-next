@@ -75,7 +75,7 @@ abstraction, not exhaustive migration:
 
 - All three transport classes + the selector
 - `lib/tauri.ts:greet` (M1.2 pilot)
-- `lib/tauri/canvas.ts` and `lib/tauri/remote-control.ts` (M1.3 — the only
+- `lib/tauri/canvas.ts` and the now-retired `lib/tauri/remote-control.ts` (historical M1.3 — the only
   direct-`invoke` callers among the plugin wrappers)
 - `lib/claude/ipc.ts`, `lib/external-bridge/tauri-control.ts`,
   `lib/native/system-scheduler.ts`,

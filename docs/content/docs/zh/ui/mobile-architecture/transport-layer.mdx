@@ -10,17 +10,16 @@ description: Transport 接口、三态选择器、CompanionTransport（HTTPS _rp
 <TLDR>
   `Transport`（`transport-types.ts:19`）是一个双方法接口——`call(name, args)` 和
   `subscribe(event, handler)`——共享包中的所有模块都通过它与后端交互，而无需直接触碰 Tauri 或
-  HTTP。`pickTransport()`（`transport-instance.ts:22`）在模块加载时一次性选定实现：桌面端使用
-  `TauriTransport`（IPC），Capacitor 端使用 `CompanionTransport`，普通浏览器使用
-  `WebStubTransport`。`CompanionTransport`（`transport-companion.ts`）通过 **TLS-pinned** fetch
-  携带 Bearer JWT 以 POST 方式请求 `/api/v1/_rpc/<name>`，并开启一个支持 `?since=` 回放的
-  `/ws/v1/events` WebSocket 连接。在移动网络环境下，它会透明地升级至 **WebRTC DataChannel** 子层
-  （`transport-rtc.ts`），失败时自动回退到 HTTP。凭据通过 `SecureStorage`（`companion-storage.ts:127`）
-  存储于操作系统 keystore 中。
+  HTTP。桌面端绑定 `TauriTransport`；Web 与 Capacitor 在账户的活动 runtime target 指向已配对 Host
+  时重新绑定 `CompanionTransport`，否则 Web 保持 standalone target。`CompanionTransport`
+  （`transport-companion.ts`）向 `/api/_rpc/<name>` 发送 5 分钟 P-256 DPoP 绑定 access token，
+  并使用单次 socket ticket 打开支持 `?since=` 回放的 `/ws/events`。它会透明升级到
+  **WebRTC DataChannel** 子层（`transport-rtc.ts`），失败时自动回退 HTTPS/WS。私钥只存入
+  OS secure storage 或 Browser Vault。
 </TLDR>
 
 <StatGrid>
-  <Stat label="选择器状态数" value="3" hint="Tauri / Companion / WebStub" />
+  <Stat label="Runtime targets" value="隔离" hint="standalone / companion" />
   <Stat label="调用超时" value="30 s" hint="transport-companion.ts:206" />
   <Stat label="传输层级数" value="4" hint="ws-lan · ws-tunnel · rtc-direct · rtc-relay" />
   <Stat label="配置键" value="cognia.companion.config.v1" hint="companion-storage.ts:68" />
@@ -39,26 +38,23 @@ export interface Transport {
 检测函数以及插件包装器。`app/`、`components/` 和 `hooks/` 中的任何模块都不会自行构造 transport；
 它们只需导入 `transport` 并直接调用。
 
-## 三态选择
+## Runtime target 选择
 
 ```ts title="lib/tauri/transport-instance.ts:22"
-function pickTransport(): Transport {
-  if (isTauri()) return new TauriTransport()       // __TAURI_INTERNALS__ present
-  if (isCapacitor()) return new CompanionTransport() // Capacitor.isNativePlatform()
-  return new WebStubTransport()                     // plain web
-}
-export const transport = pickTransport()            // eager, module-load
+// Desktop 从 Tauri IPC 启动。Web/Capacitor 激活账户的 RuntimeTarget，
+// 并原子重新绑定共享 transport singleton。Companion target 只加载该 Host
+// 对应的加密凭据。
 ```
 
-`isTauri` / `isCapacitor` 委托给规范的检测叶节点 `@/lib/platform/detect`（`:16`）——该文件不直接
-检查任何 `window` 全局变量。选择结果是 **3 态**的；WebRTC 层级并不是这里的第四个并列选项——它是
-`CompanionTransport` *内部*的子层，仅在 Capacitor 分支上可用，并在运行时按调用粒度选择。
+`RuntimeTargetRegistry` 按账户隔离目标，并为每个目标分配独立 Dexie 数据库。激活顺序为停止旧订阅、
+切换数据库、重新绑定 transport、刷新 manifest/sync cursor；失败时回滚活动指针。WebRTC 仍是
+`CompanionTransport` 的内部子层，而不是独立应用 transport。
 
 | 实现 | `call` | `subscribe` |
 | --- | --- | --- |
 | `TauriTransport`（`transport-tauri.ts`） | `@tauri-apps/api` `invoke` | `listen` → unsubscribe |
-| `CompanionTransport`（`transport-companion.ts:290`） | `POST {baseUrl}/api/v1/_rpc/<name>` + Bearer | `GET {baseUrl}/ws/v1/events` |
-| `WebStubTransport`（`transport-web.ts`） | 拒绝（`tauri-only command from web`） | 无操作 |
+| `CompanionTransport`（`transport-companion.ts`） | `POST {baseUrl}/api/_rpc/<name>` + DPoP | `GET {baseUrl}/ws/events` + 单次 ticket |
+| Standalone Web target | 浏览器可执行的本地 runtime | 本地事件源 |
 
 ## CompanionTransport — HTTP+WS 路径
 
@@ -71,7 +67,7 @@ flowchart TB
   RO{"read-only?<br/>READ_ONLY_COMMANDS :305"}
   RTC{"RTC open?<br/>:306"}
   IDK["mint Idempotency-Key (writes)<br/>:325"]
-  URL["POST baseUrl/api/v1/_rpc/name<br/>:319 + Bearer :322"]
+  URL["POST baseUrl/api/_rpc/name<br/>DPoP access token + proof"]
   PIN["pinnedFetch + fingerprint<br/>:601"]
   RETRY["fetchWithRetry backoff<br/>:578"]
   OUT["JSON result"]
@@ -104,9 +100,9 @@ flowchart TB
 ### subscribe() — `transport-companion.ts:334`
 
 逐通道注册处理器（`:341`），当 RTC 层级开启时同步在其上订阅（`:351`），并在尚无 WebSocket
-连接时主动建立（`:356`）。`openWebSocket`（`:680`）以各通道最大 seq 的全局最大值
-（`globalMaxSeq`，`:827`）计算 `since`，将 `https` 改写为 `wss`，并连接至
-`{wsBase}/ws/v1/events?token=<jwt>&since=<seq>`（`:688-689`）。`handleWsMessage`（`:726`）
+连接时主动建立（`:356`）。`openWebSocket` 以各通道最大 seq 的全局最大值计算 `since`，
+通过 `/api/auth/socket-ticket` 签发单次 ticket，将 `https` 改写为 `wss`，并连接至
+`{wsBase}/ws/events?ticket=<single-use>&since=<seq>`。`handleWsMessage`
 处理 `resync_required`（清空游标，`:739`），回复 `pong` 响应 `ping`（`:758`），并在推进
 各通道游标的同时分发事件帧（`:771-782`）。断线重连在 `[1, 2, 4, 8, 16, 30] s`（`:197`）
 区间内进行 backoff；当最后一个通道取消订阅后，WebSocket 将在 30 秒宽限期
@@ -147,17 +143,17 @@ flowchart TB
 
 ## 凭据存储
 
-`CompanionConfig`（`companion-storage.ts`）包含
-`{ baseUrl, deviceJwt, deviceId, serverVersion, serverFingerprint?, rendezvousId?, signalingRoomDescriptor?, signalingPrivateKey? }`。
-`CompanionConfigStorage` 接口（`:62`）有两个实现，由 `pickCompanionStorage()`（`:165`）选定：
+`CompanionConfig`（`companion-storage.ts`）包含目标 URL/身份、`deviceId`、服务器版本/指纹、
+signaling URL/ICE 元数据，以及运行时设备与 signaling key 引用。存储 adapter 明确分离公开目标元数据与秘密：
 
-- **`LocalStorageCompanionStorage`**（`:74`）——使用 `window.localStorage`，适用于 web/jsdom。
+- **Browser Vault + target book** —— 公开字段可以进入目标簿；设备与 signaling 私钥是加密或
+  non-extractable Vault 材料，绝不进入 `localStorage`。
 - **`SecureStorageCompanionStorage`**（`:127`）——通过 `capacitor-secure-storage-plugin` 访问
   iOS Keychain / Android Keystore，使用键名 `cognia.companion.config.v1`（`:68`）。
 
-读取操作使用 `transport-companion.ts` 中的内存缓存——`hydrateCompanionConfig()`（`:83`）在
-启动时预热缓存，使 `call()` 能同步读取 JWT；`saveCompanionConfig()`（`:88`）在等待 keystore
-写入完成*之前*先更新缓存。该配置**永远不会**写入 `~/.claude/.credentials.json`——该文件归
+读取时先 hydrate 精确的活动目标，再绑定 `CompanionTransport`。DPoP access token 只存活 5 分钟，
+并从已存储的 P-256 key 刷新，不是持久凭据。注册以可回滚方式一起提交 Vault、目标簿与 runtime target。
+该配置**永远不会**写入 `~/.claude/.credentials.json`——该文件归
 subscription OAuth 所有，与移动端无关。
 
 ## 相关页面
@@ -165,5 +161,5 @@ subscription OAuth 所有，与移动端无关。
 <Cards>
   <Card title="External API：RPC 清单" href="../../subsystems/companion-api/rpc-manifest" description="这些 _rpc 调用的服务端实现，以及客户端所镜像的 READ_ONLY 集合。" />
   <Card title="WebRTC transport" href="./webrtc-transport" description="DataChannel Offerer、签名信封以及 rendezvous 服务器。" />
-  <Card title="发现与配对" href="./discovery-pairing" description="baseUrl、指纹和 JWT 最初是如何写入 CompanionConfig 的。" />
+  <Card title="发现与配对" href="./discovery-pairing" description="canonical 目标元数据与加密设备/signaling 私钥如何完成注册。" />
 </Cards>

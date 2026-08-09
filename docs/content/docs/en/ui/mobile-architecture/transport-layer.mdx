@@ -10,17 +10,16 @@ description: The Transport interface, the tri-state selector, CompanionTransport
 <TLDR>
   `Transport` (`transport-types.ts:19`) is a two-method interface — `call(name, args)` and
   `subscribe(event, handler)` — that every part of the shared bundle uses instead of touching Tauri or
-  HTTP directly. `pickTransport()` (`transport-instance.ts:22`) selects the implementation once at
-  module load: `TauriTransport` (IPC) on desktop, `CompanionTransport` on Capacitor, `WebStubTransport`
-  in a plain browser. `CompanionTransport` (`transport-companion.ts`) POSTs to `/api/v1/_rpc/<name>`
-  with a Bearer JWT through a **TLS-pinned** fetch and opens one `/ws/v1/events` socket with `?since=`
-  replay. On cellular it transparently upgrades to a **WebRTC DataChannel** sub-tier (`transport-rtc.ts`)
-  and falls back to HTTP on failure. Credentials live in the OS keystore via `SecureStorage`
-  (`companion-storage.ts:127`).
+  HTTP directly. Desktop binds `TauriTransport`; web and Capacitor rebind to `CompanionTransport` when
+  the account's active runtime target is a paired Host, otherwise web stays on its standalone target.
+  `CompanionTransport` (`transport-companion.ts`) POSTs to `/api/_rpc/<name>` with a five-minute
+  P-256 DPoP-bound access token and opens `/ws/events` with a single-use socket ticket plus `?since=`
+  replay. It transparently upgrades to a **WebRTC DataChannel** sub-tier (`transport-rtc.ts`) and falls
+  back to HTTPS/WS on failure. Private keys live only in OS secure storage or the Browser Vault.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Selector states" value="3" hint="Tauri / Companion / WebStub" />
+  <Stat label="Runtime targets" value="isolated" hint="standalone / companion" />
   <Stat label="Call timeout" value="30 s" hint="transport-companion.ts:206" />
   <Stat label="Transport tiers" value="4" hint="ws-lan · ws-tunnel · rtc-direct · rtc-relay" />
   <Stat label="Config key" value="cognia.companion.config.v1" hint="companion-storage.ts:68" />
@@ -39,27 +38,24 @@ export interface Transport {
 `isCapacitor` detectors, and the plugin wrappers. Nothing in `app/`, `components/`, or `hooks/`
 constructs a transport; they import `transport` and call it.
 
-## Tri-state selection
+## Runtime-target selection
 
 ```ts title="lib/tauri/transport-instance.ts:22"
-function pickTransport(): Transport {
-  if (isTauri()) return new TauriTransport()       // __TAURI_INTERNALS__ present
-  if (isCapacitor()) return new CompanionTransport() // Capacitor.isNativePlatform()
-  return new WebStubTransport()                     // plain web
-}
-export const transport = pickTransport()            // eager, module-load
+// Desktop starts on Tauri IPC. Web/Capacitor activation resolves the account's
+// active RuntimeTarget and atomically rebinds the shared transport singleton.
+// A companion target loads only encrypted credentials for that exact Host.
 ```
 
-`isTauri` / `isCapacitor` delegate to the canonical detection leaf `@/lib/platform/detect` (`:16`) —
-the file inspects no `window` global directly. The selection is **3-state**; the WebRTC tier is *not*
-a fourth peer here — it is a sub-tier *inside* `CompanionTransport`, reachable only on the Capacitor
-branch and chosen per-call at runtime.
+`RuntimeTargetRegistry` keeps targets account-scoped and gives every target a separate Dexie database.
+Activation stops old subscriptions, switches the database, rebinds the transport, then refreshes the
+manifest and sync cursor; failure rolls back the active pointer. WebRTC remains a sub-tier inside
+`CompanionTransport`, not a separate application transport.
 
 | Implementation | `call` | `subscribe` |
 | --- | --- | --- |
 | `TauriTransport` (`transport-tauri.ts`) | `@tauri-apps/api` `invoke` | `listen` → unsubscribe |
-| `CompanionTransport` (`transport-companion.ts:290`) | `POST {baseUrl}/api/v1/_rpc/<name>` + Bearer | `GET {baseUrl}/ws/v1/events` |
-| `WebStubTransport` (`transport-web.ts`) | rejects (`tauri-only command from web`) | no-op |
+| `CompanionTransport` (`transport-companion.ts`) | `POST {baseUrl}/api/_rpc/<name>` + DPoP | `GET {baseUrl}/ws/events` + single-use ticket |
+| Standalone web target | local browser-capable runtime | local event sources |
 
 ## CompanionTransport — the HTTP+WS path
 
@@ -72,7 +68,7 @@ flowchart TB
   RO{"read-only?<br/>READ_ONLY_COMMANDS :305"}
   RTC{"RTC open?<br/>:306"}
   IDK["mint Idempotency-Key (writes)<br/>:325"]
-  URL["POST baseUrl/api/v1/_rpc/name<br/>:319 + Bearer :322"]
+  URL["POST baseUrl/api/_rpc/name<br/>DPoP access token + proof"]
   PIN["pinnedFetch + fingerprint<br/>:601"]
   RETRY["fetchWithRetry backoff<br/>:578"]
   OUT["JSON result"]
@@ -105,9 +101,9 @@ off over `[250, 500, 1000] ms` (`:200`) within a 30-second `CALL_TIMEOUT_MS` (`:
 ### subscribe() — `transport-companion.ts:334`
 
 Registers the handler per channel (`:341`), also subscribes on the RTC tier when open (`:351`), and
-opens the WebSocket if none exists (`:356`). `openWebSocket` (`:680`) computes `since` as the highest
-seq across channels (`globalMaxSeq`, `:827`), rewrites `https→wss`, and connects to
-`{wsBase}/ws/v1/events?token=<jwt>&since=<seq>` (`:688-689`). `handleWsMessage` (`:726`) handles
+opens the WebSocket if none exists (`:356`). `openWebSocket` computes `since` as the highest
+seq across channels, mints a socket ticket through `/api/auth/socket-ticket`, rewrites `https→wss`,
+and connects to `{wsBase}/ws/events?ticket=<single-use>&since=<seq>`. `handleWsMessage` handles
 `resync_required` (clears cursors, `:739`), replies `pong` to `ping` (`:758`), and dispatches event
 frames while advancing the per-channel cursor (`:771-782`). Reconnect backs off over
 `[1, 2, 4, 8, 16, 30] s` (`:197`); when the last channel unsubscribes the socket closes after a 30-second
@@ -148,17 +144,18 @@ automatic. Full mechanics are in [WebRTC transport](./webrtc-transport).
 
 ## Credential storage
 
-`CompanionConfig` (`companion-storage.ts`) includes `{ baseUrl, deviceJwt, deviceId, serverVersion,
-serverFingerprint?, rendezvousId?, signalingRoomDescriptor?, signalingPrivateKey? }`. The `CompanionConfigStorage` interface
-has two implementations selected by `pickCompanionStorage()` (`:165`):
+`CompanionConfig` (`companion-storage.ts`) includes the target URL/identity, `deviceId`, server
+version/fingerprint, signaling URL/ICE metadata, and runtime references to the device/signaling keys.
+The storage adapters deliberately split public target metadata from secret material:
 
-- **`LocalStorageCompanionStorage`** (`:74`) — `window.localStorage`, for web/jsdom.
+- **Browser Vault + target book** — public fields may enter the target book; device and signaling
+  private keys are encrypted/non-extractable Vault material and never enter `localStorage`.
 - **`SecureStorageCompanionStorage`** (`:127`) — the iOS Keychain / Android Keystore via
   `capacitor-secure-storage-plugin`, under key `cognia.companion.config.v1` (`:68`).
 
-Reads use an in-memory cache in `transport-companion.ts` — `hydrateCompanionConfig()` (`:83`) warms it
-at startup so `call()` reads the JWT synchronously, and `saveCompanionConfig()` (`:88`) updates the
-cache *before* awaiting the keystore write. The config is **never** written to
+Reads hydrate the exact active target before binding `CompanionTransport`. DPoP access tokens are
+minted for five minutes and refreshed from the stored P-256 key; they are not durable credentials.
+Registration commits Vault, target book, and runtime target as one rollback-safe operation. The config is **never** written to
 `~/.claude/.credentials.json` — that file is owned by subscription OAuth, unrelated to mobile.
 
 ## Related pages
@@ -166,5 +163,5 @@ cache *before* awaiting the keystore write. The config is **never** written to
 <Cards>
   <Card title="External API: RPC manifest" href="../../subsystems/companion-api/rpc-manifest" description="The server side of these _rpc calls, and the READ_ONLY set the client mirrors." />
   <Card title="WebRTC transport" href="./webrtc-transport" description="The DataChannel offerer, the signed envelope, and the rendezvous server." />
-  <Card title="Discovery & pairing" href="./discovery-pairing" description="How baseUrl + fingerprint + JWT get into the CompanionConfig in the first place." />
+  <Card title="Discovery & pairing" href="./discovery-pairing" description="How canonical target metadata and encrypted device/signaling keys are registered." />
 </Cards>

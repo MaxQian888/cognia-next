@@ -153,8 +153,8 @@ Layer 0 — foundation (no tauri)
 | `cognia-plugin-runtime` | 15.2k | 插件运行时;**wasmtime/cranelift** | `set_sidecar_dir_resolver`（claude：：sidecar），注册于`run()`年;规范WIT保持在`src-tauri/wit/`（Bindgen 使用相对路径——插件 SDK sync/gate脚本依赖于该位置） |
 | `cognia-skills` | 2.1k | 技能scan/install/registry | 无（零耦合） |
 | `cognia-tts` | 0.9k | 边缘TTS，用 提供商 密钥环，代理取球 | 没有 |
-| `cognia-remote-control` | 2.0k | LAN 控制 API 原语 | 没有 |
-| `cognia-gateway` | 6.6k | OpenAI-compatible 本地网关 | 无（重复使用 Cognia-Remote-Control） |
+| `cognia-remote-control`（2026-08-09 退役） | — | 由 Companion 控制面取代 | — |
+| `cognia-gateway` | 6.6k | OpenAI-compatible 本地网关 | 无 |
 | `cognia-ccswitch` | 2.4k | 提供商继电器切换器 | 无（使用 Cognia 订阅发现） |
 | `cognia-mcp-server` | 3.9k | 嵌入式MCP服务器（可流式HTTP） | 无（使用Cognia-Automation Dispatcher） |
 | `cognia-external-agent` | 4.9k | 执行后端;**路桩**/**kube** 在crate特征后面（`container-exec`/`k8s-exec`现在从app_lib前转） | `BusAgentEmitter`因`companion_api::rpc`移至crate `AgentEventEmitter`特质后方;环境突变测试获得了crate本地锁，取代了借来的`ws_bridge`测试锁 |

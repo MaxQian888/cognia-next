@@ -1,6 +1,6 @@
 ---
 title: 事件、WebSocket 与推送
-description: 规范 socket-ticket 鉴权、事件 replay、终端和浏览器 channel，以及已发布 v1 兼容 socket。
+description: 规范 socket-ticket 鉴权、事件 replay，以及终端、浏览器和 ACP channel。
 ---
 
 # 事件、WebSocket 与推送
@@ -10,8 +10,8 @@ description: 规范 socket-ticket 鉴权、事件 replay、终端和浏览器 ch
 <TLDR>
   规范 WebSocket 不会把五分钟 DPoP token 放入 URL。设备先用 DPoP 调用
   `POST /api/auth/socket-ticket`，再把返回的 60 秒单次 ticket 用于指定的 event、terminal、
-  browser 或 ACP 路径。事件连接可传 `since` 回放缺失序列。`/ws/v1/*?token=…` 仅用于已发布
-  客户端兼容。
+  browser 或 ACP 路径。事件连接可传 `since` 回放缺失序列。服务端不挂载任何 query-string
+  bearer socket。
 </TLDR>
 
 ## Ticket 流程
@@ -49,8 +49,5 @@ Ticket 只能使用一次且绑定路径。为 events 签发的 ticket 不能打
 推送 token 的注册与撤销也是受命令 manifest 管理的 RPC。Push 是离线提示，不是权威状态 channel。
 设备已有活动 event socket 时，服务器会抑制重复 push。
 
-## 已发布 v1 兼容
-
-`GET /ws/v1/events?token=<device-jwt>` 与 `GET /ws/v1/terminal?token=<device-jwt>` 继续为已发布
-移动端 transport 挂载。它们已弃用，因为 query string 中的长期 bearer credential 可能进入日志或
-中间层。新客户端必须使用 socket ticket。
+旧 `/ws/v1/*?token=…` socket 被明确移除。`cgnp3` 升级前的客户端必须重新配对，并改用单次
+socket ticket。

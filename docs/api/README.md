@@ -4,14 +4,13 @@ OpenAPI 3.1 contracts for the HTTP and WebSocket surfaces exposed by the Cognia
 native runtime. These endpoints do not exist in web-only builds because the
 Next.js application is a static export.
 
-| File                                                                       | Surface                                                         | Default listener           | Authentication                                                                                                       |
-| -------------------------------------------------------------------------- | --------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| [`mobile-companion-api.openapi.yaml`](./mobile-companion-api.openapi.yaml) | Paired-device API, RPC, event and terminal sockets              | `https://127.0.0.1:27890`  | DPoP device access token; explicit `/api/v1` and `/ws/v1` compatibility routes accept the released legacy device JWT |
-| [`headless-service-api.openapi.yaml`](./headless-service-api.openapi.yaml) | Renderer-free Brain RPC, events, bridge, and IDE content broker | `https://127.0.0.1:27890`  | Process-scoped opaque token from `--local-debug`, or a 24-hour service JWT; loopback only                            |
-| [`mcp-http.openapi.yaml`](./mcp-http.openapi.yaml)                         | External Bridge MCP                                             | Random loopback port       | Static bearer token                                                                                                  |
-| [`workflow-webhook.openapi.yaml`](./workflow-webhook.openapi.yaml)         | Workflow webhook receiver                                       | Configurable loopback port | Optional per-trigger HMAC-SHA-256                                                                                    |
-| [`connectors-webhook.openapi.yaml`](./connectors-webhook.openapi.yaml)     | Connector ingress and OneBot WebSocket                          | Configurable               | Adapter-specific                                                                                                     |
-| [`remote-control.openapi.yaml`](./remote-control.openapi.yaml)             | Local task trigger and event bridge                             | `127.0.0.1:47821`          | Bearer token, allowlist, and rate limit                                                                              |
+| File                                                                       | Surface                                                         | Default listener           | Authentication                                                                            |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------- |
+| [`mobile-companion-api.openapi.yaml`](./mobile-companion-api.openapi.yaml) | Paired-device API, RPC, event and terminal sockets              | `https://127.0.0.1:27890`  | Five-minute DPoP-bound device access token and single-use socket tickets                  |
+| [`headless-service-api.openapi.yaml`](./headless-service-api.openapi.yaml) | Renderer-free Brain RPC, events, bridge, and IDE content broker | `https://127.0.0.1:27890`  | Process-scoped opaque token from `--local-debug`, or a 24-hour service JWT; loopback only |
+| [`mcp-http.openapi.yaml`](./mcp-http.openapi.yaml)                         | External Bridge MCP                                             | Random loopback port       | Static bearer token                                                                       |
+| [`workflow-webhook.openapi.yaml`](./workflow-webhook.openapi.yaml)         | Workflow webhook receiver                                       | Configurable loopback port | Optional per-trigger HMAC-SHA-256                                                         |
+| [`connectors-webhook.openapi.yaml`](./connectors-webhook.openapi.yaml)     | Connector ingress and OneBot WebSocket                          | Configurable               | Adapter-specific                                                                          |
 
 For a verified local import, TLS certificate, token, HTTP request, and
 WebSocket setup, see the bilingual Fumadocs page
@@ -56,9 +55,8 @@ runtime allowlist.
 
 Canonical device routes are unversioned: `/api/*` and `/ws/*`. DPoP access
 tokens expire after five minutes; WebSocket tickets expire after 60 seconds and
-are single-use. The documented `/api/v1/*` and `/ws/v1/*` routes are deprecated
-compatibility endpoints for released clients and must not be used for new
-integrations.
+are single-use. Versioned public paths and legacy device-JWT compatibility
+aliases are intentionally absent and return 404.
 
 The Headless surface is internal and versioned with the application. Its
 `/internal/*` routes are never a substitute for the paired-device API and are

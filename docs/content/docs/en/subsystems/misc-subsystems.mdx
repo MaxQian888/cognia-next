@@ -147,10 +147,10 @@ Key files: `lib/qr/{pair-payload,pair-qr,barcode-scanner}.ts`.
 `proxy-config.ts` provides pure functions:
 
 - `isProxyActive(cfg)` — mode ≠ off + has host + port > 0.
-- `buildProxyUrl(cfg)` — constructs `http(s)://user:pass@host:port` or `socks5://...`, with URL-encoded credentials.
-- `shouldBypass(targetUrl, bypass[])` — checks literal host / domain suffix (`.internal`) / loopback.
+- `buildProxyUrl(cfg)` — constructs a credential-free public endpoint.
+- `shouldBypass(targetUrl, bypass[])` — checks exact hosts, `.domain` suffixes, exact IPv4/IPv6 addresses, CIDR ranges, and loopback defaults.
 
-`proxy-fetch.ts` builds on this to provide `createProxyFetch(cfg)`, returning a `fetch` replacement that routes through the proxy when needed. This layer is only used on the browser side — desktop HTTP / WS goes through `src-tauri/src/proxy_config/` handled by Rust.
+`proxy-fetch.ts` provides the desktop's buffered fetch subset. It preserves `Request`/`init` precedence, transports binary bodies as base64, supports redirect/timeout/cancellation, and rejects caller-supplied `Proxy-Authorization`. Routing and credentials are decided only by Rust.
 
 ### Rust Side
 
@@ -167,15 +167,17 @@ pub struct ProxyConfig {
 }
 ```
 
-`current() / set_current()` expose `OnceLock<RwLock<...>>`; every setting change triggers a `proxy_set` command from the frontend. Core Rust services:
+The password field above exists only in native memory. Dexie stores the username and non-sensitive settings; the password is stored under `cognia-network-proxy/manual-password` in the OS keyring. Boot migrates legacy plaintext rows only after a write-and-read-back succeeds.
+
+The runtime state is `Uninitialized → Ready | Blocked`; managed public traffic fails with a stable proxy error until settings and credentials have hydrated. `proxy_apply` publishes an atomic sanitized configuration. Core Rust services:
 
 - `build_reqwest_proxy()` — for reqwest builder, includes bypass closure.
 - `env_vars()` — feeds child processes (sidecar, etc.) `HTTP_PROXY / HTTPS_PROXY / NO_PROXY` in both cases.
 - `basic_auth_header()` — Base64-encoded `Proxy-Authorization`, used for WSS CONNECT tunnels.
-- `wsproxy::connect_via_proxy()` — WSS over HTTP CONNECT dialer.
-- `detect.rs` — scans for locally running proxy software in Auto mode.
+- `wsproxy::connect_via_proxy()` — HTTP CONNECT, TLS-to-HTTPS-proxy CONNECT, and SOCKS5 (proxy-side DNS) dialing for WSS.
+- `detect.rs` — scans for local proxy software and returns only endpoints that complete an HTTP CONNECT or SOCKS5 CONNECT handshake.
 
-`detect.rs` uses a straightforward strategy: TCP probe a set of common loopback ports (Clash 7890/7891, SOCKS 1080, Mihomo, etc.) in parallel with a 500 ms timeout. When a Clash/Mihomo port hits, it sends a `GET http://127.0.0.1:9090/version` to fetch the controller version, so the settings UI can show "Detected Clash Verge v1.x" and adopt that port in one click.
+An open port is not enough to become a candidate: ordinary services on 8080/8888, unknown-auth proxies, and fake SOCKS listeners are excluded. Clash controller metadata is still used for attribution and display after protocol verification.
 
 `ProxyCandidate` carries `kind: "http" | "socks5" | "clash"` to distinguish protocols; the UI list displays them in probe order, keeping it stable.
 
@@ -184,10 +186,11 @@ The bypass algorithm is intentionally identical on both sides, with TS and Rust 
 ```ts
 shouldBypass("http://127.0.0.1:3000", ["127.0.0.1"]) // → true
 shouldBypass("https://api.internal/foo", [".internal"]) // → true (suffix)
+shouldBypass("https://10.42.9.8", ["10.42.0.0/16"]) // → true (CIDR)
 shouldBypass("https://api.example.com", ["localhost"]) // → false
 ```
 
-The "which one takes effect" order for proxy paths is deliberate: browser fetch goes through `lib/network/proxy-fetch.ts` on the TS side; all Tauri command HTTP / WS goes through `proxy_config::current()` on the Rust side; child processes (Node sidecar, shell tools) handle it themselves via `env_vars()` injection. All three paths read from the same `AppSettings.network.proxy` config; changing it once in the settings UI syncs all three.
+Off and bypass routes call reqwest `.no_proxy()`, so ambient system proxy variables cannot override the decision. Active invalid/unreachable routes never fall back to direct. The sidecar receives a host-managed environment with inherited proxy variables cleared or replaced. Embedded WebViews support direct, HTTP, and SOCKS5 routes; Tauri cannot configure an HTTPS proxy for a WebView, so that combination returns `PROXY_TRANSPORT_UNSUPPORTED` instead of navigating directly.
 
 Key files: `lib/network/{proxy-config,proxy-fetch}.ts` · `src-tauri/src/proxy_config/{mod,commands,detect,wsproxy}.rs`.
 
@@ -402,7 +405,7 @@ Adjacent subsystems each section cares about:
 The following subsystems may warrant their own pages as the repo grows:
 
 - **TTS** — already has 9 providers + Edge bridge + auto-play gating + cache. Once STT (voice input) is also wired, plus multi-language pronunciation dictionaries, it could carry a standalone `voice-stack` page.
-- **Connectivity & Push** — when the mobile PWA / remote control (`./remote-control`) matures, the entire discovery + pairing + push chain could move together to `mobile-architecture` or a new `discovery-and-pairing` page.
+- **Connectivity & Push** — the Companion control plane owns discovery, pairing, and push; document future cross-device expansion under `mobile-architecture` or a dedicated `discovery-and-pairing` page.
 - **Monaco & Editor Workbench** — currently a shim; if cognia-next gains a full built-in code editing surface (more language servers, format-on-save, debug views), it could become a `code-editor` page.
 - **Wallpaper + Theme** — currently under `theming-and-i18n`; if animated/video wallpapers or a dynamic theme engine are introduced, it could become `appearance-engine`.
 

@@ -24,7 +24,7 @@ This decision extends [ADR-0025](/docs/en/adr/0025-unified-subscription-module) 
 - Native authenticated HTTP preserves real status with bounded headers and body. QuickJS uses a fresh 16 MiB runtime, 250 ms compute phases, at most three 1 MiB GET/POST responses, redirect/DNS revalidation, and explicit domain/HTTP/private-network grants. The host resolves only the source's own secure credential reference after evaluation.
 - A Rust-driven scheduler clock runs free reachability every 15 minutes, primary balance every 30 minutes, and other balance sources every two hours. It pauses offline or while the vault is locked, honors `Retry-After`, never schedules paid benchmarks, and emits transition-only notifications with cooldown.
 - Endpoint candidates are limited to catalog, current settings, explicit input, and read-only local CCSwitch rows. Free comparison ranks reachability; paid comparison is separately confirmed. Apply shows a diff and rollback is compare-and-swap protected.
-- Paired devices receive sanitized captured-at/revision projections. Remote jobs require desktop opt-in, device remote-control permission, an online unlocked host, and initiating-device cost confirmation. Remote payloads cannot carry endpoints, credentials, scripts, grants, or pricing.
+- Paired devices receive sanitized captured-at/revision projections. Remote jobs require desktop opt-in, the relevant Companion device-control grant, an online unlocked host, and initiating-device cost confirmation. Remote payloads cannot carry endpoints, credentials, scripts, grants, or pricing.
 - Diagnostic badges are advisory mirrors only. Passive production traffic remains the sole automatic routing and circuit-breaker health input.
 
 ## Verification

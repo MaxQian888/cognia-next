@@ -1,6 +1,6 @@
 ---
 title: Server & Authentication
-description: The current Companion TLS listener, DPoP device bootstrap, five-minute access tokens, WebSocket tickets, and deprecated v1 compatibility boundary.
+description: The current Companion TLS listener, cgnp3 bootstrap, DPoP access tokens, WebSocket tickets, signaling identity, and OIDC boundary.
 ---
 
 # Server & Authentication
@@ -24,12 +24,12 @@ request bodies are bounded, and middleware classifies the request before it reac
 | Route family | Credential |
 | --- | --- |
 | `/healthz`, `/livez`, `/readyz`, agent card | None |
+| `GET /api/auth/config` | None; deployment-safe discovery only |
 | `/api/auth/device/challenge`, `/api/auth/device/register` | Signed device challenge plus invitation or configured OIDC authority |
 | `/api/auth/token` | Registered device signature over the challenge |
-| Canonical `/api/*` | `Authorization: DPoP <access-token>` plus matching `DPoP` proof header |
+| Canonical `/api/*` | `Authorization: Bearer <access-token>` plus matching `DPoP` proof header |
 | Canonical `/ws/*` | Path-bound ticket from `POST /api/auth/socket-ticket` |
 | `/internal/*`, `/ide/content*` | Loopback service token |
-| Explicit `/api/v1/*`, `/ws/v1/*` | Deprecated released-client device JWT compatibility |
 
 ## Device bootstrap
 
@@ -37,19 +37,22 @@ request bodies are bounded, and middleware classifies the request before it reac
 sequenceDiagram
   participant D as Device
   participant C as Companion server
+  D->>C: GET /api/auth/config
+  C-->>D: mode, Host id, OIDC config, public signaling + ICE
   D->>C: POST /api/auth/device/challenge
   C-->>D: challengeId, nonce, expiresAt
-  D->>C: POST /api/auth/device/register + public key + signed proof
-  C-->>D: deviceId, role
+  D->>C: POST /api/auth/device/register + auth key + independent signaling key + signed proof
+  C-->>D: deviceId, tenantId, role, serverVersion, room descriptor
   D->>C: POST /api/auth/device/challenge
   C-->>D: fresh challenge
   D->>C: POST /api/auth/token + signed proof
   C-->>D: DPoP access token (300 s)
 ```
 
-Registration requires an invitation in single-user mode or the configured identity authority in
-managed mode. A developer cannot bypass this boundary by presenting a Headless service token to a
-public route.
+The `cgnp3` payload declares either `owner-invitation` or `oidc`. Only the former contains a one-time
+invitation. Managed mode validates Logto issuer, resource/audience, Web client, and organization
+before registering the device. Authentication and signaling private keys remain in Browser Vault or
+system secure storage; the target book contains only public metadata.
 
 ## Calling canonical HTTP routes
 
@@ -58,7 +61,7 @@ identifier, HTTP method, and request path:
 
 ```http
 POST /api/_rpc/session_list HTTP/1.1
-Authorization: DPoP eyJ…
+Authorization: Bearer eyJ…
 DPoP: eyJ…
 Content-Type: application/json
 
@@ -74,13 +77,11 @@ Call `POST /api/auth/socket-ticket` with a valid DPoP request and the target cha
 ticket expires after 60 seconds, is single-use, and is bound to the intended socket path. Pass it as
 the `ticket` query parameter; never put the DPoP access token in a WebSocket URL.
 
-## Compatibility policy
+## Breaking-upgrade policy
 
-The released v1 mobile client still uses a long-lived device JWT. The server therefore mounts only
-the explicit compatibility routes documented in the public OpenAPI spec, including
-`POST /api/v1/_rpc/{name}`, `GET /ws/v1/events`, and `GET /ws/v1/terminal`. They are marked
-`deprecated` and must not be copied into new clients. Once the released client completes DPoP
-onboarding, these aliases can follow the normal deprecation and removal process.
+The server mounts only the unversioned canonical routes. A target record without a P-256 device key
+is invalidated and shown as requiring a fresh `cgnp3` pairing; long-lived bearer device JWTs are not
+accepted or migrated.
 
 ## Developer credentials
 

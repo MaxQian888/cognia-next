@@ -1,174 +1,107 @@
 ---
 title: Transports
-description: How buildMcpServer reaches external agents — the stdio sidecar (standalone-entry), the Tauri/axum HTTP server with bearer auth, the long-lived serial sidecar process, and the automation_proxy side-channel.
+description: Canonical MCP Streamable HTTP routing, per-client verification, session binding, capacity limits, and the stdio sidecar.
 ---
 
 # Transports
 
-<Status variant="stable">Stable · `mcp-server/` + `src-tauri/src/mcp_server/`</Status>
+<Status variant="stable">Stable · `lib/external-bridge/mcp-server/` + `crates/cognia-mcp-server/`</Status>
 
 <TLDR>
-  The same `buildMcpServer` skeleton is reached two ways. Over **stdio**, a Node sidecar
-  (`standalone-entry.ts`) resolves its settings from `COGNIA_BRIDGE_SETTINGS` (bridged) or a JSON file
-  (standalone), then `connect()`s the SDK's `StdioServerTransport`. Over **HTTP**, the Tauri Rust side
-  (`src-tauri/src/mcp_server/`, axum) binds `127.0.0.1:<port>`, authenticates a bearer token in
-  constant time (`subtle`), and forwards each JSON-RPC line to a **long-lived, serial** Node sidecar via
-  a `Mutex`-guarded `round_trip`. Four `#[tauri::command]`s expose the lifecycle. When the server starts
-  it also spawns an `automation_proxy` — a second 127.0.0.1 socket the sidecar uses for `computer_use`,
-  gated by the automation permission gate and rate-limited per peer.
+  The same `buildMcpServer` skeleton is available over stdio and the loopback External Bridge.
+  The HTTP surface has exactly one MCP path: `GET|POST|DELETE /mcp/stream`. Each bearer credential
+  resolves to one client identity and canonical scope set, and every `Mcp-Session-Id` is bound to that
+  identity. `/mcp` and `/mcp/sse` are deliberately not mounted. Active sessions are capped at 128,
+  idle sessions are reclaimed after five minutes, and excess initializes fail with an explicit 503.
 </TLDR>
 
 ## stdio — the sidecar entry
 
-`standalone-entry.ts` (98 lines) is the Node CLI that runs the MCP server on stdin/stdout. Its only job
-beyond `buildMcpServer` is choosing **where settings come from**, keyed on `COGNIA_BRIDGED`:
+`lib/external-bridge/mcp-server/standalone-entry.ts` builds the shared MCP server and connects the SDK's
+`StdioServerTransport`. In bridged mode it reads `COGNIA_BRIDGE_SETTINGS`; standalone mode reads the
+host data file on each call. The bundled entry is `sidecar/cognia-mcp.mjs`, and Rust resolves the same
+path for both spawning and client setup so the advertised command cannot drift from the installed file.
 
-```ts title="lib/external-bridge/mcp-server/standalone-entry.ts:77"
-export async function runMcpServerStdio(): Promise<void> {
-  const server = buildMcpServer({ settingsGetter: resolveSettingsGetter() })
-  await server.connect(createStdioTransport())
-}
-```
+## HTTP — canonical Streamable HTTP
 
-| Mode | Condition | Settings source | Freshness |
-| --- | --- | --- | --- |
-| **bridged** | `COGNIA_BRIDGED` = `"1"` / `"true"` | `COGNIA_BRIDGE_SETTINGS` env (JSON) | parsed **once**, cached — scope changes need a restart |
-| **standalone** | otherwise | `${COGNIA_DATA_DIR}/external-bridge.json` | read **on every call** |
-
-`bridgedSettingsGetter` (`:41`) parses the env JSON once and returns `async () => cached`;
-`standaloneSettingsGetter` (`:59`) reads the file per call and falls back to
-`DEFAULT_EXTERNAL_BRIDGE_SETTINGS` on any error. `transport-stdio.ts` is a 13-line wrapper exporting
-`createStdioTransport()` so tests can swap an in-memory transport. The bundled output of this entry is
-`cognia-mcp.js`; the Settings UI resolves it at `~/.cognia/cognia-mcp.js` by default
-(`external-bridge-section.tsx:78`).
-
-## HTTP — the Tauri/axum server
-
-`src-tauri/src/mcp_server/` is the HTTP transport. It is registered in `src-tauri/src/lib.rs`: the module
-at `lib.rs:22`, the state via `.manage(McpServerState::new())` at `lib.rs:214`, and the four commands in
-the invoke handler at `lib.rs:534-537`.
+The listener lives in `crates/cognia-mcp-server/`. `http_server.rs` owns loopback binding, DNS-rebinding
+protection, authentication, the 1 MiB body limit, and graceful shutdown. `streamable_http.rs` owns MCP
+session creation, routing, SSE, idle reclamation, and admission control.
 
 ```mermaid
-flowchart TB
-  subgraph Agent["External agent (HTTP)"]
-    Client["POST http://127.0.0.1:&lt;port&gt;/mcp<br/>Authorization: Bearer &lt;token&gt;"]
-  end
-  subgraph Rust["src-tauri/src/mcp_server/"]
-    Cmds["commands.rs<br/>mcp_server_start / stop / restart / status"]
-    State["mod.rs · McpServerState<br/>Mutex&lt;McpServerInner&gt;"]
-    Http["http_server.rs<br/>axum · auth_middleware · graceful shutdown"]
-    Side["sidecar.rs · SidecarProcess<br/>tokio::process + Mutex&lt;SidecarIo&gt;"]
-    Proxy["automation_proxy.rs<br/>127.0.0.1 socket for computer_use"]
-  end
-  subgraph Node["Node sidecar (COGNIA_BRIDGED=1)"]
-    Entry["standalone-entry.ts → buildMcpServer"]
-  end
-
-  Client -->|loopback| Http
-  Cmds --> State
-  State --> Http
-  State --> Side
-  State --> Proxy
-  Http -->|round_trip(line)| Side
-  Side -->|stdin/stdout| Node
-  Proxy -. COGNIA_AUTOMATION_PROXY(_TOKEN) .-> Node
-
-  classDef n fill:#1e293b,stroke:#475569,color:#e2e8f0
-  class Agent,Rust,Node n
+flowchart LR
+  Client["External MCP client"] -->|"Bearer client credential"| Auth["ClientVerifierStore"]
+  Auth -->|"client id + canonical scopes"| Stream["/mcp/stream"]
+  Stream --> Sessions["SessionRegistry · max 128 · idle 5 min"]
+  Sessions --> Sidecar["session sidecar stdin/stdout"]
+  Sidecar --> Server["buildMcpServer"]
 ```
 
 ### Endpoints
 
 | Method | Path | Auth | Behaviour |
 | --- | --- | --- | --- |
-| GET | `/healthz` | none | `{ "ok": true, "version": "<CARGO_PKG_VERSION>" }` |
-| POST | `/mcp` | bearer | one JSON-RPC line in → one line out (`mcp_post`) |
-| POST | `/mcp/sse` | bearer | **501** placeholder — `{ error: "SSE streaming is not implemented in Phase 1; use POST /mcp" }` |
+| GET | `/healthz` | none | Liveness only; loopback Host/Origin checks still apply. |
+| POST | `/mcp/stream` | per-client bearer | Initialize a session, send JSON-RPC, or receive a response as JSON/SSE. |
+| GET | `/mcp/stream` | per-client bearer + session | Long-lived server-to-client SSE stream. |
+| DELETE | `/mcp/stream` | per-client bearer + session | Close the session and release its worker. |
 
-```rust title="src-tauri/src/mcp_server/http_server.rs"
-const BODY_LIMIT_BYTES: usize = 1024 * 1024;   // 1 MiB
-
+```rust title="crates/cognia-mcp-server/src/http_server.rs"
 let app = Router::new()
     .route("/healthz", get(healthz))
-    .route("/mcp", post(mcp_post))
-    .route("/mcp/sse", post(mcp_sse))
-    .layer(from_fn_with_state(state.clone(), auth_middleware))
-    .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
-    .with_state(state);
+    .route(
+        "/mcp/stream",
+        post(streamable_http::post_handler)
+            .get(streamable_http::get_handler)
+            .delete(streamable_http::delete_handler),
+    );
 ```
 
-`auth_middleware` (`http_server.rs:168`) bypasses `/healthz`, then extracts `Bearer <token>` and compares
-it against `state.token` with `subtle::ConstantTimeEq` — a length mismatch is rejected, and the content
-comparison is constant-time to defeat timing attacks. Missing header → 401 `missing bearer token`;
-mismatch → 401 `invalid token`. `mcp_post` rejects an empty body with 400 and maps a sidecar failure to
-502 Bad Gateway, forwarding the sidecar's response as a raw `serde_json::Value` to avoid field loss from
-double-serialization.
+The initial JSON-RPC `initialize` request omits `Mcp-Session-Id`; the response returns one. Later calls
+must carry it. A notification without `id` returns 202. A normal request returns JSON, while
+`Accept: text/event-stream` produces an SSE stream ending after the matching response. A session ID
+owned by another client is rejected and credential rotation, revocation, or expiry closes established
+sessions.
 
-### Lifecycle commands
+### Authentication and scopes
 
-The four `#[tauri::command]`s (`commands.rs`) align 1:1 with `tauri-control.ts`:
+The host persists only SHA-256 client credential verifiers. The middleware hashes the supplied bearer,
+performs a constant-time digest comparison, checks expiry, then stamps trusted `clientId` and scopes
+into the sidecar request. Caller-supplied scope metadata is overwritten. Client scope is intersected
+with the host's enabled scopes in the MCP permission gate; no transport-local tool allowlist is used.
+The listener also requires loopback `Host` and, when present, a loopback `Origin`.
 
-| Command | Input | Output | Notes |
-| --- | --- | --- | --- |
-| `mcp_server_start` | `port` · `token` · `settings_json` · `sidecar_path` (+ `AutomationState`) | `u16` bound port | `port=0` → OS-assigned |
-| `mcp_server_stop` | — | `()` | `NotRunning` if already stopped |
-| `mcp_server_restart` | same as start | `u16` bound port | best-effort stop + fresh start |
-| `mcp_server_status` | — | `McpServerStatus` | `{ running, port, startedAt }` |
+### Canonical lifecycle
 
-```ts title="lib/external-bridge/tauri-control.ts:36"
-export async function startMcpServer(args: StartArgs): Promise<number> {
-  return transport.call<number>("mcp_server_start", {
-    port: args.port, token: args.token,
-    settingsJson: JSON.stringify(args.settings), sidecarPath: args.sidecarPath,
-  })
-}
-```
+The public control plane is the `external_bridge_*` command family: revisioned configuration,
+per-client create/list/rotate/revoke, start/stop/restart, and redacted status. These commands are
+manifest-governed and execute through `remote_execution`. Starting loads active client verifiers from
+the host security store and calls `McpServerState::start_with_clients`; verifier replacement closes all
+sessions so a stale stream cannot outlive a credential change.
 
-`mcp_server_start` (`commands.rs:26`) also receives the `AutomationState` and forwards
-`Enforcement::from_state(&automation)` into `McpServerState::start`, which is how the automation gate
-reaches the proxy.
+The older `mcp_server_*` Tauri lifecycle remains an internal migration seam for the local settings UI.
+It is not an HTTP MCP facade and does not re-mount `/mcp` or `/mcp/sse`; its removal is tracked by the
+remote API consolidation work.
 
-## The sidecar process model
+## Session and process model
 
-`McpServerState::start` (`mod.rs:108`) validates the token (empty → `TokenMissing`), parses the settings
-JSON early (bad → `InvalidSettings`), and guards against double-start (`AlreadyRunning(port)`). Then,
-**in order**: spawn the `AutomationProxy` → spawn the sidecar with the proxy's addr/token → spawn the
-HTTP listener.
+`SessionRegistry` admits at most 128 active sessions with a non-blocking semaphore. The permit is held
+until the last in-flight reference drops, so deleting a registry row cannot admit excess work while an
+SSE/request task still uses the session. Capacity exhaustion returns 503 rather than spawning another
+process. A 30-second response timeout bounds synchronous POSTs, a 256-message broadcast channel bounds
+per-session fan-out, and a background sweep removes sessions idle for more than five minutes.
 
-```rust title="src-tauri/src/mcp_server/sidecar.rs (spawn_with_env)"
-let mut cmd = Command::new("node");
-cmd.arg(sidecar_path)
-   .env("COGNIA_BRIDGED", "1")
-   .env("COGNIA_BRIDGE_SETTINGS", settings_json);
-for (key, value) in extra_env { cmd.env(key, value); }   // COGNIA_AUTOMATION_PROXY(_TOKEN)
-cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit())
-   .kill_on_drop(true);
-```
-
-The process is **long-lived and serial** — a single `Mutex<SidecarIo>` serialises `round_trip`:
-
-```rust title="src-tauri/src/mcp_server/sidecar.rs (round_trip)"
-let mut io = self.request_lock.lock().await;   // serialise stdin/stdout
-io.stdin.write_all(request.as_bytes()).await?; io.stdin.write_all(b"\n").await?;
-io.stdin.flush().await?;
-let mut line = String::new();
-io.stdout.read_line(&mut line).await?;          // exactly one line back
-```
-
-Rationale: the MCP SDK's `StdioServerTransport` is inherently sequential, so multiplexing buys nothing;
-a single mutex prevents two concurrent axum handlers from interleaving bytes; and a long lifetime means
-V8, the handler modules, and the Dexie adapter initialise only once. `kill_on_drop(true)` guarantees the
-child dies when `SidecarProcess` is dropped — `stop` (`mod.rs:188`) `Option::take`s the server tuple,
-sends the axum graceful-shutdown signal, and lets the sidecar + proxy drop. `stderr` is inherited, so
-sidecar `console.error` flows into the Tauri log. Integration tests use `spawn_echo_for_tests`
-(`sidecar.rs`), which early-returns when `node` is not on PATH so CI does not hard-depend on Node.
+Each session currently owns a sidecar child, a single writer lock, and a reader task that broadcasts
+stdout lines to POST and GET consumers. `McpServerState` also retains the root sidecar for lifecycle and
+managed-process reporting. The planned single-process framed multiplexer is not implemented yet; the
+128-session admission limit bounds the current process and memory exposure until that migration lands.
 
 ### Error model
 
-`McpServerError` (`types.rs`, `thiserror`) serialises to a single string for React toasts:
-`AlreadyRunning(port)`, `NotRunning`, `Bind { port, source }`, `InvalidSettings(reason)`, `TokenMissing`,
-`SidecarSpawn(reason)`, `SidecarIo(reason)`. `McpServerStatus` is `{ running, port, startedAt }` (camelCase
-serde) with a `default()` of all-empty/false.
+Authentication failures are 401, cross-origin or cross-client access is 403, malformed requests are
+400, unknown sessions are 404, sidecar spawn/write failures are 502, capacity overload is 503, and a
+matching-response timeout is 504. Bodies contain only a short `{ error }` message and never echo bearer
+credentials, scopes, command arguments, or results.
 
 ## automation_proxy
 
@@ -213,6 +146,6 @@ as the MCP sidecar that depends on it.
 <Cards>
   <Card title="Action tools" href="./action-tools" description="The computer_use handler that opens this proxy socket and frames the envelopes." />
   <Card title="MCP server" href="./mcp-server" description="The buildMcpServer skeleton both transports connect." />
-  <Card title="Remote Control" href="../remote-control" description="A sibling axum HTTP path with the same bearer-auth + IPC pattern." />
+  <Card title="Companion API" href="../companion-api" description="The canonical authenticated host-control plane." />
   <Card title="Audit, storage & settings" href="./audit-and-settings" description="The Settings UI that calls startMcpServer with the token + sidecar path." />
 </Cards>

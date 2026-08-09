@@ -10,18 +10,19 @@ description: How a phone finds and trusts a desktop — mDNS subscribe, the LAN 
 <TLDR>
   Before a phone can call anything it must (a) find a desktop and (b) establish trust. Discovery is
   two distinct systems: `lan-scanner.ts` *discovers unknown* hosts (parallel mDNS subscribe + IP-range
-  probe, accepting a `401` from `/api/v1/whoami` as proof-of-Cognia), while `connection-strategy.ts`
+  probe, accepting a `401` from `/api/whoami` as proof-of-Cognia), while `connection-strategy.ts`
   *resolves a known* paired device's reachable URL by walking a prioritized candidate list (mDNS →
-  tunnel → cached) and probing `/api/v1/healthz`. Trust is the three-step pairing wizard: scan the QR
-  (or type a 6-digit code), redeem it for a device JWT, pin the TLS fingerprint, and persist the
-  `CompanionConfig` to the OS keystore. The local IP needed for scanning is recovered via a WebRTC ICE
+  tunnel → cached) and probing `/healthz`. Trust is the canonical pairing wizard: scan or paste a
+  `cgnp3` payload, validate Host/tenant/expiry/version, register independent P-256 device and signaling
+  keys with an Owner invitation or OIDC session, and atomically persist the resulting public target plus
+  encrypted private keys. The local IP needed for scanning is recovered via a WebRTC ICE
   trick (`local-ip.ts:50`) because mobile WebViews can't read network interfaces.
 </TLDR>
 
 <StatGrid>
   <Stat label="mDNS service" value="_cognia._tcp" hint="mdns-discovery.ts:42" />
   <Stat label="Probe ports" value="27890·7890·7891·7900·8443" hint="lan-scanner.ts:119" />
-  <Stat label="Probe target" value="GET /api/v1/whoami → 401" hint="lan-scanner.ts:357" />
+  <Stat label="Probe target" value="GET /api/whoami → 401" hint="lan-scanner.ts:357" />
   <Stat label="Candidate order" value="mDNS → tunnel → cache" hint="connection-strategy.ts:43" />
 </StatGrid>
 
@@ -47,7 +48,7 @@ flowchart TB
   TGT["pickProbeTargets<br/>:254 (emulator → 10.0.2.2)"]
   EXP["expandToPortTargets<br/>:290"]
   CONC["runWithConcurrency(8)<br/>probeServer :345"]
-  PROBE{"GET ip:port/api/v1/whoami<br/>== 401 ?  :357,:416"}
+  PROBE{"GET ip:port/api/whoami<br/>== 401 ?  :357,:416"}
   RANK["rankSource: paired>mdns>probe>history<br/>:309"]
   RESULT["DiscoveredServer[]"]
 
@@ -64,7 +65,7 @@ flowchart TB
 ```
 
 A candidate is accepted **only** if it returns HTTP `401` with a `{code,message}` body
-(`evaluateProbeResponse`, `:409-432`) — an unauthenticated request to `/api/v1/whoami` *should* be
+(`evaluateProbeResponse`, `:409-432`) — an unauthenticated request to `/api/whoami` *should* be
 rejected, which is exactly what proves the host is a Cognia server. The result is then enriched with
 the TLS fingerprint via `healthz`. Default port `27890` (`:110`); the extra ports `[27890, 7890, 7891, 7900,
 8443]` (`:119`) are tried only for paired/emulator IPs.
@@ -85,7 +86,7 @@ For a *known* device, `buildCandidates()` (`:43`) produces an ordered try-list:
 3. **cache** — the last successfully used `baseUrl` (`:71-80`).
 
 `pickReachable(candidates, probe)` (`:90`) walks them in order and returns the first that responds to
-`GET /api/v1/healthz` (`healthz.ts:48`).
+`GET /healthz` (`healthz.ts:48`).
 
 ## mDNS subscribe
 
@@ -105,12 +106,12 @@ file via Tauri (`startBroadcast` → `companion_mdns_start`, `:172`).
 (`scan-radar.tsx` + `server-card.tsx`); tapping one pre-fills its `baseUrl`.
 </Step>
 <Step>
-**Pair** — `pair-step.tsx`. Either scan the QR (`barcode.ts` → parse the payload) or type the 6-digit
-code. The submit calls `pair-api.ts`, which generates the mobile P-256 role key and redeems against
-`POST /api/v1/auth/pair` (QR) or `/api/v1/auth/pair/redeem-code` (code), receiving
-`{ deviceJwt, deviceId, serverVersion, rendezvousId, roomDescriptor, fingerprint }`.
-Validation lives in `pair-helpers.ts`; the private key is stored separately and never enters
-the public pairing row.
+**Pair** — `pair-step.tsx`. Scan or paste the canonical payload (`barcode.ts` → strict parser). The
+submit calls `pair-api.ts`, reads `GET /api/auth/config`, obtains an Owner invitation or completes the
+Logto popup PKCE session, and submits independent device-auth and signaling public keys to
+`POST /api/auth/device/register`. The response carries `deviceId`, `tenantId`, `role`,
+`serverVersion`, `rendezvousId`, and `roomDescriptor`. Private keys enter only the OS secure store or
+Browser Vault; registration failure leaves neither a target row nor plaintext key material.
 </Step>
 <Step>
 **Paired** — `paired-step.tsx` runs a read-only smoke test (`claude_sidecar_status`), verifies the WS
@@ -122,9 +123,9 @@ heartbeat). `saveCompanionConfig(...)` writes the config to the keystore. Unpair
 
 ## QR payload & TLS pinning
 
-The QR encodes the desktop's resolved `baseUrl` (priority tunnel > LAN > loopback), the 5-minute pair
-JWT, the server version, and the **TLS SPKI fingerprint**. The phone parses it, redeems the JWT, and
-stores the fingerprint in `CompanionConfig.serverFingerprint`. From then on every request goes through
+The QR encodes canonical `base`, `host`, `tenant`, `exp`, `ver`, `fp`, and `mode` fields; only
+`owner-invitation` carries a one-time invitation. The client rejects expired, Host-mismatched, and
+older payloads and stores the fingerprint in `CompanionConfig.serverFingerprint`. From then on every request goes through
 the [TLS-pinned fetch](./transport-layer#tls-pinned-fetch): the phone compares the live certificate's
 SPKI hash against the pinned value and refuses on mismatch. Because the desktop reuses its key across
 re-signs, the fingerprint never changes and the phone never has to re-pair.

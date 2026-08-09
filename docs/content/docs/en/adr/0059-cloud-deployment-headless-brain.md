@@ -22,7 +22,8 @@ description: "Defines the cloud deployment strategy: keep the desktop's proven t
 > tuned seccomp profile (P0.4). Phase 1 (W1–W6) is landed: the headless
 > binary supervises brain + sidecar, the server secret store is env-keyed,
 > and `compose-e2e.yml` runs the tier-2 smoke in CI. From Phase 2, F2 (Caddy
-> ACME front door) and F4 (public connector webhooks) are shipped, plus
+> ACME front door), F4 (public connector webhooks), and F6 (server-owned
+> connector-runtime lease) are shipped, plus
 > Logto OIDC multi-user auth on the gateway. From Phase 3,
 > `ExecBackend::Container` (R13, bollard + `docker-compose.t2.yml`), its
 > Kubernetes flavor (`k8s-exec` feature — runner Pods with attached stdio
@@ -38,7 +39,7 @@ description: "Defines the cloud deployment strategy: keep the desktop's proven t
 Cognia is local-first: the Next.js static export is consumed by three shells, and the **desktop is the server** — mobile reaches it via mDNS → WebRTC → cloudflared tunnel (`lib/connectivity/connection-strategy.ts`). The cloud footprint today:
 
 - **Two standalone services** (`services/signaling-server`, `services/share-server`), each shipping an axum binary + a Cloudflare Worker variant, Dockerfile, and a sample fly.toml. CI tests them (clippy + ≥90% llvm-cov) but **deploys nothing** — `deploy.yml` is dead Vercel scaffold (`DEPLOY_ENABLED: false`), and the service workflows' push triggers only fire on `master`.
-- **A headless companion-API skeleton already exists**: `src-tauri/src/bin/cognia-server.rs` ("Phase D") opens a SQLite `AppStore`, self-signed TLS + fingerprint, pair JWT (`cgnp2|` payload), `FilePushCredStore`, and serves the companion axum router with `app_handle: None`. `Dockerfile.cognia-server` exists but is never built in CI.
+- **The headless companion front door is now canonical**: `src-tauri/src/bin/cognia-server.rs` opens SQLite app/SecurityStore state, self-signed TLS + fingerprint, issues `cgnp3` Owner/OIDC payloads, persists secrets in the encrypted backend, and serves the companion axum router with `app_handle: None`. Device traffic uses P-256 DPoP-bound access tokens and single-use socket tickets.
 - **The CLI (`cli/`) proves the brain runs headless**: `fake-indexeddb` preamble (`cli/src/db/install-indexeddb.ts`) lets the desktop Dexie code run in Node; `setTransport(StdioTransport)` drives the same sidecar; a debounced JSON snapshot (`cli/src/db/{bootstrap,snapshot}.ts`) persists the store.
 - **The frontend/backend seam already exists**: everything flows through `Transport { call, subscribe }` (`lib/tauri/transport-types.ts`) with five implementations (Tauri IPC / companion HTTP+WS / WebRTC / web stub / CLI stdio). The plain-web build gets the stub, which rejects every call.
 
@@ -96,7 +97,7 @@ Cloud capability = desktop capability minus hardware-bound features. Both execut
 - **Sidecar** (Claude Agent SDK / AI SDK): spawned and supervised by cognia-server exactly as `claude/sidecar.rs` does on desktop (ready probe, crash backoff).
 - **External agents** (claude-code / codex / opencode / cursor / cline / gemini): the TS orchestration (`lib/ai/agent/external/{manager,acp-client,env-builder}.ts`) already lives in `@/lib` and calls `Transport.call("spawn_external_agent")`; the Rust supervisor (`external_agent/` — `command_resolver`, `proc_group`, ADR-0049 hardening) is kept as-is behind `ExecBackend`. Credentials flow through the unified subscription vault exactly as on desktop (`env-builder.ts`); Codex device-code OAuth and Claude token paste are headless-friendly.
 
-Not available in cloud (degraded/hidden): computer-use, OCR, native terminal into the host, desktop pet, native sqlite-vec (use the five cloud vector backends from ADR-0023).
+Not available in cloud (degraded/hidden): OS-local UI automation against a desktop session, desktop pet, and native sqlite-vec (use the five cloud vector backends from ADR-0023). Server OCR is available through the process-owned native registry (backend/list/status/extract/model download/cancel); only platform-bound engines such as Apple Vision remain desktop-only. Interactive terminal and shared-browser operations use their headless host/runtime implementations rather than a WebView.
 
 ### D5 — Three-layer isolation, three-tier topology
 
@@ -119,7 +120,7 @@ Topology ladder:
 - `spawn_external_agent`-class commands on the headless RPC surface are **RCE-grade**: preset-only allowlist (no arbitrary argv), separate scope, full audit trail.
 - `remote_control` (47821) and the LLM `gateway` (47823) keep their loopback-only threat model — never exposed beyond the container.
 - The PII redaction gate (`packages/redact/src/index.ts:hasNoLeakingPii`) sits in the brain and therefore survives the move unchanged; verify with the pii-gate audit before each phase ships.
-- Client-side secrets keep the keyring; **server-side secrets move to an encrypted file store** (pattern precedent: `FilePushCredStore`), master key via env/boot secret.
+- Client-side secrets keep their platform secure storage; **server-side secrets use the encrypted secret store** with a master key supplied via env/boot secret. Canonical service RPCs are `secret_store_get`, `secret_store_set`, and `secret_store_delete`; `keyring_secret_*` remains compatibility-only.
 
 ## Plan
 
@@ -144,7 +145,7 @@ Work packages are ordered by dependency. Every TS/Rust item follows repo rules: 
 | W2 | **Headless bootstrap registry**: extract the effect bodies of the runtime providers (`companion-boot`, `desktop-sync-source`, `desktop-message-source`, `backup-scheduler`, `a2ui-dispatch`, connector runtime, scheduler, initializers/*) into a plain-TS `bootstrapHeadlessRuntimes()`; providers become thin wrappers. Zero desktop behavior change; mergeable alone | `components/providers/**`, new `lib/headless/bootstrap.ts` | desktop app behaves identically; each extracted runtime has a headless smoke test |
 | W3 | **headless-host process**: extend the CLI package with a `serve` mode (reuses `install-indexeddb`, snapshot, sidecar bootstrap): connect `SocketBridgeTransport` (answer the data plane), use `CompanionTransport` → localhost with a service token (drive the control plane), call `bootstrapHeadlessRuntimes()`. Durability v1: flush-on-write debounce + exit hooks + RSS metric | `cli/src/serve/` (new), `cli/src/db/bootstrap.ts` | `cognia-agent serve` answers a `sync_pull` end-to-end against a local cognia-server |
 | W4 | **cognia-server supervision + RPC expansion**: spawn/supervise brain + sidecar (ready probe, crash backoff, mirroring `claude/sidecar.rs`); aggregate `/healthz`; mint/verify the brain's service token; add `spawn/send/kill/status_external_agent` to the headless RPC surface behind preset allowlist + scope + audit; extract **`ExecBackend`** (`LocalProcess` impl only) | `src-tauri/src/bin/cognia-server.rs`, `companion_api/rpc.rs`, `external_agent/{process,commands}.rs`, new `exec_backend.rs` | kill -9 the brain → front door serves 503 + degraded reads, brain restarts, clients recover |
-| W5 | **Server secret store**: encrypted-file store replacing keyring reads in headless (subscription vault, vector creds, connector creds, share upload secret); master key via env; PII-gate audit re-run | `src-tauri/src/subscription/vault.rs` (backend trait), `companion_api/push_creds.rs` pattern | codex + claude-code creds resolve in a container with no keyring |
+| W5 | **Server secret store**: encrypted-file store replacing OS-keyring reads in headless (subscription vault, vector creds, connector creds, share upload secret); canonical `secret_store_*` service RPCs; master key via env; PII-gate audit re-run | `crates/cognia-secrets`, `src-tauri/src/secret_store.rs`, `companion_api/rpc.rs` | codex + claude-code creds resolve in a container with no OS keyring |
 | W6 | **Container + smoke**: `Dockerfile.cognia-server` slim (sidecar only) / full (external CLIs preinstalled + git) variants; wire into the compose suite with the seccomp profile; e2e smoke: pair → chat turn (sidecar) → external-agent turn → connector webhook in | `Dockerfile.cognia-server`, `deploy/compose/` | the smoke script passes against `docker compose up` |
 
 **Phase 1 exit criterion**: a phone pairs against a cloud container and completes a full chat turn executed server-side, with the desktop switched off.
@@ -153,11 +154,12 @@ Work packages are ordered by dependency. Every TS/Rust item follows repo rules: 
 
 | # | Task | Notes |
 | --- | --- | --- |
-| F1 | Web transport selection: browser build uses `CompanionTransport` when a cloud base URL is configured (replaces `WebStubTransport`); login/pair page (paste/scan `cgnp2\|`, exchange for device JWT, browser-safe storage) | i18n both locales; `static-export-auditor` must stay green |
+| F1 | Web transport selection: browser build uses `CompanionTransport` for the active Headless target; `/pair` consumes canonical Owner/OIDC payloads, creates independent device/signaling keys, and commits only encrypted Browser Vault state after registration succeeds | i18n both locales; `static-export-auditor` must stay green |
 | F2 | Real TLS story: Caddy (ACME) in the compose suite fronting cognia-server; keep fingerprint pinning only on Capacitor paths | docs + compose |
 | F3 | Account model: align `HEADLESS_LOCAL_ACCOUNT_ID` with ADR-0054 multi-account isolation; per-account scoping in brain + front door | prerequisite for T3 |
 | F4 | Connectors go public: webhook routes exposed via the front door's public URL; retire the tunnel requirement in docs/UI for cloud installs | biggest structural win |
 | F5 | Capability degradation matrix in UI: hide/disable desktop-only features when the transport is cloud-companion | i18n; per-feature capability flags already exist for mobile — extend, don't fork |
+| F6 | Connector runtime ownership: the active remote-target guard stops the desktop runtime before a cloud brain starts; local desktop webviews still serialize with Web Locks; headless brain processes acquire a single Rust-hosted lease through the service-only `connectors_runtime_lease_{acquire,renew,release}` arms | 15 s monotonic TTL, renewed every 5 s; contention blocks boot and renewal loss fails closed by stopping all connector transports. OneBot reverse-WS inbound events and outbound actions stay on the canonical connector event/command plane; Lark OAuth callbacks use a non-replayed event targeted only to the lease-owning `brain-local` service principal while retaining the desktop custom-scheme bounce |
 
 ### 2026-07-31 Web dual-runtime completion
 
@@ -167,7 +169,7 @@ Phase 2 no longer selects behavior from `web` versus `tauri` alone. The Web shel
 - `companion` resolves an encrypted credential reference from the unlocked browser Vault, binds transport and synchronization to that target, and uses only healthy, granted operations advertised by `HostRuntimeManifestV2`.
 - `legacy-readonly` preserves unclassified pre-migration data without allowing it to be written back to an arbitrary host.
 
-Target metadata is account-scoped, while each target has a physically separate Dexie database. Switching follows stop subscriptions → activate database → rebind transport → refresh manifest/sync; a failed transport rebind rolls back the active pointer. Outbound queue rows carry both `accountId` and `targetId`, and are never replayed against a different target. Browser secrets (provider keys, device JWTs, signaling JWKs) are encrypted by the PBKDF2/AES-GCM Vault and never stored in the public target book.
+Target metadata is account-scoped, while each target has a physically separate Dexie database. Switching follows stop subscriptions → activate database → rebind transport → refresh manifest/sync; a failed transport rebind rolls back the active pointer. Outbound queue rows carry both `accountId` and `targetId`, and are never replayed against a different target. Browser secrets (provider keys, device private keys, and signaling private keys) are encrypted by the PBKDF2/AES-GCM Vault and never stored in the public target book.
 
 Public navigation and deep links consume the shared `SurfaceContract` registry. Each route therefore resolves to executable, remote, cached read-only, queued, or an explicit localized recovery state. Host build ids are diagnostic only: compatibility is negotiated from protocol range and per-feature versions, and undeclared, unhealthy, or ungranted operations fail closed.
 
@@ -218,7 +220,7 @@ these rungs fix durability, not the in-memory dataset ceiling.
 | Dexie durability in Node (fake-indexeddb is in-memory; snapshots lose the last seconds on crash; whole-DB serialize is O(n)) | **Resolved 2026-08-02** — ladder built: `snapshot-v3` debounced store → `journal-v4` checksummed transaction journal (`fsync` before the transaction resolves) → `sqlite-v5` WAL row store, all behind `HeadlessDurabilityBackend` with a parity-gated migration path. Monitor brain RSS; the in-memory dataset remains this path's ceiling. |
 | Residual `window`/DOM assumptions in `lib/` runtimes the CLI never exercised (connectors, schedulers) | W2 lands a headless smoke per extracted runtime; failures surface at extraction time, not in production |
 | bwrap unavailable inside stock Docker (`CLONE_NEWUSER` blocked) | ship the tuned seccomp profile in compose; honest degradation via `UninstalledSandboxBackend` |
-| RCE surface of spawn-class RPC | preset allowlist + dedicated scope + audit; loopback-only for remote-control/gateway |
+| RCE surface of spawn-class RPC | preset allowlist + dedicated scope + audit; authenticated Companion/gateway front doors |
 | Brain⇄front-door version skew (rolling container updates) | ship them in one image; `/healthz` reports both versions; bridge protocol carries a version field |
 
 ## Alternatives considered

@@ -11,7 +11,7 @@ description: Current health and readiness endpoints, LAN discovery, TLS identity
   The Companion listener defaults to TLS on port `27890`. LAN discovery advertises the listener and
   certificate identity; `GET /healthz` confirms the process, while `/livez` and `/readyz` separate
   liveness from dependency readiness. Tunnel or managed front doors preserve the same canonical
-  `/api/*` and `/ws/*` paths. The old `/api/v1/healthz` path is not the canonical discovery route.
+  `/api/*` and `/ws/*` paths. There is no versioned compatibility alias.
 </TLDR>
 
 ## Probe endpoints
@@ -49,8 +49,10 @@ client should pin or otherwise validate that identity according to its deploymen
 sending registration material. A tunnel's public certificate does not implicitly authorize a
 different Companion instance.
 
-## Compatibility note
+## Browser front door
 
-Released v1 RPC and socket aliases are documented compatibility endpoints. Discovery should still
-return the canonical base URL; clients choose the legacy paths only because of their transport
-version, not because the server advertises a `/api/v1` base path.
+The primary deployment serves the static export, API, WebSockets, and signaling from one HTTPS
+origin. Split-origin deployments must explicitly list exact HTTPS origins in
+`COGNIA_ALLOWED_WEB_ORIGINS`; PNA additionally requires `COGNIA_ALLOW_PRIVATE_NETWORK=true`.
+Wildcard origins and cookie credentials are never enabled, and browser WebSocket upgrades follow
+the same Origin decision as HTTP.

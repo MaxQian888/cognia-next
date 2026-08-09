@@ -1,6 +1,6 @@
 ---
 title: 服务器与鉴权
-description: 当前 Companion TLS listener、DPoP 设备初始化、五分钟 access token、WebSocket ticket 与弃用的 v1 兼容边界。
+description: 当前 Companion TLS listener、cgnp3 初始化、DPoP access token、WebSocket ticket、signaling 身份与 OIDC 边界。
 ---
 
 # 服务器与鉴权
@@ -23,12 +23,12 @@ desktop 管理的 Companion listener 默认使用 loopback，启用 LAN 后才�
 | 路由族 | 凭据 |
 | --- | --- |
 | `/healthz`、`/livez`、`/readyz`、agent card | 无 |
+| `GET /api/auth/config` | 无；仅返回部署安全的 discovery 信息 |
 | `/api/auth/device/challenge`、`/api/auth/device/register` | 已签名设备 challenge，加 invitation 或配置的 OIDC authority |
 | `/api/auth/token` | 已注册设备对 challenge 的签名 |
-| 规范 `/api/*` | `Authorization: DPoP <access-token>` 与匹配的 `DPoP` proof header |
+| 规范 `/api/*` | `Authorization: Bearer <access-token>` 与匹配的 `DPoP` proof header |
 | 规范 `/ws/*` | `POST /api/auth/socket-ticket` 签发的路径绑定 ticket |
 | `/internal/*`、`/ide/content*` | loopback service token |
-| 显式 `/api/v1/*`、`/ws/v1/*` | 已发布客户端的弃用 device JWT 兼容 |
 
 ## 设备初始化
 
@@ -36,18 +36,21 @@ desktop 管理的 Companion listener 默认使用 loopback，启用 LAN 后才�
 sequenceDiagram
   participant D as 设备
   participant C as Companion server
+  D->>C: GET /api/auth/config
+  C-->>D: 模式、Host 身份、OIDC 配置、公开 signaling 与 ICE
   D->>C: POST /api/auth/device/challenge
   C-->>D: challengeId, nonce, expiresAt
-  D->>C: POST /api/auth/device/register + 公钥 + 签名 proof
-  C-->>D: deviceId, role
+  D->>C: POST /api/auth/device/register + 认证公钥 + 独立 signaling 公钥 + 签名 proof
+  C-->>D: deviceId, tenantId, role, serverVersion, room descriptor
   D->>C: POST /api/auth/device/challenge
   C-->>D: 新 challenge
   D->>C: POST /api/auth/token + 签名 proof
   C-->>D: DPoP access token（300 秒）
 ```
 
-单用户模式下注册需要 invitation；受管模式使用配置的身份 authority。开发者不能把 Headless
-service token 交给公开路由来绕过这条边界。
+`cgnp3` 载荷明确声明 `owner-invitation` 或 `oidc`，只有前者携带一次性 invitation。受管模式会在
+注册前校验 Logto issuer、resource/audience、Web client 与 organization。认证私钥和 signaling
+私钥只进入 Browser Vault 或系统安全存储，目标簿只保存公开元数据。
 
 ## 调用规范 HTTP 路由
 
@@ -55,7 +58,7 @@ service token 交给公开路由来绕过这条边界。
 
 ```http
 POST /api/_rpc/session_list HTTP/1.1
-Authorization: DPoP eyJ…
+Authorization: Bearer eyJ…
 DPoP: eyJ…
 Content-Type: application/json
 
@@ -70,11 +73,10 @@ Content-Type: application/json
 只能使用一次且绑定目标 socket path。通过 `ticket` query parameter 传入；不要把 DPoP access token
 放进 WebSocket URL。
 
-## 兼容策略
+## 破坏性升级策略
 
-已发布 v1 移动端仍使用长期 device JWT，因此服务器只挂载公开 OpenAPI 明确列出的兼容路由，包括
-`POST /api/v1/_rpc/{name}`、`GET /ws/v1/events` 与 `GET /ws/v1/terminal`。这些路由均标记
-`deprecated`，新客户端不得照搬。待已发布客户端完成 DPoP onboarding 后，再按正常弃用流程移除。
+服务器只挂载未版本化的规范路由。缺少 P-256 设备密钥的目标记录会被判定为失效，并要求重新完成
+`cgnp3` 配对；长期 bearer device JWT 不再接受或迁移。
 
 ## 开发调试凭据
 

@@ -10,8 +10,8 @@ Accepted — 2026-05-08
 ## Context
 
 ADR-0014 ("Capacitor Mobile Shell", 2026-04-XX) shipped a V1 mobile
-foundation: Capacitor 7 workspace, JWT pairing, `/api/v1/*` axum companion
-server, push notifications, incremental sync, secure storage, and an M3.4
+foundation: Capacitor 7 workspace, the original companion pairing/data plane,
+push notifications, incremental sync, secure storage, and an M3.4
 manual-textbox pairing onboarding flow. ADR-0014 explicitly deferred:
 
 - **M2.8** — TLS for the LAN companion server, Cloudflared tunnel
@@ -53,12 +53,14 @@ barcode-scanning`).
    embedded into the QR pair payload so the mobile client pins it across
    future calls. Re-issuance with the same key keeps the pin valid.
 
-3. **Pair payload v2 (`lib/qr/pair-payload.ts`)**
+3. **Canonical pair payload (`lib/qr/pair-payload.ts`)**
 
-   Header-prefixed (`cgnp2|...`) base64url JSON carrying `baseUrl`,
-   `pairJwt`, `version`, and `fingerprint`. Backwards-compatible with M3.4
-   bare-JSON payloads (auto-detected). The new `lib/capacitor/barcode.ts`
-   wrapper feeds raw QR strings into the decoder.
+   The current payload is the breaking `cgnp3` envelope carrying `base`,
+   `host`, `tenant`, `exp`, `ver`, `fp`, and `mode`; only
+   `owner-invitation` mode carries a one-time `invitation`. Clients reject
+   every older or bare-JSON payload. Device authentication uses a P-256 key,
+   five-minute DPoP-bound access tokens, and single-use socket tickets. The
+   `lib/capacitor/barcode.ts` wrapper feeds raw QR strings into the decoder.
 
 4. **mDNS broadcast + scan**
 

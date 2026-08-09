@@ -5,10 +5,11 @@ description: 如何编写一个 cognia-next 插件，使其贡献一个新的消
 
 # 用插件扩展平台连接器
 
-cognia-next 内置了七个平台适配器（Telegram、Discord、Slack、Lark、OneBot、WeCom、
-个人微信）。**插件连接器桥**（`lib/plugin/bridge/connectors-bridge.ts`）让
-任何已安装的插件都能贡献额外的适配器 —— 例如 Mastodon、Bluesky、Matrix，或任何
-内部消息系统 —— 而无需改动 cognia-next 的源码。
+cognia-next 内置了十一个平台适配器（Telegram、Discord、Slack、Lark、OneBot、钉钉、
+企业微信、微信公众号、个人微信、QQ 官方机器人和 Matrix）。**插件连接器桥**
+（`lib/plugin/bridge/connectors-bridge.ts`）让任何已安装的插件都能贡献额外的适配器 ——
+例如 Mastodon、Bluesky 或内部消息系统 —— 而无需改动 cognia-next 的源码。Email、
+KOOK、LINE 与 Mattermost 仍明确处于规划状态，不计入可用适配器。
 
 ## 工作原理
 
