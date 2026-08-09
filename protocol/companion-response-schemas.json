@@ -1,32 +1,1517 @@
 {
   "schemaVersion": 1,
   "$defs": {
+    "LegacyResult": {
+      "type": ["object", "array", "string", "number", "boolean", "null"],
+      "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+    },
+    "LegacyRecord": {
+      "type": "object",
+      "additionalProperties": true,
+      "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain."
+    },
+    "LegacyList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/LegacyResult"
+      },
+      "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain."
+    },
+    "NullResult": {
+      "type": "null"
+    },
+    "BooleanResult": {
+      "type": "boolean"
+    },
+    "StringResult": {
+      "type": "string"
+    },
+    "IntegerResult": {
+      "type": "integer"
+    },
     "SessionRow": {
       "type": "object",
       "required": ["id", "title", "kind", "createdAt", "updatedAt"],
       "properties": {
-        "id": { "type": "string" },
-        "title": { "type": "string" },
-        "kind": { "type": "string" },
-        "createdAt": { "type": "integer" },
-        "updatedAt": { "type": "integer" }
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "integer"
+        }
       },
       "additionalProperties": false
-    }
-  },
-  "commands": {
-    "session_list": {
+    },
+    "SessionPage": {
       "type": "object",
       "required": ["rows", "total"],
       "properties": {
         "rows": {
           "type": "array",
-          "items": { "$ref": "#/$defs/SessionRow" }
+          "items": {
+            "$ref": "#/$defs/SessionRow"
+          }
         },
-        "total": { "type": "integer", "minimum": 0 },
-        "nextOffset": { "type": "integer", "minimum": 0 }
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nextOffset": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "additionalProperties": false
+    },
+    "MessageRow": {
+      "type": "object",
+      "required": ["id", "sessionId", "role", "content", "createdAt"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "MessagePage": {
+      "type": "object",
+      "required": ["rows", "total"],
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MessageRow"
+          }
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nextOffset": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ProfileVersion": {
+      "type": "object",
+      "required": ["profileVersion"],
+      "properties": {
+        "profileVersion": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "SyncTables": {
+      "type": "object",
+      "required": ["tables"],
+      "properties": {
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "description", "hasTombstones"],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "hasTombstones": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ConnectorAdapters": {
+      "type": "object",
+      "required": ["adapters"],
+      "properties": {
+        "adapters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["adapter_id", "adapter_type"],
+            "properties": {
+              "adapter_id": {
+                "type": "string"
+              },
+              "adapter_type": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ProviderSearch": {
+      "type": "object",
+      "required": ["results"],
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LegacyRecord"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "commands": {
+    "adapter_update_policy": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "agent_task_cancel": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "agent_task_comment": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "agent_task_move": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "agent_task_pause": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "agent_task_resume": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "agent_task_start": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "app_settings_update": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "automation_consent_pending": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "automation_consent_respond": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "background_job_kill": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "background_job_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "background_job_read": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "background_job_spawn_scheduled": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "background_monitor_cancel": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "background_monitor_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "background_monitor_register_scheduled": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "backup_export": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "backup_import": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_act": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_back": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_capability": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_close_page": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_downloads": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "browser_evaluate": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_find": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_find_clear": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_forward": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_get_page": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_navigate": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_pages": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "browser_press_key": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_read_console": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_read_network": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_reload": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_runtime_status": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "browser_screenshot": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_scroll": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_session_close": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_session_ensure": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "browser_session_get": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "browser_set_files": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_set_zoom": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_snapshot": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "browser_stop": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_switch_page": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_wait_for": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_wait_for_load": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "character_bind_twin": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "character_delete": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "character_upsert": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "claude_approve": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "claude_close_session": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "claude_compact": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "claude_has_api_key": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "claude_has_oauth_bearer": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "claude_interrupt": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "claude_plugin_tool_response": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "claude_protocol_adapter_message": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "claude_restart_sidecar": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "claude_restore": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "claude_send": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "claude_set_api_key": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "claude_set_mode": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "claude_set_oauth_bearer": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "claude_set_provider_env": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "claude_sidecar_status": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "claude_tool_result_decision": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "codeserver_activate_proxy": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "codeserver_broker_notify": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "codeserver_broker_respond": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "codeserver_broker_validate_paths": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "codeserver_build_proxy": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "codeserver_ensure": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "codeserver_list_proxies": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "codeserver_status": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "codeserver_stop": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "codeserver_stop_all": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "codeserver_supported": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "companion_can_control": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "companion_endpoints": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "connector_approve_draft": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "connector_reject_draft": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "connector_send": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "connectors_attachment_fetch": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "connectors_attachment_read": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "connectors_health": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "connectors_http_request": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "connectors_keyring_delete": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "connectors_keyring_get": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "connectors_keyring_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "connectors_keyring_set": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "connectors_lark_upload_file": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "connectors_lark_upload_image": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "connectors_lark_ws_close": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "connectors_lark_ws_open": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "connectors_list_adapters": {
+      "$ref": "#/$defs/ConnectorAdapters"
+    },
+    "connectors_media_upload": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "connectors_onebot_send": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "connectors_register": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "connectors_reset_all_ws": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "connectors_runtime_lease_acquire": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "connectors_runtime_lease_release": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "connectors_runtime_lease_renew": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "connectors_unregister": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "connectors_ws_close": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "connectors_ws_open": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "connectors_ws_send": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "conversation_overrides_update": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "default_export_dir": {
+      "$ref": "#/$defs/StringResult"
+    },
+    "device_capabilities_report": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "ensure_dir": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "ensure_dir_confined": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "ensure_system_lsp_host": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "external_agent_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "external_agent_update": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "external_bridge_client_create": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "external_bridge_client_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "external_bridge_client_revoke": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "external_bridge_client_rotate": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "external_bridge_config_get": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "external_bridge_config_update": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "external_bridge_relay_disable": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "external_bridge_relay_enable": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "external_bridge_restart": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "external_bridge_start": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "external_bridge_status": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "external_bridge_stop": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "fleet_focus_terminal": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "fleet_get_snapshot": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "fleet_interrupt_session": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "fleet_opencode_send_message": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "fleet_permission_respond": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "fleet_question_respond": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "fs_copy_workspace_entry": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "fs_create_workspace_dir": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "fs_delete_workspace_entry": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "fs_list_workspace_dir": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "fs_read_workspace_file": {
+      "$ref": "#/$defs/StringResult"
+    },
+    "fs_rename_workspace_entry": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "fs_search_content_workspace": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "fs_search_workspace": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "fs_stat_workspace_file": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "fs_write_workspace_file": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "get_external_agent_status": {
+      "$ref": "#/$defs/StringResult"
+    },
+    "git_blame": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "git_branches": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "git_checkout_branch": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_cherry_pick": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_clone": {
+      "$ref": "#/$defs/StringResult"
+    },
+    "git_commit": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "git_commit_files": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "git_conflicts": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "git_create_branch": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_create_tag": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_delete_branch": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_delete_tag": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_diff_commit": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "git_diff_file": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "git_diff_refs_file": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "git_diff_refs_files": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "git_diff_staged_all": {
+      "$ref": "#/$defs/StringResult"
+    },
+    "git_diff_stat": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "git_discard": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_discard_all": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_fetch": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_file_history": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "git_identity": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "git_ignore_add": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_init": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_interactive_rebase": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_is_repo": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "git_log": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "git_merge": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_merge_abort": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_pull": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_push": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_push_tag": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_rebase": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_rebase_commits": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "git_refs": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "git_remote_add": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_remote_remove": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_remotes": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "git_rename_branch": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_repo_state": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "git_reset": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_resolve_conflict": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_restore": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_revert": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_sequencer_abort": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_sequencer_continue": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_set_identity": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_stage": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_stash_apply": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_stash_drop": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_stash_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "git_stash_pop": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_stash_push": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_status": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "git_sync": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "git_tags": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "git_unstage": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_worktree_add": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_worktree_commit": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "git_worktree_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "git_worktree_prune": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_worktree_remove": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "github_workspace_clone": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "github_workspace_commit_and_push": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "github_workspace_remove": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "github_workspace_stat": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "goal_create": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "goal_pause": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "goal_resume": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "goal_status": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "goal_stop": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "goal_update": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "host_admin_lease_issue": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "host_admin_lease_revoke": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "host_capabilities": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "host_feature_manifest": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "integration_ingress_ack": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "integration_ingress_deadletter": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "integration_ingress_deadletters": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "integration_ingress_get_url": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "integration_ingress_nack": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "integration_ingress_poll": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "integration_ingress_register": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "integration_ingress_requeue": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "integration_ingress_unregister": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "keyring_secret_clear": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "keyring_secret_get": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "keyring_secret_set": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "kill_external_agent": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "lark_entry_issue": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "lark_metrics_record": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "lark_result_complete": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "logs_list_files": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "logs_query": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "lsp_host_ensure": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "lsp_host_request": {
+      "$ref": "#/$defs/StringResult"
+    },
+    "mcp_server_restart": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "mcp_server_start": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "mcp_server_status": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "mcp_server_stop": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "memory_forget": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "memory_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "memory_search": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "memory_store": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "memory_update": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "message_delete": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "message_get_by_session": {
+      "$ref": "#/$defs/MessagePage"
+    },
+    "message_send": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "message_update": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "ocr_cancel_model_download": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "ocr_download_model": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "ocr_extract_native": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "ocr_list_available_backends": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "ocr_list_native_backends": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "ocr_model_status": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "plugin_activate_vscode": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_api_batch_invoke": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "plugin_api_invoke": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "plugin_backup_create": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "plugin_backup_delete": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_backup_restore": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_commit_staged_update": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "plugin_deactivate_js": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_deactivate_vscode": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_discard_staged_update": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_finalize_staged_update": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_get_capabilities": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "plugin_install": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_install_from_github": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_invoke_js_callback": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_invoke_vscode_rpc": {
+      "$ref": "#/$defs/StringResult"
+    },
+    "plugin_js_status": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "plugin_launch_js": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "plugin_load_vscode": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_permission_grant": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_permission_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "plugin_permission_revoke": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_python_call": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_python_call_hook": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_python_call_tool": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_python_eval": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_python_get_info": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_python_get_tools": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_python_import": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_python_initialize": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_python_install_deps": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_python_is_initialized": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "plugin_python_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "plugin_python_load": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_python_module_call": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_python_module_getattr": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_python_push_config": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_python_runtime_info": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_python_unload": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_runtime_snapshot": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "plugin_set_enabled": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_set_network_allowlist": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_set_shell_allowlist": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_set_status": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_stage_version": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_stop_js": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_uninstall": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_unload_vscode": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_vscode_send_response": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_wasm_activate": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_wasm_call": {
+      "$ref": "#/$defs/StringResult"
+    },
+    "plugin_wasm_deactivate": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_wasm_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "plugin_wasm_load": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "plugin_wasm_unload": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "project_environment_execute": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "provider_catalog_refresh": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "provider_catalog_search": {
+      "$ref": "#/$defs/ProviderSearch"
+    },
+    "provider_catalog_status": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "provider_diagnostics_cancel": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "provider_diagnostics_history": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "provider_diagnostics_start": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "provider_diagnostics_status": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "provider_profiles_import": {
+      "$ref": "#/$defs/ProfileVersion"
+    },
+    "provider_profiles_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "provider_profiles_version": {
+      "$ref": "#/$defs/ProfileVersion"
+    },
+    "read_agent_config": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "read_text_file": {
+      "$ref": "#/$defs/StringResult"
+    },
+    "register_push_token": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "remote_notification_publish": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "revoke_push_token": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "scheduled_task_backfill": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "scheduled_task_cleanup": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "scheduled_task_create": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "scheduled_task_delete": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "scheduled_task_emit_event": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "scheduled_task_export": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "scheduled_task_get": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "scheduled_task_import": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "scheduled_task_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "scheduled_task_pause": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "scheduled_task_resume": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "scheduled_task_run_now": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "scheduled_task_runs": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "scheduled_task_statistics": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "scheduled_task_upcoming": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "scheduled_task_update": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "secret_store_delete": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "secret_store_get": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "secret_store_set": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "send_to_external_agent": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "session_attach": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "session_detach": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "session_list": {
+      "$ref": "#/$defs/SessionPage"
+    },
+    "session_timeline": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "session_turn_messages": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "skill_set_enabled": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "skills_bundle_upload_abort": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "skills_bundle_upload_commit": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "skills_bundle_upload_open": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "skills_bundle_upload_write": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "skills_catalog_get": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "skills_install_atomic": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "skills_install_native": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "skills_load_registry": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "skills_scan_native": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "skills_uninstall": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "skills_uninstall_native": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "spawn_external_agent": {
+      "$ref": "#/$defs/StringResult"
+    },
+    "sync_list_tables": {
+      "$ref": "#/$defs/SyncTables"
+    },
+    "sync_pull": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_resource_download_close": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "task_resource_download_open": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_resource_download_read_chunk": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "task_resource_read_diff": {
+      "$ref": "#/$defs/StringResult"
+    },
+    "task_resource_read_text": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "task_resource_upload_abort": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "task_resource_upload_commit": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_resource_upload_open": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_resource_upload_write_chunk": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "task_workspace_apply": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_workspace_begin": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_workspace_export_resource_manifest": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "task_workspace_get": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_workspace_get_patch_set": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "task_workspace_get_resource": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "task_workspace_get_resource_summary": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "task_workspace_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "task_workspace_list_resource_events": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "task_workspace_list_resources": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "task_workspace_list_runs": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "task_workspace_pin": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "task_workspace_prune": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "task_workspace_record_tool_event": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "task_workspace_resolve_conflict": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "task_workspace_settle": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_workspace_status": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_workspace_undo": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "team_run_pause": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "team_run_resume": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "team_run_stop": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "team_task_comment": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "team_task_create": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "team_task_move": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "terminal_complete_paths": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "terminal_exec": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "terminal_kill": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "terminal_kill_port": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "terminal_list_all": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "terminal_list_for_project": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "transcript_capabilities": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "twin_create": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "twin_delete": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "twin_ingest_source": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "twin_job_cancel": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "twin_job_pause": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "twin_job_resume": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "twin_job_retry": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "twin_job_status": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "twin_profile_get": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "twin_profile_update": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "twin_source_create": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "twin_source_delete": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "twin_source_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "twin_source_update": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "workflow_approval_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "workflow_approval_respond": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "workflow_cancel_run": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "workflow_create": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "workflow_delete": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "workflow_run_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "workflow_schedule_pause": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "workflow_schedule_resume": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "workflow_step_result": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "workflow_trigger_manual": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "workflow_update": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "write_agent_config": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "write_text_file": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "write_text_file_confined": {
+      "$ref": "#/$defs/NullResult"
     }
   }
 }

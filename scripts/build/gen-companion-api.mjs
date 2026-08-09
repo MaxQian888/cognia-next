@@ -2292,6 +2292,9 @@ function buildHeadlessSpec(
           !argumentSchemas.has(name) &&
           classified.byName.get(name).inputSchema === "#/components/schemas/RpcArgs"
       ).length,
+      generatedResponseSchemaCount: classified.internalNames.filter(
+        (name) => responseSchemaCatalog.commands[name] !== undefined
+      ).length,
       loopbackOnly: true,
     },
   })
@@ -2435,6 +2438,9 @@ export function inspectCommittedContract() {
       path,
       errors
     )
+    if (operation["x-cognia-response-schema-source"] !== "contract") {
+      errors.push(`internal command has no concrete response schema: ${name}`)
+    }
   }
   for (const name of Object.keys(requestSchemaCatalog.commands)) {
     if (!classified.byName.has(name)) errors.push(`request schema has no command descriptor: ${name}`)

@@ -159,9 +159,12 @@ test("builds a deterministic host catalog from the generated Headless command se
   )
   assert.equal(first.commands.find((command) => command.name === "session_list")?.outputTyped, true)
   assert.equal(
-    first.commands
-      .filter((command) => command.name !== "session_list")
-      .every((command) => command.outputTyped === false && command.outputSchema === null),
+    first.commands.every(
+      (command) =>
+        command.outputTyped === true &&
+        command.outputSchema !== null &&
+        command.outputSchemaSource === "contract",
+    ),
     true,
   )
 })
@@ -176,6 +179,20 @@ test("compiles every generated Headless input as Draft 2020-12 JSON Schema", () 
       () => ajv.compile(item.post.requestBody.content["application/json"].schema),
       path,
     )
+  }
+})
+
+test("publishes a compilable output contract for every Headless command", () => {
+  const { desiredHostCommandCatalog } = inspectCommittedContract()
+  const ajv = new Ajv2020({ strict: false, allErrors: true, validateFormats: false })
+
+  assert.equal(desiredHostCommandCatalog.commands.length >= 440, true)
+  for (const command of desiredHostCommandCatalog.commands) {
+    assert.equal(command.outputTyped, true, command.name)
+    assert.equal(command.outputSchemaSource, "contract", command.name)
+    assert.ok(command.outputSchema, command.name)
+    assert.notDeepEqual(command.outputSchema, {}, command.name)
+    assert.doesNotThrow(() => ajv.compile(command.outputSchema), command.name)
   }
 })
 
