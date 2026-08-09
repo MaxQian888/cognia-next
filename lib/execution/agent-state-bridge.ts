@@ -176,13 +176,12 @@ function runStepStatus(status: PlanStepStatus): RunStepStatus {
 }
 
 export async function syncGoalExecutionRun(goal: Goal, session: ChatSession): Promise<void> {
-  if (!session.platformBinding) return
   const runId = await ensureRun({
     kind: "goal",
     sourceId: goal.id,
     session,
     projectId: goal.projectId ?? session.projectId,
-    title: "Goal",
+    title: goal.safeObjective || "Goal",
     startedAt: goal.createdAt,
   })
   const steps = (goal.subgoals ?? [])
@@ -231,7 +230,6 @@ export async function syncGoalExecutionRun(goal: Goal, session: ChatSession): Pr
 }
 
 export async function syncPlanExecutionRun(plan: AgentPlan, session: ChatSession): Promise<void> {
-  if (!session.platformBinding) return
   const runId = await ensureRun({
     kind: "plan",
     sourceId: plan.id,
@@ -299,11 +297,11 @@ export function startAgentStateExecutionBridge(): () => void {
     return {
       goals: goals.flatMap((goal) => {
         const session = sessionsById.get(goal.sessionId)
-        return session?.platformBinding ? [{ goal, session }] : []
+        return session ? [{ goal, session }] : []
       }),
       plans: plans.flatMap((plan) => {
         const session = sessionsById.get(plan.sessionId)
-        return session?.platformBinding ? [{ plan, session }] : []
+        return session ? [{ plan, session }] : []
       }),
     }
   }).subscribe({

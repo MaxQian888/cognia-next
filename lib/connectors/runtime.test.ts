@@ -744,7 +744,7 @@ describe("installRuntime — ai-run (live-activity card wiring)", () => {
     expect(await getDb().outboundQueue.toArray()).toHaveLength(0)
   })
 
-  it("continues the existing run with a new attempt without resetting journal revisions", async () => {
+  it("continues a terminal run in a linked immutable journal run", async () => {
     window.localStorage.setItem(
       "cognia-agent-execution-flags-v1",
       JSON.stringify({ agentExecutionResolverV2: true })
@@ -805,13 +805,21 @@ describe("installRuntime — ai-run (live-activity card wiring)", () => {
     )
     await callHandler(resumedEvent, "ai-run")
 
-    const rows = await getDb().executionRunEvents.where("runId").equals(run!.id).toArray()
+    const runs = await getDb().executionRuns.where("kind").equals("agent-turn").toArray()
+    const resumedRun = runs.find((candidate) => candidate.id !== run!.id)
+    const rows = await getDb().executionRunEvents.where("runId").equals(resumedRun!.id).toArray()
     const sequences = rows.map((row) => row.seq)
-    expect(await getDb().executionRuns.where("kind").equals("agent-turn").count()).toBe(1)
-    expect((await getDb().executionRuns.get(run!.id))!.currentRevision).toBeGreaterThan(
-      firstRevision
-    )
+    expect(runs).toHaveLength(2)
+    expect(resumedRun).toMatchObject({
+      parentRunId: run!.id,
+      sourceId: run!.sourceId,
+      status: "completed",
+    })
+    expect((await getDb().executionRuns.get(run!.id))!.currentRevision).toBe(firstRevision)
     expect(new Set(sequences).size).toBe(sequences.length)
+    expect(rows.find((row) => row.type === "run.started")?.payload.recoveryAnchor).toEqual(
+      expect.objectContaining({ executionJournalRunId: resumedRun!.id })
+    )
     const resumedExecution = (DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[1][2].execution
     expect(resumedExecution.identity).toMatchObject({
       runId: executionIdentityRunId,

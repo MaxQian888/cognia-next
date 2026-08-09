@@ -1124,6 +1124,8 @@ mod tests {
                     execution_root: "/workspace".into(),
                     isolation_kind: IsolationKind::Shadow,
                     isolation_ref: None,
+                    workspace_id: None,
+                    base: crate::WorkspaceBaseSpec::WorkingState,
                     workspace_key: None,
                     execution_run_id: None,
                     trace_id: None,

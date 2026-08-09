@@ -38,6 +38,7 @@ import { syncAgentTaskAttempts, syncAgentTasks } from "./handlers/agent-tasks"
 import { syncAppSettings } from "./handlers/app-settings"
 import { syncCharacters } from "./handlers/characters"
 import { syncConversationOverrides } from "./handlers/conversation-overrides"
+import { syncExecutionRuns } from "./handlers/execution-runs"
 import { syncGoals } from "./handlers/goals"
 import { syncMcpServers } from "./handlers/mcp-servers"
 import { syncMemories } from "./handlers/memory"
@@ -88,6 +89,9 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // from Dexie offline; both are authored on the desktop.
   { table: "goals", run: syncGoals },
   { table: "memories", run: syncMemories },
+  // Canonical, remote-safe run summaries. Detailed/private event rows remain
+  // on the executing host and are never part of companion sync.
+  { table: "executionRuns", run: syncExecutionRuns },
   // Workflow run history — mirrors execution state so the mobile library
   // badges, runs feed, and active-runs card reflect runs (incl. phone-
   // triggered ones). Definitions sync via `workflows` above; this is runs.

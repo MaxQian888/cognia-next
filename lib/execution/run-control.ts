@@ -186,6 +186,14 @@ async function executeRunControlCommandUnlocked(
     }
   }
 
+  if (["completed", "failed", "cancelled"].includes(run.status)) {
+    return {
+      accepted: false,
+      reason: "source_rejected",
+      currentRevision: run.currentRevision,
+    }
+  }
+
   if (!authorized(run.initiator, command.actor, options.operatorIds ?? [])) {
     return reject(command, "forbidden", run.currentRevision)
   }

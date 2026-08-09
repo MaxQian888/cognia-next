@@ -127,7 +127,7 @@ describe("agent state execution bridge", () => {
     const run = await getDb().executionRuns.get(runId)
     expect(run?.latestSnapshot).toMatchObject({
       kind: "goal",
-      title: "Goal",
+      title: "redacted objective",
       status: "running",
       progress: { completed: 1, total: 2, trustworthy: true },
     })
@@ -171,5 +171,19 @@ describe("agent state execution bridge", () => {
     const runId = agentStateExecutionRunId("goal", "goal-disabled")
     expect(await getDb().executionRuns.get(runId)).toBeDefined()
     expect(await getDb().executionRunBindings.where("runId").equals(runId).count()).toBe(0)
+  })
+
+  it("journals local-only goal and plan runs without creating presenter bindings", async () => {
+    const localSession = { ...session("session-local"), platformBinding: undefined }
+    await syncGoalExecutionRun(goal({ id: "goal-local", sessionId: localSession.id }), localSession)
+    await syncPlanExecutionRun(plan({ id: "plan-local", sessionId: localSession.id }), localSession)
+
+    expect(
+      await getDb().executionRuns.get(agentStateExecutionRunId("goal", "goal-local"))
+    ).toBeDefined()
+    expect(
+      await getDb().executionRuns.get(agentStateExecutionRunId("plan", "plan-local"))
+    ).toBeDefined()
+    expect(await getDb().executionRunBindings.count()).toBe(0)
   })
 })

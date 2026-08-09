@@ -1,4 +1,3 @@
-import { platform } from "@tauri-apps/plugin-os"
 import { isTauri, transport } from "@/lib/tauri"
 import { updateProjectEnvironmentInitialization } from "@/lib/db/project-environments"
 import type {
@@ -34,12 +33,6 @@ export interface ExecuteProjectEnvironmentInput {
   timeoutSecs?: number
 }
 
-function currentOs(): ProjectEnvironmentOs {
-  const value = platform()
-  if (value === "windows" || value === "linux" || value === "macos") return value
-  throw new Error(`Unsupported project environment OS: ${value}`)
-}
-
 export function resolveEnvironmentScript(
   script: ProjectEnvironmentScript,
   os: ProjectEnvironmentOs
@@ -61,9 +54,6 @@ function selectAction(
 export async function executeProjectEnvironment(
   input: ExecuteProjectEnvironmentInput
 ): Promise<ProjectEnvironmentExecutionResult> {
-  if (!isTauri()) {
-    return { success: false, bypassed: false, error: "Project environments require local Tauri" }
-  }
   if (!input.environment.isEnabled) {
     return { success: true, bypassed: false }
   }
@@ -76,11 +66,15 @@ export async function executeProjectEnvironment(
   }
 
   const action = selectAction(input.environment, input.actionId)
-  const script = resolveEnvironmentScript(
-    action?.script ?? input.environment.setupScript,
-    currentOs()
-  )
-  if (!script) return { success: true, bypassed: false }
+  const script = action?.script ?? input.environment.setupScript
+  if (!script.default.trim() && !Object.values(script.byOs ?? {}).some((value) => value?.trim())) {
+    return { success: true, bypassed: false }
+  }
+  const policy =
+    input.environment.policy ??
+    (isTauri()
+      ? { network: "on" as const, requireSandbox: false }
+      : { network: "off" as const, requireSandbox: true })
 
   const startedAt = Date.now()
   if (!action) {
@@ -102,6 +96,7 @@ export async function executeProjectEnvironment(
       cwd: input.executionRoot,
       variables: input.environment.variables,
       keyringReferences: input.environment.keyringReferences,
+      policy,
       timeoutSecs: input.timeoutSecs,
     })
     const success = !result.timed_out && result.exit_code === 0

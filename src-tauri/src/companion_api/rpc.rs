@@ -588,6 +588,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "fs_search_content_workspace",
     "fs_read_workspace_file",
     "fs_write_workspace_file",
+    "project_environment_execute",
     // Task-scoped resource ledger. File bodies use bounded reads or verified
     // transfer handles; events carry only summaries.
     "task_workspace_status",
@@ -1180,6 +1181,7 @@ const CONTROL_COMMANDS: &[&str] = &[
     "task_workspace_pin",
     "task_workspace_prune",
     "task_workspace_record_tool_event",
+    "project_environment_execute",
     // File-tree browser writes — mutate the workspace, so remote-control gated.
     "fs_create_workspace_dir",
     "fs_delete_workspace_entry",
@@ -5383,6 +5385,28 @@ pub(super) async fn dispatch(
             .map(|_| Value::Null)
             .map_err(RpcError::internal)
         }
+        "project_environment_execute" => {
+            let script: crate::project_environment::EnvironmentScript = required(&args, "script")?;
+            let cwd = authorize_workspace_root(host, required(&args, "cwd")?)?;
+            let variables: std::collections::BTreeMap<String, String> =
+                optional(&args, "variables")?.unwrap_or_default();
+            let keyring_references: Vec<crate::project_environment::EnvironmentKeyringReference> =
+                optional(&args, "keyringReferences")?.unwrap_or_default();
+            let policy: Option<crate::project_environment::EnvironmentPolicy> =
+                optional(&args, "policy")?;
+            let timeout_secs: Option<u64> = optional(&args, "timeoutSecs")?;
+            crate::project_environment::project_environment_execute_cloud(
+                script,
+                cwd,
+                variables,
+                keyring_references,
+                policy,
+                timeout_secs,
+            )
+            .await
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
         "task_workspace_status" => to_json(crate::task_workspace::task_workspace_status()),
         "task_workspace_begin" => {
             let input: cognia_task_workspace::BeginTaskRun = required(&args, "input")?;
@@ -5398,6 +5422,7 @@ pub(super) async fn dispatch(
                         run_id: input.run_id,
                         parent_run_id: input.parent_run_id,
                         workspace_root: input.workspace_root,
+                        base: input.base,
                         agent_id: input.agent_id,
                         agent_kind: input.agent_kind,
                         workspace_key: input.workspace_key,

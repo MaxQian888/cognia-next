@@ -41,7 +41,7 @@ beforeEach(() => {
   platformMock.mockReset().mockReturnValue("macos")
 })
 
-it("selects the host override and keeps keyring values native", async () => {
+it("keeps host script selection and keyring values inside the execution host", async () => {
   const result = await executeProjectEnvironment({
     environment,
     executionRoot: "/worktree",
@@ -51,10 +51,11 @@ it("selects the host override and keeps keyring values native", async () => {
 
   expect(result).toEqual(expect.objectContaining({ success: true, bypassed: false }))
   expect(callMock).toHaveBeenCalledWith("project_environment_execute", {
-    script: "pnpm install",
+    script: { default: "install", byOs: { macos: "pnpm install" } },
     cwd: "/worktree",
     variables: { NODE_ENV: "development" },
     keyringReferences: [{ variable: "API_TOKEN", keyringRef: "project:token" }],
+    policy: { network: "on", requireSandbox: false },
     timeoutSecs: undefined,
   })
   expect(updateInitializationMock).toHaveBeenLastCalledWith(
@@ -97,12 +98,12 @@ it("executes reusable actions without overwriting setup initialization state", a
   })
   expect(callMock).toHaveBeenCalledWith(
     "project_environment_execute",
-    expect.objectContaining({ script: "pnpm test" })
+    expect.objectContaining({ script: { default: "pnpm test" } })
   )
   expect(updateInitializationMock).not.toHaveBeenCalled()
 })
 
-it("fails closed outside local Tauri", async () => {
+it("routes web execution through the existing transport with a fail-closed cloud policy", async () => {
   tauri = false
   await expect(
     executeProjectEnvironment({
@@ -111,8 +112,14 @@ it("fails closed outside local Tauri", async () => {
       scope: "local",
       surface: "interactive",
     })
-  ).resolves.toEqual(expect.objectContaining({ success: false }))
-  expect(callMock).not.toHaveBeenCalled()
+  ).resolves.toEqual(expect.objectContaining({ success: true, bypassed: false }))
+  expect(callMock).toHaveBeenCalledWith(
+    "project_environment_execute",
+    expect.objectContaining({
+      script: environment.setupScript,
+      policy: { network: "off", requireSandbox: true },
+    })
+  )
 })
 
 it("uses the default script when the host has no override", () => {

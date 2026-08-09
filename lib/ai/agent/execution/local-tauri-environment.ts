@@ -90,6 +90,7 @@ function asMutableEnvironment(profile: ProjectEnvironmentVersion): ProjectEnviro
     actions: profile.actions,
     variables: profile.variables,
     keyringReferences: profile.keyringReferences,
+    policy: profile.policy,
     createdAt: profile.createdAt,
     updatedAt: profile.createdAt,
   }
@@ -103,14 +104,7 @@ export function createLocalTauriExecutionEnvironment(
     string,
     AgentChildEnvironmentSession & { settle: OpenWorkspaceResult["settle"] }
   >()
-  const tauriAvailable = (): boolean => {
-    if (options.isTauri) return options.isTauri()
-    // Kept lazy so importing the contract remains safe in static-export/web tests.
-    return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
-  }
-
   const capabilities = (): ReadonlySet<AgentExecutionEnvironmentCapability> => {
-    if (!tauriAvailable()) return new Set()
     const values: AgentExecutionEnvironmentCapability[] = [
       "filesystem",
       "process",
@@ -118,13 +112,12 @@ export function createLocalTauriExecutionEnvironment(
       "editor",
       "browser",
     ]
-    if (options.sandboxSupported === true) values.push("sandbox")
-    if (options.networkPolicySupported === true) values.push("network_policy")
+    if (options.sandboxSupported !== false) values.push("sandbox")
+    if (options.networkPolicySupported !== false) values.push("network_policy")
     return new Set(values)
   }
 
   const preflight = (profile: ProjectEnvironmentVersion): { ok: boolean; missing: string[] } => {
-    if (!tauriAvailable()) return { ok: false, missing: ["local_tauri"] }
     const required = new Set(profile.policy.requiredRuntimeCapabilities)
     if (profile.policy.requireSandbox) required.add("sandbox")
     if ((profile.policy.allowedDomains?.length ?? 0) > 0) required.add("network_policy")
@@ -177,8 +170,6 @@ export function createLocalTauriExecutionEnvironment(
     preflight,
 
     async prepare(profile, repositoryPath) {
-      if (!tauriAvailable())
-        throw new Error("Writable durable AgentTeam execution requires local Tauri")
       const check = preflight(profile)
       if (!check.ok) {
         throw new Error(`Execution environment cannot enforce: ${check.missing.join(", ")}`)

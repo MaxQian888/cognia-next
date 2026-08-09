@@ -50,6 +50,8 @@ export interface ProjectEnvironment {
   /** Non-sensitive values only. */
   variables: Record<string, string>
   keyringReferences: ProjectEnvironmentKeyringReference[]
+  /** Host-enforced execution policy. Legacy desktop definitions omit this field. */
+  policy?: ProjectEnvironmentPolicy
   lastInitialization?: ProjectEnvironmentInitialization
   initializationHistory?: ProjectEnvironmentInitialization[]
   createdAt: number
@@ -61,6 +63,8 @@ export interface ProjectEnvironmentPolicy {
     "filesystem" | "process" | "terminal" | "editor" | "browser" | "network_policy" | "sandbox"
   >
   allowedDomains?: string[]
+  /** Explicit egress posture; cloud execution defaults to `off`. */
+  network?: "off" | "allowlist" | "on"
   requireSandbox?: boolean
   cacheKey?: string
 }

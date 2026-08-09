@@ -12,6 +12,7 @@ import type { UnifiedExecutionRow } from "./monitor-model"
 import type { ExecutionLegSnapshot } from "./types"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 import type { TaskExecution } from "@/types/scheduler"
+import type { ExecutionRun } from "@/types/execution/run"
 
 const leg = (o: Partial<ExecutionLegSnapshot> = {}): ExecutionLegSnapshot => ({
   id: "leg1",
@@ -60,6 +61,57 @@ describe("buildExecutionMonitorModel", () => {
     })
     expect(rows.map((r) => r.source)).toEqual(["scheduled", "workflow", "broker"])
     expect(rows.map((r) => r.rowId)).toEqual(["scheduled:ex1", "workflow:run1", "broker:leg1"])
+  })
+
+  it("uses canonical journal rows and suppresses matching legacy workflow rows", () => {
+    const executionRun: ExecutionRun = {
+      id: "execution:workflow:run1",
+      kind: "workflow",
+      sourceId: "run1",
+      title: "Canonical workflow",
+      status: "running",
+      currentRevision: 1,
+      startedAt: 2500,
+      updatedAt: 2500,
+    }
+    const rows = buildExecutionMonitorModel({
+      brokerLegs: [],
+      executionRuns: [executionRun],
+      workflowRuns: [run()],
+    })
+    expect(rows).toEqual([
+      expect.objectContaining({
+        rowId: "journal:execution:workflow:run1",
+        source: "journal",
+        label: "Canonical workflow",
+      }),
+    ])
+  })
+
+  it("keeps the cancellable broker projection when it matches a canonical live run", () => {
+    const executionRun: ExecutionRun = {
+      id: "execution:agent:session-1:turn-1",
+      kind: "agent-turn",
+      sourceId: "turn-1",
+      sessionId: "session-1",
+      title: "Canonical chat",
+      status: "running",
+      currentRevision: 1,
+      startedAt: 1000,
+      updatedAt: 1000,
+    }
+
+    const rows = buildExecutionMonitorModel({
+      brokerLegs: [leg({ id: "leg-chat", kind: "chat", sessionId: "session-1" })],
+      executionRuns: [executionRun],
+    })
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      rowId: "broker:leg-chat",
+      source: "broker",
+      cancellable: true,
+    })
   })
 
   it("maps broker leg state + cancelled into a unified status", () => {

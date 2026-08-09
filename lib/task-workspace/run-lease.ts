@@ -3,7 +3,7 @@ import {
   settleTaskWorkspaceRunWithProjection,
   type BeginTaskWorkspaceTurn,
 } from "./client"
-import type { ResourceChange, ResourceTrackingPolicy, TaskRun } from "./types"
+import type { ResourceChange, ResourceTrackingPolicy, TaskRun, WorkspaceBaseSpec } from "./types"
 
 export interface TaskWorkspaceRunLease {
   run: TaskRun
@@ -24,6 +24,7 @@ export async function openTaskWorkspaceRunLease(
 export interface TaskWorkspaceRunLeaseInput {
   enabled: boolean
   workspaceRoot?: string
+  base?: WorkspaceBaseSpec
   taskId?: string
   sessionId: string
   runId: string
@@ -83,6 +84,7 @@ export async function withTaskWorkspaceRun<T>(
     agentId: input.agentId,
     agentKind: input.agentKind,
     workspaceRoot,
+    ...(input.base ? { base: input.base } : {}),
     executionRunId: input.executionRunId ?? input.runId,
     ...(input.traceId ? { traceId: input.traceId } : {}),
     ...(input.traceSpanId ? { traceSpanId: input.traceSpanId } : {}),

@@ -1035,9 +1035,15 @@
             "conversationOverrides",
             "goals",
             "memories",
+            "executionRuns",
             "mcpServers",
             "terminalHistory",
-            "agentTeamBoard"
+            "agentTeamBoard",
+            "agentTasks",
+            "agentTaskAttempts",
+            "templateDefinitions",
+            "templatePackages",
+            "templateInstances"
           ],
           "description": "Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live\nregistry: `sync_registry.rs::default_tables`, listable via\n`sync_list_tables`). Any other value returns 400 to prevent a\nmalicious phone from asking for arbitrary tables.\n`agentTeamBoard` (v104) is the one-way Agent-Team board mirror —\nboard edits travel back as `team_*` control RPCs, never as sync\nwrites.\n"
         },
@@ -3010,6 +3016,65 @@
         "maxBytes": {
           "type": "integer"
         }
+      },
+      "additionalProperties": false
+    },
+    "project_environment_execute": {
+      "type": "object",
+      "required": ["script", "cwd"],
+      "properties": {
+        "script": {
+          "oneOf": [
+            { "type": "string" },
+            {
+              "type": "object",
+              "required": ["default"],
+              "properties": {
+                "default": { "type": "string" },
+                "byOs": {
+                  "type": "object",
+                  "additionalProperties": { "type": "string" }
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "cwd": { "type": "string" },
+        "variables": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "keyringReferences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["variable", "keyringRef"],
+            "properties": {
+              "variable": { "type": "string" },
+              "keyringRef": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "policy": {
+          "type": "object",
+          "properties": {
+            "requiredRuntimeCapabilities": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "allowedDomains": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "requireSandbox": { "type": "boolean" },
+            "network": { "type": "string", "enum": ["off", "allowlist", "on"] },
+            "cacheKey": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "timeoutSecs": { "type": "integer", "minimum": 1, "maximum": 300 }
       },
       "additionalProperties": false
     },

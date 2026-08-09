@@ -11,6 +11,13 @@ export interface ResourceTrackingPolicy {
   autoDetect: boolean
 }
 
+export type WorkspaceBaseSpec =
+  | { kind: "workingState" }
+  | { kind: "localHead" }
+  | { kind: "remoteDefault" }
+  | { kind: "gitRef"; gitRef: string }
+  | { kind: "pullRequest"; provider: string; repo: string; number: number }
+
 export interface TaskWorkspace {
   taskId: string
   sessionId: string
@@ -31,6 +38,8 @@ export interface TaskRun {
   executionRoot: string
   isolationKind: "gitWorktree" | "shadow"
   isolationRef: string | null
+  workspaceId: string | null
+  base: WorkspaceBaseSpec
   workspaceKey: string | null
   executionRunId: string | null
   traceId: string | null

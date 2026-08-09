@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
+import type { ExecutionRun } from "@/types/execution/run"
 
 import { __resetDbForTesting, getDb } from "./schema"
 import {
@@ -9,6 +10,8 @@ import {
   getExecutionRunBinding,
   getExecutionRunSnapshot,
   listExecutionRunEvents,
+  listExecutionRuns,
+  listVisibleExecutionRunEvents,
   listExecutionRunBindings,
   putExecutionRunBinding,
   runEventJournal,
@@ -21,6 +24,32 @@ describe("execution run journal", () => {
   beforeEach(async () => {
     await getDb().delete()
     __resetDbForTesting()
+  })
+
+  it("never overwrites an existing immutable run during duplicate creation", async () => {
+    const completed: ExecutionRun = {
+      id: "duplicate-run",
+      kind: "agent-turn",
+      sourceId: "message-1",
+      title: "Completed",
+      status: "completed",
+      currentRevision: 1,
+      startedAt: 1,
+      updatedAt: 2,
+      endedAt: 2,
+    }
+    await createExecutionRun(completed)
+
+    await expect(
+      createExecutionRun({
+        ...completed,
+        title: "Reopened",
+        status: "queued",
+        currentRevision: 0,
+        endedAt: undefined,
+      })
+    ).rejects.toBeDefined()
+    expect(await getExecutionRun(completed.id)).toEqual(completed)
   })
 
   it("atomically assigns monotonic sequences and persists a replayable snapshot", async () => {
@@ -98,6 +127,53 @@ describe("execution run journal", () => {
         payload: {},
       })
     ).rejects.toThrow("Execution run not found: missing-run")
+  })
+
+  it("keeps terminal runs immutable while preserving duplicate delivery idempotency", async () => {
+    await createExecutionRun({
+      id: "run-terminal",
+      kind: "agent-turn",
+      sourceId: "turn-terminal",
+      title: "Terminal",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+    })
+    const completed = semanticRunEvent("run.completed", {}, { sourceEventId: "completed" })
+    const first = await runEventJournal.append("run-terminal", completed)
+    await expect(runEventJournal.append("run-terminal", completed)).resolves.toEqual(first)
+    await expect(
+      runEventJournal.append("run-terminal", semanticRunEvent("step.added", { stepId: "late" }))
+    ).rejects.toThrow("Execution run is terminal: run-terminal")
+  })
+
+  it("queries the canonical run table and hides private events by default", async () => {
+    await createExecutionRun({
+      id: "run-query",
+      kind: "goal",
+      sourceId: "goal-query",
+      projectId: "project-a",
+      title: "Query",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+    })
+    await runEventJournal.appendBatch("run-query", [
+      semanticRunEvent("run.started", {}, { visibility: "summary", sourceEventId: "public" }),
+      semanticRunEvent(
+        "step.progress",
+        { detail: "private" },
+        { visibility: "private", sourceEventId: "private" }
+      ),
+    ])
+
+    await expect(
+      listExecutionRuns({ kinds: ["goal"], projectId: "project-a", limit: 10 })
+    ).resolves.toEqual([expect.objectContaining({ id: "run-query" })])
+    await expect(listVisibleExecutionRunEvents("run-query")).resolves.toHaveLength(1)
+    await expect(listVisibleExecutionRunEvents("run-query", true)).resolves.toHaveLength(2)
   })
 
   it("appends a batch sequentially and keeps explicit ids idempotent", async () => {

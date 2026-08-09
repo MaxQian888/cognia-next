@@ -25,6 +25,7 @@ import type {
 } from "@cognia/agent-config-types"
 import { CROSS_PLATFORM_SETTING_KEYS } from "@cognia/agent-config-types/settings-sync"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
+import type { ExecutionRun } from "@/types/execution/run"
 import type { TerminalHistoryRow } from "@/lib/db/terminal-history"
 import { getDb } from "@/lib/db/schema"
 import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
@@ -140,6 +141,8 @@ export async function readDexieDelta(
       return readWorkflowsDelta(since)
     case "workflowRuns":
       return readWorkflowRunsDelta(since)
+    case "executionRuns":
+      return readExecutionRunsDelta(since)
     case "twinProfile":
       return readTwinProfileDelta(since)
     case "plugins":
@@ -287,6 +290,20 @@ async function readWorkflowRunsDelta(since: number): Promise<SyncDelta<WorkflowR
   const page = ordered.slice(0, RUN_PAGE_SIZE)
   const hasMore = ordered.length > RUN_PAGE_SIZE
   return finalizeDelta("workflowRuns", page, since, hasMore, runActivityAt)
+}
+
+/**
+ * Canonical execution summaries. Event rows stay device-local because they can
+ * carry private detail; `latestSnapshot` is the deliberately remote-safe
+ * projection consumed by Agent Runs and the execution monitor.
+ */
+async function readExecutionRunsDelta(since: number): Promise<SyncDelta<ExecutionRun>> {
+  const rows = await getDb()
+    .executionRuns.where("updatedAt")
+    .above(since)
+    .limit(RUN_PAGE_SIZE)
+    .toArray()
+  return finalizeDelta("executionRuns", rows, since, rows.length === RUN_PAGE_SIZE)
 }
 
 async function readTwinProfileDelta(since: number): Promise<SyncDelta<unknown>> {

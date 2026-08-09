@@ -8,6 +8,7 @@ import {
   isTerminalAgentRunStatus,
   makeAgentRunId,
   mapGoalStatus,
+  mapExecutionRunStatus,
   mapPlanStatus,
   mapTaskExecStatus,
   mapTeamStatus,
@@ -15,6 +16,7 @@ import {
   parseAgentRunId,
   parseTeamWorkflowId,
   toAgentRunFromGoal,
+  toAgentRunFromExecutionRun,
   toAgentRunFromPlan,
   toAgentRunFromTaskExecution,
   toAgentRunFromTeamRun,
@@ -98,6 +100,11 @@ describe("status mappers", () => {
     expect(mapTaskExecStatus("failed")).toBe("failed")
     expect(mapTaskExecStatus("cancelled")).toBe("cancelled")
     expect(mapTaskExecStatus("skipped")).toBe("cancelled")
+  })
+  it("maps durable execution statuses", () => {
+    expect(mapExecutionRunStatus("waiting")).toBe("running")
+    expect(mapExecutionRunStatus("recovery_required")).toBe("paused")
+    expect(mapExecutionRunStatus("completed")).toBe("succeeded")
   })
 })
 
@@ -199,5 +206,23 @@ describe("row mappers", () => {
       finishedAt: 2000,
     })
     expect(run.error).toEqual({ message: "boom" })
+  })
+  it("maps a canonical durable run without changing its legacy deep-link identity", () => {
+    const run = toAgentRunFromExecutionRun({
+      id: "execution:goal:g1",
+      kind: "goal",
+      sourceId: "g1",
+      title: "Canonical goal",
+      status: "completed",
+      currentRevision: 2,
+      startedAt: 100,
+      updatedAt: 200,
+      endedAt: 200,
+    })
+    expect(run).toMatchObject({
+      unifiedId: "goal:g1",
+      status: "succeeded",
+      origin: { tableName: "executionRuns", nativeId: "g1", executionRunId: "execution:goal:g1" },
+    })
   })
 })

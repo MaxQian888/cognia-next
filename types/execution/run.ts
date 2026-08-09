@@ -165,6 +165,8 @@ export interface ExecutionRunInitiator {
 
 export interface ExecutionRun {
   id: string
+  /** Previous immutable journal run when this run continues a recovered attempt. */
+  parentRunId?: string
   kind: ExecutionRunKind
   sourceId: string
   sessionId?: string

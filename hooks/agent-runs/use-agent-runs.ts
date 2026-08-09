@@ -21,6 +21,7 @@ import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { getDb } from "@/lib/db/schema"
 import { listAllGoals } from "@/lib/db/goals"
+import { listExecutionRuns } from "@/lib/db/execution-runs"
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store/store"
 import type { AgentTeam, TeamStatus } from "@/types/agent/agent-team"
@@ -30,6 +31,7 @@ import {
   isTeamWorkflowId,
   parseTeamWorkflowId,
   toAgentRunFromGoal,
+  toAgentRunFromExecutionRun,
   toAgentRunFromPlan,
   toAgentRunFromTaskExecution,
   toAgentRunFromTeamRun,
@@ -62,6 +64,10 @@ export interface UseAgentRunsResult {
 export function useAgentRuns(options: UseAgentRunsOptions = {}): UseAgentRunsResult {
   const limit = options.limit && options.limit > 0 ? options.limit : DEFAULT_LIMIT
 
+  const canonicalRuns = useLiveQuery(
+    async () => listExecutionRuns({ kinds: ["goal", "plan", "team", "scheduled"], limit }),
+    [limit]
+  )
   const goals = useLiveQuery(async () => listAllGoals(limit), [limit])
   const plans = useLiveQuery(
     async () => getDb().agentPlans.orderBy("createdAt").reverse().limit(limit).toArray(),
@@ -75,10 +81,28 @@ export function useAgentRuns(options: UseAgentRunsOptions = {}): UseAgentRunsRes
   const teams = useAgentTeamStore((s) => s.teams)
 
   const runs = useMemo(() => {
-    const merged: AgentRun[] = []
+    const mergedById = new Map<string, AgentRun>()
+    for (const run of canonicalRuns ?? []) {
+      const mapped = toAgentRunFromExecutionRun(run)
+      if (mapped) mergedById.set(mapped.unifiedId, mapped)
+    }
+    const addLegacy = (run: AgentRun) => {
+      const canonical = mergedById.get(run.unifiedId)
+      if (!canonical) {
+        mergedById.set(run.unifiedId, run)
+        return
+      }
+      // Keep the canonical status/projection while retaining source-specific
+      // control identifiers (for example the team id parsed from a legacy
+      // workflow row) until every producer records them in ExecutionRun.
+      mergedById.set(run.unifiedId, {
+        ...canonical,
+        origin: { ...run.origin, ...canonical.origin },
+      })
+    }
 
-    if (goals) merged.push(...goals.map(toAgentRunFromGoal))
-    if (plans) merged.push(...plans.map(toAgentRunFromPlan))
+    if (goals) goals.map(toAgentRunFromGoal).forEach(addLegacy)
+    if (plans) plans.map(toAgentRunFromPlan).forEach(addLegacy)
 
     if (teamRuns) {
       const teamRows = teamRuns.filter((r) => isTeamWorkflowId(r.workflowId))
@@ -97,7 +121,7 @@ export function useAgentRuns(options: UseAgentRunsOptions = {}): UseAgentRunsRes
         const isNewest = teamId ? newestRunIdByTeam.get(teamId) === row.id : false
         const liveStatus =
           isNewest && team && LIVE_TEAM_STATUSES.has(team.status) ? team.status : undefined
-        merged.push(toAgentRunFromTeamRun(row, liveStatus))
+        addLegacy(toAgentRunFromTeamRun(row, liveStatus))
       }
     }
 
@@ -105,9 +129,10 @@ export function useAgentRuns(options: UseAgentRunsOptions = {}): UseAgentRunsRes
       const agentExecs = taskExecutions.filter((e: TaskExecution) =>
         AGENT_TASK_TYPES.has(e.taskType)
       )
-      merged.push(...agentExecs.map(toAgentRunFromTaskExecution))
+      agentExecs.map(toAgentRunFromTaskExecution).forEach(addLegacy)
     }
 
+    const merged = [...mergedById.values()]
     merged.sort(compareAgentRuns)
 
     let filtered = merged
@@ -119,9 +144,20 @@ export function useAgentRuns(options: UseAgentRunsOptions = {}): UseAgentRunsRes
       filtered = filtered.filter((r) => r.title.toLowerCase().includes(q))
     }
     return filtered.slice(0, limit)
-  }, [goals, plans, teamRuns, taskExecutions, teams, limit, options.filterKind, options.query])
+  }, [
+    canonicalRuns,
+    goals,
+    plans,
+    teamRuns,
+    taskExecutions,
+    teams,
+    limit,
+    options.filterKind,
+    options.query,
+  ])
 
   const isLoading =
+    canonicalRuns === undefined ||
     goals === undefined ||
     plans === undefined ||
     teamRuns === undefined ||

@@ -152,10 +152,7 @@ export function startWorkflowExecutionBridge(): () => void {
         subscriptions: await listForWorkflow(run.workflowId),
       }))
     )
-    return rows.filter(
-      ({ run, subscriptions }) =>
-        run.triggeredBySource === "im" || subscriptions.some((subscription) => subscription.enabled)
-    )
+    return rows
   }).subscribe({
     next(rows) {
       for (const row of rows) {

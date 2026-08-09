@@ -426,25 +426,30 @@ async function runChatPrompt(
   const boundWorkspaceRoot = executionContext
     ? resolveSessionWorkspaceRoot(executionContext)
     : undefined
-  if (executionContext?.location === "managedWorktree" && !boundWorkspaceRoot) {
-    return { success: false, error: "Managed workspace is missing on this device" }
+  if (executionContext && !boundWorkspaceRoot) {
+    return { success: false, error: "Scheduled workspace is missing on this device" }
   }
-  const taskLease =
-    executionContext?.location === "managedWorktree"
-      ? await openTaskWorkspaceRunLease({
-          taskId: executionContext.taskWorkspace.taskId,
-          sessionId,
-          runId: `scheduled:${execution.id}`,
-          agentId: "scheduler",
-          agentKind: "scheduled-chat",
-          workspaceRoot: boundWorkspaceRoot!,
-          workspaceKey: executionContext.taskWorkspace.workspaceKey,
-          executionRunId: execution.id,
-          surface: "scheduler",
-        })
-      : null
-  if (executionContext?.location === "managedWorktree" && !taskLease) {
-    return { success: false, error: "Managed worktree is unavailable for scheduled execution" }
+  const taskLease = executionContext
+    ? await openTaskWorkspaceRunLease({
+        taskId: executionContext.taskWorkspace.taskId,
+        sessionId,
+        runId: `scheduled:${execution.id}`,
+        agentId: "scheduler",
+        agentKind: "scheduled-chat",
+        workspaceRoot: boundWorkspaceRoot!,
+        workspaceKey: executionContext.taskWorkspace.workspaceKey,
+        base:
+          executionContext.location === "managedWorktree" &&
+          executionContext.baseRef &&
+          executionContext.baseRef !== "HEAD"
+            ? { kind: "gitRef", gitRef: executionContext.baseRef }
+            : { kind: "workingState" },
+        executionRunId: execution.id,
+        surface: "scheduler",
+      })
+    : null
+  if (executionContext && !taskLease) {
+    return { success: false, error: "Scheduled workspace isolation is unavailable" }
   }
   if (taskLease) {
     finalOptions = {
@@ -458,8 +463,6 @@ async function runChatPrompt(
         agentKind: "scheduled-chat",
       },
     }
-  } else if (executionContext?.location === "local") {
-    finalOptions = { ...finalOptions, cwd: executionContext.projectRoot }
   }
 
   if (executionContext?.environmentId) {

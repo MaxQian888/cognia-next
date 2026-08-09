@@ -38,8 +38,7 @@ const linkAgentTaskAttemptExecutionMock = jest.fn()
 const settleAgentTaskAttemptMock = jest.fn()
 jest.mock("@/lib/db/agent-tasks", () => ({
   beginAgentTaskAttempt: (...args: unknown[]) => beginAgentTaskAttemptMock(...args),
-  linkAgentTaskAttemptExecution: (...args: unknown[]) =>
-    linkAgentTaskAttemptExecutionMock(...args),
+  linkAgentTaskAttemptExecution: (...args: unknown[]) => linkAgentTaskAttemptExecutionMock(...args),
   settleAgentTaskAttempt: (...args: unknown[]) => settleAgentTaskAttemptMock(...args),
 }))
 
@@ -617,7 +616,7 @@ describe("executeChatTask", () => {
     )
     expect(result).toEqual({
       success: false,
-      error: "Managed worktree is unavailable for scheduled execution",
+      error: "Scheduled workspace isolation is unavailable",
     })
     expect(sendPromptMock).not.toHaveBeenCalled()
   })
@@ -657,10 +656,17 @@ describe("executeChatTask", () => {
 
     expect(executeProjectEnvironmentMock).toHaveBeenCalledWith({
       environment,
-      executionRoot: "/repo",
+      executionRoot: "/managed/session-1",
       scope: "local",
       surface: "scheduled",
     })
+    expect(openTaskWorkspaceRunLeaseMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceRoot: "/repo",
+        base: { kind: "workingState" },
+        surface: "scheduler",
+      })
+    )
     expect(sendPromptMock).toHaveBeenCalled()
     expect(result.success).toBe(true)
   })

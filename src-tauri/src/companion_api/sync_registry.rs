@@ -99,6 +99,11 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             has_tombstones: false,
         },
         SyncTableDescriptor {
+            name: "executionRuns".to_string(),
+            description: "Canonical execution summaries (read-only remote-safe projection; private event rows remain on the executing host)".to_string(),
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
             name: "twinProfile".to_string(),
             description: "Distilled twin profiles for the mobile twin switcher".to_string(),
             has_tombstones: false,
@@ -209,6 +214,7 @@ mod tests {
         assert!(r.contains("characters"));
         assert!(r.contains("workflows"));
         assert!(r.contains("workflowRuns"));
+        assert!(r.contains("executionRuns"));
         assert!(r.contains("goals"));
         assert!(r.contains("memories"));
         assert!(r.contains("mcpServers"));
@@ -220,7 +226,7 @@ mod tests {
         assert!(r.contains("templateDefinitions"));
         assert!(r.contains("templatePackages"));
         assert!(r.contains("templateInstances"));
-        assert_eq!(r.list().len(), 21);
+        assert_eq!(r.list().len(), 22);
         assert!(!r.contains("ohai"));
     }
 

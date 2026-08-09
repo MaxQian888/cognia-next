@@ -121,6 +121,8 @@ pub struct BeginTaskRun {
     pub agent_kind: String,
     pub workspace_root: String,
     #[serde(default)]
+    pub base: WorkspaceBaseSpec,
+    #[serde(default)]
     pub workspace_key: Option<String>,
     #[serde(default)]
     pub execution_run_id: Option<String>,
@@ -162,6 +164,10 @@ pub struct TaskRun {
     pub execution_root: String,
     pub isolation_kind: IsolationKind,
     pub isolation_ref: Option<String>,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub base: WorkspaceBaseSpec,
     #[serde(default)]
     pub workspace_key: Option<String>,
     #[serde(default)]
@@ -458,6 +464,12 @@ pub enum WorkspaceBaseSpec {
         repo: String,
         number: u64,
     },
+}
+
+impl Default for WorkspaceBaseSpec {
+    fn default() -> Self {
+        Self::WorkingState
+    }
 }
 
 impl WorkspaceBaseSpec {

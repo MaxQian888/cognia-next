@@ -112,6 +112,40 @@ describe("execution run controls", () => {
     unregister()
   })
 
+  it("rejects controls for terminal runs without mutating the immutable journal", async () => {
+    await createExecutionRun({
+      id: "terminal-run",
+      kind: "agent-turn",
+      sourceId: "turn-terminal",
+      title: "Done",
+      status: "completed",
+      initiator: { remoteUserId: "owner" },
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 2,
+      endedAt: 2,
+    })
+    const handler = jest.fn(async () => undefined)
+    const unregister = registerRunControlHandler("agent-turn", handler)
+
+    const result = await executeRunControlCommand({
+      runId: "terminal-run",
+      action: "stop",
+      idempotencyKey: "terminal-control",
+      expectedRevision: 0,
+      actor: { remoteUserId: "owner" },
+    })
+
+    expect(result).toEqual({
+      accepted: false,
+      reason: "source_rejected",
+      currentRevision: 0,
+    })
+    expect(handler).not.toHaveBeenCalled()
+    expect(await getDb().executionRunEvents.where("runId").equals("terminal-run").count()).toBe(0)
+    unregister()
+  })
+
   it("expires approvals without executing a source handler", async () => {
     await seed()
     await createRunInterrupt({

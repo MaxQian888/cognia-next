@@ -1064,13 +1064,21 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           await auditRuleDecision({ characterId: routing.characterId })
         }
 
-        const executionRunId = `execution:agent:${session.id}:${storedMsg.id}`
+        const baseExecutionRunId = `execution:agent:${session.id}:${storedMsg.id}`
         const recoveringSafely = event.channelData?.recoveryIntent === "continue_safely"
         const previousRecoveryAnchor = recoveringSafely
           ? parseAgentRunRecoveryAnchor(event.channelData?.recoveryAnchor)
           : undefined
+        const recoveryParentRunId = previousRecoveryAnchor
+          ? (previousRecoveryAnchor.executionJournalRunId ??
+            previousRecoveryAnchor.executionIdentityRunId ??
+            baseExecutionRunId)
+          : undefined
+        const executionRunId = previousRecoveryAnchor
+          ? `${baseExecutionRunId}:attempt:${previousRecoveryAnchor.attemptId}`
+          : baseExecutionRunId
         const executionIdentity = {
-          runId: previousRecoveryAnchor?.executionIdentityRunId ?? executionRunId,
+          runId: previousRecoveryAnchor?.executionIdentityRunId ?? baseExecutionRunId,
           ...(previousRecoveryAnchor ? { attemptId: previousRecoveryAnchor.attemptId } : {}),
         }
 
@@ -1109,7 +1117,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               "recovery_gateway_ticket_remint_failed"
             )
             await runEventJournal.append(
-              executionRunId,
+              recoveryParentRunId ?? executionRunId,
               semanticRunEvent("run.recovery_required", {
                 reason: "gateway-ticket-remint-failed",
               })
@@ -1140,7 +1148,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               { error: validation.mismatches.join(",") }
             )
             await runEventJournal.append(
-              executionRunId,
+              recoveryParentRunId ?? executionRunId,
               semanticRunEvent("run.recovery_required", {
                 reason: "execution-drift",
                 detail: validation.mismatches,
@@ -1198,28 +1206,27 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         const streamsThroughReceiver =
           outboundTarget.adapterId === event.adapterId &&
           outboundTarget.conversationKey === event.conversationKey
-        if (!recoveringSafely) {
-          await createExecutionRun({
-            id: executionRunId,
-            kind: "agent-turn",
-            sourceId: storedMsg.id,
-            sessionId: session.id,
-            projectId: session.projectId,
-            title: runTitle,
-            status: "queued",
-            initiator: {
-              platformIdentityId: event.sender.id,
-              remoteUserId: event.sender.remoteUserId,
-              displayName: event.sender.displayName,
-              ...(readResolvedPrincipal(event.channelData) ?? {}),
-            },
-            currentRevision: 0,
-            startedAt: Date.now(),
-            updatedAt: Date.now(),
-          })
-        }
+        await createExecutionRun({
+          id: executionRunId,
+          ...(recoveryParentRunId ? { parentRunId: recoveryParentRunId } : {}),
+          kind: "agent-turn",
+          sourceId: storedMsg.id,
+          sessionId: session.id,
+          projectId: session.projectId,
+          title: runTitle,
+          status: "queued",
+          initiator: {
+            platformIdentityId: event.sender.id,
+            remoteUserId: event.sender.remoteUserId,
+            displayName: event.sender.displayName,
+            ...(readResolvedPrincipal(event.channelData) ?? {}),
+          },
+          currentRevision: 0,
+          startedAt: Date.now(),
+          updatedAt: Date.now(),
+        })
         await routeContext.bindExecutionRun(executionRunId)
-        if (liveActivityEnabled && !recoveringSafely) {
+        if (liveActivityEnabled) {
           const teamId =
             typeof event.conversationRef.teamId === "string"
               ? event.conversationRef.teamId
@@ -1250,6 +1257,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           sessionId: session.id,
           sdkSessionId: session.sdkSessionId,
           execution: recoveryExecution,
+          journalRunId: executionRunId,
           candidateDeploymentIds: candidateDeploymentIds(sendOptions, recoveryExecution),
           restoredPermissions: previousRecoveryAnchor?.restoredPermissions,
           partialOutput: previousRecoveryAnchor?.partialOutput,

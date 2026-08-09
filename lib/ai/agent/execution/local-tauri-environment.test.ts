@@ -77,8 +77,15 @@ describe("local Tauri AgentTeam execution environment", () => {
     expect(settle).toHaveBeenCalledTimes(1)
   })
 
-  it("refuses writable durable children outside Tauri", async () => {
-    const environment = createLocalTauriExecutionEnvironment({ isTauri: () => false })
-    await expect(environment.prepare(profile(), "/repo")).rejects.toThrow(/requires local Tauri/)
+  it("uses the host-neutral execution transport outside Tauri", async () => {
+    const executeSetup = jest.fn(async () => ({ success: true }))
+    const environment = createLocalTauriExecutionEnvironment({
+      isTauri: () => false,
+      executeSetup,
+    })
+    await expect(environment.prepare(profile(), "/repo")).resolves.toEqual(
+      expect.objectContaining({ executionRoot: "/repo" })
+    )
+    expect(executeSetup).toHaveBeenCalledWith(profile(), "/repo")
   })
 })

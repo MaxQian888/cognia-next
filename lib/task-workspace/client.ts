@@ -18,6 +18,7 @@ import type {
   TaskWorkspaceResourceEvent,
   TransferChunk,
   UploadHandle,
+  WorkspaceBaseSpec,
 } from "./types"
 
 export const TASK_WORKSPACE_RESOURCE_EVENT = "task-workspace://resources-changed"
@@ -30,6 +31,7 @@ export interface BeginTaskWorkspaceTurn {
   agentId: string
   agentKind: string
   workspaceRoot: string
+  base?: WorkspaceBaseSpec
   workspaceKey?: string
   executionRunId?: string
   traceId?: string

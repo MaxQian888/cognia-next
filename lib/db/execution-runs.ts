@@ -3,6 +3,8 @@ import { reduceRunEvents } from "@/lib/execution/run-reducer"
 import type {
   ExecutionRun,
   ExecutionRunBinding,
+  ExecutionRunKind,
+  ExecutionRunStatus,
   RunEvent,
   RunEventType,
   RunEventVisibility,
@@ -42,7 +44,7 @@ function redactPayload(payload: Record<string, unknown>): Record<string, unknown
 export async function createExecutionRun(run: ExecutionRun): Promise<ExecutionRun> {
   await withDbReopenRetry(() =>
     getDb()
-      .executionRuns.put(run)
+      .executionRuns.add(run)
       .then(() => undefined)
   )
   return run
@@ -50,6 +52,33 @@ export async function createExecutionRun(run: ExecutionRun): Promise<ExecutionRu
 
 export async function getExecutionRun(runId: string): Promise<ExecutionRun | undefined> {
   return getDb().executionRuns.get(runId)
+}
+
+export interface ExecutionRunQuery {
+  kinds?: readonly ExecutionRunKind[]
+  statuses?: readonly ExecutionRunStatus[]
+  projectId?: string
+  sessionId?: string
+  limit?: number
+}
+
+/** Canonical query used by Agent Runs, monitoring, and remote-safe projections. */
+export async function listExecutionRuns(query: ExecutionRunQuery = {}): Promise<ExecutionRun[]> {
+  const kinds = query.kinds ? new Set(query.kinds) : undefined
+  const statuses = query.statuses ? new Set(query.statuses) : undefined
+  const limit = Math.max(1, query.limit ?? 50)
+  return getDb()
+    .executionRuns.orderBy("updatedAt")
+    .reverse()
+    .filter(
+      (run) =>
+        (!kinds || kinds.has(run.kind)) &&
+        (!statuses || statuses.has(run.status)) &&
+        (!query.projectId || run.projectId === query.projectId) &&
+        (!query.sessionId || run.sessionId === query.sessionId)
+    )
+    .limit(limit)
+    .toArray()
 }
 
 export async function createExecutionRunBinding(
@@ -94,6 +123,14 @@ export async function listExecutionRunEvents(runId: string): Promise<RunEvent[]>
     .toArray()
 }
 
+export async function listVisibleExecutionRunEvents(
+  runId: string,
+  includePrivate = false
+): Promise<RunEvent[]> {
+  const events = await listExecutionRunEvents(runId)
+  return includePrivate ? events : events.filter((event) => event.visibility !== "private")
+}
+
 export async function getExecutionRunSnapshot(
   runId: string
 ): Promise<RunProjectionSnapshot | undefined> {
@@ -110,6 +147,9 @@ function appendInsideTransaction(
     if (!run) throw new Error(`Execution run not found: ${runId}`)
     return db.executionRunEvents.get(id).then((duplicate) => {
       if (duplicate) return duplicate
+      if (["completed", "failed", "cancelled"].includes(run.status)) {
+        throw new Error(`Execution run is terminal: ${runId}`)
+      }
 
       const event: RunEvent = {
         id,

@@ -18,11 +18,12 @@
 import type { ExecutionLegSnapshot } from "./types"
 import type { WorkflowRunRow, RunStatus } from "@/types/workflow/visual"
 import type { TaskExecution, TaskExecutionStatus } from "@/types/scheduler"
+import type { ExecutionRun, ExecutionRunStatus } from "@/types/execution/run"
 
 export type UnifiedExecutionStatus =
   "queued" | "running" | "waiting" | "done" | "error" | "cancelled"
 
-export type UnifiedExecutionSource = "broker" | "workflow" | "scheduled"
+export type UnifiedExecutionSource = "broker" | "journal" | "workflow" | "scheduled"
 
 export interface UnifiedExecutionRow {
   /** Source-prefixed unique row id (stable React key). */
@@ -47,6 +48,7 @@ export interface UnifiedExecutionRow {
 
 export interface BuildMonitorModelInput {
   brokerLegs: ExecutionLegSnapshot[]
+  executionRuns?: ExecutionRun[]
   workflowRuns?: WorkflowRunRow[]
   schedulerExecutions?: TaskExecution[]
   /** When set, keep only rows for this project (plus unscoped rows). */
@@ -98,10 +100,36 @@ export function mapExecStatus(status: TaskExecutionStatus): UnifiedExecutionStat
   }
 }
 
+export function mapExecutionStatus(status: ExecutionRunStatus): UnifiedExecutionStatus {
+  switch (status) {
+    case "queued":
+      return "queued"
+    case "running":
+      return "running"
+    case "waiting":
+    case "paused":
+    case "recovery_required":
+      return "waiting"
+    case "completed":
+      return "done"
+    case "failed":
+      return "error"
+    case "cancelled":
+      return "cancelled"
+  }
+}
+
 function inProject(rowProjectId: string | undefined, filter: string | undefined): boolean {
   if (!filter) return true
   // Unscoped rows are global → always shown; scoped rows must match.
   return rowProjectId == null || rowProjectId === filter
+}
+
+function brokerKindForRun(run: ExecutionRun): ExecutionLegSnapshot["kind"] | undefined {
+  if (run.kind === "agent-turn") return "chat"
+  if (run.kind === "workflow") return "workflow-step"
+  if (run.kind === "goal" || run.kind === "team" || run.kind === "scheduled") return run.kind
+  return undefined
 }
 
 /**
@@ -110,6 +138,7 @@ function inProject(rowProjectId: string | undefined, filter: string | undefined)
  */
 export function buildExecutionMonitorModel(input: BuildMonitorModelInput): UnifiedExecutionRow[] {
   const rows: UnifiedExecutionRow[] = []
+  const journalSourceKeys = new Set<string>()
 
   for (const leg of input.brokerLegs) {
     if (!inProject(leg.projectId, input.projectId)) continue
@@ -133,7 +162,46 @@ export function buildExecutionMonitorModel(input: BuildMonitorModelInput): Unifi
     })
   }
 
+  for (const run of input.executionRuns ?? []) {
+    if (["completed", "failed", "cancelled"].includes(run.status)) continue
+    if (!inProject(run.projectId, input.projectId)) continue
+    journalSourceKeys.add(`${run.kind}:${run.sourceId}`)
+    const brokerKind = brokerKindForRun(run)
+    const hasLiveBrokerLeg = input.brokerLegs.some(
+      (leg) =>
+        leg.runId === run.id ||
+        leg.runId === run.sourceId ||
+        (brokerKind !== undefined &&
+          leg.kind === brokerKind &&
+          run.sessionId !== undefined &&
+          leg.sessionId === run.sessionId)
+    )
+    // The broker row remains the live/cancellable projection while the
+    // durable journal supplies replay and suppresses matching legacy rows.
+    if (hasLiveBrokerLeg) continue
+    rows.push({
+      rowId: `journal:${run.id}`,
+      source: "journal",
+      nativeId: run.id,
+      kind: run.kind,
+      label: run.latestSnapshot?.title || run.title,
+      status: mapExecutionStatus(run.latestSnapshot?.status ?? run.status),
+      startedAt: run.startedAt,
+      ...(run.sessionId ? { sessionId: run.sessionId } : {}),
+      runId: run.id,
+      ...(run.projectId ? { projectId: run.projectId } : {}),
+      cancellable: false,
+    })
+  }
+
   for (const run of input.workflowRuns ?? []) {
+    const kind =
+      run.triggerKind === "trigger.team"
+        ? "team"
+        : run.triggerKind === "trigger.cron"
+          ? "scheduled"
+          : "workflow"
+    if (journalSourceKeys.has(`${kind}:${run.id}`)) continue
     if (!ACTIVE_RUN_STATUSES.has(run.status)) continue
     if (!inProject(run.projectId, input.projectId)) continue
     rows.push({
@@ -151,6 +219,7 @@ export function buildExecutionMonitorModel(input: BuildMonitorModelInput): Unifi
   }
 
   for (const exec of input.schedulerExecutions ?? []) {
+    if (journalSourceKeys.has(`scheduled:${exec.id}`)) continue
     if (!ACTIVE_EXEC_STATUSES.has(exec.status)) continue
     rows.push({
       rowId: `scheduled:${exec.id}`,
@@ -201,6 +270,11 @@ export type ExecutionFilterKind = (typeof EXECUTION_FILTER_KINDS)[number]
 export function executionRowFilterKind(row: UnifiedExecutionRow): ExecutionFilterKind {
   if (row.source === "workflow") return "workflow"
   if (row.source === "scheduled") return "scheduled"
+  if (row.source === "journal") {
+    if (row.kind === "agent-turn") return "chat"
+    if (row.kind === "plan") return "workflow"
+    return row.kind as ExecutionFilterKind
+  }
   return row.kind as ExecutionFilterKind
 }
 

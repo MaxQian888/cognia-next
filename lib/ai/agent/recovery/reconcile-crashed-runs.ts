@@ -41,6 +41,7 @@ export interface AgentRunRecoveryAnchorV1 extends TicketRemintSpec {
   sdkSessionId?: string
   attemptId: string
   executionIdentityRunId?: string
+  executionJournalRunId?: string
   routeKind: "gateway" | "direct"
   runtimeAdapter: string
   restoredPermissions?: RestoredPermission[]
@@ -56,6 +57,7 @@ export function buildAgentRunRecoveryAnchor(input: {
   sessionId: string
   sdkSessionId?: string
   execution: AgentExecutionSendSpec
+  journalRunId?: string
   candidateDeploymentIds: string[]
   restoredPermissions?: RestoredPermission[]
   partialOutput?: string
@@ -67,6 +69,7 @@ export function buildAgentRunRecoveryAnchor(input: {
     ...(input.sdkSessionId ? { sdkSessionId: input.sdkSessionId } : {}),
     attemptId: input.execution.identity.attemptId,
     executionIdentityRunId: input.execution.identity.runId,
+    ...(input.journalRunId ? { executionJournalRunId: input.journalRunId } : {}),
     routeKind: input.execution.route.kind,
     executionFingerprint: input.execution.executionFingerprint,
     runtimeAdapter: input.execution.runtimeAdapter,
@@ -110,6 +113,8 @@ export function parseAgentRunRecoveryAnchor(value: unknown): AgentRunRecoveryAnc
     typeof anchor.attemptId !== "string" ||
     (anchor.executionIdentityRunId !== undefined &&
       typeof anchor.executionIdentityRunId !== "string") ||
+    (anchor.executionJournalRunId !== undefined &&
+      typeof anchor.executionJournalRunId !== "string") ||
     (anchor.routeKind !== "gateway" && anchor.routeKind !== "direct") ||
     typeof anchor.executionFingerprint !== "string" ||
     typeof anchor.runtimeAdapter !== "string" ||

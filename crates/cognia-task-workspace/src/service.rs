@@ -11,7 +11,8 @@ use crate::{
     ResourceCaptureClass, ResourceChange, ResourceEvent, ResourceEventEvidence, ResourceEventKind,
     ResourceKind, RunState, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
     TaskWorkspaceEventSink, TaskWorkspaceResourceEvent, TaskWorkspaceState, TransferChunk,
-    TransferRegistry, UploadHandle, WatchManager,
+    TransferRegistry, UploadHandle, WatchManager, WorkspaceBaseSpec, WorkspaceOwnerType,
+    WorkspaceRecord, WorkspaceRegistry, WorkspaceState,
 };
 use parking_lot::Mutex;
 use std::{
@@ -43,6 +44,7 @@ impl ServiceConfig {
 
 pub struct TaskWorkspaceService {
     store: Arc<Mutex<WorkspaceStore>>,
+    registry: WorkspaceRegistry,
     execution_dir: PathBuf,
     manifest_key: Vec<u8>,
     retention: Duration,
@@ -66,11 +68,15 @@ impl TaskWorkspaceService {
         fs::create_dir_all(&execution_dir).map_err(|error| {
             format!("create execution dir {}: {error}", execution_dir.display())
         })?;
+        let store = Arc::new(Mutex::new(WorkspaceStore::open(
+            &service_dir,
+            config.max_blob_bytes,
+        )?));
+        let registry =
+            WorkspaceRegistry::new(Arc::clone(&store)).map_err(|error| error.to_string())?;
         let service = Self {
-            store: Arc::new(Mutex::new(WorkspaceStore::open(
-                &service_dir,
-                config.max_blob_bytes,
-            )?)),
+            store,
+            registry,
             execution_dir,
             manifest_key: load_or_create_manifest_key(&service_dir)?,
             retention: config.retention,
@@ -113,6 +119,7 @@ impl TaskWorkspaceService {
                     && existing.attempt_id == input.attempt_id
                     && existing.provider_attempt_id == input.provider_attempt_id
                     && existing.surface == input.surface
+                    && existing.base == input.base
                     && existing.tracking_policy == tracking_policy
                     && task.session_id == input.session_id
                     && Path::new(&task.workspace_root) == root;
@@ -141,63 +148,125 @@ impl TaskWorkspaceService {
         } else {
             None
         };
-        let (baseline, blobs, execution_root, isolation_kind, isolation_ref, owns_execution) =
-            if let Some(previous) = reusable {
-                let execution_root = PathBuf::from(&previous.execution_root);
-                if !execution_root.is_dir() {
-                    return Err(format!(
-                        "pipeline workspace is unavailable: {}",
-                        execution_root.display()
-                    ));
+        let (
+            baseline,
+            blobs,
+            execution_root,
+            isolation_kind,
+            isolation_ref,
+            workspace_id,
+            base,
+            owns_execution,
+        ) = if let Some(previous) = reusable {
+            let execution_root = PathBuf::from(&previous.execution_root);
+            if !execution_root.is_dir() {
+                return Err(format!(
+                    "pipeline workspace is unavailable: {}",
+                    execution_root.display()
+                ));
+            }
+            let (baseline, blobs) = capture_with_policy(&execution_root, &tracking_policy)?;
+            if let Some(workspace_id) = previous.workspace_id.as_deref() {
+                self.reactivate_managed_workspace(workspace_id)?;
+            }
+            (
+                baseline,
+                blobs,
+                execution_root,
+                previous.isolation_kind,
+                previous.isolation_ref,
+                previous.workspace_id,
+                previous.base,
+                false,
+            )
+        } else {
+            let (mut baseline, mut blobs) = capture_with_policy(&root, &tracking_policy)?;
+            // A fresh isolated execution root intentionally starts without
+            // ignored build outputs. Treat the generated baseline as empty
+            // so pre-existing host artifacts are not reported as deletions.
+            baseline.generated_entries.clear();
+            let execution_root = self
+                .execution_dir
+                .join(storage_key(&input.task_id))
+                .join(storage_key(&input.run_id));
+            if execution_root.exists() {
+                return Err(format!(
+                    "run already has an execution root: {}",
+                    input.run_id
+                ));
+            }
+            let (isolation_kind, isolation_ref) =
+                create_execution(&root, &execution_root, &input.base, &baseline, &blobs)?;
+            if input.base != WorkspaceBaseSpec::WorkingState {
+                match capture_with_policy(&execution_root, &tracking_policy) {
+                    Ok(captured) => (baseline, blobs) = captured,
+                    Err(error) => {
+                        cleanup_execution(&root, &execution_root, isolation_kind, None);
+                        return Err(error);
+                    }
                 }
-                let (baseline, blobs) = capture_with_policy(&execution_root, &tracking_policy)?;
-                (
-                    baseline,
-                    blobs,
-                    execution_root,
-                    previous.isolation_kind,
-                    previous.isolation_ref,
-                    false,
-                )
-            } else {
-                let (mut baseline, blobs) = capture_with_policy(&root, &tracking_policy)?;
-                // A fresh isolated execution root intentionally starts without
-                // ignored build outputs. Treat the generated baseline as empty
-                // so pre-existing host artifacts are not reported as deletions.
-                baseline.generated_entries.clear();
-                let execution_root = self
-                    .execution_dir
-                    .join(storage_key(&input.task_id))
-                    .join(storage_key(&input.run_id));
-                if execution_root.exists() {
-                    return Err(format!(
-                        "run already has an execution root: {}",
-                        input.run_id
-                    ));
+            }
+            let (owner_type, owner_ref) = managed_owner(&input);
+            let record = match self.registry.insert(
+                owner_type,
+                owner_ref.clone(),
+                root.to_string_lossy().into_owned(),
+                git_common_dir(&root),
+                input.base.clone(),
+                isolation_kind,
+                execution_root.to_string_lossy().into_owned(),
+                now,
+            ) {
+                Ok(record) => record,
+                Err(error) => {
+                    cleanup_execution(&root, &execution_root, isolation_kind, None);
+                    return Err(error.to_string());
                 }
-                let (isolation_kind, isolation_ref) = create_execution(
-                    &root,
-                    &execution_root,
-                    &input.task_id,
-                    &input.run_id,
-                    &baseline,
-                    &blobs,
-                )?;
-                (
-                    baseline,
-                    blobs,
-                    execution_root,
-                    isolation_kind,
-                    isolation_ref,
-                    true,
-                )
             };
+            if isolation_kind == IsolationKind::GitWorktree {
+                if let Err(error) = lock_git_worktree(&root, &execution_root, &record.workspace_id)
+                {
+                    cleanup_execution(&root, &execution_root, isolation_kind, None);
+                    self.discard_managed_workspace(&record, now);
+                    return Err(error);
+                }
+            }
+            if let Err(error) = self.registry.transition(
+                &record.workspace_id,
+                owner_type,
+                owner_ref.as_deref(),
+                WorkspaceState::Active,
+                now,
+            ) {
+                unlock_git_worktree(&root, &execution_root, isolation_kind);
+                cleanup_execution(&root, &execution_root, isolation_kind, None);
+                self.discard_managed_workspace(&record, now);
+                return Err(error.to_string());
+            }
+            (
+                baseline,
+                blobs,
+                execution_root,
+                isolation_kind,
+                isolation_ref,
+                Some(record.workspace_id),
+                input.base.clone(),
+                true,
+            )
+        };
 
         let mut store = self.store.lock();
         for (hash, bytes) in &blobs {
             if let Err(error) = store.put_blob(hash, bytes, now) {
                 if owns_execution {
-                    let _ = fs::remove_dir_all(&execution_root);
+                    drop(store);
+                    self.rollback_managed_execution(
+                        workspace_id.as_deref(),
+                        &root,
+                        &execution_root,
+                        isolation_kind,
+                        now,
+                    );
                 }
                 return Err(error);
             }
@@ -214,13 +283,32 @@ impl TaskWorkspaceService {
         });
         if task.workspace_root != root.to_string_lossy() {
             if owns_execution {
-                let _ = fs::remove_dir_all(&execution_root);
+                drop(store);
+                self.rollback_managed_execution(
+                    workspace_id.as_deref(),
+                    &root,
+                    &execution_root,
+                    isolation_kind,
+                    now,
+                );
             }
             return Err("one task cannot span multiple workspace roots".into());
         }
         task.state = TaskWorkspaceState::Active;
         task.expires_at = now + self.retention.as_millis() as i64;
-        store.put_task(&task)?;
+        if let Err(error) = store.put_task(&task) {
+            if owns_execution {
+                drop(store);
+                self.rollback_managed_execution(
+                    workspace_id.as_deref(),
+                    &root,
+                    &execution_root,
+                    isolation_kind,
+                    now,
+                );
+            }
+            return Err(error);
+        }
         let run = TaskRun {
             run_id: input.run_id,
             task_id: input.task_id,
@@ -230,6 +318,8 @@ impl TaskWorkspaceService {
             execution_root: execution_root.to_string_lossy().into_owned(),
             isolation_kind,
             isolation_ref,
+            workspace_id,
+            base,
             workspace_key: input.workspace_key,
             execution_run_id: input.execution_run_id,
             trace_id: input.trace_id,
@@ -243,8 +333,128 @@ impl TaskWorkspaceService {
             created_at: now,
             settled_at: None,
         };
-        store.put_run(&run, &baseline)?;
+        if let Err(error) = store.put_run(&run, &baseline) {
+            if owns_execution {
+                drop(store);
+                self.rollback_managed_execution(
+                    run.workspace_id.as_deref(),
+                    &root,
+                    &execution_root,
+                    isolation_kind,
+                    now,
+                );
+            }
+            return Err(error);
+        }
         Ok(run)
+    }
+
+    pub fn get_managed_workspace(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Option<WorkspaceRecord>, String> {
+        self.registry
+            .get(workspace_id)
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn list_managed_workspaces(&self) -> Result<Vec<WorkspaceRecord>, String> {
+        self.registry.list().map_err(|error| error.to_string())
+    }
+
+    fn reactivate_managed_workspace(&self, workspace_id: &str) -> Result<(), String> {
+        let Some(record) = self
+            .registry
+            .get(workspace_id)
+            .map_err(|error| error.to_string())?
+        else {
+            return Err(format!("managed workspace is missing: {workspace_id}"));
+        };
+        let now = now_ms();
+        let mut state = record.state;
+        if state == WorkspaceState::Archived {
+            state = self
+                .registry
+                .transition(
+                    workspace_id,
+                    record.owner_type,
+                    record.owner_ref.as_deref(),
+                    WorkspaceState::Restorable,
+                    now,
+                )
+                .map_err(|error| error.to_string())?
+                .state;
+        }
+        if state != WorkspaceState::Active {
+            self.registry
+                .transition(
+                    workspace_id,
+                    record.owner_type,
+                    record.owner_ref.as_deref(),
+                    WorkspaceState::Active,
+                    now,
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+
+    fn archive_run_workspace(&self, run: &TaskRun, now: i64) -> Result<(), String> {
+        let Some(workspace_id) = run.workspace_id.as_deref() else {
+            return Ok(());
+        };
+        let Some(record) = self
+            .registry
+            .get(workspace_id)
+            .map_err(|error| error.to_string())?
+        else {
+            return Err(format!("managed workspace is missing: {workspace_id}"));
+        };
+        if record.state == WorkspaceState::Active {
+            self.registry
+                .transition(
+                    workspace_id,
+                    record.owner_type,
+                    record.owner_ref.as_deref(),
+                    WorkspaceState::Archived,
+                    now,
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+
+    fn discard_managed_workspace(&self, record: &WorkspaceRecord, now: i64) {
+        let transitioned = self.registry.transition(
+            &record.workspace_id,
+            record.owner_type,
+            record.owner_ref.as_deref(),
+            WorkspaceState::Removing,
+            now,
+        );
+        if transitioned.is_ok() {
+            let reason = crate::registry::compose_lock_reason(&record.workspace_id);
+            let _ = self
+                .registry
+                .remove_workspace(&record.workspace_id, &reason);
+        }
+    }
+
+    fn rollback_managed_execution(
+        &self,
+        workspace_id: Option<&str>,
+        workspace_root: &Path,
+        execution_root: &Path,
+        isolation_kind: IsolationKind,
+        now: i64,
+    ) {
+        unlock_git_worktree(workspace_root, execution_root, isolation_kind);
+        cleanup_execution(workspace_root, execution_root, isolation_kind, None);
+        if let Some(workspace_id) = workspace_id {
+            if let Ok(Some(record)) = self.registry.get(workspace_id) {
+                self.discard_managed_workspace(&record, now);
+            }
+        }
     }
 
     pub fn settle_run(&self, run_id: &str) -> Result<Vec<ResourceChange>, String> {
@@ -331,6 +541,8 @@ impl TaskWorkspaceService {
             TaskWorkspaceState::Ready
         };
         store.put_task(&task)?;
+        drop(store);
+        self.archive_run_workspace(&run, now)?;
         Ok(changes)
     }
 
@@ -519,13 +731,63 @@ impl TaskWorkspaceService {
 
     pub fn prune(&self) -> Result<crate::PruneOutcome, String> {
         let now = now_ms();
-        let mut store = self.store.lock();
-        let mut removed_task_ids = Vec::new();
-        for task in store.list_tasks()? {
-            if task.pinned || task.expires_at > now || !store.task_is_prunable(&task.task_id)? {
-                continue;
+        let candidates = {
+            let store = self.store.lock();
+            let mut candidates = Vec::new();
+            for task in store.list_tasks()? {
+                if task.pinned || task.expires_at > now || !store.task_is_prunable(&task.task_id)? {
+                    continue;
+                }
+                let runs = store.list_runs(&task.task_id)?;
+                candidates.push((task, runs));
             }
-            for run in store.list_runs(&task.task_id)? {
+            candidates
+        };
+        let mut removed_task_ids = Vec::new();
+        let mut removed_workspace_ids = std::collections::HashSet::new();
+        for (task, runs) in candidates {
+            for run in runs {
+                if let Some(workspace_id) = run.workspace_id.as_deref() {
+                    if !removed_workspace_ids.insert(workspace_id.to_string()) {
+                        continue;
+                    }
+                    let record = self
+                        .registry
+                        .get(workspace_id)
+                        .map_err(|error| error.to_string())?
+                        .ok_or_else(|| format!("managed workspace is missing: {workspace_id}"))?;
+                    self.registry
+                        .transition(
+                            workspace_id,
+                            record.owner_type,
+                            record.owner_ref.as_deref(),
+                            WorkspaceState::Removing,
+                            now,
+                        )
+                        .map_err(|error| error.to_string())?;
+                    unlock_git_worktree(
+                        Path::new(&task.workspace_root),
+                        Path::new(&run.execution_root),
+                        run.isolation_kind,
+                    );
+                    cleanup_execution(
+                        Path::new(&task.workspace_root),
+                        Path::new(&run.execution_root),
+                        run.isolation_kind,
+                        run.isolation_ref.as_deref(),
+                    );
+                    if Path::new(&run.execution_root).exists() {
+                        return Err(format!(
+                            "managed workspace removal did not remove execution root: {}",
+                            run.execution_root
+                        ));
+                    }
+                    let reason = crate::registry::compose_lock_reason(workspace_id);
+                    self.registry
+                        .remove_workspace(workspace_id, &reason)
+                        .map_err(|error| error.to_string())?;
+                    continue;
+                }
                 let execution_root = Path::new(&run.execution_root);
                 match run.isolation_kind {
                     IsolationKind::GitWorktree => cleanup_git_worktree(
@@ -545,9 +807,10 @@ impl TaskWorkspaceService {
                     }
                 }
             }
-            store.delete_task(&task.task_id)?;
+            self.store.lock().delete_task(&task.task_id)?;
             removed_task_ids.push(task.task_id);
         }
+        let mut store = self.store.lock();
         let (removed_blob_count, reclaimed_bytes) = store.prune_unreferenced_blobs()?;
         Ok(crate::PruneOutcome {
             removed_task_ids,
@@ -1317,17 +1580,12 @@ fn validate_event_relative_path(path: &str) -> Result<(), String> {
 fn create_execution(
     workspace_root: &Path,
     execution_root: &Path,
-    task_id: &str,
-    run_id: &str,
+    base: &WorkspaceBaseSpec,
     baseline: &WorkspaceSnapshot,
     blobs: &HashMap<String, Vec<u8>>,
 ) -> Result<(IsolationKind, Option<String>), String> {
     if is_git_root(workspace_root) {
-        let branch = format!(
-            "cognia/task/{}/{}",
-            storage_key(task_id),
-            storage_key(run_id)
-        );
+        let base_ref = resolve_git_base(workspace_root, base)?;
         if let Some(parent) = execution_root.parent() {
             fs::create_dir_all(parent)
                 .map_err(|error| format!("create {}: {error}", parent.display()))?;
@@ -1335,9 +1593,9 @@ fn create_execution(
         let output = Command::new("git")
             .args(["-C"])
             .arg(workspace_root)
-            .args(["worktree", "add", "-b", &branch])
+            .args(["worktree", "add", "--detach"])
             .arg(execution_root)
-            .arg("HEAD")
+            .arg(&base_ref)
             .output()
             .map_err(|error| format!("start git worktree add: {error}"))?;
         if !output.status.success() {
@@ -1346,16 +1604,58 @@ fn create_execution(
                 String::from_utf8_lossy(&output.stderr).trim()
             ));
         }
-        let result = clear_worktree_contents(execution_root)
-            .and_then(|_| materialize(execution_root, baseline, blobs));
-        if let Err(error) = result {
-            cleanup_git_worktree(workspace_root, execution_root, &branch);
-            return Err(error);
+        if *base == WorkspaceBaseSpec::WorkingState {
+            let result = clear_worktree_contents(execution_root)
+                .and_then(|_| materialize(execution_root, baseline, blobs));
+            if let Err(error) = result {
+                cleanup_git_worktree(workspace_root, execution_root, "");
+                return Err(error);
+            }
         }
-        return Ok((IsolationKind::GitWorktree, Some(branch)));
+        return Ok((IsolationKind::GitWorktree, None));
+    }
+    if *base != WorkspaceBaseSpec::WorkingState {
+        return Err("non-Git workspaces only support the workingState base".into());
     }
     materialize(execution_root, baseline, blobs)?;
     Ok((IsolationKind::Shadow, None))
+}
+
+fn resolve_git_base(workspace_root: &Path, base: &WorkspaceBaseSpec) -> Result<String, String> {
+    match base {
+        WorkspaceBaseSpec::WorkingState | WorkspaceBaseSpec::LocalHead => Ok("HEAD".into()),
+        WorkspaceBaseSpec::GitRef { git_ref } if !git_ref.trim().is_empty() => {
+            Ok(git_ref.trim().to_string())
+        }
+        WorkspaceBaseSpec::GitRef { .. } => Err("gitRef base cannot be empty".into()),
+        WorkspaceBaseSpec::RemoteDefault => {
+            let fetch = Command::new("git")
+                .args(["-C"])
+                .arg(workspace_root)
+                .args(["fetch", "origin"])
+                .output()
+                .map_err(|error| format!("start git fetch origin: {error}"))?;
+            if !fetch.status.success() {
+                return Err(format!(
+                    "refresh remote default failed: {}",
+                    String::from_utf8_lossy(&fetch.stderr).trim()
+                ));
+            }
+            let output = Command::new("git")
+                .args(["-C"])
+                .arg(workspace_root)
+                .args(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+                .output()
+                .map_err(|error| format!("resolve origin/HEAD: {error}"))?;
+            if !output.status.success() {
+                return Err("remote default is unavailable: configure origin/HEAD".into());
+            }
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        }
+        WorkspaceBaseSpec::PullRequest { .. } => {
+            Err("pullRequest bases must be resolved by the configured PullRequestProvider".into())
+        }
+    }
 }
 
 fn is_git_root(workspace_root: &Path) -> bool {
@@ -1404,6 +1704,76 @@ fn cleanup_git_worktree(workspace_root: &Path, execution_root: &Path, branch: &s
             .arg(workspace_root)
             .args(["branch", "-D", branch])
             .status();
+    }
+}
+
+fn cleanup_execution(
+    workspace_root: &Path,
+    execution_root: &Path,
+    isolation_kind: IsolationKind,
+    branch: Option<&str>,
+) {
+    match isolation_kind {
+        IsolationKind::GitWorktree => {
+            cleanup_git_worktree(workspace_root, execution_root, branch.unwrap_or_default())
+        }
+        IsolationKind::Shadow => {
+            let _ = fs::remove_dir_all(execution_root);
+        }
+    }
+}
+
+fn git_common_dir(workspace_root: &Path) -> Option<String> {
+    git2::Repository::discover(workspace_root)
+        .ok()
+        .and_then(|repository| repository.commondir().canonicalize().ok())
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+fn lock_git_worktree(
+    workspace_root: &Path,
+    execution_root: &Path,
+    workspace_id: &str,
+) -> Result<(), String> {
+    let reason = crate::registry::compose_lock_reason(workspace_id);
+    let output = Command::new("git")
+        .args(["-C"])
+        .arg(workspace_root)
+        .args(["worktree", "lock", "--reason", &reason])
+        .arg(execution_root)
+        .output()
+        .map_err(|error| format!("start git worktree lock: {error}"))?;
+    output.status.success().then_some(()).ok_or_else(|| {
+        format!(
+            "git worktree lock failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+    })
+}
+
+fn unlock_git_worktree(
+    workspace_root: &Path,
+    execution_root: &Path,
+    isolation_kind: IsolationKind,
+) {
+    if isolation_kind != IsolationKind::GitWorktree {
+        return;
+    }
+    let _ = Command::new("git")
+        .args(["-C"])
+        .arg(workspace_root)
+        .args(["worktree", "unlock"])
+        .arg(execution_root)
+        .status();
+}
+
+fn managed_owner(input: &BeginTaskRun) -> (WorkspaceOwnerType, Option<String>) {
+    match input.surface.as_deref() {
+        Some("scheduled" | "scheduler") => {
+            (WorkspaceOwnerType::Scheduled, Some(input.task_id.clone()))
+        }
+        Some("team") => (WorkspaceOwnerType::Team, Some(input.task_id.clone())),
+        _ => (WorkspaceOwnerType::Session, Some(input.session_id.clone())),
     }
 }
 
@@ -1696,6 +2066,7 @@ mod tests {
             agent_id: "agent-1".into(),
             agent_kind: "in-app".into(),
             workspace_root: root.path().to_string_lossy().into_owned(),
+            base: WorkspaceBaseSpec::WorkingState,
             workspace_key: None,
             execution_run_id: None,
             trace_id: None,
@@ -2017,14 +2388,27 @@ mod tests {
             .unwrap();
 
         assert_eq!(run.isolation_kind, IsolationKind::GitWorktree);
-        let expected_branch = format!(
-            "cognia/task/{}/{}",
-            storage_key("task:git"),
-            storage_key("run:git")
-        );
-        assert_eq!(run.isolation_ref.as_deref(), Some(expected_branch.as_str()));
+        assert_eq!(run.isolation_ref, None);
+        let workspace_id = run
+            .workspace_id
+            .as_deref()
+            .expect("managed run has a registry identity");
+        let record = service
+            .get_managed_workspace(workspace_id)
+            .unwrap()
+            .expect("registry row");
+        assert_eq!(record.state, WorkspaceState::Active);
+        assert_eq!(record.owner_type, WorkspaceOwnerType::Session);
+        assert_eq!(record.owner_ref.as_deref(), Some("session-1"));
         let execution = PathBuf::from(run.execution_root);
         assert!(execution.join(".git").is_file());
+        assert!(!Command::new("git")
+            .args(["-C"])
+            .arg(&execution)
+            .args(["symbolic-ref", "-q", "--short", "HEAD"])
+            .status()
+            .unwrap()
+            .success());
         assert_eq!(
             fs::read_to_string(execution.join("tracked.txt")).unwrap(),
             "uncommitted baseline\n"

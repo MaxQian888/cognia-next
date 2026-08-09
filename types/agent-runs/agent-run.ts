@@ -18,6 +18,7 @@ import type { AgentPlan, PlanStatus } from "@/types/agent/plan"
 import type { TeamStatus } from "@/types/agent/agent-team"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 import type { TaskExecution } from "@/types/scheduler"
+import type { ExecutionRun, ExecutionRunStatus } from "@/types/execution/run"
 
 export type AgentRunKind = "goal" | "team" | "plan" | "scheduled-task"
 export type AgentRunStatus = "running" | "paused" | "succeeded" | "failed" | "cancelled"
@@ -30,6 +31,7 @@ export interface AgentRunOrigin {
   teamId?: string
   goalId?: string
   planId?: string
+  executionRunId?: string
 }
 
 export interface AgentRun {
@@ -193,6 +195,24 @@ export function mapTaskExecStatus(status: TaskExecution["status"]): AgentRunStat
   }
 }
 
+export function mapExecutionRunStatus(status: ExecutionRunStatus): AgentRunStatus {
+  switch (status) {
+    case "queued":
+    case "running":
+    case "waiting":
+      return "running"
+    case "paused":
+    case "recovery_required":
+      return "paused"
+    case "completed":
+      return "succeeded"
+    case "failed":
+      return "failed"
+    case "cancelled":
+      return "cancelled"
+  }
+}
+
 // ── Row mappers ──────────────────────────────────────────────────────────────
 
 export function toAgentRunFromGoal(goal: Goal): AgentRun {
@@ -269,5 +289,40 @@ export function toAgentRunFromTaskExecution(exec: TaskExecution): AgentRun {
     origin: { tableName: "schedulerDb.executions", nativeId: exec.id },
     result: exec.output,
     error: exec.error ? { message: exec.error } : undefined,
+  }
+}
+
+/** Canonical mapper for run kinds represented by the Agent Runs product surface. */
+export function toAgentRunFromExecutionRun(run: ExecutionRun): AgentRun | null {
+  const kind: AgentRunKind | undefined =
+    run.kind === "goal"
+      ? "goal"
+      : run.kind === "plan"
+        ? "plan"
+        : run.kind === "team"
+          ? "team"
+          : run.kind === "scheduled"
+            ? "scheduled-task"
+            : undefined
+  if (!kind) return null
+  const status = mapExecutionRunStatus(run.latestSnapshot?.status ?? run.status)
+  const ratio = run.latestSnapshot?.progress.ratio
+  return {
+    unifiedId: makeAgentRunId(kind, run.sourceId),
+    kind,
+    title: run.latestSnapshot?.title || run.title,
+    status,
+    startedAt: run.startedAt,
+    ...(run.endedAt !== undefined ? { finishedAt: run.endedAt } : {}),
+    ...(ratio !== undefined ? { progress: ratio } : {}),
+    isLive: !isTerminalAgentRunStatus(status),
+    origin: {
+      tableName: "executionRuns",
+      nativeId: run.sourceId,
+      executionRunId: run.id,
+      ...(kind === "goal" ? { goalId: run.sourceId } : {}),
+      ...(kind === "plan" ? { planId: run.sourceId } : {}),
+    },
+    ...(run.latestSnapshot?.error ? { error: { message: run.latestSnapshot.error } } : {}),
   }
 }

@@ -1,14 +1,22 @@
 import { act, renderHook } from "@testing-library/react"
 import type { TaskExecution } from "@/types/scheduler"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
+import type { ExecutionRun } from "@/types/execution/run"
 
 // Controlled liveQuery value — set per test before render.
-let liveValue: { workflowRuns: WorkflowRunRow[]; schedulerExecutions: TaskExecution[] } | undefined
+let liveValue:
+  | {
+      executionRuns: ExecutionRun[]
+      workflowRuns: WorkflowRunRow[]
+      schedulerExecutions: TaskExecution[]
+    }
+  | undefined
 
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => liveValue,
 }))
 jest.mock("@/lib/db/schema", () => ({ getDb: () => ({}) }))
+jest.mock("@/lib/db/execution-runs", () => ({ listExecutionRuns: jest.fn() }))
 jest.mock("@/lib/scheduler/scheduler-db", () => ({
   schedulerDb: { getRecentExecutions: jest.fn() },
 }))
@@ -47,7 +55,11 @@ describe("useExecutionMonitor", () => {
   })
 
   it("merges broker legs with the persisted sources and reacts to broker changes", async () => {
-    liveValue = { workflowRuns: [run({ status: "running" })], schedulerExecutions: [] }
+    liveValue = {
+      executionRuns: [],
+      workflowRuns: [run({ status: "running" })],
+      schedulerExecutions: [],
+    }
     const broker = getExecutionBroker()
     const { result } = renderHook(() => useExecutionMonitor())
     expect(result.current.isLoading).toBe(false)
@@ -67,6 +79,7 @@ describe("useExecutionMonitor", () => {
 
   it("passes the projectId filter through to the model", async () => {
     liveValue = {
+      executionRuns: [],
       workflowRuns: [run({ id: "mine", projectId: "p1" }), run({ id: "theirs", projectId: "p2" })],
       schedulerExecutions: [],
     }

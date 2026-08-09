@@ -52,8 +52,8 @@ describe("DataTableCatalog", () => {
     })
   })
 
-  it("maps all 21 companion tables and makes governed other tables discoverable", () => {
-    expect(COMPANION_SYNC_TABLES.size).toBe(21)
+  it("maps all 22 companion tables and makes governed other tables discoverable", () => {
+    expect(COMPANION_SYNC_TABLES.size).toBe(22)
     expect(tableNamesForCategory("other")).toContain("agentTraces")
     expect(tableNamesForCategory("other")).toContain("workflowRunEvents")
   })

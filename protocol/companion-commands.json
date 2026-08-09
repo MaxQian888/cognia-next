@@ -2726,6 +2726,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "project_environment_execute",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "critical",
+      "approval": "interactive",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "task_workspace_status",
       "target": "execution",
       "operation": "read",

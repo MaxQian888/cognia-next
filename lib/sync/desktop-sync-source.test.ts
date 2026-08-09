@@ -61,6 +61,7 @@ describe("readDexieDelta", () => {
     await db.conversationOverrides.clear()
     await db.settings.clear()
     await db.workflowRuns.clear()
+    await db.executionRuns.clear()
     await db.syncTombstones.clear()
     ;(tauriListen as jest.Mock).mockReset()
     ;(tauriInvoke as jest.Mock).mockReset()
@@ -413,6 +414,47 @@ describe("readDexieDelta", () => {
     ])
     // next_since rides the highest max(startedAt, completedAt) = 40.
     expect(delta.next_since).toBe(40)
+  })
+
+  it("returns canonical execution summaries without syncing private event rows", async () => {
+    const db = getDb()
+    await db.executionRuns.bulkPut([
+      {
+        id: "execution-old",
+        kind: "goal",
+        sourceId: "goal-old",
+        title: "Old",
+        status: "completed",
+        currentRevision: 1,
+        startedAt: 1,
+        updatedAt: 5,
+      },
+      {
+        id: "execution-new",
+        kind: "plan",
+        sourceId: "plan-new",
+        title: "New",
+        status: "running",
+        currentRevision: 2,
+        startedAt: 10,
+        updatedAt: 30,
+      },
+    ] as never)
+    await db.executionRunEvents.put({
+      id: "private-event",
+      runId: "execution-new",
+      seq: 2,
+      ts: 30,
+      type: "step.progress",
+      visibility: "private",
+      payload: { detail: "host only" },
+    })
+
+    const delta = await readDexieDelta("executionRuns", 10)
+
+    expect(delta.rows).toEqual([expect.objectContaining({ id: "execution-new" })])
+    expect(JSON.stringify(delta)).not.toContain("host only")
+    expect(delta.next_since).toBe(30)
   })
 
   it("pages workflow runs (oldest activity first) and sets has_more past the page size", async () => {
