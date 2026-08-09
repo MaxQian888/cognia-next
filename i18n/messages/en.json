@@ -9319,11 +9319,13 @@
     "agents": {
       "claude-code": "Claude Code",
       "codex": "Codex",
+      "cognia": "Cognia",
       "opencode": "OpenCode"
     },
     "island": {
       "empty": "No active agents",
       "legend": {
+        "detached": "{count} detached",
         "done": "{count} done",
         "idle": "{count} idle",
         "needsYou": "{count} waiting",
@@ -9345,6 +9347,8 @@
     },
     "question": {
       "expired": "Answered in terminal",
+      "reject": "Reject",
+      "rejected": "Rejected",
       "submit": "Submit",
       "submitted": "Sent"
     },
@@ -9396,6 +9400,7 @@
       "openTranscript": "Reveal transcript",
       "questionMore": "{count, plural, one {+# more question} other {+# more questions}}",
       "status": {
+        "detached": "Monitoring detached",
         "ended": "Session ended",
         "idle": "Idle",
         "planPending": "Plan awaiting approval in the terminal",
@@ -9742,6 +9747,10 @@
         "desc": "Fires when the working directory changes.",
         "label": "Directory changed"
       },
+      "DirectoryAdded": {
+        "desc": "Fires when a directory is added to the session workspace.",
+        "label": "Directory added"
+      },
       "Elicitation": {
         "desc": "Fires when the agent prompts you for structured input.",
         "label": "Elicitation"
@@ -9757,6 +9766,10 @@
       "InstructionsLoaded": {
         "desc": "Fires when CLAUDE.md / instructions are loaded.",
         "label": "Instructions loaded"
+      },
+      "MessageDisplay": {
+        "desc": "Fires when the runtime displays a message to the user.",
+        "label": "Message displayed"
       },
       "Notification": {
         "desc": "Fires on a runtime notification (idle, awaiting input).",
@@ -9802,6 +9815,10 @@
         "desc": "Fires when a session begins; good for injecting standing context.",
         "label": "Session start"
       },
+      "Setup": {
+        "desc": "Fires while a repository or worktree environment is being set up.",
+        "label": "Setup"
+      },
       "Stop": {
         "desc": "Fires when the assistant finishes its turn.",
         "label": "Stop"
@@ -9809,6 +9826,10 @@
       "StopFailure": {
         "desc": "Fires when a turn ends because of an error.",
         "label": "Stop (failed)"
+      },
+      "SubagentStart": {
+        "desc": "Fires when a native subagent begins its run.",
+        "label": "Subagent start"
       },
       "SubagentStop": {
         "desc": "Fires when a subagent finishes its run.",
@@ -12767,6 +12788,8 @@
         "countdown": "{seconds}s left",
         "expired": "The answer window closed — answer in the terminal.",
         "failed": "Could not send the answer.",
+        "reject": "Reject",
+        "rejected": "Rejected.",
         "submit": "Submit"
       },
       "reply": {
@@ -12783,6 +12806,7 @@
         "focus": "Focus terminal",
         "focusFailed": "Couldn't focus the terminal.",
         "status": {
+          "detached": "Monitoring detached",
           "ended": "Session ended",
           "idle": "Idle",
           "planPending": "Plan awaiting approval on desktop",
@@ -25829,6 +25853,11 @@
       "triggerAria": "Find a setting"
     },
     "fleet": {
+      "capabilities": {
+        "degraded": "Limited APIs",
+        "proven": "APIs verified",
+        "unproven": "Awaiting probe"
+      },
       "claude": {
         "desc": "Install forwarder hooks into ~/.claude/settings.json so every Claude Code session reports here. Fail-open: with Cognia closed they exit instantly.",
         "label": "Claude Code hooks"
@@ -25890,7 +25919,13 @@
       },
       "opencode": {
         "desc": "Install a plugin into ~/.config/opencode/plugin. Observe sessions and approve/deny permissions from the island.",
-        "label": "OpenCode plugin"
+        "label": "OpenCode plugin",
+        "outbox": {
+          "corrupt": "The durable command queue is corrupt; controls are disabled.",
+          "repair": "Repair queue",
+          "repaired": "OpenCode command queue repaired.",
+          "unavailable": "The durable command queue is unavailable; controls are disabled."
+        }
       },
       "saved": "Fleet settings updated.",
       "status": {
@@ -26247,7 +26282,7 @@
         "discard": "Discard & switch",
         "title": "Discard unsaved changes?"
       },
-      "description": "Run shell commands or send webhooks at lifecycle events. Stored in ~/.claude/settings.json (User scope) or .claude/settings.json under a project. The full settings document round-trips — unrelated keys are preserved.",
+      "description": "Run runtime-supported handlers at lifecycle events. Claude supports command, HTTP, MCP tool, prompt, and agent handlers; other runtimes expose only probed capabilities.",
       "eventListLabel": "Events",
       "group": {
         "addHandler": "Add handler",
@@ -26270,14 +26305,29 @@
         "headersEmpty": "No custom headers.",
         "headersLabel": "Headers",
         "httpCapability": "HTTP requests require the network capability.",
+        "inputLabel": "Input JSON",
+        "modelLabel": "Model (optional)",
+        "promptLabel": "Prompt",
+        "promptRequired": "Prompt can't be empty.",
         "removeAria": "Remove handler",
-        "timeoutLabel": "Timeout (ms)",
-        "timeoutPlaceholder": "5000",
+        "serverLabel": "MCP server",
+        "serverRequired": "MCP server is required.",
+        "timeoutLabel": "Timeout (seconds)",
+        "timeoutPlaceholder": "30",
+        "toolLabel": "Tool",
+        "toolRequired": "MCP tool is required.",
         "typeCommand": "Command",
         "typeHttp": "HTTP request",
         "typeLabel": "Type",
         "typeWebhook": "Webhook",
         "typeWebhookLegacy": "Legacy webhook",
+        "types": {
+          "agent": "Agent",
+          "command": "Command",
+          "http": "HTTP",
+          "mcp_tool": "MCP tool",
+          "prompt": "Prompt"
+        },
         "urlInvalid": "Enter a valid http(s) URL.",
         "urlLabel": "URL",
         "urlPlaceholder": "https://example.com/hook",

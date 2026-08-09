@@ -1,6 +1,11 @@
 // Mock heavyweight adapter modules so requiring manager.ts does not pull in
 // the real ACP/OpenCode adapters.
 let mockProcessExitCb: ((event: { agentId: string; code: number }) => void) | undefined
+const appendCanonicalEnvelopesMock = jest.fn(async () => 1)
+
+jest.mock("@/lib/ai/agent/recovery/canonical-log", () => ({
+  appendCanonicalEnvelopes: (...args: unknown[]) => appendCanonicalEnvelopesMock(...args),
+}))
 
 jest.mock("./acp-client", () => ({
   AcpClientAdapter: class {
@@ -964,6 +969,24 @@ describe("execute / cancel", () => {
 })
 
 describe("executeStreaming", () => {
+  beforeEach(() => appendCanonicalEnvelopesMock.mockClear())
+
+  it("persists each external event through the redacted canonical envelope log", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.events = [
+      { type: "text", text: "alice@example.com", timestamp: new Date() } as ExternalAgentEvent,
+    ]
+
+    for await (const _event of m.executeStreaming("agent-1", "hi")) {
+      // drain
+    }
+
+    expect(appendCanonicalEnvelopesMock).toHaveBeenCalledTimes(1)
+    const envelope = appendCanonicalEnvelopesMock.mock.calls[0][1][0]
+    expect(envelope.event.kind).toBe("text-delta")
+    expect(JSON.stringify(envelope.event)).not.toContain("alice@example.com")
+  })
   it("yields events from the adapter and updates stats", async () => {
     const m = freshManager()
     await m.addAgent(buildBaseConfig())

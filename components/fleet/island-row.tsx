@@ -30,6 +30,7 @@ const STATUS_DOT: Record<FleetStatus, string> = {
   "plan-pending": "bg-sky-400 animate-pulse",
   "waiting-input": "bg-amber-400",
   idle: "bg-white/30",
+  detached: "bg-slate-400/40",
   ended: "bg-white/15",
 }
 
@@ -175,6 +176,8 @@ export function IslandRow({
         return t("status.waitingInput")
       case "ended":
         return t("status.ended")
+      case "detached":
+        return t("status.detached")
       case "idle":
         return activity ?? t("status.idle")
       case "working":

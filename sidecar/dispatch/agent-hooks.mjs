@@ -18,7 +18,7 @@
 import { spawn } from "node:child_process"
 
 import { HOOK_EVENTS } from "@anthropic-ai/claude-agent-sdk"
-import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
 
 const DEFAULT_TIMEOUT_SECS = 5
 const HARD_TIMEOUT_CAP_SECS = 30
@@ -364,7 +364,11 @@ export function runCommandHandler(command, configuredTimeout, payloadJson, signa
  * errors become soft-allow warnings.
  */
 export async function runWebhookHandler(url, headers, configuredTimeout, payloadJson, signal) {
-  if (!hasNoLeakingPiiDeep(payloadJson)) {
+  // Outbound hooks never receive the original sensitive payload. Redact first;
+  // then apply the deep gate to the redacted representation and fail closed if
+  // a detector still finds data that the redactor could not remove.
+  const redactedPayloadJson = redactText(payloadJson).redacted
+  if (!hasNoLeakingPiiDeep(redactedPayloadJson)) {
     return { block: HOOK_PII_BLOCK_REASON }
   }
   const timeoutSecs = Math.min(
@@ -383,7 +387,7 @@ export async function runWebhookHandler(url, headers, configuredTimeout, payload
     const res = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json", ...(headers ?? {}) },
-      body: payloadJson,
+      body: redactedPayloadJson,
       signal: controller.signal,
     })
     const body = await res.text()
@@ -401,21 +405,61 @@ export async function runWebhookHandler(url, headers, configuredTimeout, payload
   }
 }
 
-function runHandler(handler, payloadJson, signal, cwd) {
+function runHandler(handler, payloadJson, signal, cwd, deps = {}) {
   if (!handler || typeof handler !== "object") {
     return Promise.resolve({ warning: "invalid hook handler configuration" })
   }
   if (handler.type === "command" && typeof handler.command === "string") {
     return runCommandHandler(handler.command, handler.timeout, payloadJson, signal, cwd)
   }
-  if (
-    (handler.type === "http" || handler.type === "webhook") &&
-    typeof handler.url === "string"
-  ) {
+  if ((handler.type === "http" || handler.type === "webhook") && typeof handler.url === "string") {
     return runWebhookHandler(handler.url, handler.headers, handler.timeout, payloadJson, signal)
   }
-  const type = typeof handler.type === "string" && handler.type ? handler.type : "missing"
-  return Promise.resolve({ warning: `unsupported hook handler type: ${type}` })
+  if (
+    (handler.type === "prompt" || handler.type === "agent" || handler.type === "mcp_tool") &&
+    typeof deps.executeNativeHandler === "function"
+  ) {
+    const redactedPayloadJson = redactText(payloadJson).redacted
+    if (!hasNoLeakingPiiDeep(redactedPayloadJson)) {
+      return Promise.resolve({ block: HOOK_PII_BLOCK_REASON })
+    }
+    return Promise.resolve()
+      .then(() =>
+        deps.executeNativeHandler(handler, redactedPayloadJson, {
+          signal,
+          depth: deps.hookDepth ?? 0,
+        })
+      )
+      .then((result) => {
+        if (result && typeof result.output === "string") return parseZeroExitOutput(result.output)
+        return result ?? {}
+      })
+      .catch((error) => ({
+        warning: `hook ${handler.type} failed: ${error?.message ?? error}`,
+      }))
+  }
+  if (handler.type === "prompt" || handler.type === "agent" || handler.type === "mcp_tool") {
+    return Promise.resolve({ warning: `hook ${handler.type} runtime adapter unavailable` })
+  }
+  return Promise.resolve({})
+}
+
+function handlerPolicyClass(handler) {
+  return handler?.policyClass === "managed" ? "managed" : "user"
+}
+
+function applyFailurePolicy(handler, outcome) {
+  if (handlerPolicyClass(handler) !== "managed" || !outcome?.warning || outcome.block) {
+    return outcome
+  }
+  return { ...outcome, block: `Managed hook failed closed: ${outcome.warning}` }
+}
+
+function auditOutcome(outcome) {
+  if (outcome?.block) return "blocked"
+  if (outcome?.warning) return "warning"
+  if (outcome?.additionalContext) return "context"
+  return "allowed"
 }
 
 /**
@@ -441,8 +485,9 @@ function groupsForEvent(hooksConfig, eventName) {
  * outcomes are merged in ARRAY order so the result is deterministic: first
  * block in config order wins, last mutation in config order wins.
  */
-export async function runGroups(groups, target, payloadJson, signal, cwd, eventName) {
+export async function runGroups(groups, target, payloadJson, signal, cwd, deps = {}) {
   const pending = []
+  let handlerIndex = 0
   for (const group of groups) {
     if (!group || typeof group !== "object") continue
     if (
@@ -450,12 +495,31 @@ export async function runGroups(groups, target, payloadJson, signal, cwd, eventN
       !matcherMatches(
         group.matcher,
         target,
-        eventName === "FileChanged" || eventName === "StopFailure"
+        deps.eventName === "FileChanged" || deps.eventName === "StopFailure"
       )
     )
       continue
     for (const handler of Array.isArray(group.hooks) ? group.hooks : []) {
-      pending.push(runHandler(handler, payloadJson, signal, cwd))
+      const index = handlerIndex++
+      const startedAt = Date.now()
+      pending.push(
+        runHandler(handler, payloadJson, signal, cwd, deps).then((rawOutcome) => {
+          const outcome = applyFailurePolicy(handler, rawOutcome)
+          deps.onAudit?.({
+            hookId: `${deps.sessionId ?? "session"}:${deps.eventName ?? "event"}:${startedAt}:${index}`,
+            hookEvent: deps.eventName ?? "unknown",
+            provider: deps.provider ?? "unknown",
+            handlerType: handler?.type ?? "unknown",
+            policyClass: handlerPolicyClass(handler),
+            outcome: auditOutcome(outcome),
+            latencyMs: Math.max(0, Date.now() - startedAt),
+            redacted: ["http", "webhook", "prompt", "agent", "mcp_tool"].includes(handler?.type),
+            blockReason: outcome?.block,
+            error: outcome?.warning,
+          })
+          return outcome
+        })
+      )
     }
   }
   const dec = emptyDecision()
@@ -560,6 +624,18 @@ export function buildHookFirePayload(sessionId, eventName, toolName, dec) {
   }
 }
 
+export function buildHookAuditPayload(sessionId, audit) {
+  return {
+    type: "event",
+    sessionId,
+    event: {
+      type: "system",
+      subtype: "hook_audit",
+      ...audit,
+    },
+  }
+}
+
 // --- SDK hooks-object assembly ----------------------------------------------
 
 function safeStringify(value) {
@@ -576,7 +652,19 @@ function makeEventCallback(eventName, hooksConfig, deps) {
     if (groups.length === 0) return {}
     const target = hookMatchTarget(eventName, input)
     const payloadJson = safeStringify(input)
-    const dec = await runGroups(groups, target, payloadJson, ctx?.signal, deps?.cwd, eventName)
+    const hookDepth =
+      input?.hook_origin === "hook" ? Math.max(1, Number(input?.hook_recursion_depth ?? 1) || 1) : 0
+    const dec = await runGroups(groups, target, payloadJson, ctx?.signal, deps?.cwd, {
+      eventName,
+      provider: deps?.provider ?? "claude",
+      sessionId: deps?.sessionId,
+      hookDepth,
+      executeNativeHandler: deps?.executeNativeHandler,
+      onAudit:
+        typeof deps?.emitAudit === "function"
+          ? (audit) => deps.emitAudit(buildHookAuditPayload(deps?.sessionId, audit))
+          : undefined,
+    })
     if (dec.warnings.length > 0 && typeof deps?.log === "function") {
       // Host log signature: (level, message).
       for (const w of dec.warnings) deps.log("warn", `agent-hook ${eventName}: ${w}`)
@@ -596,7 +684,7 @@ function makeEventCallback(eventName, hooksConfig, deps) {
  * caller can omit the field.
  *
  * @param {object|undefined} hooksConfig  `HooksConfig` (event → HookGroup[])
- * @param {{ emit: Function, log?: Function, sessionId: string, cwd?: string }} deps
+ * @param {{ emit: Function, emitAudit?: Function, log?: Function, sessionId: string, cwd?: string, provider?: string, executeNativeHandler?: Function }} deps
  */
 export function buildAgentHooks(hooksConfig, deps) {
   if (!hooksConfig || typeof hooksConfig !== "object") return undefined

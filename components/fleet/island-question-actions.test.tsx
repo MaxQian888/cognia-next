@@ -12,8 +12,10 @@ jest.mock("next-intl", () => ({
 }))
 
 const respondMock = jest.fn()
+const rejectMock = jest.fn()
 jest.mock("@/lib/tauri/fleet", () => ({
   fleetQuestionRespond: (...args: unknown[]) => respondMock(...args),
+  fleetQuestionReject: (...args: unknown[]) => rejectMock(...args),
 }))
 
 const SINGLE: PendingQuestion = {
@@ -35,6 +37,8 @@ function request(requestedAt = Date.now()) {
 beforeEach(() => {
   respondMock.mockReset()
   respondMock.mockResolvedValue(true)
+  rejectMock.mockReset()
+  rejectMock.mockResolvedValue(true)
 })
 
 describe("IslandQuestionActions", () => {
@@ -48,6 +52,14 @@ describe("IslandQuestionActions", () => {
     expect(screen.getByTestId("question-option-0-0")).toHaveTextContent("OAuth")
     expect(screen.getByTestId("question-countdown")).toBeInTheDocument()
     expect(screen.getByTestId("question-submit")).toBeInTheDocument()
+    expect(screen.getByTestId("question-reject")).toBeInTheDocument()
+  })
+
+  it("rejects the native question without requiring a selection", async () => {
+    render(<IslandQuestionActions request={request()} questions={[SINGLE]} />)
+    fireEvent.click(screen.getByTestId("question-reject"))
+    await waitFor(() => expect(rejectMock).toHaveBeenCalledWith("q-1"))
+    expect(screen.getByTestId("question-rejected")).toBeInTheDocument()
   })
 
   it("keeps submit disabled until every question is answered", () => {

@@ -48,9 +48,12 @@ const mockFleet = {
   fleetCodexHooksInstall: jest.fn(),
   fleetCodexHooksUninstall: jest.fn(),
   fleetCodexHooksStatus: jest.fn(),
+  fleetCodexHooksCapabilities: jest.fn(),
   fleetOpencodeInstall: jest.fn(),
   fleetOpencodeUninstall: jest.fn(),
   fleetOpencodeStatus: jest.fn(),
+  fleetOpencodeOutboxStatus: jest.fn(),
+  fleetOpencodeOutboxRepair: jest.fn(),
   openIslandWindow: jest.fn(),
   closeIslandWindow: jest.fn(),
   isIslandWindowOpen: jest.fn(),
@@ -70,9 +73,12 @@ jest.mock("@/lib/tauri/fleet", () => ({
   fleetCodexHooksInstall: () => mockFleet.fleetCodexHooksInstall(),
   fleetCodexHooksUninstall: () => mockFleet.fleetCodexHooksUninstall(),
   fleetCodexHooksStatus: () => mockFleet.fleetCodexHooksStatus(),
+  fleetCodexHooksCapabilities: () => mockFleet.fleetCodexHooksCapabilities(),
   fleetOpencodeInstall: () => mockFleet.fleetOpencodeInstall(),
   fleetOpencodeUninstall: () => mockFleet.fleetOpencodeUninstall(),
   fleetOpencodeStatus: () => mockFleet.fleetOpencodeStatus(),
+  fleetOpencodeOutboxStatus: () => mockFleet.fleetOpencodeOutboxStatus(),
+  fleetOpencodeOutboxRepair: () => mockFleet.fleetOpencodeOutboxRepair(),
   openIslandWindow: () => mockFleet.openIslandWindow(),
   closeIslandWindow: () => mockFleet.closeIslandWindow(),
   isIslandWindowOpen: () => mockFleet.isIslandWindowOpen(),
@@ -148,9 +154,25 @@ beforeEach(() => {
     scriptPath: null,
   })
   mockFleet.fleetCodexHooksStatus.mockResolvedValue("not-installed")
+  mockFleet.fleetCodexHooksCapabilities.mockResolvedValue({
+    state: "probed",
+    ceilingEvents: ["SessionStart", "SessionEnd"],
+    effectiveEvents: ["SessionStart", "SessionEnd"],
+    diagnostic: null,
+  })
   mockFleet.fleetCodexHooksInstall.mockResolvedValue("installed")
   mockFleet.fleetCodexHooksUninstall.mockResolvedValue("not-installed")
   mockFleet.fleetOpencodeStatus.mockResolvedValue({ status: "not-installed", pluginPath: null })
+  mockFleet.fleetOpencodeOutboxStatus.mockResolvedValue({
+    health: "healthy",
+    path: "/tmp/outbox.json",
+    error: null,
+  })
+  mockFleet.fleetOpencodeOutboxRepair.mockResolvedValue({
+    health: "healthy",
+    path: "/tmp/outbox.json",
+    error: null,
+  })
   mockFleet.isIslandWindowOpen.mockResolvedValue(false)
   mockFleet.islandListMonitors.mockResolvedValue([
     {

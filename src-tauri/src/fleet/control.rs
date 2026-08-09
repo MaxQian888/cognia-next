@@ -488,7 +488,14 @@ fn send_interrupt(_pid: u32) -> Result<(), String> {
 pub async fn interrupt_session(agent: &str, session_id: &str) -> Result<(), String> {
     let agent = super::registry::FleetAgent::parse(agent).ok_or("unknown agent")?;
     if agent == super::registry::FleetAgent::Opencode {
-        super::runtime().queue_opencode_interrupt(session_id.to_string())?;
+        let runtime = super::runtime();
+        if !runtime
+            .session_capabilities(agent, session_id)
+            .is_some_and(|capabilities| capabilities.interrupt)
+        {
+            return Err(InterruptRefusal::Unsupported.code().to_string());
+        }
+        runtime.queue_opencode_interrupt(session_id.to_string())?;
         return Ok(());
     }
     let pid = super::runtime()
@@ -758,7 +765,7 @@ mod tests {
     }
 
     #[test]
-    fn interrupt_is_a_unix_only_capability() {
+    fn process_interrupt_is_a_unix_only_capability() {
         // Windows console control events cannot reach a process that does not
         // share our console, so the capability (and the button) stay off there.
         assert_eq!(can_interrupt(), cfg!(unix));

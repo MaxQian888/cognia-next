@@ -12,8 +12,8 @@
 //! install the *same* generated forwarder script
 //! ([`super::install::hook_forwarder_script`]) with `agent: "codex"`.
 //!
-//! Two field-verified constraints shape this module (checked 2026-07-21
-//! against `@openai/codex 0.144.4`):
+//! Two field-verified constraints shape this module (rechecked 2026-08-06
+//! against local Codex `0.145.0` and its generated app-server schema):
 //!
 //! 1. **`hooks.json` is shared territory.** On a real machine it is already
 //!    populated by other tools (a third-party agent-overlay app was found
@@ -33,7 +33,9 @@
 //!    line also revokes trust — so [`CodexHooksStatus::Stale`] (our handler
 //!    present but with a different command) is a state the UI must surface.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
@@ -43,11 +45,9 @@ const EDIT_RETRIES: usize = 4;
 static HOOKS_FILE_LOCK: Mutex<()> = Mutex::new(());
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-/// Events we register. Verified present in a live `~/.codex/hooks.json` and in
-/// the shipped binary's `HookEventsToml`. Current Codex exposes SessionEnd and
-/// SubagentStart; Notification, StopFailure, and PermissionDenied remain absent. The manifest in
-/// [`super::integrations`] deliberately omits them rather than registering
-/// hooks that would never fire.
+/// Audited upper bound from Codex's `HookEventsToml`. Installation never uses
+/// this list directly: the local executable must prove each event through its
+/// generated app-server JSON schema, and only the intersection is registered.
 ///
 /// The second field is the forwarder's `$2` mode: `wait` makes the hook block
 /// on our long-poll so the island can answer it; everything else is
@@ -65,6 +65,152 @@ pub const CODEX_HOOK_EVENTS: &[(&str, HookMode)] = &[
     ("PreCompact", HookMode::Fire),
     ("PostCompact", HookMode::Fire),
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CodexHookProbeState {
+    Probed,
+    Degraded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexHookCapabilityReport {
+    pub state: CodexHookProbeState,
+    pub ceiling_events: Vec<String>,
+    pub effective_events: Vec<String>,
+    pub diagnostic: Option<String>,
+}
+
+fn degraded_probe(error: String) -> CodexHookCapabilityReport {
+    CodexHookCapabilityReport {
+        state: CodexHookProbeState::Degraded,
+        ceiling_events: CODEX_HOOK_EVENTS
+            .iter()
+            .map(|(event, _)| (*event).to_string())
+            .collect(),
+        effective_events: Vec::new(),
+        diagnostic: Some(error),
+    }
+}
+
+/// Extract `HookEventName.enum` values from a generated Codex JSON schema.
+/// Kept pure because schema layout differs between aggregate and per-method
+/// files; walking recursively is more version-tolerant than pinning one path.
+pub fn parse_codex_hook_events(schema: &Value) -> Vec<String> {
+    fn visit(value: &Value, found: &mut BTreeSet<String>) {
+        match value {
+            Value::Object(object) => {
+                if let Some(events) = object
+                    .get("HookEventName")
+                    .and_then(Value::as_object)
+                    .and_then(|definition| definition.get("enum"))
+                    .and_then(Value::as_array)
+                {
+                    for event in events.iter().filter_map(Value::as_str) {
+                        found.insert(event.to_string());
+                    }
+                }
+                for child in object.values() {
+                    visit(child, found);
+                }
+            }
+            Value::Array(values) => {
+                for child in values {
+                    visit(child, found);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut found = BTreeSet::new();
+    visit(schema, &mut found);
+    found.into_iter().collect()
+}
+
+fn collect_schema_events(dir: &Path, found: &mut BTreeSet<String>) -> Result<(), String> {
+    for entry in std::fs::read_dir(dir).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_schema_events(&path, found)?;
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
+            let schema: Value = serde_json::from_slice(&bytes)
+                .map_err(|error| format!("parse Codex schema {}: {error}", path.display()))?;
+            found.extend(parse_codex_hook_events(&schema));
+        }
+    }
+    Ok(())
+}
+
+/// Ask the installed Codex executable to generate its own protocol schema,
+/// then intersect the advertised HookEventName enum with our audited ceiling.
+/// Probe failure returns a degraded report with no effective events — callers
+/// must never install an unproven hook merely because its name is known here.
+pub fn probe_codex_hook_events(command: &Path) -> CodexHookCapabilityReport {
+    let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "cognia-codex-hook-probe-{}-{sequence}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        return degraded_probe(format!("create Codex schema probe directory: {error}"));
+    }
+
+    let output = Command::new(command)
+        .args(["app-server", "generate-json-schema", "--out"])
+        .arg(&dir)
+        .output();
+    let report = match output {
+        Err(error) => degraded_probe(format!("run Codex hook capability probe: {error}")),
+        Ok(output) if !output.status.success() => degraded_probe(format!(
+            "Codex hook capability probe exited {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+        Ok(_) => {
+            let mut advertised = BTreeSet::new();
+            match collect_schema_events(&dir, &mut advertised) {
+                Err(error) => degraded_probe(error),
+                Ok(()) => {
+                    let effective_events: Vec<String> = CODEX_HOOK_EVENTS
+                        .iter()
+                        .filter(|(event, _)| advertised.contains(*event))
+                        .map(|(event, _)| (*event).to_string())
+                        .collect();
+                    if effective_events.is_empty() {
+                        degraded_probe(
+                            "Codex schema did not advertise any audited hook events".to_string(),
+                        )
+                    } else {
+                        CodexHookCapabilityReport {
+                            state: CodexHookProbeState::Probed,
+                            ceiling_events: CODEX_HOOK_EVENTS
+                                .iter()
+                                .map(|(event, _)| (*event).to_string())
+                                .collect(),
+                            effective_events,
+                            diagnostic: None,
+                        }
+                    }
+                }
+            }
+        }
+    };
+    let _ = std::fs::remove_dir_all(&dir);
+    report
+}
+
+fn event_specs(report: &CodexHookCapabilityReport) -> Vec<(&'static str, HookMode)> {
+    CODEX_HOOK_EVENTS
+        .iter()
+        .copied()
+        .filter(|(event, _)| report.effective_events.iter().any(|item| item == event))
+        .collect()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HookMode {
@@ -161,6 +307,14 @@ fn is_ours(command: &str, script: &str) -> bool {
 /// preserved (Codex runs every matching hook), and a previous version of our
 /// own handler is replaced rather than duplicated.
 pub fn merge_our_hooks(existing: &Value, script: &str) -> Value {
+    merge_our_hooks_for_events(existing, script, CODEX_HOOK_EVENTS)
+}
+
+fn merge_our_hooks_for_events(
+    existing: &Value,
+    script: &str,
+    events: &[(&str, HookMode)],
+) -> Value {
     let mut root = existing.as_object().cloned().unwrap_or_default();
     let mut hooks = root
         .get("hooks")
@@ -168,7 +322,7 @@ pub fn merge_our_hooks(existing: &Value, script: &str) -> Value {
         .cloned()
         .unwrap_or_default();
 
-    for (event, mode) in CODEX_HOOK_EVENTS {
+    for (event, mode) in events {
         let mut groups: Vec<Value> = hooks
             .get(*event)
             .and_then(Value::as_array)
@@ -250,6 +404,15 @@ pub fn classify(
     codex_home_exists: bool,
     script: &str,
 ) -> CodexHooksStatus {
+    classify_for_events(existing, codex_home_exists, script, CODEX_HOOK_EVENTS)
+}
+
+fn classify_for_events(
+    existing: Option<&Value>,
+    codex_home_exists: bool,
+    script: &str,
+    events: &[(&str, HookMode)],
+) -> CodexHooksStatus {
     if !codex_home_exists {
         return CodexHooksStatus::Unavailable;
     }
@@ -262,7 +425,7 @@ pub fn classify(
 
     let mut found_any = false;
     let mut all_current = true;
-    for (event, mode) in CODEX_HOOK_EVENTS {
+    for (event, mode) in events {
         let want = handler_command(script, event, *mode);
         let commands = our_commands_for(hooks, event, script);
         if commands.is_empty() {
@@ -366,13 +529,26 @@ fn write_hooks_if_unchanged(
 }
 
 fn install_at(hooks_path: &Path, script: &Path) -> Result<CodexHooksStatus, String> {
+    install_at_for_events(hooks_path, script, CODEX_HOOK_EVENTS)
+}
+
+fn install_at_for_events(
+    hooks_path: &Path,
+    script: &Path,
+    events: &[(&str, HookMode)],
+) -> Result<CodexHooksStatus, String> {
     let script_str = script.to_string_lossy().to_string();
     for _ in 0..EDIT_RETRIES {
         let raw = read_hooks_raw_at(hooks_path)?;
         let existing = parse_hooks(raw.as_deref())?.unwrap_or_else(|| json!({}));
-        let merged = merge_our_hooks(&existing, &script_str);
+        let merged = merge_our_hooks_for_events(&existing, &script_str, events);
         if write_hooks_if_unchanged(hooks_path, raw.as_deref(), &merged)? {
-            return Ok(classify(Some(&merged), true, &script_str));
+            return Ok(classify_for_events(
+                Some(&merged),
+                true,
+                &script_str,
+                events,
+            ));
         }
     }
     Err("codex hooks.json changed repeatedly while installing; retry".to_string())
@@ -396,12 +572,80 @@ fn uninstall_at(hooks_path: &Path, script: &Path) -> Result<(), String> {
 }
 
 fn status_at(hooks_path: &Path, codex_home: &Path, script: &Path) -> CodexHooksStatus {
+    status_at_for_events(hooks_path, codex_home, script, CODEX_HOOK_EVENTS)
+}
+
+fn status_at_for_events(
+    hooks_path: &Path,
+    codex_home: &Path,
+    script: &Path,
+    events: &[(&str, HookMode)],
+) -> CodexHooksStatus {
     let script_str = script.to_string_lossy().to_string();
     match read_hooks_at(hooks_path) {
-        Ok(doc) => classify(doc.as_ref(), codex_home.is_dir(), &script_str),
+        Ok(doc) => classify_for_events(doc.as_ref(), codex_home.is_dir(), &script_str, events),
         // Unparseable: we cannot claim ownership, but Codex is clearly present.
         Err(_) if codex_home.is_dir() => CodexHooksStatus::NotInstalled,
         Err(_) => CodexHooksStatus::Unavailable,
+    }
+}
+
+fn write_script_atomic(script: &Path, contents: &[u8]) -> Result<(), String> {
+    let parent = script
+        .parent()
+        .ok_or_else(|| "Codex hook script path has no parent".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let tmp = parent.join(format!(
+        ".codex-hook.{}.{}.tmp",
+        std::process::id(),
+        sequence
+    ));
+    std::fs::write(&tmp, contents).map_err(|error| error.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
+            .map_err(|error| error.to_string())?;
+    }
+    if let Err(error) = std::fs::rename(&tmp, script) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+
+fn restore_script(script: &Path, previous: Option<&[u8]>) -> Result<(), String> {
+    match previous {
+        Some(bytes) => write_script_atomic(script, bytes),
+        None => match std::fs::remove_file(script) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.to_string()),
+        },
+    }
+}
+
+fn install_transactional_at(
+    hooks: &Path,
+    script: &Path,
+    contents: &[u8],
+    events: &[(&str, HookMode)],
+) -> Result<CodexHooksStatus, String> {
+    let previous = match std::fs::read(script) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.to_string()),
+    };
+    write_script_atomic(script, contents)?;
+    match install_at_for_events(hooks, script, events) {
+        Ok(status) => Ok(status),
+        Err(install_error) => match restore_script(script, previous.as_deref()) {
+            Ok(()) => Err(install_error),
+            Err(rollback_error) => Err(format!(
+                "{install_error}; additionally failed to restore Codex hook script: {rollback_error}"
+            )),
+        },
     }
 }
 
@@ -428,19 +672,16 @@ pub async fn fleet_codex_hooks_install() -> Result<CodexHooksStatus, String> {
         if !home.is_dir() {
             return Ok(CodexHooksStatus::Unavailable);
         }
-        if let Some(parent) = script.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        let probe = probe_codex_hook_events(Path::new("codex"));
+        let events = event_specs(&probe);
+        if events.is_empty() {
+            return Err(probe
+                .diagnostic
+                .unwrap_or_else(|| "Codex hook capability probe failed".to_string()));
         }
         let contents =
             super::install::hook_forwarder_script("codex", super::terminal::CAPTURED_ENV_VARS);
-        std::fs::write(&script, contents.as_bytes()).map_err(|e| e.to_string())?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
-                .map_err(|e| e.to_string())?;
-        }
-        install_at(&hooks, &script)
+        install_transactional_at(&hooks, &script, contents.as_bytes(), &events)
     })
     .await
     .map_err(|e| format!("codex hooks install task: {e}"))?
@@ -473,10 +714,25 @@ pub async fn fleet_codex_hooks_status() -> Result<CodexHooksStatus, String> {
             .lock()
             .map_err(|_| "codex hooks lock poisoned".to_string())?;
         let (hooks, home, script) = paths()?;
-        Ok(status_at(&hooks, &home, &script))
+        let probe = probe_codex_hook_events(Path::new("codex"));
+        let events = event_specs(&probe);
+        Ok(if events.is_empty() {
+            status_at(&hooks, &home, &script)
+        } else {
+            status_at_for_events(&hooks, &home, &script, &events)
+        })
     })
     .await
     .map_err(|e| format!("codex hooks status task: {e}"))?
+}
+
+/// Runtime-proven Codex hook event set. This is separate from install status:
+/// a file may be present while the local executable's schema probe is degraded.
+#[tauri::command]
+pub async fn fleet_codex_hooks_capabilities() -> Result<CodexHookCapabilityReport, String> {
+    tokio::task::spawn_blocking(|| probe_codex_hook_events(Path::new("codex")))
+        .await
+        .map_err(|error| format!("codex hook capability probe task: {error}"))
 }
 
 #[cfg(test)]
@@ -532,6 +788,7 @@ mod tests {
 
     #[test]
     fn merge_registers_every_event() {
+        assert_eq!(CODEX_HOOK_EVENTS.len(), 11);
         let merged = merge_our_hooks(&json!({}), SCRIPT);
         for (event, _) in CODEX_HOOK_EVENTS {
             assert!(
@@ -625,6 +882,75 @@ mod tests {
                 "{event} has the wrong mode"
             );
         }
+    }
+
+    #[test]
+    fn parser_extracts_hook_event_enum_from_nested_schema() {
+        let schema = json!({
+            "definitions": {
+                "HookEventName": {
+                    "type": "string",
+                    "enum": ["SessionStart", "SessionEnd", "FutureEvent"]
+                }
+            }
+        });
+        assert_eq!(
+            parse_codex_hook_events(&schema),
+            vec!["FutureEvent", "SessionEnd", "SessionStart"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_probe_intersects_fake_schema_with_audited_ceiling() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let command = dir.path().join("fake-codex");
+        let script = r#"#!/bin/sh
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--out" ]; then shift; out="$1"; fi
+  shift
+done
+mkdir -p "$out"
+printf '%s' '{"definitions":{"HookEventName":{"enum":["SessionStart","SessionEnd","SubagentStart","NotAudited"]}}}' > "$out/schema.json"
+"#;
+        std::fs::write(&command, script).unwrap();
+        std::fs::set_permissions(&command, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let report = probe_codex_hook_events(&command);
+        assert_eq!(report.state, CodexHookProbeState::Probed);
+        assert_eq!(
+            report.effective_events,
+            vec!["SessionStart", "SessionEnd", "SubagentStart"]
+        );
+        assert!(!report
+            .effective_events
+            .iter()
+            .any(|event| event == "NotAudited"));
+    }
+
+    #[test]
+    fn failed_runtime_probe_is_conservative() {
+        let report = probe_codex_hook_events(Path::new("/definitely/missing/codex"));
+        assert_eq!(report.state, CodexHookProbeState::Degraded);
+        assert!(report.effective_events.is_empty());
+        assert!(report.diagnostic.is_some());
+    }
+
+    #[test]
+    fn transactional_install_restores_previous_script_when_hooks_write_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let hooks = dir.path().join("hooks.json");
+        std::fs::create_dir(&hooks).unwrap();
+        let script = dir.path().join("codex-hook.sh");
+        std::fs::write(&script, b"previous").unwrap();
+
+        let error = install_transactional_at(&hooks, &script, b"replacement", CODEX_HOOK_EVENTS)
+            .unwrap_err();
+        assert!(!error.is_empty());
+        assert_eq!(std::fs::read(&script).unwrap(), b"previous");
     }
 
     #[test]

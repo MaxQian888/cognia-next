@@ -85,7 +85,8 @@ const STATUS_RANK: Record<FleetStatus, number> = {
   "waiting-input": 2,
   working: 3,
   idle: 4,
-  ended: 5,
+  detached: 5,
+  ended: 6,
 }
 
 export function sortForIsland(sessions: readonly FleetSession[]): FleetSession[] {
@@ -156,6 +157,7 @@ export interface FleetStatusSummary {
   attention: number
   working: number
   idle: number
+  detached: number
   ended: number
   total: number
 }
@@ -166,6 +168,7 @@ export function fleetStatusSummary(sessions: readonly FleetSession[]): FleetStat
     attention: 0,
     working: 0,
     idle: 0,
+    detached: 0,
     ended: 0,
     total: sessions.length,
   }
@@ -181,6 +184,9 @@ export function fleetStatusSummary(sessions: readonly FleetSession[]): FleetStat
         break
       case "idle":
         summary.idle += 1
+        break
+      case "detached":
+        summary.detached += 1
         break
       case "ended":
         summary.ended += 1

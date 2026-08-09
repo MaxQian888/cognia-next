@@ -69,6 +69,19 @@ describe("HooksConfigSchema", () => {
     })
   })
 
+  it("accepts the canonical http handler name", () => {
+    const result = hookGroupSchema.safeParse({
+      hooks: [
+        {
+          type: "http",
+          url: "https://example.test/hook",
+          allowedEnvVars: ["TOKEN"],
+        },
+      ],
+    })
+    expect(result.success).toBe(true)
+  })
+
   it("tolerates unknown event keys without dropping known ones", () => {
     const fragment = {
       PreToolUse: [{ hooks: [{ type: "command", command: "x" }] }],

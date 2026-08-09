@@ -36,6 +36,7 @@ import {
 } from "./tool-search-policy.mjs"
 import { buildLspHooks } from "./lsp-hooks.mjs"
 import { buildAgentHooks, mergeHookMaps } from "./agent-hooks.mjs"
+import { createNativeHookExecutor } from "./hook-native-executor.mjs"
 import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
 import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
@@ -371,6 +372,20 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     }
   }
 
+  const executeNativeHook = createNativeHookExecutor({
+    cwd: sendOptions.cwd,
+    env: baseEnv,
+    model:
+      sendOptions.execution?.modelBindings?.primary &&
+      sendOptions.execution.modelBindings.primary !== "inherit"
+        ? sendOptions.execution.modelBindings.primary
+        : sendOptions.model,
+    fallbackModel: sendOptions.execution?.modelBindings?.fast ?? sendOptions.fallbackModel,
+    mcpServers: mergedMcpServers,
+    allowedTools: sendOptions.allowedTools,
+    maxBudgetUsd: sendOptions.maxBudgetUsd,
+  })
+
   // Allowlist construction — only fields listed below reach the SDK. This is
   // intentional: cognia-next sends a few sidecar-protocol-only fields
   // (`builtinTools`, `bareMode`, `debugMode`, `briefMode`, `aliasResolution`,
@@ -439,7 +454,15 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     // undefined when neither contributes, so the strip pass omits the key.
     hooks: mergeHookMaps(
       lspEnabled ? buildLspHooks(lspResolver) : undefined,
-      buildAgentHooks(sendOptions.hooks, { emit, log, sessionId, cwd: sendOptions.cwd })
+      buildAgentHooks(sendOptions.hooks, {
+        emit,
+        emitAudit: emit,
+        log,
+        sessionId,
+        cwd: sendOptions.cwd,
+        provider: "claude",
+        executeNativeHandler: executeNativeHook,
+      })
     ),
 
     canUseTool: (toolName, input, ctx) => {

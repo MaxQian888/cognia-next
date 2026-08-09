@@ -9319,11 +9319,13 @@
     "agents": {
       "claude-code": "Claude Code",
       "codex": "Codex",
+      "cognia": "Cognia",
       "opencode": "OpenCode"
     },
     "island": {
       "empty": "暂无活动 Agent",
       "legend": {
+        "detached": "{count} 个已断开监控",
         "done": "{count} 个已结束",
         "idle": "{count} 个空闲",
         "needsYou": "{count} 个待处理",
@@ -9345,6 +9347,8 @@
     },
     "question": {
       "expired": "已在终端中处理",
+      "reject": "拒绝",
+      "rejected": "已拒绝",
       "submit": "提交",
       "submitted": "已发送"
     },
@@ -9396,6 +9400,7 @@
       "openTranscript": "在文件管理器中显示会话记录",
       "questionMore": "还有 {count} 个问题",
       "status": {
+        "detached": "监控已断开",
         "ended": "会话已结束",
         "idle": "空闲",
         "planPending": "计划等待在终端中确认",
@@ -9742,6 +9747,10 @@
         "desc": "工作目录变更时触发。",
         "label": "工作目录变更"
       },
+      "DirectoryAdded": {
+        "desc": "向会话工作区添加目录时触发。",
+        "label": "目录已添加"
+      },
       "Elicitation": {
         "desc": "智能体向你征询结构化输入时触发。",
         "label": "信息征询"
@@ -9757,6 +9766,10 @@
       "InstructionsLoaded": {
         "desc": "加载 CLAUDE.md / 指令时触发。",
         "label": "指令加载"
+      },
+      "MessageDisplay": {
+        "desc": "运行时向用户显示消息时触发。",
+        "label": "消息显示"
       },
       "Notification": {
         "desc": "运行时通知（空闲、等待输入）时触发。",
@@ -9802,6 +9815,10 @@
         "desc": "会话开始时触发；适合注入常驻上下文。",
         "label": "会话开始"
       },
+      "Setup": {
+        "desc": "设置仓库或工作树环境时触发。",
+        "label": "环境设置"
+      },
       "Stop": {
         "desc": "助手完成本轮回复时触发。",
         "label": "停止"
@@ -9809,6 +9826,10 @@
       "StopFailure": {
         "desc": "本轮因错误结束时触发。",
         "label": "停止（失败）"
+      },
+      "SubagentStart": {
+        "desc": "原生子代理开始运行时触发。",
+        "label": "子代理启动"
       },
       "SubagentStop": {
         "desc": "子代理结束运行时触发。",
@@ -12767,6 +12788,8 @@
         "countdown": "剩余 {seconds} 秒",
         "expired": "回答窗口已关闭，请在终端里回答。",
         "failed": "回答发送失败。",
+        "reject": "拒绝",
+        "rejected": "已拒绝。",
         "submit": "提交"
       },
       "reply": {
@@ -12783,6 +12806,7 @@
         "focus": "聚焦终端",
         "focusFailed": "无法聚焦终端。",
         "status": {
+          "detached": "监控已断开",
           "ended": "会话已结束",
           "idle": "空闲",
           "planPending": "计划等待在桌面确认",
@@ -25829,6 +25853,11 @@
       "triggerAria": "查找设置"
     },
     "fleet": {
+      "capabilities": {
+        "degraded": "API 能力受限",
+        "proven": "API 已验证",
+        "unproven": "等待能力探测"
+      },
       "claude": {
         "desc": "将转发 hooks 安装到 ~/.claude/settings.json，让每个 Claude Code 会话上报到这里。失败即放行：Cognia 关闭时立即退出。",
         "label": "Claude Code hooks"
@@ -25890,7 +25919,13 @@
       },
       "opencode": {
         "desc": "在 ~/.config/opencode/plugin 安装插件。可在灵动岛上观察会话并批准/拒绝权限。",
-        "label": "OpenCode 插件"
+        "label": "OpenCode 插件",
+        "outbox": {
+          "corrupt": "持久化命令队列已损坏，控制功能已停用。",
+          "repair": "修复队列",
+          "repaired": "OpenCode 命令队列已修复。",
+          "unavailable": "持久化命令队列不可用，控制功能已停用。"
+        }
       },
       "saved": "舰队设置已更新。",
       "status": {
@@ -26247,7 +26282,7 @@
         "discard": "放弃并切换",
         "title": "放弃未保存的更改?"
       },
-      "description": "在生命周期事件触发时运行 shell 命令或调用 webhook。配置写入 ~/.claude/settings.json (用户作用域) 或项目下的 .claude/settings.json。整份配置原样回写,未识别的字段会被保留。",
+      "description": "在生命周期事件触发时运行当前运行时支持的处理器。Claude 支持命令、HTTP、MCP 工具、提示词和 Agent；其他运行时只显示探测确认的能力。",
       "eventListLabel": "事件",
       "group": {
         "addHandler": "新建处理器",
@@ -26270,14 +26305,29 @@
         "headersEmpty": "暂无自定义头部。",
         "headersLabel": "请求头",
         "httpCapability": "HTTP 请求需要网络能力。",
+        "inputLabel": "输入 JSON",
+        "modelLabel": "模型（可选）",
+        "promptLabel": "提示词",
+        "promptRequired": "提示词不能为空。",
         "removeAria": "移除处理器",
-        "timeoutLabel": "超时 (ms)",
-        "timeoutPlaceholder": "5000",
+        "serverLabel": "MCP 服务器",
+        "serverRequired": "MCP 服务器不能为空。",
+        "timeoutLabel": "超时（秒）",
+        "timeoutPlaceholder": "30",
+        "toolLabel": "工具",
+        "toolRequired": "MCP 工具不能为空。",
         "typeCommand": "命令",
         "typeHttp": "HTTP 请求",
         "typeLabel": "类型",
         "typeWebhook": "Webhook",
         "typeWebhookLegacy": "旧版 Webhook",
+        "types": {
+          "agent": "Agent",
+          "command": "命令",
+          "http": "HTTP",
+          "mcp_tool": "MCP 工具",
+          "prompt": "提示词"
+        },
         "urlInvalid": "请输入有效的 http(s) URL。",
         "urlLabel": "URL",
         "urlPlaceholder": "https://example.com/hook",

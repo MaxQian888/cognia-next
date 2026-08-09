@@ -22,6 +22,31 @@ describe("hooks types module", () => {
     expect(webhook.type).toBe("webhook")
   })
 
+  it("HookHandler accepts every Claude native handler shape and the legacy webhook alias", () => {
+    const handlers: HookHandler[] = [
+      { type: "command", command: "node", args: ["guard.mjs"], async: true },
+      {
+        type: "http",
+        url: "https://example.test/hook",
+        headers: { Authorization: "Bearer $TOKEN" },
+        allowedEnvVars: ["TOKEN"],
+      },
+      { type: "mcp_tool", server: "policy", tool: "check", input: { path: "${tool_input.path}" } },
+      { type: "prompt", prompt: "Approve this input: $ARGUMENTS", model: "haiku" },
+      { type: "agent", prompt: "Inspect this input: $ARGUMENTS", model: "sonnet" },
+      { type: "webhook", url: "https://legacy.example.test/hook" },
+    ]
+
+    expect(handlers.map((handler) => handler.type)).toEqual([
+      "command",
+      "http",
+      "mcp_tool",
+      "prompt",
+      "agent",
+      "webhook",
+    ])
+  })
+
   it("HookGroup carries a matcher and handlers", () => {
     const group: HookGroup = {
       matcher: "*",

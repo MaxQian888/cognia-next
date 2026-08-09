@@ -11,6 +11,7 @@ import {
   fleetRemoteInterrupt,
   fleetRemotePermissionRespond,
   fleetRemoteQuestionRespond,
+  fleetRemoteQuestionReject,
   fleetRemoteSendMessage,
   isControlForbidden,
 } from "./fleet-remote-actions"
@@ -69,6 +70,12 @@ describe("fleet-remote-actions", () => {
       requestId: "q-1",
       selections: [[2], [0, 1]],
     })
+  })
+
+  it("rejects an AskUserQuestion through the native gate", async () => {
+    callMock.mockResolvedValue(true)
+    await expect(fleetRemoteQuestionReject("q-2")).resolves.toBe(true)
+    expect(callMock).toHaveBeenCalledWith("fleet_question_reject", { requestId: "q-2" })
   })
 
   it("reports a lapsed answer window rather than throwing", async () => {

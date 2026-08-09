@@ -17,6 +17,7 @@ import {
 } from "@cognia/agent-config-types/agent-execution"
 
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
+import { redactText } from "@cognia/redact"
 
 export { isAgentEventEnvelope, isKnownCanonicalAgentEventKind }
 
@@ -162,6 +163,17 @@ export function canonicalEventFromCaptureEvent(
     case "tool-summary":
       return null
   }
+}
+
+/**
+ * Remove PII/credentials before a canonical envelope crosses the durable-log
+ * boundary. Envelope ids and ordering metadata remain stable; only string
+ * leaves in the canonical event are replaced with redaction placeholders.
+ */
+export function redactAgentEventEnvelope(envelope: AgentEventEnvelope): AgentEventEnvelope {
+  const serialized = JSON.stringify(envelope.event)
+  const redacted = redactText(serialized).redacted
+  return { ...envelope, event: JSON.parse(redacted) as CanonicalAgentEvent }
 }
 
 /**

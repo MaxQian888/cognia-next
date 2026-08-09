@@ -17,7 +17,10 @@ import { reconcileFleetHistory, type FleetSessionHistoryRow } from "@/lib/db/fle
 import type { FleetSession } from "@/lib/fleet/types"
 import { fleetHistoryId } from "@/lib/db/fleet-sessions"
 import { fleetCanonicalRunId, projectFleetSessionEnvelopes } from "@/lib/fleet/canonical-projection"
-import { appendCanonicalEnvelopes } from "@/lib/ai/agent/recovery/canonical-log"
+import {
+  appendCanonicalEnvelopes,
+  pruneCanonicalEnvelopeDetails,
+} from "@/lib/ai/agent/recovery/canonical-log"
 import { redactText } from "@cognia/redact"
 
 /** Project one live session into a persistable history row. Pure. */
@@ -49,6 +52,10 @@ export function toHistoryRow(session: FleetSession, updatedAt: number): FleetSes
 export function useFleetHistorySink(): void {
   const { snapshot, available } = useFleetStream()
   const previousBySession = useRef(new Map<string, FleetSession>())
+
+  useEffect(() => {
+    if (available) void pruneCanonicalEnvelopeDetails()
+  }, [available])
 
   useEffect(() => {
     if (!available) return

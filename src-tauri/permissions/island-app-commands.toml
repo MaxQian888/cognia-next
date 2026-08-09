@@ -4,8 +4,10 @@ description = "Enables the application commands invoked by the trusted local fle
 commands.allow = [
   "fleet_focus_terminal",
   "fleet_get_snapshot",
+  "fleet_interrupt_session",
   "fleet_opencode_send_message",
   "fleet_permission_respond",
+  "fleet_question_reject",
   "fleet_question_respond",
   "island_resize",
   "island_set_tucked",

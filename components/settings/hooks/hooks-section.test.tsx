@@ -5,6 +5,7 @@
 import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { HooksSection } from "./hooks-section"
+import { knownHookRuntimeCapabilities } from "@/lib/claude/hooks/runtime-capabilities"
 
 // The command field renders the shared CodeMirror `LightCodeEditor`, which
 // measures the DOM and crashes under jsdom. Swap it for a plain textarea with
@@ -185,6 +186,21 @@ describe("HooksSection — load + scope switching", () => {
 })
 
 describe("HooksSection — editing + save", () => {
+  it("threads runtime-proven handler capabilities into newly added groups", async () => {
+    mockReadUser.mockResolvedValue({ hooks: {} })
+    const runtimeCapabilities = {
+      ...knownHookRuntimeCapabilities("claude"),
+      handlerTypes: ["http"] as const,
+      probed: true,
+    }
+    render(<HooksSection runtimeCapabilities={runtimeCapabilities} />)
+    await waitFor(() => expect(mockReadUser).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByTestId("hooks-add-group"))
+    fireEvent.click(screen.getByTestId("group-add-handler"))
+    expect(screen.getByTestId("hook-handler-form")).toHaveAttribute("data-handler-type", "http")
+  })
+
   it("adding a group bumps the active event count badge and dirties the form", async () => {
     mockReadUser.mockResolvedValue({ hooks: {} })
     render(<HooksSection />)
@@ -311,30 +327,22 @@ describe("HooksSection — editing + save", () => {
   })
 })
 
-describe("HooksSection — no-trigger event annotations", () => {
-  it("marks events with no trigger source and leaves wired events unmarked", async () => {
+describe("HooksSection — runtime event annotations", () => {
+  it("does not mark SDK-native events as dormant", async () => {
     mockReadUser.mockResolvedValue({ hooks: {} })
     render(<HooksSection />)
     await waitFor(() => expect(mockReadUser).toHaveBeenCalled())
 
-    // WorktreeCreate has no trigger source → dot present.
-    expect(screen.getByTestId("event-no-trigger-WorktreeCreate")).toBeInTheDocument()
-    // PostToolUse is wired → no dot.
+    expect(screen.queryByTestId("event-no-trigger-WorktreeCreate")).not.toBeInTheDocument()
     expect(screen.queryByTestId("event-no-trigger-PostToolUse")).not.toBeInTheDocument()
   })
 
-  it("shows the no-trigger note when a dead event is active, and hides it for wired events", async () => {
+  it("does not show a dormant note for SDK-native lifecycle events", async () => {
     searchString = "hookTab=WorktreeCreate"
     mockReadUser.mockResolvedValue({ hooks: {} })
-    const { rerender } = render(<HooksSection />)
+    render(<HooksSection />)
     await waitFor(() => expect(mockReadUser).toHaveBeenCalled())
-    expect(screen.getByTestId("hooks-no-trigger-note")).toBeInTheDocument()
-
-    searchString = "hookTab=PostToolUse"
-    rerender(<HooksSection />)
-    await waitFor(() =>
-      expect(screen.queryByTestId("hooks-no-trigger-note")).not.toBeInTheDocument()
-    )
+    expect(screen.queryByTestId("hooks-no-trigger-note")).not.toBeInTheDocument()
   })
 })
 

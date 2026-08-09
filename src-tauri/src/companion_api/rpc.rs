@@ -815,6 +815,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "fleet_get_snapshot",
     "fleet_permission_respond",
     "fleet_question_respond",
+    "fleet_question_reject",
     "fleet_opencode_send_message",
     "fleet_focus_terminal",
     "fleet_interrupt_session",
@@ -1284,6 +1285,7 @@ const CONTROL_COMMANDS: &[&str] = &[
     // controls above.
     "fleet_permission_respond",
     "fleet_question_respond",
+    "fleet_question_reject",
     "fleet_opencode_send_message",
     "fleet_focus_terminal",
     "fleet_interrupt_session",
@@ -7117,13 +7119,20 @@ pub(super) async fn dispatch(
             let selections: Vec<Vec<u32>> = required(&args, "selections")?;
             to_json(crate::fleet::runtime().respond_question(&request_id, selections))
         }
+        "fleet_question_reject" => {
+            let request_id: String = required(&args, "requestId")?;
+            to_json(crate::fleet::runtime().reject_question(&request_id))
+        }
         "fleet_opencode_send_message" => {
             let session_id: String = required(&args, "sessionId")?;
             let text: String = required(&args, "text")?;
             if text.trim().is_empty() {
                 return Err(RpcError::malformed("text must not be empty".to_string()));
             }
-            to_json(crate::fleet::runtime().queue_opencode_command(session_id, text))
+            crate::fleet::fleet_opencode_send_message(session_id, text)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
         }
         "fleet_focus_terminal" => {
             let agent: String = required(&args, "agent")?;
@@ -7485,6 +7494,7 @@ mod tests {
         for cmd in [
             "fleet_permission_respond",
             "fleet_question_respond",
+            "fleet_question_reject",
             "fleet_opencode_send_message",
             "fleet_focus_terminal",
             "fleet_interrupt_session",
