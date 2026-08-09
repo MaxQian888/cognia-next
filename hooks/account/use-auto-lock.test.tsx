@@ -38,6 +38,7 @@ function setVisibility(value: "visible" | "hidden") {
 
 beforeEach(() => {
   lockMock.mockReset()
+  lockMock.mockResolvedValue(undefined)
   state.minutes = 0
   state.locked = false
   state.streaming = false
@@ -87,6 +88,19 @@ describe("useAutoLock", () => {
     act(() => {
       jest.advanceTimersByTime(MIN)
     })
+    expect(lockMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("contains runtime-clear rejection when the idle deadline elapses", async () => {
+    state.minutes = 1
+    lockMock.mockRejectedValueOnce(new Error("runtime busy"))
+    renderHook(() => useAutoLock())
+
+    await act(async () => {
+      jest.advanceTimersByTime(MIN)
+      await Promise.resolve()
+    })
+
     expect(lockMock).toHaveBeenCalledTimes(1)
   })
 

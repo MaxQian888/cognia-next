@@ -48,6 +48,7 @@ import { cn } from "@/lib/utils"
 import type {
   LocalProviderName,
   LocalModelPullProgress,
+  LocalModelInfo,
 } from "@cognia/provider-types/local-provider"
 import { formatLocalModelSize } from "@cognia/provider-types/local-provider"
 import { getInstallInstructions } from "@cognia/provider-core/providers/local-provider-service"
@@ -61,7 +62,10 @@ import {
 export interface LocalProviderModelManagerProps {
   providerId: LocalProviderName
   baseUrl?: string
+  apiKey?: string
+  customHeaders?: Record<string, string>
   onModelSelect?: (modelId: string) => void
+  onModelsChange?: (models: LocalModelInfo[]) => void
   selectedModel?: string
   compact?: boolean
 }
@@ -69,7 +73,10 @@ export interface LocalProviderModelManagerProps {
 export function LocalProviderModelManager({
   providerId,
   baseUrl,
+  apiKey,
+  customHeaders,
   onModelSelect,
+  onModelsChange,
   selectedModel,
   compact = false,
 }: LocalProviderModelManagerProps) {
@@ -94,6 +101,9 @@ export function LocalProviderModelManager({
   } = useLocalProvider({
     providerId,
     baseUrl,
+    apiKey,
+    customHeaders,
+    onModelsDiscovered: onModelsChange,
     autoRefresh: true,
     refreshInterval: 30000,
   })

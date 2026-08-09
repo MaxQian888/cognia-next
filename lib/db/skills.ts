@@ -8,6 +8,7 @@ import {
   replaceResourcesForSkill,
   type SkillResourceDraft,
 } from "./skill-resources"
+import { allocateUniqueSkillSlug, deriveSkillSlug, isValidSkillSlug } from "@/lib/skills/slug"
 
 function newId() {
   return "skill_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -31,7 +32,13 @@ export type SkillDraft = Pick<Skill, "name" | "content"> &
   Partial<
     Pick<
       Skill,
+      | "slug"
       | "description"
+      | "compatibility"
+      | "metadata"
+      | "invocationPolicy"
+      | "frontmatterExtensions"
+      | "codexOpenAiYaml"
       | "allowedTools"
       | "tags"
       | "category"
@@ -62,12 +69,49 @@ export type SkillDraft = Pick<Skill, "name" | "content"> &
     resources?: Array<Omit<SkillResourceDraft, "skillId">>
   }
 
-export function createSkill(draft: SkillDraft): Promise<Skill> {
+/** Atomically store a skill row and, when supplied, replace its complete resource set. */
+export async function persistSkillBundle(input: {
+  skill: Skill
+  resources?: Array<Omit<SkillResourceDraft, "skillId">>
+  ensureUniqueSlug?: boolean
+  usedSlugs?: Set<string>
+}): Promise<void> {
+  const db = getDb()
+  await db.transaction("rw", db.skills, db.skillResources, async () => {
+    if (input.ensureUniqueSlug) {
+      const used =
+        input.usedSlugs ??
+        new Set(
+          (await db.skills.toArray())
+            .filter((row) => row.id !== input.skill.id)
+            .map((row) => row.slug)
+            .filter(Boolean) as string[]
+        )
+      input.skill.slug = allocateUniqueSkillSlug(deriveSkillSlug(input.skill), used)
+    }
+    await db.skills.put(input.skill)
+    if (input.resources !== undefined) {
+      await replaceResourcesForSkill(input.skill.id, input.resources)
+    }
+  })
+}
+
+export async function createSkill(
+  draft: SkillDraft,
+  options: { usedSlugs?: Set<string> } = {}
+): Promise<Skill> {
   const now = Date.now()
+  const id = newId()
   const skill: Skill = {
-    id: newId(),
+    id,
+    slug: draft.slug,
     name: draft.name.trim() || "Untitled skill",
     description: draft.description,
+    compatibility: draft.compatibility,
+    metadata: draft.metadata,
+    invocationPolicy: draft.invocationPolicy,
+    frontmatterExtensions: draft.frontmatterExtensions,
+    codexOpenAiYaml: draft.codexOpenAiYaml,
     content: draft.content,
     allowedTools: draft.allowedTools,
     tags: draft.tags,
@@ -90,44 +134,59 @@ export function createSkill(draft: SkillDraft): Promise<Skill> {
     createdAt: now,
     updatedAt: now,
   }
-  return getDb()
-    .skills.put(skill)
-    .then(() =>
-      draft.resources && draft.resources.length > 0
-        ? replaceResourcesForSkill(skill.id, draft.resources)
-        : undefined
-    )
-    .then(() => skill)
+  await persistSkillBundle({
+    skill,
+    resources: draft.resources,
+    ensureUniqueSlug: true,
+    usedSlugs: options.usedSlugs,
+  })
+  return skill
 }
 
-export function updateSkill(
+export async function updateSkill(
   id: string,
   patch: Partial<Omit<Skill, "id" | "createdAt" | "isBuiltIn">>
 ): Promise<void> {
-  return getDb()
-    .skills.update(id, { ...patch, updatedAt: Date.now() })
-    .then(() => undefined)
+  const db = getDb()
+  if (patch.slug === undefined) {
+    await db.skills.update(id, { ...patch, updatedAt: Date.now() })
+    return
+  }
+  if (!isValidSkillSlug(patch.slug)) throw new Error(`Invalid Skill slug: ${patch.slug}`)
+  await db.transaction("rw", db.skills, async () => {
+    const conflict = (await db.skills.toArray()).find(
+      (skill) => skill.id !== id && skill.slug === patch.slug
+    )
+    if (conflict) throw new Error(`Skill slug "${patch.slug}" is already in use.`)
+    await db.skills.update(id, { ...patch, updatedAt: Date.now() })
+  })
 }
 
 export async function deleteSkill(id: string): Promise<void> {
-  const existing = await getDb().skills.get(id)
-  if (existing?.isBuiltIn) {
-    throw new Error("Built-in skills cannot be deleted. Duplicate first.")
-  }
-  // Cascade: drop bundled resources alongside the skill row so the
-  // skill_resources table doesn't accumulate orphans.
-  await deleteResourcesForSkill(id)
-  await getDb().skills.delete(id)
+  const db = getDb()
+  await db.transaction("rw", db.skills, db.skillResources, async () => {
+    const existing = await db.skills.get(id)
+    if (existing?.isBuiltIn) {
+      throw new Error("Built-in skills cannot be deleted. Duplicate first.")
+    }
+    await deleteResourcesForSkill(id)
+    await db.skills.delete(id)
+  })
 }
 
 export async function duplicateSkill(id: string): Promise<Skill> {
-  const source = await getDb().skills.get(id)
+  const db = getDb()
+  const source = await db.skills.get(id)
   if (!source) throw new Error(`Skill ${id} not found`)
+  const sourceResources = await listResourcesForSkill(id)
   const now = Date.now()
+  const copyId = newId()
+  const copyName = `${source.name} (copy)`
   const copy: Skill = {
     ...source,
-    id: newId(),
-    name: `${source.name} (copy)`,
+    id: copyId,
+    slug: source.slug,
+    name: copyName,
     isBuiltIn: false,
     source: "custom",
     canonicalId: undefined,
@@ -142,7 +201,14 @@ export async function duplicateSkill(id: string): Promise<Skill> {
     createdAt: now,
     updatedAt: now,
   }
-  await getDb().skills.put(copy)
+  await persistSkillBundle({
+    skill: copy,
+    resources: sourceResources.map(
+      ({ id: _id, skillId: _skillId, createdAt: _createdAt, updatedAt: _updatedAt, ...resource }) =>
+        resource
+    ),
+    ensureUniqueSlug: true,
+  })
   return copy
 }
 
@@ -267,40 +333,73 @@ export function upsertSkillByCanonicalId(input: {
    * function self-scans (single-call callers like marketplace install).
    */
   existingByCanonicalId?: Map<string, Skill>
+  usedSlugs?: Set<string>
 }): Promise<{ skill: Skill; created: boolean }> {
-  const { draft, canonicalId, existingByCanonicalId } = input
+  const { draft, canonicalId, existingByCanonicalId, usedSlugs } = input
   const db = getDb()
+  const knownSlugs =
+    usedSlugs ??
+    (existingByCanonicalId
+      ? new Set(
+          [...existingByCanonicalId.values()].map((skill) => skill.slug).filter(Boolean) as string[]
+        )
+      : undefined)
   const persist = (existing: Skill | undefined): Promise<{ skill: Skill; created: boolean }> => {
     if (!existing) {
-      return createSkill({ ...draft, canonicalId }).then((skill) => ({ skill, created: true }))
+      return createSkill({ ...draft, canonicalId }, { usedSlugs: knownSlugs }).then((skill) => ({
+        skill,
+        created: true,
+      }))
     }
-    return updateSkill(existing.id, {
-      name: draft.name,
-      description: draft.description,
-      content: draft.content,
-      allowedTools: draft.allowedTools,
-      tags: draft.tags,
-      category: draft.category ?? existing.category,
-      source: draft.source ?? existing.source,
-      status: draft.status ?? existing.status,
-      version: draft.version ?? existing.version,
-      author: draft.author ?? existing.author,
-      license: draft.license ?? existing.license,
-      canonicalId,
-      marketplaceSkillId: draft.marketplaceSkillId ?? existing.marketplaceSkillId,
-      marketplaceHash: draft.marketplaceHash ?? existing.marketplaceHash,
-      nativeDirectory: draft.nativeDirectory ?? existing.nativeDirectory,
-      syncOrigin: draft.syncOrigin ?? existing.syncOrigin,
-      syncFingerprint: draft.syncFingerprint ?? existing.syncFingerprint,
-      validationErrors: draft.validationErrors,
-      kind: draft.kind ?? existing.kind,
-      workflowId: draft.workflowId ?? existing.workflowId,
+    return db.transaction("rw", db.skills, db.skillResources, async () => {
+      const availableSlugs = knownSlugs
+        ? new Set([...knownSlugs].filter((value) => value !== existing.slug))
+        : new Set(
+            (await db.skills.toArray())
+              .filter((row) => row.id !== existing.id)
+              .map((row) => row.slug)
+              .filter(Boolean) as string[]
+          )
+      const slug = draft.slug ? allocateUniqueSkillSlug(draft.slug, availableSlugs) : existing.slug
+      if (knownSlugs && slug) {
+        if (existing.slug) knownSlugs.delete(existing.slug)
+        knownSlugs.add(slug)
+      }
+      await db.skills.update(existing.id, {
+        slug,
+        name: draft.name,
+        description: draft.description,
+        compatibility: draft.compatibility,
+        metadata: draft.metadata,
+        invocationPolicy: draft.invocationPolicy,
+        frontmatterExtensions: draft.frontmatterExtensions,
+        codexOpenAiYaml: draft.codexOpenAiYaml,
+        content: draft.content,
+        allowedTools: draft.allowedTools,
+        tags: draft.tags,
+        category: draft.category ?? existing.category,
+        source: draft.source ?? existing.source,
+        status: draft.status ?? existing.status,
+        version: draft.version ?? existing.version,
+        author: draft.author ?? existing.author,
+        license: draft.license ?? existing.license,
+        canonicalId,
+        marketplaceSkillId: draft.marketplaceSkillId ?? existing.marketplaceSkillId,
+        marketplaceHash: draft.marketplaceHash ?? existing.marketplaceHash,
+        nativeDirectory: draft.nativeDirectory ?? existing.nativeDirectory,
+        syncOrigin: draft.syncOrigin ?? existing.syncOrigin,
+        syncFingerprint: draft.syncFingerprint ?? existing.syncFingerprint,
+        validationErrors: draft.validationErrors,
+        kind: draft.kind ?? existing.kind,
+        workflowId: draft.workflowId ?? existing.workflowId,
+        updatedAt: Date.now(),
+      })
+      if (draft.resources !== undefined) {
+        await replaceResourcesForSkill(existing.id, draft.resources)
+      }
+      const refreshed = await db.skills.get(existing.id)
+      return { skill: refreshed ?? existing, created: false }
     })
-      .then(() =>
-        draft.resources ? replaceResourcesForSkill(existing.id, draft.resources) : undefined
-      )
-      .then(() => db.skills.get(existing.id))
-      .then((refreshed) => ({ skill: refreshed ?? existing, created: false }))
   }
   if (existingByCanonicalId) return persist(existingByCanonicalId.get(canonicalId))
   return db.skills
@@ -344,6 +443,7 @@ export async function bulkImportSkills(
   // upsert path doesn't re-scan the table once per draft.
   const byCanonicalId = new Map<string, Skill>()
   for (const s of existing) if (s.canonicalId) byCanonicalId.set(s.canonicalId, s)
+  const usedSlugs = new Set(existing.map((skill) => skill.slug).filter(Boolean) as string[])
 
   for (const draft of drafts) {
     try {
@@ -359,6 +459,7 @@ export async function bulkImportSkills(
           draft,
           canonicalId: draft.canonicalId,
           existingByCanonicalId: byCanonicalId,
+          usedSlugs,
         })
         byName.set(skill.name.toLowerCase(), skill)
         // Keep the map current so a repeated canonicalId in the same batch
@@ -370,7 +471,7 @@ export async function bulkImportSkills(
       }
       const collision = byName.get(draft.name.trim().toLowerCase())
       if (!collision) {
-        const created = await createSkill(draft)
+        const created = await createSkill(draft, { usedSlugs })
         byName.set(created.name.toLowerCase(), created)
         result.created += 1
         continue
@@ -380,26 +481,40 @@ export async function bulkImportSkills(
         continue
       }
       if (strategy === "overwrite" && !collision.isBuiltIn) {
-        await updateSkill(collision.id, {
-          description: draft.description,
-          content: draft.content,
-          allowedTools: draft.allowedTools,
-          tags: draft.tags,
-          category: draft.category ?? collision.category,
-          source: draft.source ?? collision.source,
-          version: draft.version ?? collision.version,
-          author: draft.author ?? collision.author,
-          license: draft.license ?? collision.license,
+        await db.transaction("rw", db.skills, db.skillResources, async () => {
+          const availableSlugs = new Set([...usedSlugs].filter((value) => value !== collision.slug))
+          const nextSlug = draft.slug
+            ? allocateUniqueSkillSlug(draft.slug, availableSlugs)
+            : collision.slug
+          await updateSkill(collision.id, {
+            slug: nextSlug,
+            description: draft.description,
+            compatibility: draft.compatibility,
+            metadata: draft.metadata,
+            invocationPolicy: draft.invocationPolicy,
+            frontmatterExtensions: draft.frontmatterExtensions,
+            codexOpenAiYaml: draft.codexOpenAiYaml,
+            content: draft.content,
+            allowedTools: draft.allowedTools,
+            tags: draft.tags,
+            category: draft.category ?? collision.category,
+            source: draft.source ?? collision.source,
+            version: draft.version ?? collision.version,
+            author: draft.author ?? collision.author,
+            license: draft.license ?? collision.license,
+          })
+          if (draft.resources !== undefined) {
+            await replaceResourcesForSkill(collision.id, draft.resources)
+          }
+          if (collision.slug) usedSlugs.delete(collision.slug)
+          if (nextSlug) usedSlugs.add(nextSlug)
         })
-        if (draft.resources) {
-          await replaceResourcesForSkill(collision.id, draft.resources)
-        }
         result.updated += 1
         continue
       }
       // duplicate path (also overwrite-but-built-in)
       const renamed = { ...draft, name: `${draft.name} (imported)` }
-      const created = await createSkill(renamed)
+      const created = await createSkill(renamed, { usedSlugs })
       byName.set(created.name.toLowerCase(), created)
       result.created += 1
     } catch (err) {
@@ -465,16 +580,17 @@ export function renderSkillsCatalog(skills: Skill[]): string {
   if (skills.length === 0) return ""
   const lines = skills.map((s) => {
     const desc = s.description?.trim()
+    const label = s.slug ? `${s.slug} (${s.name})` : s.name
     // Graph-bodied skills need no load_skill round-trip — the callable
     // contract fits on one line, so surface it directly.
     if (s.kind === "workflow") {
       return (
-        `- \`${s.id}\` — ${s.name}${desc ? `: ${desc}` : ""} ` +
+        `- \`${s.id}\` — ${label}${desc ? `: ${desc}` : ""} ` +
         `(graph-bodied skill: run it by calling the \`${WORKFLOW_RUNNER_TOOL_NAME}\` tool ` +
         `with \`{ "name": ${JSON.stringify(s.name)} }\`)`
       )
     }
-    return `- \`${s.id}\` — ${s.name}${desc ? `: ${desc}` : ""}`
+    return `- \`${s.id}\` — ${label}${desc ? `: ${desc}` : ""}`
   })
   return [
     "## Available skills",
@@ -592,10 +708,12 @@ export async function seedBuiltInSkills(): Promise<void> {
       canonicalId: `builtin:${entry.id}`,
     })),
   ]
+  const usedBuiltInSlugs = new Set<string>()
   // Use `put` so newly-added defaults are applied to existing rows, but
   // never clobber user-added tags / status overrides on built-ins. Read first,
   // merge defaults, then write.
   for (const seed of builtIns) {
+    seed.slug = allocateUniqueSkillSlug(deriveSkillSlug(seed), usedBuiltInSlugs)
     const existing = await db.skills.get(seed.id)
     if (!existing) {
       await db.skills.put(seed)

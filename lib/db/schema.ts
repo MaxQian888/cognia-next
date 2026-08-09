@@ -62,6 +62,7 @@ import { buildA2UIBridgeMcpRow, A2UI_BRIDGE_SERVER_NAME } from "@/lib/a2ui/mcp-t
 import { dispatchDbUpgradeBlocked } from "./upgrade-blocked-signal"
 import { createDiagnostic } from "@cognia/diagnostics"
 import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
+import { allocateUniqueSkillSlug, deriveMigratedSkillSlug } from "@/lib/skills/slug"
 import type { Twin, TwinSource, TwinChunk, TwinProfile, TwinDraft, TwinJob } from "@/types/twin"
 import type { MobileOutboundJobRow } from "./mobile-outbound-types"
 import type {
@@ -141,7 +142,7 @@ import type { ChatInputHistoryRow } from "./chat-input-history"
 import type { Goal, GoalEvent, GoalTemplate } from "@/types/goal"
 import type { Loop, LoopEvent } from "@/types/loop"
 import type { AgentPlan, PlanEvent } from "@/types/agent/plan"
-import type { RemoteControlAuditEntry, RemoteControlRunStatusRow } from "@/types/remote-control"
+import type { WebhookAuditEntry } from "@/types/webhooks"
 import type { OcrResultRow } from "./ocr-results"
 import type { PluginSkillUsageRow } from "./plugin-skill-usage"
 import type { WorkflowProposalHistoryRow } from "@/lib/workflow/editor/proposal-history"
@@ -346,12 +347,25 @@ function buildCollapsedSchema(db: Dexie): CollapsedSchemaCache | undefined {
 
 let databaseConnectionSequence = 0
 
+/** Historical table shape retained only so old databases remain readable. */
+interface LegacyRemoteControlRunStatusRow {
+  runId: string
+  target: string
+  status: string
+  detail?: string
+  correlationId?: string
+  startedAt: number
+  updatedAt: number
+}
+
 export class CogniaDB extends Dexie {
   readonly connectionOwner: string
   readonly connectionId: string
   private readonly connectionCreatedAt: number
   sessions!: Table<ChatSession, string>
   messages!: Table<StoredMessage, string>
+  // v155 — independent-session messages and their durable delivery receipts.
+  sessionPeerMessages!: Table<import("./session-peer-messages").SessionPeerMessageRow, string>
   settings!: Table<AppSettings, "singleton">
   promptPresets!: Table<SystemPromptPreset, string>
   mcpServers!: Table<McpServer, string>
@@ -485,15 +499,9 @@ export class CogniaDB extends Dexie {
   // v128 — Content-addressed chat image store. See `lib/db/message-media.ts`.
   messageMedia!: Table<import("./message-media").MessageMediaRow, string>
   // v152 — Message-to-media authorization and lifecycle ledger.
-  messageMediaRefs!: Table<
-    import("./message-media-refs").MessageMediaRefRow,
-    [string, string]
-  >
+  messageMediaRefs!: Table<import("./message-media-refs").MessageMediaRefRow, [string, string]>
   // v153 — lazily materialized transcript summaries and resumable watermark.
-  chatTurnSummaries!: Table<
-    import("./chat-transcript-index").ChatTurnSummaryRow,
-    [string, string]
-  >
+  chatTurnSummaries!: Table<import("./chat-transcript-index").ChatTurnSummaryRow, [string, string]>
   chatTranscriptIndexState!: Table<
     import("./chat-transcript-index").ChatTranscriptIndexStateRow,
     string
@@ -2269,7 +2277,7 @@ export class CogniaDB extends Dexie {
     // ── v72 — Remote-control durable audit trail (ADR-0005 activation). ──────
     // One row per inbound command dispatch and per outbound delivery attempt.
     // `at` drives the newest-first Events tab; `direction`/`kind` filter.
-    // See `lib/db/remote-control-audit.ts` and `@/types/remote-control`.
+    // Historical table name; canonical outbound writes live in `lib/webhooks/audit.ts`.
     this.version(72).stores({
       remoteControlAudit: "id, at, direction, kind, runId",
     })
@@ -2540,7 +2548,7 @@ export class CogniaDB extends Dexie {
     // server-issued `runId` with its dispatch outcome (and, where a subsystem
     // emits a terminal signal, the final status) so `GET /api/v1/runs/:runId`
     // can report it. Pure additive — no upgrade hook. See
-    // `lib/db/remote-control-run-status.ts`.
+    // Historical run projection retained read-only for database compatibility.
     this.version(92).stores({
       remoteControlRunStatus: "&runId, target, status, startedAt, updatedAt",
     })
@@ -3665,6 +3673,28 @@ export class CogniaDB extends Dexie {
       chatTranscriptIndexState: "sessionId, revision, updatedAt",
     })
 
+    // v154 — Agent Skills portable identity. `slug` is intentionally not
+    // indexed: it is a low-cardinality management field and uniqueness is
+    // enforced transactionally by the Skill persistence seam.
+    this.version(154).upgrade(async (tx) => {
+      const table = tx.table<Skill, string>("skills")
+      const rows = await table.toArray()
+      const used = new Set<string>()
+      rows.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+      for (const row of rows) {
+        row.slug = allocateUniqueSkillSlug(deriveMigratedSkillSlug(row), used)
+      }
+      if (rows.length > 0) await table.bulkPut(rows)
+    })
+
+    // v155 — Independent-session messaging. The payload is text-only and
+    // carries explicit untrusted-agent provenance; receiver policy transitions
+    // the durable receipt instead of treating enqueue success as delivery.
+    this.version(155).stores({
+      sessionPeerMessages:
+        "&id, senderSessionId, receiverSessionId, status, expiresAt, [receiverSessionId+status], [senderSessionId+createdAt], [receiverSessionId+createdAt]",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -3720,10 +3750,11 @@ export class CogniaDB extends Dexie {
   petAchievements!: Table<PetAchievementRecord, string>
   // v94 — Pet item inventory (economy wave). See `lib/db/pet.ts`.
   petInventory!: Table<PetInventoryRow, string>
-  // v72 — Remote-control durable audit. See `lib/db/remote-control-audit.ts`.
-  remoteControlAudit!: Table<RemoteControlAuditEntry, string>
-  // v92 — Remote-control run-status projection. See `lib/db/remote-control-run-status.ts`.
-  remoteControlRunStatus!: Table<RemoteControlRunStatusRow, string>
+  // Historical table name retained for schema compatibility; new rows are
+  // outbound-only and written through `lib/webhooks/audit.ts`.
+  remoteControlAudit!: Table<WebhookAuditEntry, string>
+  // Historical, no longer written after the legacy inbound listener removal.
+  remoteControlRunStatus!: Table<LegacyRemoteControlRunStatusRow, string>
   // v73 — Pet Live2D models + asset blobs. See `lib/db/pet-models.ts`.
   petModels!: Table<PetModelRow, string>
   petModelFiles!: Table<PetModelFileRow, string>

@@ -47,7 +47,10 @@ describe("TtsVoiceSelector", () => {
         value="alloy"
         options={[{ id: "alloy", name: "Alloy" }]}
         onValueChange={jest.fn()}
-        getVoiceOverlay={(voiceId) => ({ ttsProvider: "openai", openaiVoice: voiceId })}
+        getVoiceOverlay={(voiceId) => ({
+          ttsProvider: "openai",
+          openaiVoice: voiceId as "alloy",
+        })}
       />
     )
 

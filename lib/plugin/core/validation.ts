@@ -104,6 +104,7 @@ const WASM_API_VERSION_PATTERN = /^\d+\.\d+\.\d+$/
 const WASM_PREOPEN_PATH_PATTERN = /^[^\0]+$/
 
 const ID_PATTERN = /^[a-z0-9]([a-z0-9-_.]*[a-z0-9])?$/
+const INTEGRATION_ACTION_ID_PATTERN = /^[a-z0-9]([A-Za-z0-9-_.]*[A-Za-z0-9])?$/
 const RESERVED_PLUGIN_IDS = new Set([".host-state", "_marketplace_cache", "_backups"])
 const MAX_PLUGIN_ID_LENGTH = 128
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(-[a-z0-9]+)?$/i
@@ -711,7 +712,7 @@ function validateIntegrations(
         )
         continue
       }
-      if (typeof action.id !== "string" || !ID_PATTERN.test(action.id)) {
+      if (typeof action.id !== "string" || !INTEGRATION_ACTION_ID_PATTERN.test(action.id)) {
         pushError(
           `${actionField}.id`,
           "manifest.integrations.actions.id.invalid",
@@ -2510,7 +2511,7 @@ function validateConfigSchema(schema: unknown): ValidationResult {
   return { valid: errors.length === 0, errors, warnings }
 }
 
-function validateConfigProperty(name: string, prop: unknown): ValidationResult {
+function validateConfigProperty(name: string, prop: unknown, depth = 0): ValidationResult {
   const errors: string[] = []
   const warnings: string[] = []
 
@@ -2529,7 +2530,7 @@ function validateConfigProperty(name: string, prop: unknown): ValidationResult {
   }
 
   if (p.type === "array" && p.items) {
-    const itemsResult = validateConfigProperty(`${name}.items`, p.items)
+    const itemsResult = validateConfigProperty(`${name}.items`, p.items, depth + 1)
     errors.push(...itemsResult.errors)
     warnings.push(...itemsResult.warnings)
   }
@@ -2537,10 +2538,34 @@ function validateConfigProperty(name: string, prop: unknown): ValidationResult {
   if (p.type === "object" && p.properties) {
     const props = p.properties as Record<string, unknown>
     for (const [key, value] of Object.entries(props)) {
-      const propResult = validateConfigProperty(`${name}.${key}`, value)
+      const propResult = validateConfigProperty(`${name}.${key}`, value, depth + 1)
       errors.push(...propResult.errors)
       warnings.push(...propResult.warnings)
     }
+  }
+
+  // `secret: true` fields are stored in the OS keyring, not the plaintext
+  // plugin-config store; the constraints below prevent a manifest from
+  // shipping a value or from placing a secret in a runtime slot the keyring
+  // API cannot reach (Phase 1: top-level string properties only).
+  if (p.secret === true) {
+    if (p.type !== "string") {
+      errors.push(
+        `Config property "${name}" declares secret: true but type "${String(p.type)}" is not "string"`
+      )
+    }
+    if (Object.hasOwn(p, "default")) {
+      errors.push(
+        `Config property "${name}" declares secret: true and must not carry a default — secrets live in the OS keyring`
+      )
+    }
+    if (depth > 0) {
+      errors.push(
+        `Config property "${name}" declares secret: true inside a nested property; only top-level configSchema properties may be secret`
+      )
+    }
+  } else if (p.secret !== undefined && typeof p.secret !== "boolean") {
+    errors.push(`Config property "${name}" has invalid "secret" flag (must be boolean)`)
   }
 
   return { valid: errors.length === 0, errors, warnings }

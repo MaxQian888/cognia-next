@@ -15,6 +15,8 @@ import {
 import type { CompanionHostKey, CompanionHostRecord } from "./types"
 
 const KEY: CompanionHostKey = { hostId: "host-1", accountNamespace: "acct_a" }
+const DEVICE_KEY: JsonWebKey = { kty: "EC", crv: "P-256", d: "device-a" }
+const DEVICE_KEY_B: JsonWebKey = { kty: "EC", crv: "P-256", d: "device-b" }
 
 function record(): CompanionHostRecord {
   return {
@@ -25,6 +27,7 @@ function record(): CompanionHostRecord {
     tlsPin: "aa11",
     cursorNamespace: "acct_a:host-1",
     deviceId: "dev-1",
+    deviceKeyThumbprint: "thumbprint-a",
     serverVersion: "0.2.0",
     connection: {
       status: "unknown",
@@ -39,7 +42,7 @@ function record(): CompanionHostRecord {
 }
 
 function book(): HostBookEnvelope {
-  return { version: 1, hosts: { "acct_a:host-1": record() }, active: { acct_a: "acct_a:host-1" } }
+  return { version: 2, hosts: { "acct_a:host-1": record() }, active: { acct_a: "acct_a:host-1" } }
 }
 
 describe("parseHostBook", () => {
@@ -52,7 +55,7 @@ describe("parseHostBook", () => {
   })
 
   it("defaults a missing active map", () => {
-    const raw = JSON.stringify({ version: 1, hosts: {} })
+    const raw = JSON.stringify({ version: 2, hosts: {} })
     expect(parseHostBook(raw).active).toEqual({})
   })
 
@@ -60,8 +63,8 @@ describe("parseHostBook", () => {
     ["invalid JSON", "{oops", /not valid JSON/],
     ["a non-object root", "[]", /not an object/],
     ["an unsupported version", JSON.stringify({ version: 9, hosts: {} }), /is not supported/],
-    ["a missing host map", JSON.stringify({ version: 1 }), /no host map/],
-    ["a non-object host map", JSON.stringify({ version: 1, hosts: [] }), /no host map/],
+    ["a missing host map", JSON.stringify({ version: 2 }), /no host map/],
+    ["a non-object host map", JSON.stringify({ version: 2, hosts: [] }), /no host map/],
   ])("throws on %s rather than silently resetting", (_label, raw, matcher) => {
     expect(() => parseHostBook(raw)).toThrow(matcher)
   })
@@ -117,8 +120,11 @@ describe("VaultHostCredentialStore", () => {
     const session = vault()
     const store = new VaultHostCredentialStore(() => session)
     const jwk: JsonWebKey = { kty: "EC", crv: "P-256", d: "x", x: "y", z: "z" } as JsonWebKey
-    await store.save(KEY, { deviceJwt: "jwt.a", signalingPrivateKeyJwk: jwk })
-    expect(await store.load(KEY)).toEqual({ deviceJwt: "jwt.a", signalingPrivateKeyJwk: jwk })
+    await store.save(KEY, { devicePrivateKeyJwk: DEVICE_KEY, signalingPrivateKeyJwk: jwk })
+    expect(await store.load(KEY)).toEqual({
+      devicePrivateKeyJwk: DEVICE_KEY,
+      signalingPrivateKeyJwk: jwk,
+    })
   })
 
   it("returns null when the host has no token", async () => {
@@ -128,15 +134,21 @@ describe("VaultHostCredentialStore", () => {
   it("clears a stale signing key when saving without one", async () => {
     const session = vault()
     const store = new VaultHostCredentialStore(() => session)
-    await store.save(KEY, { deviceJwt: "jwt.a", signalingPrivateKeyJwk: {} as JsonWebKey })
-    await store.save(KEY, { deviceJwt: "jwt.b" })
-    expect(await store.load(KEY)).toEqual({ deviceJwt: "jwt.b" })
+    await store.save(KEY, {
+      devicePrivateKeyJwk: DEVICE_KEY,
+      signalingPrivateKeyJwk: {} as JsonWebKey,
+    })
+    await store.save(KEY, { devicePrivateKeyJwk: DEVICE_KEY_B })
+    expect(await store.load(KEY)).toEqual({ devicePrivateKeyJwk: DEVICE_KEY_B })
   })
 
   it("removes both secrets", async () => {
     const session = vault()
     const store = new VaultHostCredentialStore(() => session)
-    await store.save(KEY, { deviceJwt: "jwt.a", signalingPrivateKeyJwk: {} as JsonWebKey })
+    await store.save(KEY, {
+      devicePrivateKeyJwk: DEVICE_KEY,
+      signalingPrivateKeyJwk: {} as JsonWebKey,
+    })
     await store.remove(KEY)
     expect(session.secrets.size).toBe(0)
   })
@@ -149,17 +161,21 @@ describe("VaultHostCredentialStore", () => {
   it("refuses to reach another account's credential", async () => {
     const store = new VaultHostCredentialStore(() => vault("acct_other"))
     await expect(store.load(KEY)).rejects.toThrow(/cannot be reached from the acct_other Vault/)
-    await expect(store.save(KEY, { deviceJwt: "x" })).rejects.toThrow(/cannot be reached/)
+    await expect(store.save(KEY, { devicePrivateKeyJwk: DEVICE_KEY })).rejects.toThrow(
+      /cannot be reached/
+    )
     await expect(store.remove(KEY)).rejects.toThrow(/cannot be reached/)
   })
 
   it("names secrets per host so two hosts never share a slot", async () => {
     const session = vault()
     const store = new VaultHostCredentialStore(() => session)
-    await store.save(KEY, { deviceJwt: "jwt.a" })
-    await store.save({ ...KEY, hostId: "host-2" }, { deviceJwt: "jwt.b" })
-    expect(await store.load(KEY)).toEqual({ deviceJwt: "jwt.a" })
-    expect(await store.load({ ...KEY, hostId: "host-2" })).toEqual({ deviceJwt: "jwt.b" })
+    await store.save(KEY, { devicePrivateKeyJwk: DEVICE_KEY })
+    await store.save({ ...KEY, hostId: "host-2" }, { devicePrivateKeyJwk: DEVICE_KEY_B })
+    expect(await store.load(KEY)).toEqual({ devicePrivateKeyJwk: DEVICE_KEY })
+    expect(await store.load({ ...KEY, hostId: "host-2" })).toEqual({
+      devicePrivateKeyJwk: DEVICE_KEY_B,
+    })
   })
 })
 
@@ -186,9 +202,12 @@ describe("SecureStorage stores", () => {
   it("round-trips a credential through the keystore", async () => {
     const native = plugin()
     const store = new SecureStorageHostCredentialStore(async () => native)
-    await store.save(KEY, { deviceJwt: "jwt.a", signalingPrivateKeyJwk: {} as JsonWebKey })
+    await store.save(KEY, {
+      devicePrivateKeyJwk: DEVICE_KEY,
+      signalingPrivateKeyJwk: {} as JsonWebKey,
+    })
     expect(await store.load(KEY)).toEqual({
-      deviceJwt: "jwt.a",
+      devicePrivateKeyJwk: DEVICE_KEY,
       signalingPrivateKeyJwk: {},
     })
   })
@@ -201,14 +220,14 @@ describe("SecureStorage stores", () => {
   it("tolerates a host with no signing key", async () => {
     const native = plugin()
     const store = new SecureStorageHostCredentialStore(async () => native)
-    await store.save(KEY, { deviceJwt: "jwt.a" })
-    expect(await store.load(KEY)).toEqual({ deviceJwt: "jwt.a" })
+    await store.save(KEY, { devicePrivateKeyJwk: DEVICE_KEY })
+    expect(await store.load(KEY)).toEqual({ devicePrivateKeyJwk: DEVICE_KEY })
   })
 
   it("removes both slots idempotently", async () => {
     const native = plugin()
     const store = new SecureStorageHostCredentialStore(async () => native)
-    await store.save(KEY, { deviceJwt: "jwt.a" })
+    await store.save(KEY, { devicePrivateKeyJwk: DEVICE_KEY })
     await store.remove(KEY)
     await expect(store.remove(KEY)).resolves.toBeUndefined()
     expect(native.values.size).toBe(0)

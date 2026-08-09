@@ -21,6 +21,8 @@ export {
   getDefaultArtifactRenderer,
   getArtifactPreviewComponent,
 } from "./artifact-api"
+export { createFilesAPI, authorizePluginAttachment, revokePluginFileHandles } from "./files-api"
+export { createSkillsAPI } from "./skills-api"
 export {
   createNotificationCenterAPI,
   dispatchNotificationAction,

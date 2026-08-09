@@ -24,7 +24,8 @@
     "ranFor": "ran {duration}",
     "showLess": "Show fewer",
     "showMore": "Show all {count}",
-    "title": "Recent sessions"
+    "title": "Recent sessions",
+    "detachedAgo": "detached {ago} ago"
   },
   "island": {
     "desc": "Dynamic-Island-style always-on-top strip showing live agent sessions near the notch.",

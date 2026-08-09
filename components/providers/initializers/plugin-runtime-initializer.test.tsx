@@ -74,6 +74,14 @@ describe("PluginRuntimeInitializer", () => {
     mockPluginRuntimeRequested = true
     delete (window as typeof window & { __cogniaPluginRuntimeReady?: boolean })
       .__cogniaPluginRuntimeReady
+    window.history.replaceState({}, "", "/")
+  })
+
+  it("keeps the pre-account E2E runtime off unrelated browser routes", () => {
+    render(<PluginRuntimeInitializer onlyForPluginSurfaceE2E />)
+
+    expect(mockInitializeManager).not.toHaveBeenCalled()
+    expect(mockInstallPackWarningRefreshWiring).not.toHaveBeenCalled()
   })
 
   it("boots the manager with the browser profile when not in Tauri", async () => {

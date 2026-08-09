@@ -292,7 +292,11 @@
         "description": "将原生 SDK 会话记录镜像到加密且租户隔离的主机存储。",
         "label": "会话存储"
       },
-      "title": "Claude Agent SDK 高级功能"
+      "title": "Claude Agent SDK 高级功能",
+      "resolver": {
+        "description": "使用统一执行解析器选择正确的智能体运行时。",
+        "label": "统一执行解析器"
+      }
     },
     "restartBtn": "重启侧载",
     "restartedToast": "已请求重启侧载。",

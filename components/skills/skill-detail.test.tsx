@@ -7,8 +7,39 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
+const mockResourcesRef: { current: import("@cognia/agent-config-types").SkillResource[] } = {
+  current: [],
+}
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => [],
+  useLiveQuery: (_query: unknown, _deps: unknown, defaultValue?: unknown) =>
+    defaultValue === 0 ? 0 : mockResourcesRef.current,
+}))
+
+jest.mock("@/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuItem: ({
+    children,
+    onSelect,
+  }: {
+    children: React.ReactNode
+    onSelect?: () => void
+  }) => <button onClick={onSelect}>{children}</button>,
+}))
+
+const serializeSkillBundleMock: jest.Mock = jest.fn(async () => ({
+  filename: "cite-sources.zip",
+  bytes: new Uint8Array([1, 2, 3]),
+}))
+const saveBinaryFileAsMock: jest.Mock = jest.fn(async () => true)
+const saveFileAsMock: jest.Mock = jest.fn(async () => true)
+jest.mock("@/lib/skills/bundle/serializer", () => ({
+  serializeSkillBundle: (...args: unknown[]) => serializeSkillBundleMock(...args),
+}))
+jest.mock("@/lib/files/file-bridge", () => ({
+  saveBinaryFileAs: (...args: unknown[]) => saveBinaryFileAsMock(...args),
+  saveFileAs: (...args: unknown[]) => saveFileAsMock(...args),
 }))
 
 // MarkdownRenderer pulls in react-markdown + the full renderer suite +
@@ -49,7 +80,7 @@ jest.mock("./skill-sync-section", () => ({
   SkillSyncSection: () => <div data-testid="sync-section" />,
 }))
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { SkillDetail } from "./skill-detail"
 import { useSkillsStore } from "@/stores/skills"
 import type { Skill } from "@cognia/agent-config-types"
@@ -66,6 +97,13 @@ const skill = {
 } as Skill
 
 describe("SkillDetail", () => {
+  beforeEach(() => {
+    mockResourcesRef.current = []
+    serializeSkillBundleMock.mockClear()
+    saveBinaryFileAsMock.mockClear()
+    saveFileAsMock.mockClear()
+  })
+
   it("the single Edit button jumps to the workspace editor (no separate form dialog)", () => {
     render(<SkillDetail skill={skill} />)
     const editButton = screen.getByTestId("skill-open-in-editor")
@@ -100,17 +138,48 @@ describe("SkillDetail", () => {
   })
 
   it("hides the update banner when the skill has no pending update", () => {
-    useSkillsStore.setState({ updateAvailable: {} })
+    act(() => useSkillsStore.setState({ updateAvailable: {} }))
     render(<SkillDetail skill={skill} />)
     expect(screen.queryByTestId("skill-update-banner")).not.toBeInTheDocument()
   })
 
   it("shows the update banner and runs the one-click update when flagged", async () => {
-    useSkillsStore.setState({ updateAvailable: { s1: true } })
+    act(() => useSkillsStore.setState({ updateAvailable: { s1: true } }))
     render(<SkillDetail skill={skill} />)
     expect(screen.getByTestId("skill-update-banner")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("skill-update-button"))
     await waitFor(() => expect(updateOneMock).toHaveBeenCalledWith(skill))
-    useSkillsStore.setState({ updateAvailable: {} })
+    act(() => useSkillsStore.setState({ updateAvailable: {} }))
+  })
+
+  it("exports a standard bundle with the localized zip filter", async () => {
+    render(<SkillDetail skill={{ ...skill, slug: "cite-sources" } as Skill} />)
+    fireEvent.click(screen.getByText("exportBundle"))
+
+    await waitFor(() => expect(serializeSkillBundleMock).toHaveBeenCalledTimes(1))
+    expect(saveBinaryFileAsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultName: "cite-sources.zip",
+        mimeType: "application/zip",
+        filters: [{ name: "bundleFilterName", extensions: ["zip"] }],
+      })
+    )
+  })
+
+  it("warns which bundle content compatibility Markdown would omit", () => {
+    mockResourcesRef.current = [
+      { id: "r1", skillId: "s1", path: "assets/icon.png", name: "icon.png" },
+    ] as never
+    render(
+      <SkillDetail
+        skill={{ ...skill, slug: "cite-sources", codexOpenAiYaml: "interface: {}" } as Skill}
+      />
+    )
+    fireEvent.click(screen.getByText("exportMarkdownCompatibility"))
+
+    expect(screen.getByText("compatibilityExportTitle")).toBeInTheDocument()
+    expect(screen.getByText('compatibilityExportResources:{"count":1}')).toBeInTheDocument()
+    expect(screen.getByText("compatibilityExportCodex")).toBeInTheDocument()
+    expect(saveFileAsMock).not.toHaveBeenCalled()
   })
 })

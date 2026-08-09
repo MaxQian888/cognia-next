@@ -36,6 +36,7 @@ beforeEach(() => {
   mockAutoLockMinutes = 5
   mockSettingsPresent = true
   mockUnlockedAccountId = "acct_1"
+  lockMock.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -48,6 +49,16 @@ describe("useAutoLockOnIdle", () => {
     renderHook(() => useAutoLockOnIdle())
 
     jest.advanceTimersByTime(5 * 60_000)
+
+    expect(lockMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("contains runtime-clear rejection when the timeout elapses", async () => {
+    lockMock.mockRejectedValueOnce(new Error("runtime busy"))
+    renderHook(() => useAutoLockOnIdle())
+
+    jest.advanceTimersByTime(5 * 60_000)
+    await Promise.resolve()
 
     expect(lockMock).toHaveBeenCalledTimes(1)
   })

@@ -58,7 +58,7 @@ function disposeRemoteTransport(remote: Transport | null): void {
 
 /**
  * Raw connection descriptor for the active remote host's WebSocket surfaces
- * (the interactive terminal at `/ws/v1/terminal`). The `call`/`subscribe` RPC
+ * (the interactive terminal at `/ws/terminal`). The `call`/`subscribe` RPC
  * path already follows {@link activeRemote}; but the terminal opens its own
  * socket outside the `Transport` contract, so it reads this descriptor instead.
  * `baseUrl` is the host's `https://…` origin — the terminal resolver flips it to
@@ -70,13 +70,16 @@ let activeRemoteEndpoint: RemoteHostEndpoint | null = null
 export interface RemoteHostEndpoint {
   /** Host origin, `https://…` (flipped to `wss://` by the terminal resolver). */
   baseUrl: string
-  /** Signed device JWT — the companion auth middleware reads `?token=`. */
-  deviceJwt: string
   /** Stable paired-device id used by multiplexed terminal controller state. */
-  deviceId?: string
+  deviceId: string
+  /** ES256 identity used to mint short-lived access tokens and socket tickets. */
+  devicePrivateKeyJwk: JsonWebKey
+  deviceKeyThumbprint: string
+  accountId?: string
+  serverVersion: string
   /**
    * SHA-256 fingerprint of the remote companion certificate's SPKI.
-   * Required by the Pro IDE relay before it sends the device JWT upstream.
+   * Required before opening a remote raw-socket surface.
    */
   serverFingerprint?: string
 }

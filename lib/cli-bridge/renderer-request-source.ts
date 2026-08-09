@@ -3,8 +3,8 @@
 /**
  * Desktop-side counterpart of the Rust `cli_bridge::renderer_bridge`.
  *
- * The CLI hits a renderer-backed bridge route (`/api/v1/dev/twin/context`,
- * `/api/v1/dev/teams/*`); the Rust handler emits one unified
+ * The CLI hits a renderer-backed bridge route (`/api/dev/twin/context`,
+ * `/api/dev/teams/*`); the Rust handler emits one unified
  * `cli-bridge://renderer-request` event with `{ requestId, command,
  * payload }`. This module dispatches by command name, runs the matching
  * renderer operation (Dexie / Zustand / twin runtime), and ships the result

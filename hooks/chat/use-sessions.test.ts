@@ -26,6 +26,7 @@ const archiveSessionMock = jest.fn()
 const unarchiveSessionMock = jest.fn()
 const bulkArchiveSessionsMock = jest.fn()
 const bulkUnarchiveSessionsMock = jest.fn()
+const bulkSetSessionsPinnedMock = jest.fn()
 const assignSessionToFolderMock = jest.fn()
 jest.mock("@/lib/db/sessions", () => ({
   createSession: (p: unknown) => createSessionMock(p),
@@ -39,6 +40,8 @@ jest.mock("@/lib/db/sessions", () => ({
   unarchiveSession: (id: string) => unarchiveSessionMock(id),
   bulkArchiveSessions: (ids: readonly string[]) => bulkArchiveSessionsMock(ids),
   bulkUnarchiveSessions: (ids: readonly string[]) => bulkUnarchiveSessionsMock(ids),
+  bulkSetSessionsPinned: (ids: readonly string[], pinned: boolean) =>
+    bulkSetSessionsPinnedMock(ids, pinned),
   assignSessionToFolder: (sid: string, fid: string | null) => assignSessionToFolderMock(sid, fid),
 }))
 
@@ -151,6 +154,7 @@ beforeEach(() => {
   unarchiveSessionMock.mockReset().mockResolvedValue(undefined)
   bulkArchiveSessionsMock.mockReset().mockResolvedValue(undefined)
   bulkUnarchiveSessionsMock.mockReset().mockResolvedValue(undefined)
+  bulkSetSessionsPinnedMock.mockReset().mockResolvedValue(undefined)
   assignSessionToFolderMock.mockReset().mockResolvedValue(undefined)
   listFoldersMock.mockReset().mockResolvedValue([])
   createFolderDbMock.mockReset().mockResolvedValue({ id: "f-new" })
@@ -526,13 +530,13 @@ describe("useSessions", () => {
     expect(closeSessionIpcMock).not.toHaveBeenCalled()
   })
 
-  it("bulkSetPinned fans out updateSession({pinned}) across every id", async () => {
+  it("bulkSetPinned delegates the whole selection to the atomic database operation", async () => {
     const { result } = renderHook(() => useSessions())
     await act(async () => {
       await result.current.bulkSetPinned(["s1", "s2"], true)
     })
-    expect(updateSessionMock).toHaveBeenCalledWith("s1", { pinned: true })
-    expect(updateSessionMock).toHaveBeenCalledWith("s2", { pinned: true })
+    expect(bulkSetSessionsPinnedMock).toHaveBeenCalledWith(["s1", "s2"], true)
+    expect(updateSessionMock).not.toHaveBeenCalled()
   })
 
   it("bulkSetPinned on an empty array does not touch Dexie", async () => {
@@ -540,7 +544,7 @@ describe("useSessions", () => {
     await act(async () => {
       await result.current.bulkSetPinned([], false)
     })
-    expect(updateSessionMock).not.toHaveBeenCalled()
+    expect(bulkSetSessionsPinnedMock).not.toHaveBeenCalled()
   })
 
   it("archive stamps the row and deselects it when it is the active session", async () => {

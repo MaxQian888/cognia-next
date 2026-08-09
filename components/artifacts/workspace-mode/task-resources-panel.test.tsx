@@ -10,6 +10,11 @@ const applyWorkspace = jest.fn()
 const listEvents = jest.fn()
 const getSummary = jest.fn()
 const exportManifest = jest.fn()
+const getAdoption = jest.fn()
+
+jest.mock("@/lib/code-adoption/persist", () => ({
+  getCodeAdoptionTurnByTaskWorkspaceRun: (...args: unknown[]) => getAdoption(...args),
+}))
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 jest.mock("@/components/chat/markdown-renderer", () => ({
@@ -110,6 +115,20 @@ describe("TaskResourcesPanel", () => {
       completeness: "reconciled",
     })
     exportManifest.mockResolvedValue({ schemaVersion: 1, events: [] })
+    getAdoption.mockResolvedValue({
+      id: "session-1:1",
+      taskWorkspaceRunId: "run-1",
+      measurement: "taskWorkspace",
+      trackingState: "tracked",
+      adoptionState: "partiallyAccepted",
+      proposedAdded: 8,
+      proposedRemoved: 2,
+      acceptedAdded: 4,
+      acceptedRemoved: 1,
+      totalAdded: 8,
+      totalRemoved: 2,
+      truncated: false,
+    })
   })
 
   it("reconciles resources and renders source/preview/diff tabs", async () => {
@@ -135,6 +154,13 @@ describe("TaskResourcesPanel", () => {
     render(<TaskResourcesPanel sessionId="session-1" layout="mobile" />)
     expect(screen.getByText("provisional")).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText("authoritative")).toBeInTheDocument())
+  })
+
+  it("shows the current Task Workspace adoption decision without a separate analytics page", async () => {
+    render(<TaskResourcesPanel sessionId="session-1" layout="desktop" />)
+    expect(await screen.findByTestId("code-adoption-summary")).toHaveTextContent("adoptionTitle")
+    expect(screen.getByTestId("code-adoption-summary")).toHaveTextContent("adoptionRate")
+    expect(getAdoption).toHaveBeenCalledWith("run-1")
   })
 
   it("requires an explicit confirmation before retrying an irreversible apply", async () => {

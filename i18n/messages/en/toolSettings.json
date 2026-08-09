@@ -42,6 +42,8 @@
   "slashToolTitle": "SlashCommand tool",
   "spawnTaskToolDesc": "Let the agent stage a scoped follow-up task in a named sidechat for you to review and start.",
   "spawnTaskToolTitle": "Spawn task",
+  "sessionMessagingToolDesc": "Let the agent discover and send untrusted plain-text requests to other live sessions in the same workspace.",
+  "sessionMessagingToolTitle": "Session messaging",
   "teamCollabToolDesc": "Let teammates collaborate during a team run — message peers, share the blackboard, open or vote in a consensus, and delegate sub-tasks. Only applies to Agent Team sessions.",
   "teamCollabToolTitle": "Team collaboration tools",
   "terminalRepl": "Interactive REPL",

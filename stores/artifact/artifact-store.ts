@@ -1561,7 +1561,9 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         const version: ArtifactVersion = {
           id: nanoid(),
           artifactId: id,
+          title: artifact.title,
           content: artifact.content,
+          metadata: artifact.metadata,
           version: artifact.version,
           createdAt: new Date(),
           changeDescription: description,
@@ -1597,7 +1599,9 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         const currentVersion: ArtifactVersion = {
           id: nanoid(),
           artifactId: id,
+          title: artifact.title,
           content: artifact.content,
+          metadata: artifact.metadata,
           version: artifact.version,
           createdAt: new Date(),
           changeDescription: autoSaveDescription ?? "Auto-saved before restore",
@@ -1614,7 +1618,9 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
               ...s.artifacts,
               [id]: {
                 ...artifact,
+                title: version.title ?? artifact.title,
                 content: version.content,
+                metadata: version.metadata,
                 version: artifact.version + 1,
                 updatedAt: new Date(),
               },

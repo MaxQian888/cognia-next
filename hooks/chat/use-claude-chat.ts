@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { createDiagnostic } from "@cognia/diagnostics"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
 import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
 import { flushProjectEditorEdits } from "@/lib/files/project-editor-bridge"
@@ -60,6 +61,16 @@ import {
   steerArmed,
 } from "./steer-runtime"
 import {
+  drainSessionPeerMessages,
+  registerSessionPeerRuntime,
+} from "@/lib/chat/session-peer-messaging"
+import {
+  buildSessionPeerInboundMessage,
+  renderSessionPeerModelPrompt,
+} from "@/lib/chat/session-peer-delivery"
+import { expireSessionPeerMessages } from "@/lib/db/session-peer-messages"
+import { completeAttachedSession, markAttachedSessionRunning } from "@/lib/chat/attached-session"
+import {
   maybeDrainBackgroundResults,
   registerBackgroundReplaySend,
 } from "./background-result-runtime"
@@ -78,6 +89,7 @@ import { gateWorkbenchProviderPayload } from "@/lib/context-workbench/provider-p
 import type { RemoteExecutionContext } from "@/lib/claude/remote-execution"
 import { COMPUTER_USE_PLUGIN_TOOL_NAMES } from "@/lib/claude/computer-use-tools"
 import { clearSessionGrants } from "@/lib/claude/computer-use-session-grants"
+import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
 
 // ADR-0020 W3 — keep grant recording and send-side suppression on the
 // same visual/execution tool-name contract.
@@ -1296,6 +1308,11 @@ export function useClaudeChat() {
         console.warn("chat lease acquire failed; sending without admission", leaseErr)
       }
       store.getState().setSessionStatus(sessionId, "streaming")
+      if (session?.attachedChild) {
+        void markAttachedSessionRunning(sessionId).catch((error) =>
+          console.warn("attached session start state failed", error)
+        )
+      }
       chatTurnPerformance.begin(sessionId)
       store.getState().setSessionError(sessionId, null)
       lastUserContentRef.current.set(sessionId, displayContent)
@@ -1325,6 +1342,46 @@ export function useClaudeChat() {
       const chatRunId = store.getState().sessions[sessionId]?.runId ?? 0
       const executionContext = session?.executionContext
       const hasNoToolSurface = sendOptions.toolSurface === "none"
+      const agentRuntime = useAgentRuntimeStore.getState().runtime
+      const manualExternal = !hasNoToolSurface && agentRuntime === "external"
+
+      // Resolve rule-based delegation before opening the Task Workspace and
+      // adoption windows so their durable agent identity reflects the runtime
+      // that will actually write the files.
+      let delegation: import("@/lib/ai/agent/external/delegation-router").RoutingDecision | null =
+        null
+      if (
+        !hasNoToolSurface &&
+        !manualExternal &&
+        !callOptions?.skipUserAppend &&
+        !callOptions?.bypassDelegation
+      ) {
+        try {
+          const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+          const mgr = getExternalAgentManager()
+          if (mgr.getConnectedAgents().length > 0) {
+            mgr.setDelegationRules(useExternalAgentStore.getState().delegationRules)
+            const [{ routeDelegation }, { redactText }] = await Promise.all([
+              import("@/lib/ai/agent/external/delegation-router"),
+              import("@cognia/redact"),
+            ])
+            const decision = routeDelegation(
+              { prompt: providerText, context: { sessionId } },
+              {
+                checkDelegation: (t, c) => mgr.checkDelegation(t, c),
+                redact: (text) => redactText(text),
+              }
+            )
+            if (decision.shouldDelegate) delegation = decision
+          }
+        } catch (err) {
+          console.error("delegation routing failed", err)
+        }
+      }
+      const routedExternalAgentId = manualExternal
+        ? useAgentRuntimeStore.getState().externalAgentId
+        : delegation?.targetAgentId
+      const adoptionAgentKind = routedExternalAgentId ? "external" : "in-app"
       if (!hasNoToolSurface && executionContext?.location === "local") {
         sendOptions = { ...sendOptions, cwd: executionContext.projectRoot }
       }
@@ -1360,8 +1417,8 @@ export function useClaudeChat() {
           turnId: anchorMessage?.id ?? userMsg.id,
           attemptId: "a1",
           surface: "chat",
-          agentId: "built-in",
-          agentKind: "in-app",
+          agentId: routedExternalAgentId ?? "built-in",
+          agentKind: adoptionAgentKind,
           workspaceRoot,
           ...(executionContext?.taskWorkspace.workspaceKey
             ? { workspaceKey: executionContext.taskWorkspace.workspaceKey }
@@ -1424,7 +1481,7 @@ export function useClaudeChat() {
           sessionId,
           runId: chatRunId,
           model: sendOptions.model ?? null,
-          agentKind: "in-app",
+          agentKind: adoptionAgentKind,
         })
       }
 
@@ -1434,49 +1491,6 @@ export function useClaudeChat() {
       // sidecar. The optimistic user-message stays in the store so the
       // composer reflects the send immediately; the assistant reply is
       // appended from the manager result when it lands.
-      const agentRuntime = useAgentRuntimeStore.getState().runtime
-      const manualExternal = !hasNoToolSurface && agentRuntime === "external"
-
-      // ── Thread B: rule-based delegation ─────────────────────────────────
-      // When the user did NOT manually pick the external runtime, evaluate the
-      // persisted delegation rules. A matching rule redirects this turn to its
-      // target external agent (with the prompt PII-filtered). Skipped for
-      // silent goal/loop continuations and on the built-in fallback re-entry,
-      // and a no-op when no external agents are connected (web/mobile).
-      let delegation: import("@/lib/ai/agent/external/delegation-router").RoutingDecision | null =
-        null
-      if (
-        !hasNoToolSurface &&
-        !manualExternal &&
-        !callOptions?.skipUserAppend &&
-        !callOptions?.bypassDelegation
-      ) {
-        try {
-          const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
-          const mgr = getExternalAgentManager()
-          if (mgr.getConnectedAgents().length > 0) {
-            mgr.setDelegationRules(useExternalAgentStore.getState().delegationRules)
-            const [{ routeDelegation }, { redactText }] = await Promise.all([
-              import("@/lib/ai/agent/external/delegation-router"),
-              import("@cognia/redact"),
-            ])
-            const decision = routeDelegation(
-              { prompt: providerText, context: { sessionId } },
-              {
-                checkDelegation: (t, c) => mgr.checkDelegation(t, c),
-                // PII gate ON for delegated external sends — the prompt leaves
-                // the trust boundary to a third-party CLI.
-                redact: (text) => redactText(text),
-              }
-            )
-            if (decision.shouldDelegate) delegation = decision
-          }
-        } catch (err) {
-          // Routing must never block a send — fall through to the built-in path.
-          console.error("delegation routing failed", err)
-        }
-      }
-
       if (manualExternal || delegation) {
         const extAgentId = manualExternal
           ? useAgentRuntimeStore.getState().externalAgentId
@@ -1899,9 +1913,47 @@ export function useClaudeChat() {
       void sendRef.current?.(framedText, undefined, { sessionId })
     })
   }, [])
+
+  useEffect(
+    () =>
+      registerSessionPeerRuntime({
+        isReachable: isSessionOpen,
+        getStatus: sessionStatusOf,
+        deliver: async (peerMessage) => {
+          const sender = await getSession(peerMessage.senderSessionId)
+          if (!sender) throw new Error(`Sender session ${peerMessage.senderSessionId} was removed`)
+          const current =
+            useChatStore.getState().sessions[peerMessage.receiverSessionId]?.messages ??
+            (await listMessages(peerMessage.receiverSessionId))
+          const inbound = buildSessionPeerInboundMessage(peerMessage, sender)
+          if (!current.some((message) => message.id === inbound.id)) {
+            const next = [...current, inbound]
+            useChatStore.getState().setSessionMessages(peerMessage.receiverSessionId, next)
+            await persistMessages(peerMessage.receiverSessionId, next)
+          }
+          if (peerMessage.intent === "trigger_turn") {
+            const activeSend = sendRef.current
+            if (!activeSend) throw new Error("Chat send runtime is unavailable")
+            const modelPrompt = renderSessionPeerModelPrompt(peerMessage, sender)
+            if (!hasNoLeakingPiiDeep(modelPrompt)) {
+              throw new Error("Session peer prompt rejected by the renderer PII gate")
+            }
+            await activeSend(modelPrompt, undefined, {
+              sessionId: peerMessage.receiverSessionId,
+              skipUserAppend: true,
+            })
+          }
+        },
+      }),
+    []
+  )
   const openSessionIdsForDrain = useChatStore((s) => s.openSessionIds)
   useEffect(() => {
-    for (const sessionId of openSessionIdsForDrain) maybeDrainBackgroundResults(sessionId)
+    void expireSessionPeerMessages().catch(() => undefined)
+    for (const sessionId of openSessionIdsForDrain) {
+      maybeDrainBackgroundResults(sessionId)
+      void drainSessionPeerMessages(sessionId).catch(() => undefined)
+    }
   }, [openSessionIdsForDrain])
 
   // Self-paced /loop kick-off: when the runtime creates or resumes a loop
@@ -2107,6 +2159,7 @@ export function useClaudeChat() {
         messagesMirrorRef.current.delete(sessionId)
         useChatStore.getState().closeSession(sessionId)
         clearSessionGrants(sessionId)
+        releaseSkillLoadContext(sessionId)
         // Drop this session's nested-dispatch state (budget guard + resolved
         // permission ceiling) so neither leaks for the renderer's lifetime. Both
         // are keyed by session id and kept alive across a turn's multiple
@@ -2416,6 +2469,7 @@ async function buildSendOptions(
     routingContextHint: userMessage ? { promptText: userMessage } : undefined,
     routingSurface: "chat",
     ephemeralSkillIds,
+    skillRenderMode: "hybrid",
     activeGoal,
     activePlan,
     activeLoop,
@@ -2631,6 +2685,7 @@ async function handleEvent(
         registry.get(sid).persist.flush()
         registry.release(sid)
         messagesMirrorRef.current.delete(sid)
+        releaseSkillLoadContext(sid)
       }
       if (sealOpen) {
         if (evt.error) {
@@ -2744,6 +2799,7 @@ async function handleEvent(
         // steer replay just started a new turn, the idle check inside defers
         // this to the NEXT settle.
         maybeDrainBackgroundResults(evt.sessionId)
+        void drainSessionPeerMessages(evt.sessionId).catch(() => undefined)
       }
       return
     }
@@ -2849,7 +2905,7 @@ async function handleEvent(
         // Remote Session Control: if a remote device is watching this
         // (non-open) session, route the approval to it instead of
         // auto-denying. The remote already received this permission_request
-        // frame over /ws/v1/events and will resolve it via claude_approve.
+        // frame over /ws/events and will resolve it via claude_approve.
         // The sidecar's canUseTool has no timeout of its own, so arm a
         // backstop deny that fires only if the remote never answers — the
         // next SDK event for this session (the turn proceeding) cancels it.
@@ -3236,6 +3292,12 @@ async function handleEvent(
         }
       }
 
+      if (turnComplete) {
+        void import("@/lib/skills/runtime-loader").then((runtime) =>
+          runtime.releaseSkillLoadContext(sessionId)
+        )
+      }
+
       if (turnComplete && isOpen) {
         // Streaming sealed. Commit the last visual frame, cancel the
         // fire-and-forget debounced writer, and await one canonical durable
@@ -3332,6 +3394,16 @@ async function handleEvent(
         // schedules continuations guarded by `activeRef`; it runs only for the
         // focused session. Background panes still seal + go idle above.
         const completedSession = await getSession(sessionId).catch(() => undefined)
+        if (completedSession?.attachedChild) {
+          const finalAssistant = [...nextMessages].reverse().find((m) => m.role === "assistant")
+          const summary = finalAssistant ? (extractAssistantText(finalAssistant) ?? "").trim() : ""
+          if (summary) {
+            void completeAttachedSession(sessionId, {
+              summary,
+              messageId: finalAssistant?.id,
+            }).catch((error) => console.warn("attached session completion state failed", error))
+          }
+        }
 
         // Auto-detect artifacts in the assistant turn that just sealed.
         // Honors the artifacts settings block; off by default for

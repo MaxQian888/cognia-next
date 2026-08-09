@@ -106,6 +106,7 @@ describe("SkillMonacoEditor", () => {
         onChange={jest.fn()}
         skillId="skill-A"
         documentId="file-7"
+        path="scripts/check.ts"
       />
     )
     expect(mountSpy).toHaveBeenCalledTimes(1)
@@ -118,6 +119,7 @@ describe("SkillMonacoEditor", () => {
       documentId: "file-7",
       language: "typescript",
       initialContent: "content",
+      pathSegments: ["scripts", "check.ts"],
     })
   })
 

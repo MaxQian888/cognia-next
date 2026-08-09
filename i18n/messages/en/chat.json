@@ -604,6 +604,12 @@
     "webLabel": "Web",
     "workflowRefs": {
       "removeAria": "Remove reference to {label}"
+    },
+    "smartSnapshot": {
+      "captureFailed": "Smart snapshot failed",
+      "captureTooltip": "Smart snapshot",
+      "captured": "Smart snapshot attached: {appName}",
+      "switchPrompt": "Switch to the target app now; Cognia will capture it in a moment."
     }
   },
   "concurrent": {
@@ -721,7 +727,15 @@
       "active": "active",
       "aria": "Switch account for this session",
       "noOverride": "Inherit",
-      "toast": "Next message will use account {label}"
+      "toast": "Next message will use account {label}",
+      "effective": "Effective account",
+      "error": "Couldn't switch accounts.",
+      "inheritedToast": "Using inherited account {label}",
+      "toastInherited": "Using the inherited account.",
+      "switchFailed": "Couldn't switch accounts: {error}",
+      "unavailable": "Account switching is unavailable.",
+      "unavailableWithId": "Account {id} is unavailable.",
+      "useInherited": "Use inherited account"
     },
     "ariaSettings": "Session settings",
     "bareMode": "Bare mode",
@@ -848,6 +862,7 @@
       "summaryUtility": "Utility"
     },
     "save": "Save",
+    "sessionCommunication": "Session communication",
     "sheet": {
       "sections": {
         "account": "Model & account",
@@ -880,7 +895,10 @@
     "unreadArtifacts": "New artifacts — open panel",
     "untitledSession": "(untitled)",
     "workingDirLabel": "Working directory",
-    "workingDirPlaceholder": "/path/to/project"
+    "workingDirPlaceholder": "/path/to/project",
+    "openInCodexApp": "Open in Codex app",
+    "openInCodexAppFailed": "Couldn't open this task in the Codex app.",
+    "openedInCodexApp": "Opened in the Codex app."
   },
   "history": {
     "loadError": "Couldn't load this conversation.",
@@ -1386,6 +1404,69 @@
   "selection": {
     "askError": "Couldn't open an aside for that.",
     "askInAside": "Ask in an aside"
+  },
+  "sessionCommunication": {
+    "acceptHeld": "Accept",
+    "agentOrigin": "Agent message from {name} · untrusted",
+    "attachedCreateError": "Couldn't create the attached session.",
+    "attachedCreated": "Attached session created.",
+    "attachedPromptLabel": "Initial prompt",
+    "attachedTab": "Attached sessions",
+    "attachedTitleLabel": "Task title",
+    "attachedStatus": {
+      "closed": "Closed",
+      "completed": "Completed",
+      "interrupted": "Interrupted",
+      "running": "Running",
+      "staged": "Ready"
+    },
+    "closeAttached": "Close",
+    "contextFull": "Full parent context",
+    "contextLabel": "Context fork",
+    "contextLastN": "Last messages",
+    "contextNone": "No parent context",
+    "createAttached": "Create attached session",
+    "description": "Manage parent-owned child chats and live plain-text handoffs between independent sessions.",
+    "from": "From {name}",
+    "inboxTitle": "Inbox",
+    "intentLabel": "Delivery intent",
+    "intentNote": "Note only",
+    "intentTrigger": "Start a turn",
+    "interruptAttached": "Interrupt",
+    "messageLabel": "Message",
+    "messageStatus": {
+      "delivered": "Delivered",
+      "expired": "Expired",
+      "held": "Awaiting approval",
+      "queued": "Queued",
+      "refused": "Refused",
+      "targetUnavailable": "Target unavailable"
+    },
+    "noAttached": "No attached sessions yet.",
+    "noInbox": "No incoming messages.",
+    "noOutbox": "No sent messages.",
+    "noReachable": "No other live sessions in this workspace.",
+    "openAttached": "Open",
+    "outboxTitle": "Receipts",
+    "peerTab": "Message session",
+    "policyAccept": "Accept",
+    "policyHold": "Hold for approval",
+    "policyLabel": "Incoming policy",
+    "policyRefuse": "Refuse",
+    "policyUpdateError": "Couldn't update the incoming-message policy.",
+    "refuseHeld": "Refuse",
+    "resultLabel": "Result",
+    "send": "Send message",
+    "sendError": "Couldn't send the message.",
+    "sent": "Message status: {status}",
+    "targetLabel": "Target session",
+    "targetPlaceholder": "Choose a live session",
+    "title": "Session communication",
+    "turnsLabel": "Messages to carry",
+    "userOrigin": "Message from {name} · untrusted",
+    "workspaceIndependent": "Independent workspace",
+    "workspaceLabel": "Workspace",
+    "workspaceShared": "Share parent workspace"
   },
   "sessionCost": {
     "byModelTitle": "By model",

@@ -11,7 +11,7 @@
  * has full visibility.
  */
 
-import { isTauri } from "@/lib/platform/detect"
+import { isHeadlessHost, isTauri } from "@/lib/platform/detect"
 import { registerOcrProvider, getSharedOcrRegistry } from "./registry"
 import { mistralOcrProvider } from "./providers/mistral-ocr"
 import { googleVisionProvider } from "./providers/google-vision"
@@ -46,7 +46,13 @@ import {
   __setPaddleOcrReadiness,
   paddleOcrProvider,
 } from "./providers/paddle-ocr"
-import { localHttpProvider } from "./providers/local-http"
+import {
+  __setLocalHttpTransport,
+  localHttpProvider,
+  type LocalHttpTransport,
+  type LocalHttpTransportRequest,
+  type LocalHttpTransportResponse,
+} from "./providers/local-http"
 
 const ALL_PROVIDERS = [
   mistralOcrProvider,
@@ -81,10 +87,12 @@ export interface OcrRuntimeOptions {
   /**
    * Inject a custom model-readiness probe — tests pass a deterministic
    * function; production reads `ocr_model_status` from the Rust side. The
-   * probe accepts the backend id (`ocrs` / `paddle-ocr`) and returns true
-   * when the local model files are installed.
+   * probe accepts the backend id (`ocrs` / `paddle-ocr`) plus the selected
+   * model variant and returns true when those model files are installed.
    */
-  modelReadinessProbe?: (backend: "ocrs" | "paddle-ocr") => Promise<boolean>
+  modelReadinessProbe?: (backend: "ocrs" | "paddle-ocr", variant?: string) => Promise<boolean>
+  /** Inject the packaged local HTTP bridge (tests/alternate Tauri hosts). */
+  localHttpTransport?: LocalHttpTransport
 }
 
 /**
@@ -117,8 +125,11 @@ export async function installOcrRuntime(opts: OcrRuntimeOptions = {}): Promise<v
   const modelProbe = opts.modelReadinessProbe ?? (await tryBuildModelStatusProbe())
   if (modelProbe) {
     __setOcrsReadiness(() => modelProbe("ocrs"))
-    __setPaddleOcrReadiness(() => modelProbe("paddle-ocr"))
+    __setPaddleOcrReadiness((variant) => modelProbe("paddle-ocr", variant))
   }
+
+  const localHttpTransport = opts.localHttpTransport ?? (await tryBuildLocalHttpTransport())
+  __setLocalHttpTransport(localHttpTransport)
 }
 
 /** Reset state — test-only. */
@@ -132,11 +143,54 @@ export function __resetOcrRuntime(): void {
   __setOcrsReadiness(null)
   __setPaddleOcrInvoker(null)
   __setPaddleOcrReadiness(null)
+  __setLocalHttpTransport(null)
+}
+
+async function tryBuildLocalHttpTransport(): Promise<LocalHttpTransport | null> {
+  if (!isTauri()) return null
+  try {
+    const { invoke } = (await import("@tauri-apps/api/core")) as {
+      invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>
+    }
+    return {
+      request(request: LocalHttpTransportRequest) {
+        return invoke<LocalHttpTransportResponse>("ocr_http_fetch", {
+          request: {
+            request_id: request.requestId,
+            url: request.url,
+            method: request.method,
+            headers: request.headers,
+            body: request.body,
+            timeout_ms: request.timeoutMs,
+            allow_private_network: request.allowPrivateNetwork,
+          },
+        })
+      },
+      cancel(requestId: string) {
+        return invoke<boolean>("ocr_http_cancel", { requestId })
+      },
+    }
+  } catch {
+    return null
+  }
 }
 
 async function tryBuildTauriInvoker(): Promise<NativeOcrInvoker | null> {
-  if (!isTauri()) return null
+  if (!isTauri() && !isHeadlessHost()) return null
   try {
+    if (isHeadlessHost()) {
+      const { transport } = await import("@/lib/tauri")
+      return async (payload: NativeOcrInvokePayload) =>
+        transport.call<NativeOcrResult>("ocr_extract_native", {
+          payload: {
+            backend: payload.backend,
+            bytes: Array.from(payload.bytes),
+            mime_type: payload.mimeType,
+            languages: payload.languages,
+            model_variant: payload.modelVariant,
+          },
+        })
+    }
     const { invoke } = (await import("@tauri-apps/api/core")) as {
       invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>
     }
@@ -148,6 +202,7 @@ async function tryBuildTauriInvoker(): Promise<NativeOcrInvoker | null> {
           bytes: Array.from(payload.bytes),
           mime_type: payload.mimeType,
           languages: payload.languages,
+          model_variant: payload.modelVariant,
         },
       })
     }
@@ -184,16 +239,33 @@ async function tryBuildMsixProbe(): Promise<(() => Promise<boolean>) | null> {
  * `OcrRuntimeOptions.modelReadinessProbe`.
  */
 async function tryBuildModelStatusProbe(): Promise<
-  ((backend: "ocrs" | "paddle-ocr") => Promise<boolean>) | null
+  ((backend: "ocrs" | "paddle-ocr", variant?: string) => Promise<boolean>) | null
 > {
-  if (!isTauri()) return null
+  if (!isTauri() && !isHeadlessHost()) return null
   try {
+    if (isHeadlessHost()) {
+      const { transport } = await import("@/lib/tauri")
+      return async (backend, variant) => {
+        try {
+          const status = await transport.call<{ installed?: boolean }>("ocr_model_status", {
+            backend,
+            variant,
+          })
+          return !!status?.installed
+        } catch {
+          return false
+        }
+      }
+    }
     const { invoke } = (await import("@tauri-apps/api/core")) as {
       invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>
     }
-    return async (backend) => {
+    return async (backend, variant) => {
       try {
-        const status = await invoke<{ installed?: boolean }>("ocr_model_status", { backend })
+        const status = await invoke<{ installed?: boolean }>("ocr_model_status", {
+          backend,
+          variant,
+        })
         return !!status?.installed
       } catch {
         return false

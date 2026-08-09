@@ -5,7 +5,7 @@
 
 import type { ScheduledTask, TaskExecution, NotificationChannel } from "@/types/scheduler"
 import type { NotificationChannel as CenterChannel, NotificationLevel } from "@/types/notifications"
-import type { OutboundWebhookEvent, RemoteControlOutboundHeader } from "@/types/remote-control"
+import type { OutboundWebhookEvent, WebhookHeader } from "@/types/webhooks"
 import { notify } from "@/lib/tauri/notification"
 import { notify as centerNotify } from "@/lib/notifications/runtime"
 import { toast } from "sonner"
@@ -251,13 +251,13 @@ function sendToastNotification(title: string, body: string, eventType: TaskEvent
   log.debug(`Toast notification sent: ${title}`)
 }
 
-function toHeaderList(headers?: Record<string, string>): RemoteControlOutboundHeader[] {
+function toHeaderList(headers?: Record<string, string>): WebhookHeader[] {
   if (!headers) return []
   return Object.entries(headers).map(([name, value]) => ({ name, value }))
 }
 
 /**
- * Send a webhook notification through the remote-control outbound egress
+ * Send a webhook notification through the canonical outbound webhook
  * pipeline: signed (Standard Webhooks) when a secret is configured, with the
  * user's custom default headers, exponential-backoff retry, and a body
  * serialized exactly once. Also fans the same event out to any configured
@@ -271,12 +271,12 @@ async function sendWebhookNotification(
     { getWebhookOutboundConfig },
     { deliverWebhook },
     { publishOutboundEvent },
-    { appendRemoteControlAudit },
+    { appendWebhookAudit },
   ] = await Promise.all([
     import("./webhook-outbound-config"),
-    import("@/lib/remote-control/outbound/delivery"),
-    import("@/lib/remote-control/outbound/egress-registry"),
-    import("@/lib/db/remote-control-audit"),
+    import("@/lib/webhooks/delivery"),
+    import("@/lib/webhooks/egress-registry"),
+    import("@/lib/webhooks/audit"),
   ])
 
   const cfg = await getWebhookOutboundConfig()
@@ -306,7 +306,7 @@ async function sendWebhookNotification(
   // Also fan the same event out to any standalone egress endpoints.
   void publishOutboundEvent(event)
 
-  void appendRemoteControlAudit({
+  void appendWebhookAudit({
     direction: "outbound",
     kind: result.ok ? "outbound.delivered" : "outbound.failed",
     result: result.ok ? "delivered" : "failed",

@@ -8,6 +8,7 @@ import {
   replaceWorkflow,
 } from "@/lib/db/workflows"
 import { createSkill } from "@/lib/db/skills"
+import { createResource } from "@/lib/db/skill-resources"
 import { publishWorkflow, unpublishWorkflow, workflowSkillCanonicalId } from "./publish-workflow"
 import { reconcileWorkflowPublications } from "./publication-lifecycle"
 import type { VisualWorkflow } from "@/types/workflow/visual"
@@ -285,5 +286,29 @@ describe("workflow publication lifecycle", () => {
 
     expect(await getWorkflow(workflow.id)).toEqual(beforeWorkflow)
     expect(await getDb().skills.get(first.skillId)).toEqual(beforeSkill)
+  })
+
+  it("re-publishes an existing generated Skill without escaping the resource transaction", async () => {
+    const workflow = await createWorkflow({
+      name: "Resource transaction",
+      nodes: nodesWithInputSchema({ type: "object" }),
+      edges: [],
+    })
+    const first = await publishWorkflow(workflow.id, 10)
+    const resource = await createResource({
+      skillId: first.skillId,
+      kind: "reference",
+      name: "notes.md",
+      path: "references/notes.md",
+      content: "keep me",
+    })
+
+    const second = await publishWorkflow(workflow.id, 20)
+
+    expect(second.skillId).toBe(first.skillId)
+    expect(await getDb().skillResources.get(resource.id)).toMatchObject({
+      skillId: first.skillId,
+      content: "keep me",
+    })
   })
 })

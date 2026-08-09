@@ -2,7 +2,7 @@
 
 /**
  * Persistent storage abstraction for the desktop server credentials the
- * mobile / web companion needs (`baseUrl`, `deviceJwt`, `deviceId`,
+ * mobile / web companion needs (`baseUrl`, device identity, `deviceId`,
  * `serverVersion`).
  *
  * Two backends:
@@ -36,8 +36,12 @@ export interface CompanionConfig {
   targetId?: string
   /** e.g. "https://192.168.1.42:7890" */
   baseUrl: string
-  /** Long-lived JWT returned by `POST /api/v1/auth/pair`. */
-  deviceJwt: string
+  /** Internal service-principal token. Never used by a paired device. */
+  serviceToken?: string
+  /** Extractable form stored only by the platform secure-storage backend. */
+  devicePrivateKeyJwk?: JsonWebKey
+  /** SHA-256 of the canonical public-key PEM registered with the host. */
+  deviceKeyThumbprint?: string
   /** Stable device identifier; namespace for idempotency keys + log lines. */
   deviceId: string
   /** Server semver, captured at pair time. Diagnostics only. */
@@ -59,6 +63,10 @@ export interface CompanionConfig {
   rendezvousId?: string
   /** Public, self-certifying signaling v2 room descriptor. */
   signalingRoomDescriptor?: RoomDescriptorV2
+  /** Browser-reachable signaling endpoint returned by this target's Host. */
+  signalingUrl?: string
+  /** Target-specific ICE servers returned by the Host auth configuration. */
+  iceServers?: RTCIceServer[]
   /**
    * Mobile role ECDSA private key. Capacitor persists this JWK inside native
    * secure storage; the web backend moves it into IndexedDB as a
@@ -68,10 +76,12 @@ export interface CompanionConfig {
   /** Runtime-only non-extractable key loaded by the web identity store. */
   signalingPrivateKey?: CryptoKey
   /**
-   * ADR-0059 C4/F3 — local account the pairing was minted for. Multi-account
-   * cloud servers route by it; absent on rows paired before it shipped.
+   * Local app/Vault account namespace that owns this target. This is not the
+   * remote Host tenant and must never be sent as the device-token tenant.
    */
   accountId?: string
+  /** Remote Host tenant used for challenges, access tokens, and authorization. */
+  tenantId?: string
   /**
    * ADR-0021 channel inventory — the desktop's cloudflared tunnel URL, as
    * last reported by the `companion_endpoints` RPC.
@@ -100,6 +110,8 @@ export interface CompanionConfigStorage {
   load(): Promise<CompanionConfig | null>
   save(config: CompanionConfig): Promise<void>
   clear(): Promise<void>
+  /** Remove one exact pairing without consulting an active-host pointer. */
+  remove?(config: CompanionConfig): Promise<void>
 }
 
 const CONFIG_KEY = "cognia.companion.config.v1"
@@ -124,7 +136,7 @@ interface BrowserVaultSecretAdapter {
 
 type PublicBrowserCompanionConfig = Omit<
   CompanionConfig,
-  "deviceJwt" | "signalingPrivateKeyJwk" | "signalingPrivateKey"
+  "serviceToken" | "devicePrivateKeyJwk" | "signalingPrivateKeyJwk" | "signalingPrivateKey"
 >
 
 interface BrowserCompanionTargetBook {
@@ -132,11 +144,7 @@ interface BrowserCompanionTargetBook {
   targets: Record<string, PublicBrowserCompanionConfig>
 }
 
-interface StoredBrowserCompanionConfig extends Omit<CompanionConfig, "deviceJwt"> {
-  deviceJwt?: string
-  deviceJwtEncrypted?: EncryptedVaultSecret
-  signalingPrivateKeyEncrypted?: EncryptedVaultSecret
-}
+type StoredBrowserCompanionConfig = Omit<CompanionConfig, "serviceToken">
 
 class IndexedDbSignalingKeyStore implements BrowserSignalingKeyStore {
   async save(deviceId: string, jwk: JsonWebKey): Promise<CryptoKey> {
@@ -223,43 +231,18 @@ export class LocalStorageCompanionStorage implements CompanionConfigStorage {
         return this.hydrateTarget(publicConfig, vault)
       }
 
-      // One-time compatibility path for the former single-target v1 record.
-      // It remains readable until successfully copied into the v2 target book
-      // and Vault secret rows; the source is removed only after that succeeds.
+      // Old bearer-token pairings are deliberately invalidated by this
+      // breaking upgrade. Remove the public pointer and require re-pairing.
       const raw = window.localStorage.getItem(CONFIG_KEY)
       if (!raw) return null
       const stored = JSON.parse(raw) as StoredBrowserCompanionConfig
-      const deviceJwt = stored.deviceJwtEncrypted
-        ? await vault.decryptSecret(
-            companionJwtSecretName(stored.targetId ?? stored.deviceId),
-            stored.deviceJwtEncrypted
-          )
-        : stored.deviceJwt
-      if (!deviceJwt) return null
-      const config: CompanionConfig = {
-        ...stored,
-        targetId: stored.targetId ?? stored.deviceId,
-        deviceJwt,
-      }
-      delete (config as StoredBrowserCompanionConfig).deviceJwtEncrypted
-      if (config.signalingRoomDescriptor) {
-        if (stored.signalingPrivateKeyEncrypted) {
-          const serialized = await vault.decryptSecret(
-            companionSigningSecretName(stored.targetId ?? stored.deviceId),
-            stored.signalingPrivateKeyEncrypted
-          )
-          config.signalingPrivateKey = await importV2SigningPrivateKey(
-            JSON.parse(serialized) as JsonWebKey
-          )
-        } else {
-          const key = await this.signalingKeys.load(config.deviceId)
-          if (key) config.signalingPrivateKey = key
-        }
-      }
-      delete (config as StoredBrowserCompanionConfig).signalingPrivateKeyEncrypted
-      await this.save(config)
+      const legacyTargetId = stored.targetId ?? stored.deviceId
+      await Promise.all([
+        vault.deleteSecret(companionJwtSecretName(legacyTargetId)),
+        vault.deleteSecret(companionSigningSecretName(legacyTargetId)),
+      ])
       window.localStorage.removeItem(CONFIG_KEY)
-      return config
+      return null
     } catch {
       return null
     }
@@ -270,7 +253,13 @@ export class LocalStorageCompanionStorage implements CompanionConfigStorage {
     const vault = this.vaultProvider()
     if (!vault) throw new Error("Browser Vault must be unlocked before saving a pairing.")
     const targetId = config.targetId ?? config.deviceId
-    await vault.storeSecret(companionJwtSecretName(targetId), config.deviceJwt)
+    if (!config.devicePrivateKeyJwk || !config.deviceKeyThumbprint) {
+      throw new Error("Companion device identity is missing; pair this device again.")
+    }
+    await vault.storeSecret(
+      companionDeviceKeySecretName(targetId),
+      JSON.stringify(config.devicePrivateKeyJwk)
+    )
     if (config.signalingPrivateKeyJwk) {
       await vault.storeSecret(
         companionSigningSecretName(targetId),
@@ -278,7 +267,8 @@ export class LocalStorageCompanionStorage implements CompanionConfigStorage {
       )
     }
     const publicConfig = { ...config } as PublicBrowserCompanionConfig
-    delete (publicConfig as Partial<CompanionConfig>).deviceJwt
+    delete (publicConfig as Partial<CompanionConfig>).serviceToken
+    delete (publicConfig as Partial<CompanionConfig>).devicePrivateKeyJwk
     delete (publicConfig as Partial<CompanionConfig>).signalingPrivateKey
     delete (publicConfig as Partial<CompanionConfig>).signalingPrivateKeyJwk
     const book = readBrowserTargetBook()
@@ -314,6 +304,7 @@ export class LocalStorageCompanionStorage implements CompanionConfigStorage {
       if (existing) {
         const cleanup: Array<Promise<void>> = [
           vault.deleteSecret(companionJwtSecretName(targetId)),
+          vault.deleteSecret(companionDeviceKeySecretName(targetId)),
           vault.deleteSecret(companionSigningSecretName(targetId)),
         ]
         if (existing.signalingRoomDescriptor) {
@@ -332,9 +323,13 @@ export class LocalStorageCompanionStorage implements CompanionConfigStorage {
     vault: BrowserVaultSecretAdapter
   ): Promise<CompanionConfig | null> {
     const targetId = publicConfig.targetId ?? publicConfig.deviceId
-    const deviceJwt = await vault.loadSecret(companionJwtSecretName(targetId))
-    if (!deviceJwt) return null
-    const config: CompanionConfig = { ...publicConfig, targetId, deviceJwt }
+    const serializedDeviceKey = await vault.loadSecret(companionDeviceKeySecretName(targetId))
+    if (!serializedDeviceKey || !publicConfig.deviceKeyThumbprint) return null
+    const config: CompanionConfig = {
+      ...publicConfig,
+      targetId,
+      devicePrivateKeyJwk: JSON.parse(serializedDeviceKey) as JsonWebKey,
+    }
     if (config.signalingRoomDescriptor) {
       const serialized = await vault.loadSecret(companionSigningSecretName(targetId))
       if (serialized) {
@@ -374,6 +369,10 @@ function writeBrowserTargetBook(book: BrowserCompanionTargetBook): void {
 
 function companionJwtSecretName(identity: string): string {
   return `companion:${identity}:device-jwt`
+}
+
+function companionDeviceKeySecretName(identity: string): string {
+  return `companion:${identity}:device-private-jwk`
 }
 
 function companionSigningSecretName(identity: string): string {
@@ -423,6 +422,10 @@ export class SecureStorageCompanionStorage implements CompanionConfigStorage {
       const { value } = await plugin.get({ key: CONFIG_KEY })
       if (!value) return null
       const config = JSON.parse(value) as CompanionConfig
+      if (!config.devicePrivateKeyJwk || !config.deviceKeyThumbprint) {
+        await plugin.remove({ key: CONFIG_KEY }).catch(() => undefined)
+        return null
+      }
       if (config.signalingPrivateKeyJwk) {
         config.signalingPrivateKey = await importV2SigningPrivateKey(config.signalingPrivateKeyJwk)
       }
@@ -434,8 +437,12 @@ export class SecureStorageCompanionStorage implements CompanionConfigStorage {
   }
 
   async save(config: CompanionConfig): Promise<void> {
+    if (!config.devicePrivateKeyJwk || !config.deviceKeyThumbprint) {
+      throw new Error("Companion device identity is missing; pair this device again.")
+    }
     const plugin = await this.loader()
     const persisted = { ...config }
+    delete persisted.serviceToken
     delete persisted.signalingPrivateKey
     await plugin.set({ key: CONFIG_KEY, value: JSON.stringify(persisted) })
   }

@@ -10,7 +10,7 @@
  *     non-foreground `permission_request`s to this device instead of
  *     auto-denying — and **detaches** on unmount.
  *  2. **Streams** the session live by subscribing to `claude://message`
- *     (forwarded over `/ws/v1/events` by the host EventBus) and replaying it
+ *     (forwarded over `/ws/events` by the host EventBus) and replaying it
  *     through the same `applySdkEvent` adapter the desktop chat hook uses, so
  *     assistant turns / tool calls render with the existing chat components.
  *     Seeded from the synced-down Dexie history for the initial paint.

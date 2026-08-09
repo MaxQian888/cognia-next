@@ -5,7 +5,7 @@
  * Tauri-only wrappers in `lib/tauri/fleet.ts`. Every call goes through the
  * unified `transport`, so the SAME functions work on Tauri desktop
  * (invoke) and over the companion API from a phone / companion-connected
- * browser (HTTP/RTC). The Rust side exposes these as `/api/v1/_rpc/fleet_*`
+ * browser (HTTP/RTC). The Rust side exposes these as `/api/_rpc/fleet_*`
  * dispatch arms (see `companion_api/rpc.rs`).
  */
 

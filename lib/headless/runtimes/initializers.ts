@@ -123,6 +123,22 @@ registerHeadlessRuntime({
   },
 })
 
+// ── Server OCR provider registry ───────────────────────────────────────────
+
+registerHeadlessRuntime({
+  name: "ocr-runtime",
+  hosts: ["brain"],
+  start: async () => {
+    const [{ installOcrRuntime, __resetOcrRuntime }, { __resetSharedOcrRegistry }] =
+      await Promise.all([import("@/lib/ocr/runtime"), import("@/lib/ocr/registry")])
+    await installOcrRuntime()
+    return () => {
+      __resetOcrRuntime()
+      __resetSharedOcrRegistry()
+    }
+  },
+})
+
 // ── A9: automation policy hydration ─────────────────────────────────────────
 
 registerHeadlessRuntime({

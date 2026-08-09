@@ -47,6 +47,11 @@ import {
 } from "./monaco-bridge"
 
 interface InvocationTriggerBag {
+  rename?: (
+    m: MonacoTextModel,
+    p: { lineNumber: number; column: number },
+    newName: string
+  ) => Promise<unknown>
   inlineCompletion?: (
     m: MonacoTextModel,
     p: { lineNumber: number; column: number }
@@ -196,8 +201,9 @@ function makeFakeApi(): MonacoApi & {
         calls.push({ method: "codeAction", selector })
         return makeDisposable()
       },
-      registerRenameProvider(selector) {
+      registerRenameProvider(selector, provider) {
         calls.push({ method: "rename", selector })
+        invocationTriggers.rename = (m, p, newName) => provider.provideRenameEdits(m, p, newName)
         return makeDisposable()
       },
       registerDocumentSymbolProvider(selector) {
@@ -486,6 +492,52 @@ describe("monaco-bridge", () => {
           "documentSymbol",
         ])
       )
+    })
+
+    it("converts rename workspace edits for every affected document", async () => {
+      const api = makeFakeApi()
+      const dispatch = jest.fn(async () => ({
+        changes: {
+          "file:///a.ts": [
+            {
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+              newText: "next",
+            },
+          ],
+          "file:///b.ts": [
+            {
+              range: { start: { line: 1, character: 1 }, end: { line: 1, character: 4 } },
+              newText: "next",
+            },
+          ],
+        },
+      })) as unknown as jest.MockedFunction<DispatchRpc>
+      configureMonacoBridge({ monacoApi: api, dispatchRpc: dispatch })
+      registerRenameProvider({ extensionId: "ext", selector: ["typescript"] })
+      const model: MonacoTextModel = {
+        uri: "file:///a.ts",
+        language: "typescript",
+        getValue: () => "old",
+        setValue: () => {},
+        getLineCount: () => 1,
+        getLineContent: () => "old",
+        isDisposed: () => false,
+      }
+
+      await expect(
+        api.invocationTriggers.rename!(model, { lineNumber: 1, column: 1 }, "next")
+      ).resolves.toEqual({
+        edits: [
+          {
+            resource: "file:///a.ts",
+            edits: [expect.objectContaining({ text: "next" })],
+          },
+          {
+            resource: "file:///b.ts",
+            edits: [expect.objectContaining({ text: "next" })],
+          },
+        ],
+      })
     })
   })
 

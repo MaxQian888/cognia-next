@@ -142,6 +142,25 @@ describe("runAndCaptureAssistantReply", () => {
     expect(unlistenMock).toHaveBeenCalledTimes(1)
   })
 
+  it("surfaces the SDK session id immediately as well as on the final result", async () => {
+    const onSdkSessionId = jest.fn()
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onSdkSessionId,
+    })
+    await flushUntilSubscribed()
+    fire({
+      type: "sdk_session_id",
+      sessionId: SESSION,
+      sdkSessionId: "sdk-issued",
+    } as unknown as ClaudeEvent)
+    expect(onSdkSessionId).toHaveBeenCalledWith("sdk-issued")
+    fire(assistantEvent("Hello"))
+    fire(sessionEnded())
+
+    await expect(promise).resolves.toEqual(expect.objectContaining({ sdkSessionId: "sdk-issued" }))
+  })
+
   it("emits a usage stream event from an in-stream result message", async () => {
     const events: Array<{ type: string }> = []
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {

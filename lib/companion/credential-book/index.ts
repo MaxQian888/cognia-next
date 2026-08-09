@@ -132,6 +132,7 @@ export class MigratingCompanionStorage implements CompanionConfigStorage {
     this.delegate = new CredentialBookCompanionStorage({
       book: this.book,
       accountNamespace: opts.accountNamespace ?? activeAccountNamespace,
+      activeHostId: () => getActiveRuntimeTargetContext()?.targetId,
     })
   }
 
@@ -153,6 +154,11 @@ export class MigratingCompanionStorage implements CompanionConfigStorage {
     await this.markMigrationDone()
     await this.delegate.clear()
     await this.opts.legacy.clear().catch(() => undefined)
+  }
+
+  async remove(config: CompanionConfig): Promise<void> {
+    await this.markMigrationDone()
+    await this.delegate.remove(config)
   }
 
   private ensureMigrated(): Promise<void> {

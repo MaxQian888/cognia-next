@@ -25,7 +25,13 @@ const fakeRemote: Transport = {
 }
 
 function config(baseUrl: string): CompanionConfig {
-  return { baseUrl, deviceJwt: "jwt", deviceId: "d", serverVersion: "1.0.0" }
+  return {
+    baseUrl,
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+    deviceKeyThumbprint: "device-thumbprint",
+    deviceId: "d",
+    serverVersion: "1.0.0",
+  }
 }
 
 function seedHost(label: string, baseUrl: string) {

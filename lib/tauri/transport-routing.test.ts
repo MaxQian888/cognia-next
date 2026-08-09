@@ -242,7 +242,13 @@ describe("active-remote holder", () => {
     const listener = jest.fn()
     subscribeActiveRemoteTransport(listener)
     setActiveRemoteTransport(remote.transport)
-    setActiveRemoteEndpoint({ baseUrl: "https://host:27890", deviceJwt: "jwt" })
+    setActiveRemoteEndpoint({
+      baseUrl: "https://host:27890",
+      deviceId: "device-1",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+      deviceKeyThumbprint: "device-thumbprint",
+      serverVersion: "1.0.0",
+    })
 
     __resetRoutingForTests()
 
@@ -275,7 +281,10 @@ describe("active-remote endpoint + isRemoteHostActive", () => {
     expect(getActiveRemoteEndpoint()).toBeNull()
     const endpoint = {
       baseUrl: "https://box.example:27890",
-      deviceJwt: "device-jwt",
+      deviceId: "device-1",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+      deviceKeyThumbprint: "device-thumbprint",
+      serverVersion: "1.0.0",
       serverFingerprint: "sha256:remote-spki",
     }
     setActiveRemoteEndpoint(endpoint)

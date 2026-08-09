@@ -10,20 +10,25 @@
  *    through to browser fetch.
  *  - `isNativeShell` — gates the Tauri-websocket providers (Edge TTS,
  *    OpenAI realtime).
+ *  - `allowCloudText` — applies the shared outbound PII gate before text
+ *    reaches any cloud adapter; loopback/system paths are filtered by the
+ *    orchestrator and never consult this cloud boundary.
  *  - `notify` — surfaces orchestrator failures as sonner toasts.
  */
 
 import { toast } from "sonner"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 import type { ProxyFetchInit, ProxyFetchResult } from "@cognia/tts/proxy-fetch"
 import { setTtsHost } from "@cognia/tts/host"
 
-import { isTauri } from "@/lib/tauri"
+import { isCapacitor, isTauri } from "@/lib/tauri"
 
 const utf8Decoder = new TextDecoder("utf-8")
 
 async function tauriProxyFetch(url: string, init: ProxyFetchInit): Promise<ProxyFetchResult> {
   const { invoke } = await import("@tauri-apps/api/core")
+  const requestId = init.requestId ?? crypto.randomUUID()
 
   let bodyB64: string | undefined
   let json: unknown | undefined
@@ -39,19 +44,32 @@ async function tauriProxyFetch(url: string, init: ProxyFetchInit): Promise<Proxy
     bodyB64 = bytesToBase64(buf)
   }
 
-  const response = await invoke<{
-    status: number
-    mime: string
-    body_b64: string
-  }>("tts_proxy_fetch", {
-    request: {
-      url,
-      method: init.method ?? "POST",
-      headers: init.headers ?? {},
-      json,
-      body_b64: bodyB64,
-    },
-  })
+  if (init.signal?.aborted) throw new DOMException("Request aborted", "AbortError")
+  const cancel = () => {
+    void invoke("tts_proxy_cancel", { requestId }).catch(() => undefined)
+  }
+  init.signal?.addEventListener("abort", cancel, { once: true })
+
+  let response: { status: number; mime: string; body_b64: string }
+  try {
+    response = await invoke<typeof response>("tts_proxy_fetch", {
+      request: {
+        url,
+        method: init.method ?? "POST",
+        headers: init.headers ?? {},
+        json,
+        body_b64: bodyB64,
+        provider: init.provider,
+        request_id: requestId,
+        timeout_ms: init.timeoutMs,
+      },
+    })
+  } catch (error) {
+    if (init.signal?.aborted) throw new DOMException("Request aborted", "AbortError")
+    throw error
+  } finally {
+    init.signal?.removeEventListener("abort", cancel)
+  }
 
   const bytes = base64ToBytes(response.body_b64)
   return {
@@ -83,6 +101,8 @@ function base64ToBytes(b64: string): Uint8Array {
 setTtsHost({
   nativeProxyFetch: (url, init) => (isTauri() ? tauriProxyFetch(url, init) : null),
   isNativeShell: isTauri,
+  isMobileShell: isCapacitor,
+  allowCloudText: (text) => hasNoLeakingPii(text),
   notify: {
     message: (text) => {
       toast.message(text)

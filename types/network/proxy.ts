@@ -4,7 +4,7 @@
  * Surfaced under Settings → Network Proxy. The persisted shape lives on the
  * `AppSettings.networkProxy` field; the Rust side mirrors it via
  * `src-tauri/src/proxy_config/mod.rs:ProxyConfig` and reads it through
- * `proxy_set` whenever the frontend writes a change.
+ * `proxy_apply` whenever the frontend writes a change.
  */
 
 export type ProxyProtocol = "http" | "https" | "socks5"
@@ -24,10 +24,9 @@ export interface NetworkProxySettings {
   host: string
   port: number
   username?: string
-  password?: string
   /**
-   * Hosts and CIDR ranges that should bypass the proxy. Matched as
-   * substrings + suffix matches by `lib/network/proxy-config.ts:shouldBypass`.
+   * Hosts and CIDR ranges that should bypass the proxy. Matched as exact
+   * hosts/IPs, leading-dot domain suffixes, or IPv4/IPv6 CIDR ranges.
    * Defaults to the loopback set so localhost dev servers always reach
    * directly.
    */
@@ -43,6 +42,15 @@ export interface NetworkProxySettings {
    * active proxy + bypass list, so it reports the egress IP the proxy sees.
    */
   ipLookupEnabled: boolean
+}
+
+/**
+ * Read-only compatibility shape for settings rows written before proxy
+ * credentials moved to the OS keyring. New code must never persist this
+ * field; it exists only so the boot migration can remove it safely.
+ */
+export interface LegacyNetworkProxySettings extends NetworkProxySettings {
+  password?: string
 }
 
 export const DEFAULT_NETWORK_PROXY_SETTINGS: NetworkProxySettings = {
@@ -90,6 +98,28 @@ export interface ProxyCandidate {
   source?: ProxyCandidateSource
   /** True when the controller answered 401/403 — present but secret-guarded. */
   controllerSecured?: boolean
+  /** Only protocol-verified candidates are returned by the native detector. */
+  verified: true
+  /** Concrete handshake used to prove that the endpoint is a proxy. */
+  verification: "http-connect" | "socks5-connect"
+}
+
+export type ProxyErrorCode =
+  | "PROXY_NOT_INITIALIZED"
+  | "PROXY_INVALID_CONFIG"
+  | "PROXY_CREDENTIAL_UNAVAILABLE"
+  | "PROXY_CONNECT_FAILED"
+  | "PROXY_TRANSPORT_UNSUPPORTED"
+
+export type ProxyRouteSummary =
+  | { kind: "direct"; reason: "off" | "bypass" }
+  | { kind: "proxy"; protocol: ProxyProtocol; host: string; port: number }
+
+export interface ProxyRuntimeStatus {
+  state: "uninitialized" | "ready" | "blocked"
+  route?: ProxyRouteSummary
+  credentialConfigured: boolean
+  errorCode?: ProxyErrorCode
 }
 
 /**
@@ -101,6 +131,7 @@ export interface ProxyTestResult {
   status?: number
   latencyMs: number
   error?: string
-  /** Echoes the proxy URL the test went through (for the UI). */
-  proxyUrl?: string
+  errorCode?: ProxyErrorCode
+  /** Sanitized route metadata; never contains proxy credentials. */
+  route?: ProxyRouteSummary
 }

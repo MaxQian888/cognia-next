@@ -62,10 +62,10 @@ describe("dispatchRoute", () => {
   it("routes pair_qr to redeemPair", () => {
     const navs = makeNavigators()
     dispatchRoute(
-      { kind: "pair_qr", payload: "cgnp2|abc", raw: "cognia://pair?payload=cgnp2|abc" },
+      { kind: "pair_qr", payload: "cgnp3|abc", raw: "cognia://pair?payload=cgnp3|abc" },
       navs
     )
-    expect(navs.redeemPair).toHaveBeenCalledWith("cgnp2|abc")
+    expect(navs.redeemPair).toHaveBeenCalledWith("cgnp3|abc")
   })
 
   it("does nothing for oauth_callback (handled by mobile-flow)", () => {
@@ -154,8 +154,8 @@ describe("makeRouterNavigators", () => {
   it("URL-encodes pair payloads", () => {
     const push = jest.fn()
     const navs = makeRouterNavigators({ push })
-    navs.redeemPair("cgnp2|abc def")
-    expect(push).toHaveBeenCalledWith("/pair?payload=cgnp2%7Cabc%20def")
+    navs.redeemPair("cgnp3|abc def")
+    expect(push).toHaveBeenCalledWith("/pair?payload=cgnp3%7Cabc%20def")
   })
 
   it("URL-encodes workflow run ids when pushing", () => {

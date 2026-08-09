@@ -51,6 +51,7 @@ it("migrates accounts, subscriptions, and workflow aliases transactionally and i
         resourceKind: "repository",
         resourceId: "cognia/cognia-next",
         eventTypes: ["pull_request.opened"],
+        ingressSecretHandle: "legacy-secret-handle",
       },
     ],
     workflowKindAliases: {
@@ -68,6 +69,12 @@ it("migrates accounts, subscriptions, and workflow aliases transactionally and i
     alreadyApplied: true,
   })
   expect((await db.workflows.get("wf-legacy"))?.nodes[0].type).toBe("trigger.integration.event")
+  const migratedAccount = await db.integrationAccounts.get("github-account")
+  const migratedSubscription = await db.integrationSubscriptions.get("github-subscription")
+  expect(migratedAccount?.authSessionId).toBe("opaque")
+  expect(migratedAccount?.providerId).toBe("github-pat")
+  expect(migratedAccount?.ingressEndpoint).toBeDefined()
+  expect(migratedAccount?.ingressEndpoint?.routeId).toBe(migratedSubscription?.ingressRouteId)
 })
 
 it("restores the original workflow and Integration rows from the transaction backup", async () => {

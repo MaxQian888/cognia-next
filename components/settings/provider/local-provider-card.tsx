@@ -19,12 +19,11 @@ import {
   ChevronDown,
   ChevronUp,
   Download,
-  Cpu,
-  Zap,
-  Wrench,
-  ImageIcon,
   MessageSquare,
+  List,
   Rocket,
+  Trash2,
+  Square,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Input } from "@/components/ui/input"
@@ -60,6 +59,7 @@ export interface LocalProviderCardProps {
   /** Opens the step-by-step install/setup guide for this provider. */
   onSetup?: () => void
   compact?: boolean
+  showToggle?: boolean
 }
 
 export function LocalProviderCard({
@@ -78,6 +78,7 @@ export function LocalProviderCard({
   onManageModels,
   onSetup,
   compact = false,
+  showToggle = true,
 }: LocalProviderCardProps) {
   const t = useTranslations("providers")
 
@@ -148,10 +149,12 @@ export function LocalProviderCard({
                   </Badge>
                 )}
               </CardTitle>
-              <CardDescription className="text-xs">{config.description}</CardDescription>
+              <CardDescription className="text-xs">
+                {t(`localProviderDescriptions.${providerId}`)}
+              </CardDescription>
             </div>
           </div>
-          <Switch checked={enabled} onCheckedChange={onToggle} />
+          {showToggle ? <Switch checked={enabled} onCheckedChange={onToggle} /> : null}
         </div>
       </CardHeader>
 
@@ -253,32 +256,32 @@ export function LocalProviderCard({
         <div className="flex flex-wrap gap-1.5">
           <CapabilityBadge
             icon={<MessageSquare className="h-3 w-3" />}
-            label="Chat"
+            label={t("capabilityChatApi")}
             enabled={true}
             t={t}
           />
           <CapabilityBadge
-            icon={<Zap className="h-3 w-3" />}
-            label="Stream"
-            enabled={capabilities.supportsStreaming}
+            icon={<List className="h-3 w-3" />}
+            label={t("capabilityModelList")}
+            enabled={capabilities.canListModels}
             t={t}
           />
           <CapabilityBadge
-            icon={<ImageIcon className="h-3 w-3" />}
-            label="Vision"
-            enabled={capabilities.supportsVision}
+            icon={<Download className="h-3 w-3" />}
+            label={t("capabilityModelPull")}
+            enabled={capabilities.canPullModels}
             t={t}
           />
           <CapabilityBadge
-            icon={<Wrench className="h-3 w-3" />}
-            label="Tools"
-            enabled={capabilities.supportsTools}
+            icon={<Trash2 className="h-3 w-3" />}
+            label={t("capabilityModelDelete")}
+            enabled={capabilities.canDeleteModels}
             t={t}
           />
           <CapabilityBadge
-            icon={<Cpu className="h-3 w-3" />}
-            label="Embed"
-            enabled={capabilities.canGenerateEmbeddings}
+            icon={<Square className="h-3 w-3" />}
+            label={t("capabilityModelUnload")}
+            enabled={capabilities.canStopModels}
             t={t}
           />
         </div>

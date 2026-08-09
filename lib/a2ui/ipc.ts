@@ -23,7 +23,7 @@ export interface SubscribeA2UIDispatchOptions {
   /**
    * Inject a listen-capable bridge (ADR-0059 T-A4). The headless brain
    * passes its transport-backed bridge — `a2ui://dispatch` then arrives over
-   * `/ws/v1/events` instead of a Tauri event, with the same envelope. When a
+   * `/ws/events` instead of a Tauri event, with the same envelope. When a
    * bridge is provided the Tauri platform gate is skipped.
    */
   bridge?: {

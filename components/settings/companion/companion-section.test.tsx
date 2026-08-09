@@ -141,16 +141,20 @@ describe("CompanionSection", () => {
     })
   })
 
-  it("clicking Generate QR calls companion_issue_pair_jwt and shows the QR", async () => {
+  it("clicking Generate QR calls companion_create_owner_invitation and shows the QR", async () => {
     const user = userEvent.setup()
     const futureMs = Date.now() + 5 * 60_000
     callSpy.mockImplementation(async (name: string) => {
       if (name === "companion_server_status") return STATUS_STOPPED
-      if (name === "companion_issue_pair_jwt") {
+      if (name === "companion_create_owner_invitation") {
         return {
-          pairJwt: "header.payload.signature",
+          invitation: "owner-invitation",
           expiresAtMs: futureMs,
           baseUrl: "http://192.168.1.42:7890",
+          fingerprint: "sha256:paired-spki",
+          appVersion: "0.1.0",
+          hostId: "host-1",
+          tenantId: "local_acct_a",
         }
       }
       return undefined as unknown as never
@@ -162,20 +166,21 @@ describe("CompanionSection", () => {
 
     const qr = await screen.findByTestId("qr-mock")
     const value = qr.getAttribute("data-value") || ""
-    // Wave 1.7 v2 payload: `cgnp2|<base64url>`. Decode through the
-    // canonical helper so the test is implementation-agnostic.
+    // The offline cgnp3 schema is independent of the now-unversioned URLs.
     const decoded = decodePairPayload(value)
     expect(decoded.kind).toBe("ok")
     if (decoded.kind === "ok") {
       expect(decoded.payload.baseUrl).toBe("http://192.168.1.42:7890")
-      expect(decoded.payload.pairJwt).toBe("header.payload.signature")
-      expect(decoded.payload.version).toBe("0.1.0")
+      expect(decoded.payload.invitation).toBe("owner-invitation")
+      expect(decoded.payload.hostId).toBe("host-1")
+      expect(decoded.payload.tenantId).toBe("local_acct_a")
+      expect(decoded.payload.serverVersion).toBe("0.1.0")
+      expect(decoded.payload.fingerprint).toBe("sha256:paired-spki")
     }
-    expect(callSpy).toHaveBeenCalledWith("companion_issue_pair_jwt", {
+    expect(callSpy).toHaveBeenCalledWith("companion_create_owner_invitation", {
       localAccountId: "local_acct_a",
     })
     expect(screen.getByText(/Expires in/i)).toBeInTheDocument()
-    // Legacy desktops (no pair code) — block must NOT render.
     expect(screen.queryByTestId("pair-code-block")).toBeNull()
   })
 
@@ -186,19 +191,24 @@ describe("CompanionSection", () => {
     render(<CompanionSection />)
     await user.click(await screen.findByRole("button", { name: /Generate QR/i }))
 
-    expect(callSpy.mock.calls.map((call) => call[0])).not.toContain("companion_issue_pair_jwt")
+    expect(callSpy.mock.calls.map((call) => call[0])).not.toContain(
+      "companion_create_owner_invitation"
+    )
   })
 
-  it("renders an expired pairing issue without a QR and disables code copy", async () => {
+  it("renders an expired one-shot invitation without a QR", async () => {
     const user = userEvent.setup()
     callSpy.mockImplementation(async (name: string) => {
       if (name === "companion_server_status") return STATUS_STOPPED
-      if (name === "companion_issue_pair_jwt") {
+      if (name === "companion_create_owner_invitation") {
         return {
-          pairJwt: "header.payload.signature",
+          invitation: "expired-invitation",
           expiresAtMs: Date.now() - 1,
           baseUrl: "http://127.0.0.1:7890",
-          pairCode: "123456",
+          fingerprint: "sha256:paired-spki",
+          appVersion: "0.1.0",
+          hostId: "host-1",
+          tenantId: "local_acct_a",
         }
       }
       return undefined as unknown as never
@@ -209,102 +219,42 @@ describe("CompanionSection", () => {
 
     expect(await screen.findByText(/Token expired/i)).toBeInTheDocument()
     expect(screen.queryByTestId("qr-mock")).toBeNull()
-    expect(screen.getByTestId("pair-code-block")).toHaveAttribute("data-expired", "true")
-    expect(screen.getByTestId("pair-code-copy")).toBeDisabled()
+    expect(screen.queryByTestId("pair-code-block")).toBeNull()
   })
 
-  it("renders the 6-digit code block alongside the QR when the desktop returns one", async () => {
+  it("handles invitation issue failures and can generate a fresh QR afterward", async () => {
     const user = userEvent.setup()
-    const futureMs = Date.now() + 5 * 60_000
     callSpy.mockImplementation(async (name: string) => {
       if (name === "companion_server_status") return STATUS_STOPPED
-      if (name === "companion_issue_pair_jwt") {
-        return {
-          pairJwt: "header.payload.signature",
-          expiresAtMs: futureMs,
-          baseUrl: "http://192.168.1.42:7890",
-          pairCode: "742518",
-          pairCodeExpiresAtMs: futureMs,
-        }
-      }
-      return undefined as unknown as never
-    })
-
-    render(<CompanionSection />)
-    const button = await screen.findByRole("button", { name: /Generate QR/i })
-    await user.click(button)
-
-    const block = await screen.findByTestId("pair-code-block")
-    expect(block.getAttribute("data-expired")).toBe("false")
-    expect(screen.getByTestId("pair-code-digits")).toHaveTextContent("742518")
-    expect(screen.getByTestId("pair-code-copy")).toBeInTheDocument()
-  })
-
-  it("copies the pairing code through the Clipboard API when available", async () => {
-    const user = userEvent.setup()
-    const writeText = jest.fn<Promise<void>, [string]>().mockResolvedValue(undefined)
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText },
-    })
-    const futureMs = Date.now() + 5 * 60_000
-    callSpy.mockImplementation(async (name: string) => {
-      if (name === "companion_server_status") return STATUS_STOPPED
-      if (name === "companion_issue_pair_jwt") {
-        return {
-          pairJwt: "header.payload.signature",
-          expiresAtMs: futureMs,
-          baseUrl: "http://192.168.1.42:7890",
-          pairCode: "742518",
-        }
-      }
-      return undefined as unknown as never
-    })
-
-    render(<CompanionSection />)
-    await user.click(await screen.findByRole("button", { name: /Generate QR/i }))
-    await user.click(await screen.findByTestId("pair-code-copy"))
-
-    expect(writeText).toHaveBeenCalledWith("742518")
-    expect(await screen.findByText(/Copied/i)).toBeInTheDocument()
-  })
-
-  it("handles pairing issue failures and clipboard write failures", async () => {
-    const user = userEvent.setup()
-    const writeText = jest.fn<Promise<void>, [string]>().mockRejectedValueOnce(new Error("denied"))
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText },
-    })
-    callSpy.mockImplementation(async (name: string) => {
-      if (name === "companion_server_status") return STATUS_STOPPED
-      if (name === "companion_issue_pair_jwt") return Promise.reject("pair failed")
+      if (name === "companion_create_owner_invitation") return Promise.reject("pair failed")
       return undefined as unknown as never
     })
 
     render(<CompanionSection />)
     await user.click(await screen.findByRole("button", { name: /Generate QR/i }))
     await waitFor(() =>
-      expect(callSpy).toHaveBeenCalledWith("companion_issue_pair_jwt", {
+      expect(callSpy).toHaveBeenCalledWith("companion_create_owner_invitation", {
         localAccountId: "local_acct_a",
       })
     )
 
     callSpy.mockImplementation(async (name: string) => {
       if (name === "companion_server_status") return STATUS_STOPPED
-      if (name === "companion_issue_pair_jwt") {
+      if (name === "companion_create_owner_invitation") {
         return {
-          pairJwt: "header.payload.signature",
+          invitation: "fresh-invitation",
           expiresAtMs: Date.now() + 5 * 60_000,
           baseUrl: "http://192.168.1.42:7890",
-          pairCode: "123456",
+          fingerprint: "sha256:paired-spki",
+          appVersion: "0.1.0",
+          hostId: "host-1",
+          tenantId: "local_acct_a",
         }
       }
       return undefined as unknown as never
     })
     await user.click(screen.getByRole("button", { name: /Generate QR/i }))
-    await user.click(await screen.findByTestId("pair-code-copy"))
-    expect(writeText).toHaveBeenCalledWith("123456")
+    expect(await screen.findByTestId("qr-mock")).toBeInTheDocument()
   })
 
   it("renders rows from listPairedDevices via useLiveQuery", async () => {

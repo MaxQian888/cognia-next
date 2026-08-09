@@ -11,7 +11,11 @@ export function registerAgentRunController(runId: string, controller: AbortContr
   }
 }
 
-export function installExecutionRunControlHandlers(): {
+export interface ExecutionRunControlHandlerDeps {
+  resumeAgentRun?: (runId: string) => Promise<{ resumed: boolean; reason?: string }>
+}
+
+export function installExecutionRunControlHandlers(deps: ExecutionRunControlHandlerDeps = {}): {
   agent: RunControlHandler
   workflow: RunControlHandler
   goal: RunControlHandler
@@ -24,6 +28,25 @@ export function installExecutionRunControlHandlers(): {
       const controller = agentControllers.get(command.runId)
       if (!controller) throw new Error("Agent run is not active in this process")
       controller.abort("execution_run_stopped")
+      return
+    }
+    if (command.action === "resume") {
+      const resume =
+        deps.resumeAgentRun ??
+        (async (runId: string) => {
+          const { resumeCrashedAgentRun } =
+            await import("@/lib/ai/agent/recovery/reconcile-crashed-runs")
+          const outcome = await resumeCrashedAgentRun(runId)
+          if (outcome.resumed) {
+            const { getBus } = await import("@/lib/connectors/bus")
+            await getBus().resumeDurableInboundJobs()
+          }
+          return outcome
+        })
+      const outcome = await resume(command.runId)
+      if (!outcome.resumed) {
+        throw new Error(`Agent run cannot resume safely: ${outcome.reason ?? "unknown"}`)
+      }
       return
     }
     if (command.action === "approve" || command.action === "deny") {

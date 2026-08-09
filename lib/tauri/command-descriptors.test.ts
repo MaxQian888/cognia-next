@@ -18,6 +18,8 @@ describe("companion command descriptors", () => {
   it("keeps client-owned definitions local and service commands internal", () => {
     expect(getCommandDescriptor("app_settings_update")?.target).toBe("client")
     expect(getCommandDescriptor("keyring_secret_get")?.target).toBe("service")
+    expect(getCommandDescriptor("secret_store_get")?.target).toBe("service")
+    expect(getCommandDescriptor("plugin_set_status")?.target).toBe("service")
     expect(getCommandDescriptor("git_status")?.target).toBe("execution")
   })
 })

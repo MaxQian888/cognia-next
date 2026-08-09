@@ -6,11 +6,16 @@ jest.mock("next-intl", () => ({
 }))
 
 const transportCall = jest.fn()
+const issueCompanionSocketTicket = jest.fn().mockResolvedValue({
+  ticket: "once",
+  expiresAt: Date.now() + 60_000,
+})
 jest.mock("@/lib/tauri/transport-instance", () => ({
   transport: { call: (...args: unknown[]) => transportCall(...args) },
 }))
 jest.mock("@/lib/tauri/transport-companion", () => ({
   loadCompanionConfig: () => ({ baseUrl: "https://cloud.example.com" }),
+  issueCompanionSocketTicket: (...args: unknown[]) => issueCompanionSocketTicket(...args),
 }))
 jest.mock("@/lib/platform/web-companion", () => ({
   buildTimeServerUrl: () => null,
@@ -141,9 +146,6 @@ beforeEach(() => {
         activePageId: "page-1",
       })
     }
-    if (name === "browser_stream_ticket_issue") {
-      return Promise.resolve({ ticket: "once", expiresAt: Date.now() + 60_000 })
-    }
     return Promise.resolve(undefined)
   })
 })
@@ -169,6 +171,13 @@ it("ensures a user-gated session and connects through a one-time ticket", async 
     domainGrants: ["example.com"],
   })
   expect(navigate).toHaveBeenCalledWith("https://example.com")
+  await expect(streamOptions?.issueTicket()).resolves.toEqual(
+    expect.objectContaining({ ticket: "once" })
+  )
+  expect(issueCompanionSocketTicket).toHaveBeenCalledWith({
+    channel: "browser",
+    sessionId: "browser-1",
+  })
 })
 
 it("takes human control before forwarding pointer input", async () => {

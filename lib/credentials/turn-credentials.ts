@@ -13,7 +13,7 @@
  * configure) — Rust never sees the sentinel.
  *
  * Backends, in order of preference:
- *   - **Tauri desktop** — `keyring_secret_*` commands in
+ *   - **Tauri desktop** — `secret_store_*` commands in
  *     `src-tauri/src/keyring_secrets.rs` → OS keyring (Keychain /
  *     Credential Manager / Secret Service).
  *   - **Capacitor mobile** — `SecureStoragePlugin` → iOS Keychain /
@@ -50,7 +50,7 @@ interface TurnCredentialStore {
 
 class TauriKeyringStore implements TurnCredentialStore {
   async save(keyId: string, value: TurnCredentialValue): Promise<void> {
-    await transport.call<void>("keyring_secret_set", {
+    await transport.call<void>("secret_store_set", {
       input: {
         namespace: KEYRING_NAMESPACE,
         key: keyId,
@@ -59,7 +59,7 @@ class TauriKeyringStore implements TurnCredentialStore {
     })
   }
   async load(keyId: string): Promise<TurnCredentialValue | null> {
-    const raw = await transport.call<string | null>("keyring_secret_get", {
+    const raw = await transport.call<string | null>("secret_store_get", {
       input: { namespace: KEYRING_NAMESPACE, key: keyId },
     })
     if (!raw) return null
@@ -74,7 +74,7 @@ class TauriKeyringStore implements TurnCredentialStore {
     }
   }
   async delete(keyId: string): Promise<void> {
-    await transport.call<void>("keyring_secret_clear", {
+    await transport.call<void>("secret_store_delete", {
       input: { namespace: KEYRING_NAMESPACE, key: keyId },
     })
   }

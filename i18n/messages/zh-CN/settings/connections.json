@@ -884,7 +884,12 @@
       "unsupportedNoProbe": "该适配器没有主动探测身份的接口。",
       "wechatOaNoProbe": "微信公众号适配器没有主动探测身份的接口 — 下方的 AppID 是配置时录入的。",
       "wechatPersonalNoProbe": "个人微信适配器没有主动探测身份的接口。",
-      "wecomNoProbe": "企业微信适配器没有主动探测身份的接口 — 下方的凭据是配置时录入的。"
+      "wecomNoProbe": "企业微信适配器没有主动探测身份的接口 — 下方的凭据是配置时录入的。",
+      "avatarPublishHint": "请在飞书开发者后台发布此头像，以保持机器人身份一致。",
+      "downloadAvatar": "下载头像",
+      "openDeveloperConsole": "打开开发者后台",
+      "recommendedAvatarHint": "建议为此飞书应用使用生成的头像。",
+      "recommendedAvatarTitle": "推荐头像"
     }
   },
   "matrix": {

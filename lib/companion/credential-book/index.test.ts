@@ -90,7 +90,8 @@ function legacyStorage(initial: CompanionConfig | null): CompanionConfigStorage 
 function config(patch: Partial<CompanionConfig> = {}): CompanionConfig {
   return {
     baseUrl: "https://studio.local:27890",
-    deviceJwt: "jwt.legacy",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+    deviceKeyThumbprint: "device-thumbprint",
     deviceId: "dev-legacy",
     serverVersion: "0.2.0",
     serverFingerprint: "ff00",
@@ -251,7 +252,10 @@ describe("MigratingCompanionStorage", () => {
       refileCursors: async () => undefined,
     })
     const loaded = await storage.load()
-    expect(loaded).toMatchObject({ deviceJwt: "jwt.legacy", deviceId: "dev-legacy" })
+    expect(loaded).toMatchObject({
+      devicePrivateKeyJwk: { d: "device-private" },
+      deviceId: "dev-legacy",
+    })
     expect(legacy.cleared).toBe(1)
     expect(await book.list("acct_a")).toHaveLength(1)
   })
@@ -334,7 +338,9 @@ describe("MigratingCompanionStorage", () => {
       refileCursors: async () => undefined,
     })
     expect(await storage.load()).toBeNull()
-    expect(await storage.load()).toMatchObject({ deviceJwt: "jwt.legacy" })
+    expect(await storage.load()).toMatchObject({
+      devicePrivateKeyJwk: { d: "device-private" },
+    })
     expect(attempts).toBe(2)
   })
 

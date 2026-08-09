@@ -92,3 +92,11 @@ test("toggles key visibility between password and text", () => {
   fireEvent.click(screen.getByRole("button", { name: "showKey" }))
   expect(input.type).toBe("text")
 })
+
+test("shows desktop key presence without exposing the key value", () => {
+  storeState.providerKeys = { openai: "__cognia_host_key_present__" }
+  const { container } = render(<ApiKeyInput provider="openai" label="OpenAI" />)
+  expect((container.querySelector("input") as HTMLInputElement).value).toBe("")
+  expect(screen.getByText("configured")).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "clear" })).toBeInTheDocument()
+})

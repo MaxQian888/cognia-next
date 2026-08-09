@@ -18,7 +18,22 @@ export interface CodeAdoptionFile {
   isNew: boolean
   /** Inclusive `[startLine, endLine]` ranges on the new side, one per hunk. */
   hunks: Array<[number, number]>
+  /** Accepted subset, populated only by the authoritative Task Workspace ledger. */
+  acceptedAdded?: number
+  acceptedRemoved?: number
+  adoptionState?: CodeAdoptionState
 }
+
+export type CodeAdoptionMeasurement = "taskWorkspace" | "legacyFingerprint"
+export type CodeAdoptionTrackingState = "tracked" | "truncated" | "unavailable"
+export type CodeAdoptionState =
+  | "pending"
+  | "accepted"
+  | "partiallyAccepted"
+  | "rejected"
+  | "reverted"
+  | "unavailable"
+  | "notApplicable"
 
 /** One turn's write-attribution record. */
 export interface CodeAdoptionTurnRow {
@@ -26,9 +41,11 @@ export interface CodeAdoptionTurnRow {
   id: string
   runId: number
   sessionId: string
+  /** Durable Task Workspace run correlated with this chat turn, when present. */
+  taskWorkspaceRunId?: string
   /** Canonicalized workspace root (resolved cwd). */
   workspaceRoot: string
-  /** `"in-app"` in Phase 1; `"cc" | "codex" | "opencode"` later. */
+  /** Runtime attribution, for example `"in-app"` or `"external"`. */
   agentKind: string
   model: string | null
   /** Epoch milliseconds at reconcile time. */
@@ -39,4 +56,16 @@ export interface CodeAdoptionTurnRow {
   files: CodeAdoptionFile[]
   /** `true` when the per-turn file cap clamped the record. */
   truncated: boolean
+  /** Optional for rows written before authoritative adoption tracking shipped. */
+  measurement?: CodeAdoptionMeasurement
+  trackingState?: CodeAdoptionTrackingState
+  trackingReason?: string
+  adoptionState?: CodeAdoptionState
+  adoptionReason?: string
+  proposedFiles?: number
+  proposedAdded?: number
+  proposedRemoved?: number
+  acceptedFiles?: number
+  acceptedAdded?: number
+  acceptedRemoved?: number
 }

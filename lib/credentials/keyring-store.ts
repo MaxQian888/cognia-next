@@ -12,7 +12,7 @@
  * so secrets never land in Dexie.
  *
  * Backends, in order of preference:
- *   - **Tauri desktop** — `keyring_secret_*` commands → OS keyring.
+ *   - **Tauri desktop** — `secret_store_*` commands → encrypted store whose master key uses the OS keyring.
  *   - **Capacitor mobile** — `SecureStoragePlugin` → iOS Keychain /
  *     Android Keystore.
  *   - **Headless brain** — service-scoped companion RPC → encrypted server store.
@@ -38,24 +38,24 @@ export interface KeyringStore {
 
 type KeyringCall = (name: string, params: Record<string, unknown>) => Promise<unknown>
 
-class TauriKeyringStore implements KeyringStore {
+class TauriSecretStore implements KeyringStore {
   constructor(
     private readonly namespace: string,
     private readonly call: KeyringCall
   ) {}
   async save(keyId: string, value: string): Promise<void> {
-    await this.call("keyring_secret_set", {
+    await this.call("secret_store_set", {
       input: { namespace: this.namespace, key: keyId, value },
     })
   }
   async load(keyId: string): Promise<string | null> {
-    const raw = await this.call("keyring_secret_get", {
+    const raw = await this.call("secret_store_get", {
       input: { namespace: this.namespace, key: keyId },
     })
     return typeof raw === "string" ? raw : null
   }
   async delete(keyId: string): Promise<void> {
-    await this.call("keyring_secret_clear", {
+    await this.call("secret_store_delete", {
       input: { namespace: this.namespace, key: keyId },
     })
   }
@@ -218,7 +218,7 @@ class BrowserVaultStore implements KeyringStore {
  */
 export function createKeyringStore(namespace: string): KeyringStore {
   if (isTauri() || isHeadlessHost()) {
-    return new TauriKeyringStore(namespace, (name, params) => transport.call(name, params))
+    return new TauriSecretStore(namespace, (name, params) => transport.call(name, params))
   }
   // A number of domain tests intentionally provide a minimal `@/lib/tauri`
   // mock with only `isTauri`. Keep the Web path resilient to that supported
@@ -240,7 +240,7 @@ export function createKeyringStore(namespace: string): KeyringStore {
  */
 export function createLocalKeyringStore(namespace: string): KeyringStore {
   if (!isTauri()) throw new Error("local Tauri keyring is unavailable")
-  return new TauriKeyringStore(namespace, async (name, params) => {
+  return new TauriSecretStore(namespace, async (name, params) => {
     const { invoke } = await import("@tauri-apps/api/core")
     return invoke(name, params)
   })

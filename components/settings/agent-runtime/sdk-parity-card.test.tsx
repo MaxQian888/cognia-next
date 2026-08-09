@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 const values: Record<string, boolean> = {
+  agentExecutionResolverV2: false,
   claudeSdkParityV1: false,
   claudeSdkSessionStore: false,
   claudeSdkCheckpoint: false,
@@ -13,7 +14,6 @@ const setAgentExecutionFlag = jest.fn((flag: string, value: boolean) => {
 
 jest.mock("@/lib/ai/agent/execution/feature-flags", () => ({
   getAgentExecutionFlags: () => ({
-    agentExecutionResolverV2: true,
     genericAgentHostCommands: false,
     gatewayAgentRouteTickets: false,
     headlessLlmGateway: false,
@@ -49,12 +49,16 @@ describe("SdkParityCard", () => {
     expect(screen.getByRole("switch", { name: "Session store" })).toBeDisabled()
     expect(screen.getByRole("switch", { name: "File checkpointing" })).toBeDisabled()
     expect(screen.getByRole("switch", { name: "Prewarm pool" })).toBeDisabled()
+    expect(screen.getByRole("switch", { name: "Unified execution resolver" })).not.toBeChecked()
   })
 
   it("writes the master and child flags through the shared feature-flag store", async () => {
     values.claudeSdkParityV1 = true
     const user = userEvent.setup()
     render(<SdkParityCard />)
+
+    await user.click(screen.getByRole("switch", { name: "Unified execution resolver" }))
+    expect(setAgentExecutionFlag).toHaveBeenCalledWith("agentExecutionResolverV2", true)
 
     await user.click(screen.getByRole("switch", { name: "Session store" }))
     expect(setAgentExecutionFlag).toHaveBeenCalledWith("claudeSdkSessionStore", true)

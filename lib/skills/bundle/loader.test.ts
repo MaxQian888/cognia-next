@@ -101,6 +101,29 @@ describe("loadBundle", () => {
     expect(result.resources[0].path).toBe("references/notes.md")
   })
 
+  it("restores inline resource flags from portable Cognia metadata", async () => {
+    const skillMd = `---
+name: inline-skill
+description: Loads selected references eagerly
+metadata:
+  cognia.inline-resources: '["references/inline.md"]'
+---
+Body.
+`
+    const bytes = await buildZip({
+      "inline-skill/SKILL.md": skillMd,
+      "inline-skill/references/inline.md": "Inline",
+      "inline-skill/references/lazy.md": "Lazy",
+    })
+    const result = await loadBundle({ kind: "zip-blob", bytes })
+    expect(result.resources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "references/inline.md", inline: true }),
+        expect.objectContaining({ path: "references/lazy.md", inline: undefined }),
+      ])
+    )
+  })
+
   it("composes walker warnings with parser warnings", async () => {
     const bytes = await buildZip({
       "SKILL.md": SKILL_MD,

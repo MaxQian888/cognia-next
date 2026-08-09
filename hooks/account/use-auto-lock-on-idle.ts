@@ -36,7 +36,7 @@ export function useAutoLockOnIdle(): void {
     const arm = () => {
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {
-        useAccountStore.getState().lock()
+        void Promise.resolve(useAccountStore.getState().lock()).catch(() => undefined)
       }, timeoutMs)
     }
 

@@ -92,6 +92,10 @@ export interface PluginIntegrationDef {
   resourceKinds: string[]
   eventTypes: IntegrationEventTypeDef[]
   actions: IntegrationActionDef[]
+  /** Optional named export used by the host to discover selectable resources. */
+  resourceProvider?: { handler: string; kinds: string[] }
+  /** Optional named export used by the host to refresh normalized account health. */
+  healthProvider?: { handler: string }
   inboxProjections?: IntegrationInboxProjectionDef[]
   /**
    * Optional webhook contribution. `normalizer` is a named module export that
@@ -113,6 +117,28 @@ export interface IntegrationResourceRef {
   name?: string
   url?: string
   parent?: { kind: string; id: string }
+}
+
+export interface IntegrationResourceQuery {
+  accountId: string
+  kind: string
+  query?: string
+  cursor?: string
+  limit?: number
+}
+
+export interface IntegrationRateLimitStatus {
+  remaining?: number
+  limit?: number
+  resetAt?: string
+  retryAt?: string
+}
+
+export interface IntegrationResourcePage {
+  items: IntegrationResourceRef[]
+  nextCursor?: string
+  syncedAt: string
+  rateLimit?: IntegrationRateLimitStatus
 }
 
 export interface IntegrationActor {
@@ -177,12 +203,76 @@ export interface IntegrationActionHandlerContext {
   ): Promise<{ status: number; headers: Record<string, string>; data: T }>
 }
 
+export interface IntegrationProviderContext {
+  pluginId: string
+  integrationId: string
+  accountId: string
+  authenticatedRequest<T = unknown>(
+    input: string,
+    init?: IntegrationRequestInit
+  ): Promise<{ status: number; headers: Record<string, string>; data: T }>
+}
+
+export type IntegrationResourceProvider = (
+  query: IntegrationResourceQuery,
+  context: IntegrationProviderContext
+) => Promise<IntegrationResourcePage>
+
 export type IntegrationActionHandler = (
   input: Record<string, unknown>,
   context: IntegrationActionHandlerContext
 ) => Promise<unknown>
 
 export type IntegrationAccountHealth = "unknown" | "healthy" | "degraded" | "revoked"
+
+export type IntegrationRecoveryAction = "reauthorize" | "review-permissions" | "reconnect" | "retry"
+
+export interface IntegrationAccountStatus {
+  health: IntegrationAccountHealth
+  code?: string
+  message?: string
+  checkedAt: string
+  lastHealthyAt?: string
+  lastSyncAt?: string
+  recoveryAction?: IntegrationRecoveryAction
+  requiredPermissions?: string[]
+  grantedPermissions?: string[]
+  rateLimit?: IntegrationRateLimitStatus
+  deliveryRecovery?: {
+    lastCheckedAt: string
+    lastDeliveryId?: string
+    /** Delivery IDs whose remote redelivery request failed and must be retried. */
+    pendingRedeliveryIds?: string[]
+  }
+}
+
+export interface IntegrationIngressEndpoint {
+  id: string
+  accountId: string
+  routeId: string
+  /** Opaque host keyring handle; never the webhook secret itself. */
+  secretHandle: string
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface IntegrationIngressDeadLetter {
+  routeId: string
+  deliveryId: string
+  eventType?: string
+  receivedAt: string
+  attempts: number
+}
+
+export interface IntegrationIngressDeadLetterDetail extends IntegrationIngressDeadLetter {
+  headers: Record<string, string>
+  body: string
+}
+
+export type IntegrationAccountStatusProvider = (
+  context: IntegrationProviderContext
+) => Promise<IntegrationAccountStatus>
 
 export interface IntegrationAccount {
   id: string
@@ -196,6 +286,11 @@ export interface IntegrationAccount {
   label: string
   enabled: boolean
   health: IntegrationAccountHealth
+  status?: IntegrationAccountStatus
+  /** Explicit user confirmation required before the host changes a remote App webhook. */
+  dedicatedAppConfirmed?: boolean
+  /** Account-level webhook endpoint. Deprecated subscription fields remain for v2 migration. */
+  ingressEndpoint?: IntegrationIngressEndpoint
   createdAt: string
   updatedAt: string
 }
@@ -208,6 +303,7 @@ export interface IntegrationAccountInput {
   approvedOrigins?: string[]
   label: string
   enabled?: boolean
+  dedicatedAppConfirmed?: boolean
 }
 
 export interface IntegrationSubscription {
@@ -223,6 +319,9 @@ export interface IntegrationSubscription {
   /** Opaque host keyring handle; never the webhook secret itself. */
   ingressSecretHandle?: string
   enabled: boolean
+  /** True when access was removed remotely; preserves the user's configuration for recovery. */
+  disabledByProvider?: boolean
+  disabledReason?: string
   createdAt: string
   updatedAt: string
 }
@@ -314,6 +413,8 @@ export interface PluginIntegrationsAPI {
   ): Promise<IntegrationAccount>
   removeAccount(accountId: string): Promise<void>
   listSubscriptions(accountId?: string): Promise<IntegrationSubscription[]>
+  listResources(query: IntegrationResourceQuery): Promise<IntegrationResourcePage>
+  checkAccountHealth(accountId: string): Promise<IntegrationAccountStatus>
   createSubscription(input: IntegrationSubscriptionInput): Promise<IntegrationSubscription>
   removeSubscription(subscriptionId: string): Promise<void>
   publishEvent(event: IntegrationEventEnvelope): Promise<{ inserted: boolean }>
@@ -326,6 +427,13 @@ export interface PluginIntegrationsAPI {
     init?: IntegrationRequestInit
   ): Promise<{ status: number; headers: Record<string, string>; data: T }>
   getIngressPublicUrl(subscriptionId: string): Promise<string | undefined>
+  listIngressDeadletters(accountId: string): Promise<IntegrationIngressDeadLetter[]>
+  getIngressDeadletter(
+    accountId: string,
+    routeId: string,
+    deliveryId: string
+  ): Promise<IntegrationIngressDeadLetterDetail | undefined>
+  requeueIngressDeadletter(accountId: string, routeId: string, deliveryId: string): Promise<boolean>
   migrateLegacy(plan: IntegrationMigrationPlan): Promise<IntegrationMigrationResult>
   rollbackMigration(migrationId: string): Promise<void>
 }

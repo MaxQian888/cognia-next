@@ -12,6 +12,7 @@ import {
 import {
   getActiveRuntimeTargetContext,
   setActiveRuntimeTargetContext,
+  type RuntimeTargetScope,
 } from "./runtime-target-context"
 import { stopRuntimeTargetSubscriptions } from "./runtime-target-lifecycle"
 import {
@@ -62,6 +63,13 @@ interface DetachDependencies {
   deleteDatabase(name: string): Promise<void>
 }
 
+interface RegisterDependencies {
+  registry: Pick<RuntimeTargetRegistry, "upsertAndActivateCompanionTarget">
+  getContext(): RuntimeTargetScope | null
+  activateDatabase(accountId: string, targetId: string): void
+  setContext(accountId: string, targetId: string): void
+}
+
 const runtimeTargetRegistry = new RuntimeTargetRegistry()
 
 export interface CompanionRuntimeConfigMetadata {
@@ -70,6 +78,8 @@ export interface CompanionRuntimeConfigMetadata {
   serverVersion: string
   serverFingerprint?: string
   targetId?: string
+  /** Account captured when pairing began; avoids re-reading mutable boot context after persistence. */
+  accountId?: string
 }
 
 export async function prepareAccountRuntimeTarget(
@@ -142,14 +152,21 @@ export async function deriveCompanionRuntimeTargetId(
 }
 
 export async function registerCompanionRuntimeTarget(
-  config: CompanionRuntimeConfigMetadata
+  config: CompanionRuntimeConfigMetadata,
+  dependencies: RegisterDependencies = {
+    registry: runtimeTargetRegistry,
+    getContext: getActiveRuntimeTargetContext,
+    activateDatabase: activateAccountDatabase,
+    setContext: setActiveRuntimeTargetContext,
+  }
 ): Promise<RuntimeTargetRecord | null> {
-  const scope = getActiveRuntimeTargetContext()
-  if (!scope) return null
+  const scope = dependencies.getContext()
+  const accountId = config.accountId ?? scope?.accountId
+  if (!accountId) return null
   const targetId = config.targetId ?? (await deriveCompanionRuntimeTargetId(config))
   const hostname = new URL(config.baseUrl).hostname
-  const target = await runtimeTargetRegistry.upsertCompanionTarget({
-    accountId: scope.accountId,
+  const activated = await dependencies.registry.upsertAndActivateCompanionTarget({
+    accountId,
     id: targetId,
     label: hostname,
     hostKind: classifyWsHost(config.baseUrl) === "ws-lan" ? "desktop" : "cloud",
@@ -157,11 +174,10 @@ export async function registerCompanionRuntimeTarget(
     deviceId: config.deviceId,
     serverVersion: config.serverVersion,
     serverFingerprint: config.serverFingerprint,
-    credentialRef: `companion:${targetId}:device-jwt`,
+    credentialRef: `companion-host:${encodeURIComponent(accountId)}:${encodeURIComponent(targetId)}:device-private-jwk`,
   })
-  const activated = await runtimeTargetRegistry.activateTarget(scope.accountId, target.id)
-  activateAccountDatabase(scope.accountId, activated.id)
-  setActiveRuntimeTargetContext(scope.accountId, activated.id)
+  dependencies.activateDatabase(accountId, activated.id)
+  dependencies.setContext(accountId, activated.id)
   return activated
 }
 

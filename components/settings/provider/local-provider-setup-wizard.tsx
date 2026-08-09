@@ -35,6 +35,9 @@ import {
 
 export interface LocalProviderSetupWizardProps {
   providerId: LocalProviderName
+  baseUrl?: string
+  apiKey?: string
+  customHeaders?: Record<string, string>
   onComplete?: () => void
 }
 
@@ -44,6 +47,9 @@ const log = loggers.native.child("local-provider-setup-wizard")
 
 export function LocalProviderSetupWizard({
   providerId,
+  baseUrl,
+  apiKey,
+  customHeaders,
   onComplete,
 }: LocalProviderSetupWizardProps) {
   const t = useTranslations("providers")
@@ -57,6 +63,11 @@ export function LocalProviderSetupWizard({
 
   const config = LOCAL_PROVIDER_CONFIGS[providerId]
   const instructions = getInstallInstructions(providerId)
+  const localizedInstructions = t.raw(`setupWizard.providers.${providerId}`) as {
+    title: string
+    steps: string[]
+  }
+  const effectiveBaseUrl = baseUrl?.trim() || config.defaultBaseURL
 
   const steps: { id: SetupStep; title: string }[] = [
     { id: "download", title: t("setupWizard.download") },
@@ -86,30 +97,37 @@ export function LocalProviderSetupWizard({
     setVerificationResult(null)
 
     try {
-      const service = createLocalProviderService(providerId)
+      const service = createLocalProviderService(providerId, {
+        baseUrl: effectiveBaseUrl,
+        apiKey,
+        customHeaders,
+      })
       const status = await service.getStatus()
 
       if (status.connected) {
         setVerificationResult({
           success: true,
-          message: `Connected${status.version ? ` v${status.version}` : ""}${status.models_count ? ` (${status.models_count} models)` : ""}`,
+          message: t("connectedSummary", {
+            version: status.version || t("unknownVersion"),
+            count: status.models_count ?? 0,
+          }),
         })
         setCurrentStep("complete")
       } else {
         setVerificationResult({
           success: false,
-          message: status.error || "Connection failed. Make sure the server is running.",
+          message: status.error || t("connectionFailed"),
         })
       }
     } catch (error) {
       setVerificationResult({
         success: false,
-        message: error instanceof Error ? error.message : "Connection failed",
+        message: error instanceof Error ? error.message : t("connectionFailed"),
       })
     } finally {
       setIsVerifying(false)
     }
-  }, [providerId])
+  }, [providerId, effectiveBaseUrl, apiKey, customHeaders, t])
 
   // Render step indicator
   const renderStepIndicator = () => (
@@ -179,7 +197,7 @@ export function LocalProviderSetupWizard({
           <div className="space-y-4">
             <div className="text-center">
               <Download className="h-12 w-12 mx-auto text-primary mb-2" />
-              <h3 className="font-semibold text-lg">{instructions.title}</h3>
+              <h3 className="font-semibold text-lg">{localizedInstructions.title}</h3>
               <p className="text-sm text-muted-foreground mt-1">
                 {t("setupWizard.downloadInstructions")}
               </p>
@@ -207,7 +225,7 @@ export function LocalProviderSetupWizard({
           <div className="space-y-4">
             <h3 className="font-semibold">{t("setupWizard.installationSteps")}</h3>
             <ol className="space-y-3">
-              {instructions.steps.map((step, index) => (
+              {localizedInstructions.steps.map((step, index) => (
                 <li key={index} className="flex gap-3 text-sm">
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-medium flex-shrink-0">
                     {index + 1}
@@ -249,11 +267,13 @@ export function LocalProviderSetupWizard({
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium">{t("serverUrl")}</span>
                   <Badge variant="secondary" className="font-mono text-xs">
-                    {config.defaultBaseURL}
+                    {effectiveBaseUrl}
                   </Badge>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {t("setupWizard.defaultPort", { port: config.defaultPort })}
+                  {effectiveBaseUrl === config.defaultBaseURL
+                    ? t("setupWizard.defaultPort", { port: config.defaultPort })
+                    : `${t("default")}: ${config.defaultBaseURL}`}
                 </p>
               </div>
 

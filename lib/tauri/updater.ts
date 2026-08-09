@@ -3,7 +3,7 @@
 import { DEFAULT_UPDATE_SETTINGS, type UpdateSettings } from "@cognia/agent-config-types"
 
 import { isTauri } from "@/lib/tauri"
-import { getActiveProxyUrl } from "@/stores/network-proxy"
+import { isProxyActive } from "@/lib/network/proxy-config"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { loggers } from "@/lib/logging"
 
@@ -23,9 +23,7 @@ interface DownloadOptions {
   timeout?: number
 }
 
-interface CheckOptions extends DownloadOptions {
-  proxy?: string
-}
+type CheckOptions = DownloadOptions
 
 /** Structural subset of the Tauri updater resource used by this module. */
 interface UpdateHandle {
@@ -142,21 +140,36 @@ function currentUpdateSettings(): UpdateSettings {
 }
 
 function requestOptions(): { check: CheckOptions; download: DownloadOptions } {
-  const settings = currentUpdateSettings()
-  const timeout = settings.requestTimeoutSeconds * 1000
-  let proxy: string | null = null
-  if (settings.useProxy) {
-    try {
-      proxy = getActiveProxyUrl()
-    } catch {
-      // Settings may still be hydrating. A missing proxy snapshot must not
-      // prevent a direct updater request.
+  const store = useSettingsStore as typeof useSettingsStore & {
+    getState?: () => {
+      loaded?: boolean
+      settings?: {
+        updates?: Partial<UpdateSettings>
+        networkProxy?: Parameters<typeof isProxyActive>[0]
+      } | null
     }
   }
-  return {
-    check: { timeout, ...(proxy ? { proxy } : {}) },
-    download: { timeout },
+  const state = store.getState?.()
+  if (state?.loaded === false) {
+    throw new Error("PROXY_NOT_INITIALIZED: updater routing policy is still loading")
   }
+
+  const settings = resolveUpdateSettings(state?.settings?.updates)
+  const timeout = settings.requestTimeoutSeconds * 1000
+  const activeGlobalProxy = isProxyActive(state?.settings?.networkProxy)
+  if (!activeGlobalProxy) {
+    return { check: { timeout }, download: { timeout } }
+  }
+  if (!settings.useProxy) {
+    throw new Error(
+      "PROXY_TRANSPORT_UNSUPPORTED: updater proxy use is disabled while the global proxy is active"
+    )
+  }
+
+  // The native host mirrors its keyring-hydrated policy into the updater
+  // plugin's process environment. Keeping the endpoint out of renderer IPC is
+  // required for authenticated proxies.
+  return { check: { timeout }, download: { timeout } }
 }
 
 function availableFromHandle(handle: UpdateHandle | null): AvailableUpdate | null {
@@ -186,7 +199,9 @@ function classifyError(error: unknown, phase: UpdatePhase): AppUpdateError {
   const message = error instanceof Error ? error.message : String(error)
   const normalized = message.toLowerCase()
   let code: UpdateErrorCode
-  if (
+  if (normalized.includes("proxy_")) {
+    code = "network"
+  } else if (
     normalized.includes("not allowed") ||
     normalized.includes("permission") ||
     normalized.includes("capability") ||

@@ -15,6 +15,8 @@ import {
 } from "./stores"
 import type { CompanionCredentialBook, CompanionHostCredential, CompanionHostKey } from "./types"
 
+const DEVICE_KEY: JsonWebKey = { kty: "EC", crv: "P-256", d: "device-key" }
+
 function memoryRecords(): HostRecordStore {
   let book: HostBookEnvelope = emptyHostBook()
   return {
@@ -46,7 +48,8 @@ function memoryCredentials(): HostCredentialStore {
 function legacy(patch: Partial<CompanionConfig> = {}): CompanionConfig {
   return {
     baseUrl: "https://desktop.local:27890",
-    deviceJwt: "jwt.legacy",
+    devicePrivateKeyJwk: DEVICE_KEY,
+    deviceKeyThumbprint: "thumbprint-legacy",
     deviceId: "dev-legacy",
     serverVersion: "0.2.0",
     serverFingerprint: "ff00",
@@ -172,7 +175,7 @@ describe("migrateLegacyCompanionConfig", () => {
     })
     expect(
       await h.book.loadCredential({ hostId: "dev-legacy", accountNamespace: "acct_a" })
-    ).toEqual({ deviceJwt: "jwt.legacy", signalingPrivateKeyJwk: undefined })
+    ).toEqual({ devicePrivateKeyJwk: DEVICE_KEY, signalingPrivateKeyJwk: undefined })
     expect(h.refiled).toEqual([["dev-legacy", "acct_a:dev-legacy"]])
     expect(h.cleared).toBe(1)
   })
@@ -284,13 +287,18 @@ describe("migrateLegacyCompanionConfig", () => {
     })
   })
 
-  it("keeps the legacy record when the token comes back different", async () => {
+  it("keeps the legacy record when the device key comes back different", async () => {
     const book = createCredentialBook({
       records: memoryRecords(),
       credentials: memoryCredentials(),
     })
     const outcome = await migrateLegacyCompanionConfig({
-      book: { ...book, loadCredential: async () => ({ deviceJwt: "someone-elses" }) },
+      book: {
+        ...book,
+        loadCredential: async () => ({
+          devicePrivateKeyJwk: { ...DEVICE_KEY, d: "someone-elses" },
+        }),
+      },
       readLegacy: async () => legacy({ accountId: "acct_a" }),
       clearLegacy: async () => {
         throw new Error("must not clear")
@@ -299,7 +307,7 @@ describe("migrateLegacyCompanionConfig", () => {
     })
     expect(outcome).toEqual({
       kind: "failed",
-      reason: "the migrated credential holds a different device token",
+      reason: "the migrated credential holds a different device key",
     })
   })
 
@@ -310,7 +318,7 @@ describe("migrateLegacyCompanionConfig", () => {
       credentials: memoryCredentials(),
     })
     const outcome = await migrateLegacyCompanionConfig({
-      book: { ...book, loadCredential: async () => ({ deviceJwt: "jwt.legacy" }) },
+      book: { ...book, loadCredential: async () => ({ devicePrivateKeyJwk: DEVICE_KEY }) },
       readLegacy: async () => legacy({ accountId: "acct_a", signalingPrivateKeyJwk: jwk }),
       clearLegacy: async () => {
         throw new Error("must not clear")

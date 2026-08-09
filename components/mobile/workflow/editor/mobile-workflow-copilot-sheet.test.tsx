@@ -7,7 +7,8 @@ import userEvent from "@testing-library/user-event"
 
 const loadCompanionConfig = jest.fn<Record<string, unknown> | null, []>(() => ({
   baseUrl: "https://desk.local",
-  deviceJwt: "jwt",
+  devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
   deviceId: "d1",
 }))
 const isTauri = jest.fn(() => false)
@@ -67,7 +68,8 @@ function renderSheet(open: boolean) {
 }
 
 beforeEach(() => {
-  loadCompanionConfig.mockReturnValue({ baseUrl: "https://desk.local", deviceJwt: "jwt", deviceId: "d1" })
+  loadCompanionConfig.mockReturnValue({ baseUrl: "https://desk.local", devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint", deviceId: "d1" })
   isTauri.mockReturnValue(false)
 })
 

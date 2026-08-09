@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { LocalAccountRecord, PasswordVerifierRecord } from "@/lib/accounts/account-types"
 import type { AccountStoreState } from "@/stores/account/account-store"
 
@@ -16,6 +16,10 @@ jest.mock("@/hooks/use-network-status", () => ({
     loading: false,
     status: { connected: true, connectionType: "wifi" as const },
   }),
+}))
+
+jest.mock("@/hooks/account/use-auto-lock", () => ({
+  useAutoLock: () => undefined,
 }))
 
 let mockIsTauri = true
@@ -277,6 +281,48 @@ describe("AccountGate", () => {
 
     expect(acknowledgeRecoveryKey).toHaveBeenCalledTimes(1)
     expect(screen.queryByText("child")).not.toBeInTheDocument()
+  })
+
+  it("does not dismiss recovery until first-account runtime activation finishes", async () => {
+    let resolveCreate!: (account: LocalAccountRecord) => void
+    mockCreateAccount.mockReturnValueOnce(
+      new Promise<LocalAccountRecord>((resolve) => {
+        resolveCreate = resolve
+      })
+    )
+    const view = render(
+      <AccountGate>
+        <div>child</div>
+      </AccountGate>
+    )
+
+    fireEvent.change(screen.getByLabelText("displayNameLabel"), {
+      target: { value: "Local User" },
+    })
+    fireEvent.change(screen.getByLabelText("passwordLabel"), {
+      target: { value: "secret-pw" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "createAccount" }))
+    await waitFor(() => expect(mockCreateAccount).toHaveBeenCalledTimes(1))
+
+    setGateState({
+      accounts: [account("acct_first", "First")],
+      activeAccountId: "acct_first",
+      unlockedAccountId: "acct_first",
+      pendingRecoveryKey: "recovery-key-once",
+    })
+    view.rerender(
+      <AccountGate>
+        <div>child</div>
+      </AccountGate>
+    )
+
+    expect(screen.getByRole("checkbox")).toBeDisabled()
+    expect(screen.getByRole("button", { name: "recoveryContinue" })).toBeDisabled()
+
+    await act(async () => resolveCreate(account("acct_first", "First")))
+
+    await waitFor(() => expect(screen.getByRole("checkbox")).toBeEnabled())
   })
 
   it("blocks the first-run create below the minimum password length", () => {

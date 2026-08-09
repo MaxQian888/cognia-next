@@ -1,21 +1,9 @@
 "use client"
 
 /**
- * Mobile Companion settings — desktop-side surface for the companion API
- * (M2.8). Three cards:
- *
- *   1. Server status: master toggle + bind-mode radio (loopback / LAN) +
- *      live "running on http://x.y.z.w:7890" status row.
- *   2. Pair a new device: button generates a one-shot pair JWT, renders a QR
- *      whose payload is `{baseUrl, pair_jwt, server_version}` (the M4.5 phone
- *      scanner expects this shape) plus a 5-minute countdown.
- *   3. Paired devices: table backed by `useLiveQuery(listPairedDevices)`.
- *      Each row exposes a revoke button that calls both Dexie's
- *      `revokePairedDevice` and the Rust `companion_revoke_device` deny-list.
- *
- * V1 ships plain HTTP — when the user picks LAN binding, the card renders an
- * inline warning that the server is reachable on the local network without
- * TLS. Self-signed certs + cloudflared are deferred to M2.9.
+ * Desktop-side Companion control plane: HTTPS server/tunnel state, canonical
+ * cgnp3 Owner invitations, paired-device capability snapshots and revocation,
+ * signaling/WebRTC diagnostics, OIDC configuration, and push credentials.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
@@ -23,7 +11,6 @@ import { useTranslations } from "next-intl"
 import {
   ChevronDownIcon,
   CircleIcon,
-  CopyIcon,
   CheckIcon,
   QrCodeIcon,
   ShieldAlertIcon,
@@ -70,19 +57,16 @@ interface CompanionServerStatus {
   boundPort: number | null
 }
 
-interface PairJwtIssue {
-  pairJwt: string
+interface OwnerInvitationIssue {
+  invitation: string
   expiresAtMs: number
   baseUrl: string
   /** SHA-256 SubjectPublicKeyInfo fingerprint (Wave 1.4). Empty if absent. */
   fingerprint?: string
   /** Server app version (Wave 1.7 v2 payload). */
   appVersion?: string
-  /** 6-digit emulator-friendly pair code (Wave 4.x). Same TTL as the JWT.
-   *  Optional so older Rust desktops returning the legacy shape still
-   *  decode — the UI renders only when present. */
-  pairCode?: string
-  pairCodeExpiresAtMs?: number
+  hostId: string
+  tenantId: string
 }
 
 interface TunnelInfo {
@@ -155,8 +139,10 @@ async function stopServer(): Promise<void> {
   await transport.call<void>("companion_server_stop")
 }
 
-async function issuePairJwt(localAccountId: string): Promise<PairJwtIssue> {
-  return transport.call<PairJwtIssue>("companion_issue_pair_jwt", { localAccountId })
+async function createOwnerInvitation(localAccountId: string): Promise<OwnerInvitationIssue> {
+  return transport.call<OwnerInvitationIssue>("companion_create_owner_invitation", {
+    localAccountId,
+  })
 }
 
 async function startMdnsBroadcast(args: {
@@ -822,7 +808,7 @@ function PairDeviceCard() {
   const t = useTranslations("mobile.companion.pair")
   const desktop = isTauri()
   const localAccountId = useAccountStore((state) => state.unlockedAccountId)
-  const [issue, setIssue] = useState<PairJwtIssue | null>(null)
+  const [issue, setIssue] = useState<OwnerInvitationIssue | null>(null)
   const [busy, setBusy] = useState(false)
   const [now, setNow] = useState<number>(() => Date.now())
 
@@ -845,7 +831,7 @@ function PairDeviceCard() {
     }
     setBusy(true)
     try {
-      const next = await issuePairJwt(localAccountId)
+      const next = await createOwnerInvitation(localAccountId)
       setIssue(next)
       setNow(Date.now())
     } catch (err) {
@@ -858,16 +844,19 @@ function PairDeviceCard() {
   const expired = issue ? now >= issue.expiresAtMs : false
   const remainingSecs = issue ? Math.max(0, Math.floor((issue.expiresAtMs - now) / 1000)) : 0
 
-  // QR payload v2 — `cgnp2|<base64url(json)>` carrying the TLS fingerprint
-  // alongside baseUrl + pair JWT. The mobile scanner pins the fingerprint
-  // against the desktop's actual cert (Wave 1.4). Falls back to the legacy
-  // bare-JSON shape when the desktop doesn't yet surface a fingerprint.
+  // QR payload cgnp3 carries only the one-shot invitation and discovery
+  // metadata. Long-lived device credentials are created on the client and
+  // never embedded in this offline payload.
   const qrPayload = useMemo(() => {
     if (!issue) return null
     return encodePairPayload({
       baseUrl: issue.baseUrl,
-      pairJwt: issue.pairJwt,
-      version: issue.appVersion ?? APP_VERSION,
+      mode: "owner-invitation",
+      invitation: issue.invitation,
+      hostId: issue.hostId,
+      tenantId: issue.tenantId,
+      expiresAt: issue.expiresAtMs,
+      serverVersion: issue.appVersion ?? APP_VERSION,
       fingerprint: issue.fingerprint ?? "",
     })
   }, [issue])
@@ -909,86 +898,11 @@ function PairDeviceCard() {
             <QRCodeSVG value={qrPayload} size={224} level="M" aria-label={t("qrAria")} />
           </div>
         )}
-        {issue?.pairCode && (
-          <PairCodeBlock
-            code={issue.pairCode}
-            expired={expired}
-            label={t("codeLabel")}
-            copyLabel={t("codeCopy")}
-            copiedLabel={t("codeCopied")}
-            hint={t("codeHint")}
-          />
-        )}
         {issue && (
           <p className="break-all text-[10px] font-mono text-muted-foreground">{issue.baseUrl}</p>
         )}
       </CardContent>
     </Card>
-  )
-}
-
-interface PairCodeBlockProps {
-  code: string
-  expired: boolean
-  label: string
-  copyLabel: string
-  copiedLabel: string
-  hint: string
-}
-
-function PairCodeBlock({ code, expired, label, copyLabel, copiedLabel, hint }: PairCodeBlockProps) {
-  const [copied, setCopied] = useState(false)
-
-  const onCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(code)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // Clipboard API unavailable (older WebView / locked-down env).
-      // The user can still read the digits off the screen.
-    }
-  }, [code])
-
-  return (
-    <div
-      className={cn("flex flex-col gap-2 rounded border bg-card p-3", expired && "opacity-50")}
-      data-testid="pair-code-block"
-      data-expired={expired ? "true" : "false"}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</span>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 gap-1 px-2"
-          onClick={() => void onCopy()}
-          disabled={expired}
-          aria-label={copyLabel}
-          data-testid="pair-code-copy"
-        >
-          {copied ? (
-            <>
-              <CheckIcon className="size-3.5" aria-hidden="true" />
-              {copiedLabel}
-            </>
-          ) : (
-            <>
-              <CopyIcon className="size-3.5" aria-hidden="true" />
-              {copyLabel}
-            </>
-          )}
-        </Button>
-      </div>
-      <p
-        className="select-all text-center font-mono text-2xl tracking-[0.3em]"
-        aria-label={label}
-        data-testid="pair-code-digits"
-      >
-        {code}
-      </p>
-      <p className="text-[11px] text-muted-foreground">{hint}</p>
-    </div>
   )
 }
 

@@ -119,6 +119,7 @@ describe("section-keys", () => {
     it("maps a key back to its owning section", () => {
       expect(keyToSection("theme")).toBe("appearance")
       expect(keyToSection("ttsProvider")).toBe("speech")
+      expect(keyToSection("localOpenaiBaseUrl")).toBe("speech")
       expect(keyToSection("networkProxy")).toBe("network")
       expect(keyToSection("biometricRequiredFor")).toBe("security")
       expect(keyToSection("customLimitsSources")).toBe("subscription")

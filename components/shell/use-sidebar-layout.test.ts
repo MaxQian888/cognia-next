@@ -21,7 +21,7 @@ interface SavePatch {
 const saveMock = jest.fn(async (_patch?: SavePatch) => {})
 
 beforeEach(() => {
-  saveMock.mockClear()
+  saveMock.mockReset().mockResolvedValue(undefined)
   useSettingsStore.setState({
     settings: { sidebarLayout: { pinned: ["workflows", "inbox"], hidden: [] } } as never,
     save: saveMock as never,
@@ -102,6 +102,26 @@ describe("useSidebarLayout", () => {
       await result.current.pin("workflows")
     })
     expect(lastSaved().pinned).toEqual(["workflows", "inbox"])
+  })
+
+  it("serializes rapid pins against the latest persisted layout", async () => {
+    useSettingsStore.setState({
+      settings: {
+        sidebarLayout: { pinned: ["workflows"], hidden: ["logs", "me"] },
+      } as never,
+    })
+    saveMock.mockImplementation(async (patch?: SavePatch) => {
+      await Promise.resolve()
+      const current = useSettingsStore.getState().settings
+      useSettingsStore.setState({ settings: { ...current, ...patch } as never })
+    })
+    const { result } = renderHook(() => useSidebarLayout())
+
+    await act(async () => {
+      await Promise.all([result.current.pin("logs"), result.current.pin("me")])
+    })
+
+    expect(lastSaved()).toEqual({ pinned: ["workflows", "logs", "me"], hidden: [] })
   })
 
   it("unpins an item (it drops to overflow)", async () => {

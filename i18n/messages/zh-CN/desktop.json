@@ -210,7 +210,8 @@
       "side": "导航栏位置",
       "sideLeft": "左侧",
       "sideRight": "右侧",
-      "title": "自定义侧边栏"
+      "title": "自定义侧边栏",
+      "pinItem": "固定项目"
     },
     "directMessages": "私信",
     "discover": "发现",
@@ -602,7 +603,10 @@
     "select": "选择",
     "unarchive": "取消归档",
     "unpin": "取消置顶",
-    "untitled": "（无标题）"
+    "untitled": "（无标题）",
+    "openInCodexApp": "在 Codex App 中打开",
+    "openInCodexAppFailed": "无法在 Codex App 中打开此任务。",
+    "openedInCodexApp": "已在 Codex App 中打开。"
   },
   "shell": {
     "desktopOnlyBodyMiddle": " 启动应用，而不是 ",

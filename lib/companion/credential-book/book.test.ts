@@ -58,6 +58,7 @@ function draft(patch: Partial<CompanionHostDraft> = {}): CompanionHostDraft {
     endpoints: { baseUrl: "https://10.0.0.1:27890" },
     tlsPin: "aa11",
     deviceId: "dev-1",
+    deviceKeyThumbprint: "device-thumbprint",
     serverVersion: "0.2.0",
     ...patch,
   }
@@ -169,10 +170,14 @@ describe("credentials", () => {
     const { book, records, credentials } = harness()
     const key = { hostId: "host-1", accountNamespace: "acct_a" }
     await book.upsert(draft())
-    await book.saveCredential(key, { deviceJwt: "jwt.a" })
-    expect(await book.loadCredential(key)).toEqual({ deviceJwt: "jwt.a" })
+    await book.saveCredential(key, {
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+    })
+    expect(await book.loadCredential(key)).toEqual({
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+    })
     expect(credentials.entries.size).toBe(1)
-    expect(JSON.stringify(records.book)).not.toContain("jwt.a")
+    expect(JSON.stringify(records.book)).not.toContain("device-private")
   })
 
   it("returns null when no credential was stored", async () => {
@@ -233,11 +238,16 @@ describe("remove", () => {
   })
 
   it("is a no-op for an unknown key", async () => {
-    const { book, records } = harness()
+    const { book, records, credentials } = harness()
     await book.upsert(draft())
+    await credentials.save(
+      { hostId: "ghost", accountNamespace: "acct_a" },
+      { devicePrivateKeyJwk: { kty: "EC", d: "orphan" } }
+    )
     const before = records.writes
     await book.remove({ hostId: "ghost", accountNamespace: "acct_a" })
     expect(records.writes).toBe(before)
+    expect(credentials.entries.has("acct_a/ghost")).toBe(false)
   })
 })
 

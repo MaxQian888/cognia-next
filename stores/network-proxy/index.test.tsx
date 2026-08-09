@@ -17,6 +17,15 @@ jest.mock("@/lib/pet/window-role", () => ({
   isMainAppWindow: jest.fn(),
 }))
 
+jest.mock("@/lib/network/proxy-credentials", () => ({
+  migrateLegacyProxyPassword: jest.fn(async (settings) => ({
+    settings,
+    credentialConfigured: false,
+    migrated: false,
+  })),
+  applyProxyPasswordMutation: jest.fn().mockResolvedValue(true),
+}))
+
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const tauriCore = require("@tauri-apps/api/core") as { invoke: jest.Mock }
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -80,23 +89,7 @@ describe("useProxyStore (legacy shape)", () => {
     expect(state.config.url).toBe("http://127.0.0.1:7890")
   })
 
-  it("preserves manual auth credentials when both are set", () => {
-    useSettingsStore.setState({
-      settings: baseSettings({
-        mode: "manual",
-        host: "proxy.corp",
-        port: 8080,
-        username: "alice",
-        password: "secret",
-      }),
-      loaded: true,
-      providerKeys: {},
-    })
-    const state = proxyStore.useProxyStore.getState()
-    expect(state.config.manual).toEqual({ username: "alice", password: "secret" })
-  })
-
-  it("returns null manual when only one cred is present", () => {
+  it("never projects credentials into the legacy compatibility snapshot", () => {
     useSettingsStore.setState({
       settings: baseSettings({
         mode: "manual",
@@ -108,7 +101,8 @@ describe("useProxyStore (legacy shape)", () => {
       providerKeys: {},
     })
     const state = proxyStore.useProxyStore.getState()
-    expect(state.config.manual).toBeNull()
+    expect(state.config).not.toHaveProperty("manual")
+    expect(JSON.stringify(state)).not.toContain("alice")
   })
 
   it("subscribe fires when networkProxy changes", () => {
@@ -194,7 +188,7 @@ describe("applyProxyToRust", () => {
     expect(tauriCore.invoke).not.toHaveBeenCalled()
   })
 
-  it("does not invoke proxy_set from a least-privilege secondary window", async () => {
+  it("does not invoke proxy_apply from a least-privilege secondary window", async () => {
     tauri.isTauri.mockReturnValue(true)
     windowRole.isMainAppWindow.mockReturnValue(false)
 
@@ -203,7 +197,7 @@ describe("applyProxyToRust", () => {
     expect(tauriCore.invoke).not.toHaveBeenCalled()
   })
 
-  it("invokes proxy_set with the snake_case payload in Tauri", async () => {
+  it("invokes proxy_apply with a sanitized payload in Tauri", async () => {
     tauri.isTauri.mockReturnValue(true)
     tauriCore.invoke.mockResolvedValue(undefined)
     useSettingsStore.setState({
@@ -212,23 +206,34 @@ describe("applyProxyToRust", () => {
         host: "127.0.0.1",
         port: 7890,
         username: "alice",
-        password: "secret",
       }),
       loaded: true,
       providerKeys: {},
     })
     await proxyStore.applyProxyToRust()
-    expect(tauriCore.invoke).toHaveBeenCalledWith("proxy_set", {
-      cfg: expect.objectContaining({
+    expect(tauriCore.invoke).toHaveBeenCalledWith("proxy_apply", {
+      input: expect.objectContaining({
         mode: "manual",
         protocol: "http",
         host: "127.0.0.1",
         port: 7890,
         username: "alice",
-        password: "secret",
         proxy_websockets: true,
       }),
     })
+    expect(JSON.stringify(tauriCore.invoke.mock.calls[0])).not.toContain("password")
+  })
+
+  it("signals live WebViews only after native policy is applied", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    tauriCore.invoke.mockResolvedValue(undefined)
+    const listener = jest.fn()
+    window.addEventListener("cognia:network-proxy-applied", listener)
+
+    await proxyStore.applyProxyToRust(DEFAULT_NETWORK_PROXY_SETTINGS)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    window.removeEventListener("cognia:network-proxy-applied", listener)
   })
 
   it("dedupes consecutive identical pushes", async () => {
@@ -262,10 +267,10 @@ describe("applyProxyToRust", () => {
     expect(tauriCore.invoke).toHaveBeenCalledTimes(2)
   })
 
-  it("swallows errors so the caller never throws", async () => {
+  it("surfaces errors so callers can block unsafe outbound traffic", async () => {
     tauri.isTauri.mockReturnValue(true)
     tauriCore.invoke.mockRejectedValue(new Error("boom"))
-    await expect(proxyStore.applyProxyToRust()).resolves.toBeUndefined()
+    await expect(proxyStore.applyProxyToRust()).rejects.toThrow("boom")
   })
 
   it("logs the empty-config branch when proxy is inactive but Tauri is on", async () => {
@@ -279,8 +284,8 @@ describe("applyProxyToRust", () => {
     })
     await proxyStore.applyProxyToRust()
     expect(tauriCore.invoke).toHaveBeenCalledWith(
-      "proxy_set",
-      expect.objectContaining({ cfg: expect.objectContaining({ mode: "off" }) })
+      "proxy_apply",
+      expect.objectContaining({ input: expect.objectContaining({ mode: "off" }) })
     )
   })
 
@@ -300,9 +305,9 @@ describe("applyProxyToRust", () => {
       port: 8888,
     })
     expect(tauriCore.invoke).toHaveBeenCalledWith(
-      "proxy_set",
+      "proxy_apply",
       expect.objectContaining({
-        cfg: expect.objectContaining({ host: "10.10.10.10", port: 8888 }),
+        input: expect.objectContaining({ host: "10.10.10.10", port: 8888 }),
       })
     )
   })
@@ -350,7 +355,14 @@ describe("maybeAutoDetectProxy", () => {
       save: saveSpy,
     })
     tauriCore.invoke.mockResolvedValue([
-      { kind: "socks5", host: "127.0.0.1", port: 1080, label: "SOCKS @ 1080" },
+      {
+        kind: "socks5",
+        host: "127.0.0.1",
+        port: 1080,
+        label: "SOCKS @ 1080",
+        verified: true,
+        verification: "socks5-connect",
+      },
     ])
     await proxyStore.maybeAutoDetectProxy()
     expect(tauriCore.invoke).toHaveBeenCalledWith("proxy_detect")
@@ -372,7 +384,14 @@ describe("maybeAutoDetectProxy", () => {
       save: saveSpy,
     })
     tauriCore.invoke.mockResolvedValue([
-      { kind: "http", host: "127.0.0.1", port: 7890, label: "HTTP @ 7890" },
+      {
+        kind: "http",
+        host: "127.0.0.1",
+        port: 7890,
+        label: "HTTP @ 7890",
+        verified: true,
+        verification: "http-connect",
+      },
     ])
     await proxyStore.maybeAutoDetectProxy()
     expect(saveSpy).not.toHaveBeenCalled()

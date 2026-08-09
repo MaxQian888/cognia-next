@@ -16,11 +16,12 @@
 //   <markdown body>
 
 import matter from "gray-matter"
-import type { Skill, SkillCategory } from "@cognia/agent-config-types"
+import type { Skill, SkillCategory, SkillValidationError } from "@cognia/agent-config-types"
 import type { SkillDraft } from "@/lib/db/skills"
 import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
 import { isTauri } from "@/lib/tauri"
 import { replacePluginRootTokens } from "@/lib/plugin/utils/plugin-root-tokens"
+import { deriveSkillSlug, isValidSkillSlug } from "@/lib/skills/slug"
 
 const VALID_CATEGORIES: SkillCategory[] = [
   "creative-design",
@@ -44,6 +45,8 @@ const VALID_CATEGORIES: SkillCategory[] = [
 const KNOWN_FRONTMATTER_KEYS = new Set<string>([
   "name",
   "description",
+  "compatibility",
+  "metadata",
   "allowed-tools",
   "allowedTools",
   "tags",
@@ -51,6 +54,8 @@ const KNOWN_FRONTMATTER_KEYS = new Set<string>([
   "version",
   "author",
   "license",
+  "disable-model-invocation",
+  "allow_implicit_invocation",
 ])
 
 const KNOWN_BUT_UNMODELLED_KEYS = new Set<string>([
@@ -60,13 +65,14 @@ const KNOWN_BUT_UNMODELLED_KEYS = new Set<string>([
   "bashPatterns",
   "importPatterns",
   "promptSignals",
-  "metadata",
 ])
 
 export interface ParseResult {
   draft: SkillDraft
   /** Issues encountered during parsing (e.g., name fallback). Non-fatal. */
   warnings: string[]
+  /** Portability findings caused by tolerant legacy normalization. */
+  portabilityIssues: SkillValidationError[]
 }
 
 export interface ParseError {
@@ -78,7 +84,12 @@ export interface ParseError {
 export type ExportableSkill = Pick<
   Skill,
   | "name"
+  | "slug"
   | "description"
+  | "compatibility"
+  | "metadata"
+  | "invocationPolicy"
+  | "frontmatterExtensions"
   | "content"
   | "allowedTools"
   | "tags"
@@ -93,22 +104,30 @@ export type ExportableSkill = Pick<
  * matches Claude Code's expected format and is readable by both systems.
  */
 export function serializeSkill(skill: ExportableSkill): string {
-  const data: Record<string, unknown> = {
-    name: skill.name,
-  }
+  const slug = deriveSkillSlug({ id: "skill-export", name: skill.name, slug: skill.slug })
+  const data: Record<string, unknown> = { ...(skill.frontmatterExtensions ?? {}), name: slug }
   if (skill.description?.trim()) data.description = skill.description.trim()
+  if (skill.compatibility?.trim()) data.compatibility = skill.compatibility.trim()
   if (skill.allowedTools && skill.allowedTools.length > 0) {
-    data["allowed-tools"] = [...skill.allowedTools]
+    data["allowed-tools"] = skill.allowedTools.join(" ")
   }
-  if (skill.tags && skill.tags.length > 0) {
-    data.tags = [...skill.tags]
+  const extensionMetadata = skill.frontmatterExtensions?.metadata
+  const metadata: Record<string, unknown> = {
+    ...(extensionMetadata &&
+    typeof extensionMetadata === "object" &&
+    !Array.isArray(extensionMetadata)
+      ? (extensionMetadata as Record<string, unknown>)
+      : {}),
+    ...(skill.metadata ?? {}),
   }
-  // Extra cognia-next / Cognia metadata. Claude Code ignores unknown keys.
-  if (skill.category && skill.category !== "custom") {
-    data.category = skill.category
-  }
-  if (skill.version?.trim()) data.version = skill.version.trim()
-  if (skill.author?.trim()) data.author = skill.author.trim()
+  metadata["cognia.display-name"] = skill.name
+  if (skill.author?.trim()) metadata.author = skill.author.trim()
+  if (skill.version?.trim()) metadata.version = skill.version.trim()
+  if (skill.category && skill.category !== "custom") metadata["cognia.category"] = skill.category
+  if (skill.tags && skill.tags.length > 0) metadata["cognia.tags"] = JSON.stringify(skill.tags)
+  if (skill.invocationPolicy) metadata["cognia.invocation-policy"] = skill.invocationPolicy
+  if (Object.keys(metadata).length > 0) data.metadata = metadata
+  if (skill.invocationPolicy === "explicit") data["disable-model-invocation"] = true
   if (skill.license?.trim()) data.license = skill.license.trim()
 
   const body = skill.content.endsWith("\n") ? skill.content : `${skill.content}\n`
@@ -125,6 +144,7 @@ export function parseSkillMarkdown(
   opts: { fallbackName?: string } = {}
 ): ParseResult {
   const warnings: string[] = []
+  const portabilityIssues: SkillValidationError[] = []
 
   let parsed: matter.GrayMatterFile<string>
   try {
@@ -138,21 +158,22 @@ export function parseSkillMarkdown(
   const fm = (parsed.data ?? {}) as Record<string, unknown>
   const body = parsed.content.trim()
 
-  let name = stringOrUndef(fm.name)
-  if (!name) {
-    name = opts.fallbackName?.trim() || ""
-    if (name) warnings.push(`No 'name' in frontmatter — using "${name}".`)
+  let portableName = stringOrUndef(fm.name)
+  if (!portableName) {
+    portableName = opts.fallbackName?.trim() || ""
+    if (portableName) warnings.push(`No 'name' in frontmatter — using "${portableName}".`)
   }
-  if (!name) {
+  if (!portableName) {
     throw new Error("Skill is missing a name (no frontmatter and no fallback).")
   }
 
   if (!body) {
-    throw new Error(`Skill "${name}" has no content body.`)
+    throw new Error(`Skill "${portableName}" has no content body.`)
   }
 
   const description = stringOrUndef(fm.description)
-  const allowedTools = parseList(fm["allowed-tools"]) ?? parseList(fm.allowedTools)
+  const compatibility = stringOrUndef(fm.compatibility)
+  const allowedTools = parseToolList(fm["allowed-tools"]) ?? parseToolList(fm.allowedTools)
   const tags = parseList(fm.tags)
   const categoryRaw = stringOrUndef(fm.category)?.toLowerCase()
   const category = (VALID_CATEGORIES as string[]).includes(categoryRaw ?? "")
@@ -164,31 +185,78 @@ export function parseSkillMarkdown(
   const version = stringOrUndef(fm.version)
   const author = stringOrUndef(fm.author)
   const license = stringOrUndef(fm.license)
+  const metadata = parseStringMetadata(fm.metadata, warnings)
+  const metadataTags = parseJsonStringArray(metadata?.["cognia.tags"])
+  const metadataCategory = metadata?.["cognia.category"]
+  const resolvedCategory = (VALID_CATEGORIES as string[]).includes(metadataCategory ?? "")
+    ? (metadataCategory as SkillCategory)
+    : category
+  const invocationMetadata = metadata?.["cognia.invocation-policy"]
+  const explicitByVendor =
+    fm["disable-model-invocation"] === true || fm.allow_implicit_invocation === false
+  const invocationPolicy =
+    explicitByVendor || invocationMetadata === "explicit"
+      ? ("explicit" as const)
+      : invocationMetadata === "implicit"
+        ? ("implicit" as const)
+        : undefined
+  const displayName = metadata?.["cognia.display-name"]?.trim() || portableName
+  const slug = deriveSkillSlug({ id: `skill-${portableName}`, name: portableName })
+
+  if (!isValidSkillSlug(portableName)) {
+    portabilityIssues.push({
+      code: "slug-format",
+      field: "slug",
+      severity: "portability",
+      message: `Imported frontmatter name "${portableName}" was normalized to slug "${slug}".`,
+    })
+  }
+
+  const frontmatterExtensions = Object.fromEntries(
+    Object.entries(fm).filter(
+      ([key, value]) =>
+        !KNOWN_FRONTMATTER_KEYS.has(key) ||
+        (key === "metadata" &&
+          (!value ||
+            typeof value !== "object" ||
+            Array.isArray(value) ||
+            Object.values(value as Record<string, unknown>).some(
+              (entry) => typeof entry !== "string"
+            )))
+    )
+  )
 
   for (const key of Object.keys(fm)) {
     if (KNOWN_FRONTMATTER_KEYS.has(key)) continue
     if (KNOWN_BUT_UNMODELLED_KEYS.has(key)) {
       warnings.push(
-        `Frontmatter key "${key}" is recognised by Claude Code's dynamic-activation model but not supported by cognia-next — the value will be ignored.`
+        `Frontmatter key "${key}" is recognised by Claude Code's dynamic-activation model and is preserved without Cognia runtime behavior.`
       )
       continue
     }
-    warnings.push(`Unknown frontmatter key "${key}" — ignored.`)
+    warnings.push(`Unknown frontmatter key "${key}" — preserved.`)
   }
 
   return {
     draft: {
-      name,
+      name: displayName,
+      slug,
       description,
+      compatibility,
+      metadata,
       content: body,
       allowedTools,
-      tags,
-      category,
-      version,
-      author,
+      tags: tags ?? metadataTags,
+      category: resolvedCategory,
+      version: version ?? metadata?.version,
+      author: author ?? metadata?.author,
       license,
+      invocationPolicy,
+      frontmatterExtensions:
+        Object.keys(frontmatterExtensions).length > 0 ? frontmatterExtensions : undefined,
     },
     warnings,
+    portabilityIssues,
   }
 }
 
@@ -232,6 +300,45 @@ function parseList(v: unknown): string[] | undefined {
     return arr.length > 0 ? arr : undefined
   }
   return undefined
+}
+
+function parseToolList(v: unknown): string[] | undefined {
+  if (Array.isArray(v)) return parseList(v)
+  if (typeof v !== "string") return undefined
+  const values = v
+    .split(/[\s,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+  return values.length > 0 ? values : undefined
+}
+
+function parseStringMetadata(
+  value: unknown,
+  warnings: string[]
+): Record<string, string> | undefined {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    warnings.push("Frontmatter metadata must be a string-to-string mapping.")
+    return undefined
+  }
+  const out: Record<string, string> = {}
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof item === "string") out[key] = item
+    else warnings.push(`Frontmatter metadata key "${key}" was not a string and was ignored.`)
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
+function parseJsonStringArray(value: string | undefined): string[] | undefined {
+  if (!value) return undefined
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return Array.isArray(parsed) && parsed.every((item) => typeof item === "string")
+      ? parsed
+      : undefined
+  } catch {
+    return undefined
+  }
 }
 
 // ---- Plugin skill IO (M4) -----------------------------------------------

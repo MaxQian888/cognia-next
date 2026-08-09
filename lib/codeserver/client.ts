@@ -26,11 +26,6 @@ export interface CodeServerStatus {
   relayPath?: string | null
 }
 
-interface DesktopRelayStatus {
-  port: number
-  url: string
-}
-
 /** Mirror of `codeserver::download::CodeServerDiskUsage`. */
 export interface CodeServerDiskUsage {
   version: string
@@ -193,13 +188,7 @@ export const codeServerClient = {
     if (!endpoint.serverFingerprint) {
       throw new Error("remote host is missing its paired certificate fingerprint")
     }
-    const relay = await transport.call<DesktopRelayStatus>("codeserver_remote_relay_ensure", {
-      baseUrl: endpoint.baseUrl,
-      deviceJwt: endpoint.deviceJwt,
-      serverFingerprint: endpoint.serverFingerprint,
-      relayPath: status.relayPath,
-    })
-    return { ...status, port: relay.port }
+    throw new Error("remote managed IDE relay requires the canonical browser socket-ticket adapter")
   },
   /** Current status for `root` without spawning. */
   status: (root: string) => transport.call<CodeServerStatus>("codeserver_status", { root }),

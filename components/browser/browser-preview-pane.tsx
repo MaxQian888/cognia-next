@@ -217,10 +217,21 @@ export function BrowserPreviewPane({
   const shouldShowLivePage = !!committedUrl && hasPainted && regionVisible
 
   const handleWebviewReady = useCallback(() => setWebviewReady(true), [])
+  const handleWebviewError = useCallback(
+    (error: unknown) => {
+      if (String(error).includes("PROXY_TRANSPORT_UNSUPPORTED")) {
+        toast.error(t("errors.httpsProxyUnsupported"))
+        return
+      }
+      toast.error(t("errors.navigate"))
+    },
+    [t]
+  )
   const { getRect, refreshBounds } = useBrowserPaneWebview(reservedRef, {
     url: committedUrl,
     ownerId,
     onReady: handleWebviewReady,
+    onError: handleWebviewError,
     onRectChange: handleRectChange,
     visible: shouldShowLivePage,
   })

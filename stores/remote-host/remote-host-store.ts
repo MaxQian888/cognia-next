@@ -103,7 +103,8 @@ function normalizeBaseUrl(baseUrl: string): string {
 function withoutPersistedSecrets(config: CompanionConfig): CompanionConfig {
   return {
     ...config,
-    deviceJwt: "",
+    devicePrivateKeyJwk: undefined,
+    serviceToken: undefined,
     signalingPrivateKeyJwk: undefined,
     signalingPrivateKey: undefined,
   }
@@ -112,12 +113,12 @@ function withoutPersistedSecrets(config: CompanionConfig): CompanionConfig {
 async function hydrateHostCredential(id: string): Promise<CompanionConfig | null> {
   const host = useRemoteHostStore.getState().hosts.find((candidate) => candidate.id === id)
   if (!host) return null
-  if (host.config.deviceJwt) return host.config
+  if (host.config.devicePrivateKeyJwk) return host.config
   const credential = await loadRemoteHostCredential(id)
   if (!credential) return null
   const config: CompanionConfig = {
     ...host.config,
-    deviceJwt: credential.deviceJwt,
+    devicePrivateKeyJwk: credential.devicePrivateKeyJwk,
     signalingPrivateKeyJwk: credential.signalingPrivateKeyJwk,
   }
   useRemoteHostStore.setState((state) => ({
@@ -316,8 +317,15 @@ export const useRemoteHostStore = create<RemoteHostState>()(
       activeHostId: null,
 
       addHost: ({ label, config }) => {
+        if (!config.devicePrivateKeyJwk || !config.deviceKeyThumbprint) {
+          throw new Error("remote host device identity is unavailable; pair again")
+        }
         const normalized = normalizeBaseUrl(config.baseUrl)
         const cleanConfig: CompanionConfig = { ...config, baseUrl: normalized }
+        const credential = {
+          devicePrivateKeyJwk: config.devicePrivateKeyJwk,
+          signalingPrivateKeyJwk: config.signalingPrivateKeyJwk,
+        }
         const existing = get().hosts.find((h) => normalizeBaseUrl(h.config.baseUrl) === normalized)
         if (existing) {
           // Re-pairing the same origin refreshes credentials; keep id + label.
@@ -329,8 +337,8 @@ export const useRemoteHostStore = create<RemoteHostState>()(
             connectionError: undefined,
           }
           set({ hosts: get().hosts.map((h) => (h.id === existing.id ? updated : h)) })
-          void saveRemoteHostCredential(existing.id, cleanConfig).catch(() => undefined)
-          // If the refreshed host is active, re-install so the new JWT takes.
+          void saveRemoteHostCredential(existing.id, credential).catch(() => undefined)
+          // If the refreshed host is active, re-install so the new key takes.
           if (get().activeHostId === existing.id) get().activateHost(existing.id)
           return updated
         }
@@ -344,7 +352,7 @@ export const useRemoteHostStore = create<RemoteHostState>()(
           connectionState: "disconnected",
         }
         set({ hosts: [...get().hosts, host] })
-        void saveRemoteHostCredential(id, cleanConfig).catch(() => undefined)
+        void saveRemoteHostCredential(id, credential).catch(() => undefined)
         return host
       },
 
@@ -366,7 +374,7 @@ export const useRemoteHostStore = create<RemoteHostState>()(
       activateHost: (id) => {
         const host = get().hosts.find((h) => h.id === id)
         if (!host) return
-        if (!host.config.deviceJwt) {
+        if (!host.config.devicePrivateKeyJwk || !host.config.deviceKeyThumbprint) {
           void hydrateHostCredential(id).then((config) => {
             if (config) {
               get().activateHost(id)
@@ -385,8 +393,11 @@ export const useRemoteHostStore = create<RemoteHostState>()(
         setActiveRemoteTransport(transportFactory(configProvider))
         setActiveRemoteEndpoint({
           baseUrl: host.config.baseUrl,
-          deviceJwt: host.config.deviceJwt,
           deviceId: host.config.deviceId,
+          devicePrivateKeyJwk: host.config.devicePrivateKeyJwk,
+          deviceKeyThumbprint: host.config.deviceKeyThumbprint,
+          accountId: host.config.accountId,
+          serverVersion: host.config.serverVersion,
           serverFingerprint: host.config.serverFingerprint,
         })
         set({
@@ -438,17 +449,14 @@ export const useRemoteHostStore = create<RemoteHostState>()(
     {
       name: "cognia-remote-hosts",
       storage: persistLocalStorage(),
-      version: 2,
+      version: 3,
       migrate: async (persisted, version) => {
         const state = persisted as Partial<RemoteHostState>
-        const hosts = Array.isArray(state.hosts) ? state.hosts : []
-        if (version < 2) {
+        const priorHosts = Array.isArray(state.hosts) ? state.hosts : []
+        const hosts = version < 3 ? [] : priorHosts
+        if (version < 3) {
           await Promise.all(
-            hosts.map(async (host) => {
-              if (host.config?.deviceJwt) {
-                await saveRemoteHostCredential(host.id, host.config).catch(() => undefined)
-              }
-            })
+            priorHosts.map((host) => clearRemoteHostCredential(host.id).catch(() => undefined))
           )
         }
         return {

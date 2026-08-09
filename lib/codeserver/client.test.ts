@@ -16,44 +16,42 @@ afterEach(() => {
   __resetRoutingForTests()
 })
 
-it("converts a remote relay path into a certificate-pinned local port", async () => {
+it("fails closed until the remote relay uses a canonical browser socket ticket", async () => {
   setActiveRemoteEndpoint({
     baseUrl: "https://remote.example:27890",
-    deviceJwt: "device-jwt",
+    deviceId: "device-1",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+    deviceKeyThumbprint: "device-thumbprint",
+    serverVersion: "1.0.0",
     serverFingerprint: "ab".repeat(32),
-  })
-  call
-    .mockResolvedValueOnce({
-      running: true,
-      port: null,
-      version: "4.128.0",
-      profile: "managed",
-      relayPath: "/ide/v1/relay/session/",
-    })
-    .mockResolvedValueOnce({ port: 43123, url: "http://127.0.0.1:43123/" })
-
-  await expect(codeServerClient.ensure("/remote/work")).resolves.toMatchObject({
-    running: true,
-    port: 43123,
-  })
-  expect(call).toHaveBeenNthCalledWith(2, "codeserver_remote_relay_ensure", {
-    baseUrl: "https://remote.example:27890",
-    deviceJwt: "device-jwt",
-    serverFingerprint: "ab".repeat(32),
-    relayPath: "/ide/v1/relay/session/",
-  })
-})
-
-it("fails closed when a remote host has no paired certificate fingerprint", async () => {
-  setActiveRemoteEndpoint({
-    baseUrl: "https://remote.example:27890",
-    deviceJwt: "device-jwt",
   })
   call.mockResolvedValueOnce({
     running: true,
     port: null,
     version: "4.128.0",
-    relayPath: "/ide/v1/relay/session/",
+    profile: "managed",
+    relayPath: "/ide/relay/session/",
+  })
+
+  await expect(codeServerClient.ensure("/remote/work")).rejects.toThrow(
+    "canonical browser socket-ticket adapter"
+  )
+  expect(call).toHaveBeenCalledTimes(1)
+})
+
+it("fails closed when a remote host has no paired certificate fingerprint", async () => {
+  setActiveRemoteEndpoint({
+    baseUrl: "https://remote.example:27890",
+    deviceId: "device-1",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+    deviceKeyThumbprint: "device-thumbprint",
+    serverVersion: "1.0.0",
+  })
+  call.mockResolvedValueOnce({
+    running: true,
+    port: null,
+    version: "4.128.0",
+    relayPath: "/ide/relay/session/",
   })
 
   await expect(codeServerClient.ensure("/remote/work")).rejects.toThrow(

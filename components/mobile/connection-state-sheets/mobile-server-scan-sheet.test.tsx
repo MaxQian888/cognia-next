@@ -116,7 +116,8 @@ describe("MobileServerScanSheet", () => {
       baseUrl: "https://192.168.1.42:7890",
       serverFingerprint: "ABCDEF0123456789",
       deviceId: "d",
-      deviceJwt: "j",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
       serverVersion: "0.1.0",
     })
     const observedPaired: Array<{ ip: string; port?: number; fingerprint?: string }> = []
@@ -162,7 +163,8 @@ describe("MobileServerScanSheet", () => {
       baseUrl: "https://192.168.1.42:7890",
       serverFingerprint: "ORIGINAL-FP",
       deviceId: "d",
-      deviceJwt: "j",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
       serverVersion: "0.1.0",
     })
     scanLanImpl = async (opts) => {
@@ -187,7 +189,8 @@ describe("MobileServerScanSheet", () => {
       baseUrl: "https://192.168.1.42:7890",
       serverFingerprint: "ORIGINAL-FP",
       deviceId: "d",
-      deviceJwt: "j",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
       serverVersion: "0.1.0",
     })
     scanLanImpl = async (opts) => {
@@ -215,7 +218,8 @@ describe("MobileServerScanSheet", () => {
       baseUrl: "https://192.168.1.42:7890",
       serverFingerprint: "ORIGINAL-FP",
       deviceId: "d",
-      deviceJwt: "j",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
       serverVersion: "0.1.0",
     })
     scanLanImpl = async (opts) => {

@@ -116,7 +116,8 @@
     "title": "Preview a web page"
   },
   "errors": {
-    "navigate": "Could not navigate to that URL"
+    "navigate": "Could not navigate to that URL",
+    "httpsProxyUnsupported": "HTTPS proxying is not supported in this browser preview."
   },
   "find": {
     "close": "Close find",

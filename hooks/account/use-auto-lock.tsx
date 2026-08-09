@@ -52,7 +52,7 @@ export function useAutoLock(): void {
       clearTimer()
       const remaining = windowMs - (Date.now() - lastActivityRef.current)
       if (remaining <= 0) {
-        useAccountStore.getState().lock()
+        void Promise.resolve(useAccountStore.getState().lock()).catch(() => undefined)
         return
       }
       timerRef.current = setTimeout(onExpire, remaining)
@@ -63,7 +63,7 @@ export function useAutoLock(): void {
       // Fresh activity since we armed? Wait out the remainder instead of locking.
       const remaining = windowMs - (Date.now() - lastActivityRef.current)
       if (remaining <= 0) {
-        useAccountStore.getState().lock()
+        void Promise.resolve(useAccountStore.getState().lock()).catch(() => undefined)
       } else {
         arm()
       }

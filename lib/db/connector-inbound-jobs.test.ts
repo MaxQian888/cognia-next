@@ -185,9 +185,20 @@ describe("connector inbound jobs", () => {
   })
 
   it("requires an explicit recovery action and distinguishes safe continuation from full retry", async () => {
-    const continuing = await enqueueConnectorInboundJob(event("om-continue", 10), "queue")
+    const continuing = await enqueueConnectorInboundJob(
+      {
+        ...event("om-continue", 10),
+        channelData: { activeRunDispatchMode: "steer" },
+      },
+      "queue"
+    )
     await markConnectorInboundJobRecoveryRequired(continuing.id, "ambiguous")
-    await expect(continueConnectorInboundJobSafely(continuing.id, { now: 400 })).resolves.toBe(true)
+    await expect(
+      continueConnectorInboundJobSafely(continuing.id, {
+        now: 400,
+        recoveryAnchor: { version: 1, attemptId: "attempt-2" },
+      })
+    ).resolves.toBe(true)
     expect(await getDb().connectorInboundJobs.get(continuing.id)).toEqual(
       expect.objectContaining({
         status: "steering",
@@ -197,10 +208,16 @@ describe("connector inbound jobs", () => {
           channelData: expect.objectContaining({
             dispatchIntent: "steer-replay",
             recoveryIntent: "continue_safely",
+            recoveryAnchor: { version: 1, attemptId: "attempt-2" },
           }),
+          plainText: expect.not.stringContaining("om-continue"),
         }),
       })
     )
+    expect(
+      (await getDb().connectorInboundJobs.get(continuing.id))?.event.channelData
+        ?.activeRunDispatchMode
+    ).toBeUndefined()
 
     const retrying = await enqueueConnectorInboundJob(event("om-retry", 20), "steer")
     await markConnectorInboundJobRecoveryRequired(retrying.id, "ambiguous")
@@ -271,6 +288,27 @@ describe("connector inbound jobs", () => {
 
     expect(await getDb().connectorInboundJobs.get(job.id)).toEqual(
       expect.objectContaining({ status: "completed", executionRunId: "execution:run-1" })
+    )
+  })
+
+  it("does not overwrite a recovery-required handler outcome with completion", async () => {
+    const job = await enqueueConnectorInboundJob(event("om-drift", 10), "queue", { now: 100 })
+    await claimNextConnectorInboundJob(job.conversationKey, {
+      leaseOwner: "active-runner",
+      leaseMs: 1_000,
+      now: 150,
+    })
+    await markConnectorInboundJobRecoveryRequired(job.id, "recovery_execution_drift", {
+      now: 200,
+    })
+
+    await completeConnectorInboundJob(job.id, { now: 300 })
+
+    expect(await getDb().connectorInboundJobs.get(job.id)).toEqual(
+      expect.objectContaining({
+        status: "recovery_required",
+        recoveryReason: "recovery_execution_drift",
+      })
     )
   })
 

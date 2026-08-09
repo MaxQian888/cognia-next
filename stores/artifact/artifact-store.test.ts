@@ -669,15 +669,30 @@ describe("artifact version history", () => {
     expect(useArtifactStore.getState().saveArtifactVersion("missing")).toBeNull()
   })
 
-  it("restoreArtifactVersion swaps content back", () => {
-    const a = useArtifactStore
-      .getState()
-      .createArtifact({ sessionId: "s", messageId: "m", type: "code", title: "t", content: "v1" })
+  it("restoreArtifactVersion restores the snapshotted title, content, and metadata", () => {
+    const a = useArtifactStore.getState().createArtifact({
+      sessionId: "s",
+      messageId: "m",
+      type: "code",
+      title: "Original",
+      content: "v1",
+      metadata: { plugin: { kind: "test/workbook", schemaVersion: 1, ownerPluginId: "test" } },
+    })
     useArtifactStore.getState().saveArtifactVersion(a.id, "snapshot")
-    useArtifactStore.getState().updateArtifact(a.id, { content: "v2" })
+    useArtifactStore.getState().updateArtifact(a.id, {
+      title: "Updated",
+      content: "v2",
+      metadata: { plugin: { kind: "test/workbook", schemaVersion: 2, ownerPluginId: "test" } },
+    })
     const versions = useArtifactStore.getState().getArtifactVersions(a.id)
     useArtifactStore.getState().restoreArtifactVersion(a.id, versions[0].id)
-    expect(useArtifactStore.getState().artifacts[a.id].content).toBe("v1")
+    expect(useArtifactStore.getState().artifacts[a.id]).toMatchObject({
+      title: "Original",
+      content: "v1",
+      metadata: {
+        plugin: { kind: "test/workbook", schemaVersion: 1, ownerPluginId: "test" },
+      },
+    })
   })
 
   it("restoreArtifactVersion ignores unknown versions", () => {

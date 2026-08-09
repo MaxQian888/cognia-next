@@ -9,6 +9,8 @@ import { useTranslations } from "next-intl"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { getCodeAdoptionTurnByTaskWorkspaceRun } from "@/lib/code-adoption/persist"
+import type { CodeAdoptionTurnRow } from "@/lib/code-adoption/types"
 import {
   applyTaskWorkspace,
   downloadTaskResource,
@@ -73,6 +75,7 @@ export function TaskResourcesPanel({
   const [diff, setDiff] = useState<string | null>(null)
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const [patchSet, setPatchSet] = useState<PatchSet | null>(null)
+  const [adoption, setAdoption] = useState<CodeAdoptionTurnRow | null>(null)
   const [selectedHunks, setSelectedHunks] = useState<string[]>([])
   const [sensitiveAuthorized, setSensitiveAuthorized] = useState(false)
   const [runPreview, setRunPreview] = useState(false)
@@ -126,6 +129,7 @@ export function TaskResourcesPanel({
     let cancelled = false
     if (!selectedRunId) {
       setPatchSet(null)
+      setAdoption(null)
       return
     }
     void getTaskPatchSet(selectedRunId)
@@ -134,6 +138,13 @@ export function TaskResourcesPanel({
       })
       .catch((reason: unknown) => {
         if (!cancelled) setError(String(reason))
+      })
+    void getCodeAdoptionTurnByTaskWorkspaceRun(selectedRunId)
+      .then((next) => {
+        if (!cancelled) setAdoption(next ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) setAdoption(null)
       })
     return () => {
       cancelled = true
@@ -235,12 +246,16 @@ export function TaskResourcesPanel({
 
   async function refresh() {
     if (!active) return
-    const [next, nextPatchSet] = await Promise.all([
+    const [next, nextPatchSet, nextAdoption] = await Promise.all([
       listTaskResources(active.taskId),
       selectedRunId ? getTaskPatchSet(selectedRunId) : Promise.resolve(null),
+      selectedRunId
+        ? getCodeAdoptionTurnByTaskWorkspaceRun(selectedRunId)
+        : Promise.resolve(undefined),
     ])
     setResources(next)
     setPatchSet(nextPatchSet)
+    setAdoption(nextAdoption ?? null)
     reconcile(sessionId, next)
   }
 
@@ -487,6 +502,7 @@ export function TaskResourcesPanel({
           )}
         </div>
       </div>
+      {adoption && <AdoptionSummary row={adoption} />}
       {view === "timeline" ? (
         <div className="min-h-0 flex-1 overflow-auto">
           {summary && (
@@ -743,6 +759,40 @@ export function TaskResourcesPanel({
             )}
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+function AdoptionSummary({ row }: { row: CodeAdoptionTurnRow }) {
+  const t = useTranslations("artifacts.workspace.taskResources")
+  const proposedLines =
+    (row.proposedAdded ?? row.totalAdded) + (row.proposedRemoved ?? row.totalRemoved)
+  const acceptedLines = (row.acceptedAdded ?? 0) + (row.acceptedRemoved ?? 0)
+  let detail: string
+  if (row.measurement !== "taskWorkspace") {
+    detail = t("adoptionGenerationOnly", { lines: proposedLines })
+  } else if (row.trackingState === "unavailable" || row.adoptionState === "unavailable") {
+    detail = t("adoptionUnavailable")
+  } else if (row.adoptionState === "pending") {
+    detail = t("adoptionPending", { lines: proposedLines })
+  } else if (row.adoptionState === "reverted") {
+    detail = t("adoptionReverted", { lines: proposedLines })
+  } else if (row.adoptionState === "rejected") {
+    detail = t("adoptionRejected", { lines: proposedLines })
+  } else {
+    const rate = proposedLines === 0 ? 0 : Math.round((acceptedLines / proposedLines) * 100)
+    detail = t("adoptionRate", { accepted: acceptedLines, proposed: proposedLines, rate })
+  }
+  return (
+    <div
+      className="flex items-center gap-2 border-b bg-muted/20 px-3 py-1.5 text-xs"
+      data-testid="code-adoption-summary"
+    >
+      <span className="font-medium">{t("adoptionTitle")}</span>
+      <span className="text-muted-foreground">{detail}</span>
+      {(row.truncated || row.trackingState === "truncated") && (
+        <span className="text-amber-600 dark:text-amber-400">{t("adoptionTruncated")}</span>
       )}
     </div>
   )

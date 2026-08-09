@@ -6,6 +6,7 @@ import {
   ChartLineIcon,
   FolderOpenIcon,
   GitBranchIcon,
+  MessagesSquareIcon,
   PlusIcon,
   SparklesIcon,
   StarIcon,
@@ -84,6 +85,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
 import { primaryRootOf } from "@/lib/workspace/roots"
 import { SessionExecutionWorkspace } from "./session-execution-workspace"
+import { SessionCommunicationSheet } from "./session-communication-sheet"
 import { ProjectEnvironmentManager } from "@/components/settings/project-environment-manager"
 import { createSessionExecutionContext } from "@/lib/task-workspace/session-execution-context"
 import { loggers } from "@cognia/logging"
@@ -179,6 +181,7 @@ export function SessionSettingsSheet({
   const t = useTranslations("chat.header")
   const tPermission = useTranslations("chat.permissionMode")
   const [insightsOpen, setInsightsOpen] = useState(false)
+  const [communicationOpen, setCommunicationOpen] = useState(false)
   const updateSession = useUpdateSession()
   const recordPresetUsage = useRecordPresetUsage()
   const presetsRaw = usePresets()
@@ -1082,6 +1085,18 @@ export function SessionSettingsSheet({
               </Button>
               <SingleExportTrigger session={session} variant="labeled" />
               <ClearConversationTrigger />
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => {
+                  onOpenChange(false)
+                  setCommunicationOpen(true)
+                }}
+              >
+                <MessagesSquareIcon className="size-4" />
+                {t("sessionCommunication")}
+              </Button>
               {/* No longer gated on `sdkSessionId`: that gate existed because the
                   old SDK-level fork had nothing to fork from without one, which
                   hid this action entirely on every provider that never issues an
@@ -1126,6 +1141,11 @@ export function SessionSettingsSheet({
       {/* Mounted here rather than in the chat header: the header's dedicated
           chart button is gone, and this sheet is the only thing that opens it. */}
       <SessionInsightsSheet session={session} open={insightsOpen} onOpenChange={setInsightsOpen} />
+      <SessionCommunicationSheet
+        session={session}
+        open={communicationOpen}
+        onOpenChange={setCommunicationOpen}
+      />
     </Sheet>
   )
 }

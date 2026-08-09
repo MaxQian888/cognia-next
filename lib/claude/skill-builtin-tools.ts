@@ -14,8 +14,11 @@
  */
 
 import { BUILT_IN_SKILL_CATALOG } from "@/lib/skills/built-in-catalog"
+import { loadSkillForSession, loadSkillResourceForSession } from "@/lib/skills/runtime-loader"
 
 export const SKILL_TOOL_NAME = "Skill"
+export const LOAD_SKILL_TOOL_NAME = "load_skill"
+export const LOAD_SKILL_RESOURCE_TOOL_NAME = "load_skill_resource"
 
 /** Synthetic plugin id tagging the promoted built-in Skill manifest entry. */
 export const SKILL_BUILTIN_PLUGIN_ID = "cognia-skill-builtin"
@@ -64,9 +67,58 @@ export function buildSkillManifestEntries(): SkillBuiltinManifestEntry[] {
   ]
 }
 
+/** Scoped, non-side-effecting loader tools used by desktop progressive disclosure. */
+export function buildProgressiveSkillManifestEntries(
+  available: Array<{ id: string; slug?: string; name: string; description?: string }>,
+  includeResourceLoader: boolean
+): SkillBuiltinManifestEntry[] {
+  const ids = available.map((skill) => skill.id)
+  const catalog = available
+    .map(
+      (skill) => `- ${skill.id}: ${skill.slug ?? skill.name} — ${skill.description ?? skill.name}`
+    )
+    .join("\n")
+  const entries: SkillBuiltinManifestEntry[] = [
+    {
+      name: LOAD_SKILL_TOOL_NAME,
+      description:
+        "Load one Skill available in this send. The id must come from the scoped catalog.\n" +
+        catalog,
+      jsonSchema: {
+        type: "object",
+        properties: { skill_id: { type: "string", enum: ids } },
+        required: ["skill_id"],
+      },
+      pluginId: SKILL_BUILTIN_PLUGIN_ID,
+    },
+  ]
+  if (includeResourceLoader) {
+    entries.push({
+      name: LOAD_SKILL_RESOURCE_TOOL_NAME,
+      description: "Read a paged UTF-8 resource from a Skill listed for this send.",
+      jsonSchema: {
+        type: "object",
+        properties: {
+          skill_id: { type: "string", enum: ids },
+          path: { type: "string" },
+          offset: { type: "number", minimum: 0 },
+          limit: { type: "number", minimum: 1, maximum: 65536 },
+        },
+        required: ["skill_id", "path"],
+      },
+      pluginId: SKILL_BUILTIN_PLUGIN_ID,
+    })
+  }
+  return entries
+}
+
 /** Is this tool name the promoted Skill built-in? */
 export function isSkillBuiltinTool(name: string): boolean {
-  return name === SKILL_TOOL_NAME
+  return (
+    name === SKILL_TOOL_NAME ||
+    name === LOAD_SKILL_TOOL_NAME ||
+    name === LOAD_SKILL_RESOURCE_TOOL_NAME
+  )
 }
 
 /** A resolved skill, narrowed to the fields the tool returns. */
@@ -81,6 +133,8 @@ export interface SkillToolRunDeps {
   getCatalogSkill?: (id: string) => ResolvedSkill | undefined
   /** Resolve a custom (Dexie) skill by id or name. Optional (absent in CLI). */
   loadCustomSkill?: (idOrName: string) => Promise<ResolvedSkill | undefined>
+  listSkillResources?: import("@/lib/skills/runtime-loader").RuntimeLoaderDeps["listResources"]
+  recordSkillUsage?: import("@/lib/skills/runtime-loader").RuntimeLoaderDeps["recordUsage"]
 }
 
 /**
@@ -91,8 +145,41 @@ export interface SkillToolRunDeps {
 export async function runSkillBuiltinTool(
   name: string,
   args: Record<string, unknown>,
-  deps: SkillToolRunDeps
+  deps: SkillToolRunDeps,
+  context?: { sessionId: string }
 ): Promise<unknown> {
+  if (name === LOAD_SKILL_TOOL_NAME) {
+    const skillId = String(args.skill_id ?? "").trim()
+    if (!skillId) return { ok: false, code: "invalid_args", error: "skill_id is required." }
+    const runtimeDeps = deps.listSkillResources
+      ? {
+          listResources: deps.listSkillResources,
+          recordUsage: deps.recordSkillUsage ?? (async () => undefined),
+        }
+      : undefined
+    return loadSkillForSession(context?.sessionId ?? "", skillId, runtimeDeps)
+  }
+  if (name === LOAD_SKILL_RESOURCE_TOOL_NAME) {
+    const skillId = String(args.skill_id ?? "").trim()
+    const path = String(args.path ?? "").trim()
+    if (!skillId || !path) {
+      return { ok: false, code: "invalid_args", error: "skill_id and path are required." }
+    }
+    const runtimeDeps = deps.listSkillResources
+      ? {
+          listResources: deps.listSkillResources,
+          recordUsage: deps.recordSkillUsage ?? (async () => undefined),
+        }
+      : undefined
+    return loadSkillResourceForSession(
+      context?.sessionId ?? "",
+      skillId,
+      path,
+      typeof args.offset === "number" ? args.offset : 0,
+      typeof args.limit === "number" ? args.limit : undefined,
+      runtimeDeps
+    )
+  }
   if (name !== SKILL_TOOL_NAME) return `Error: unknown skill tool: ${name}`
   const key = String(args?.name ?? "").trim()
   if (!key) return "Error: the Skill tool requires a `name` (skill id or name)."

@@ -69,7 +69,10 @@
     "urlLabel": "URL",
     "urlPlaceholder": "https://example.com/hook",
     "urlRequired": "URL is required.",
-    "webhookUnsupported": "Webhooks aren't executed by the desktop runtime yet — this handler is saved but won't fire."
+    "webhookUnsupported": "Webhooks aren't executed by the desktop runtime yet — this handler is saved but won't fire.",
+    "httpCapability": "HTTP requests require the network capability.",
+    "typeHttp": "HTTP request",
+    "typeWebhookLegacy": "Legacy webhook"
   },
   "loadError": "Could not read settings: {detail}",
   "loading": "Loading hooks…",
@@ -88,5 +91,6 @@
   },
   "summary": "{count, plural, one {# group} other {# groups}}",
   "title": "Lifecycle hooks",
-  "unsaved": "Unsaved changes"
+  "unsaved": "Unsaved changes",
+  "runtimeSummary": "Runtime hooks execute through the configured host environment."
 }

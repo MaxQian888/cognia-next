@@ -57,6 +57,37 @@ export interface UseSidebarLayout {
   reset: () => Promise<void>
 }
 
+type SidebarLayoutMutation = (current: SidebarLayout) => SidebarLayout
+
+// `saveSettings` serializes writes, but serializing already-computed patches
+// is not enough: two fast clicks could both derive from the same rendered
+// layout and the second patch would erase the first. Serialize the derivation
+// too, reading the store only when each mutation reaches the front of the
+// queue. The recovered tail keeps one rejected save from blocking later edits,
+// while the returned task still rejects for the initiating caller.
+let sidebarLayoutMutationQueue: Promise<void> | null = null
+
+function enqueueSidebarLayoutMutation(mutate: SidebarLayoutMutation): Promise<void> {
+  const run = async () => {
+    const state = useSettingsStore.getState()
+    const stored = state.settings?.sidebarLayout
+    const current: SidebarLayout = {
+      pinned: stored?.pinned ?? DEFAULT_SIDEBAR_LAYOUT.pinned,
+      hidden: stored?.hidden ?? DEFAULT_SIDEBAR_LAYOUT.hidden,
+    }
+    await state.save({ sidebarLayout: mutate(current) })
+  }
+  // Start the first mutation synchronously so event handlers preserve their
+  // existing observable behavior; only followers wait for the active save.
+  const task = sidebarLayoutMutationQueue ? sidebarLayoutMutationQueue.then(run, run) : run()
+  const recovered = task.catch(() => undefined)
+  sidebarLayoutMutationQueue = recovered
+  void recovered.then(() => {
+    if (sidebarLayoutMutationQueue === recovered) sidebarLayoutMutationQueue = null
+  })
+  return task
+}
+
 export function useSidebarLayout(): UseSidebarLayout {
   const platform = usePlatform()
   const runtimeSnapshot = useRuntimeSnapshot()
@@ -95,42 +126,55 @@ export function useSidebarLayout(): UseSidebarLayout {
   const side = useSettingsStore((s) => s.settings?.sidebarSide ?? DEFAULT_SIDEBAR_SIDE)
   const setSide = useCallback((next: SidebarSide) => save({ sidebarSide: next }), [save])
 
-  const commit = useCallback((next: SidebarLayout) => save({ sidebarLayout: next }), [save])
-
   const pin = useCallback(
     (id: string) =>
-      commit({
-        pinned: layout.pinned.includes(id) ? layout.pinned : [...layout.pinned, id],
-        hidden: layout.hidden.filter((h) => h !== id),
-      }),
-    [commit, layout]
+      enqueueSidebarLayoutMutation((current) => ({
+        pinned: current.pinned.includes(id) ? current.pinned : [...current.pinned, id],
+        hidden: current.hidden.filter((h) => h !== id),
+      })),
+    []
   )
 
   const unpin = useCallback(
-    (id: string) => commit({ ...layout, pinned: layout.pinned.filter((p) => p !== id) }),
-    [commit, layout]
+    (id: string) =>
+      enqueueSidebarLayoutMutation((current) => ({
+        ...current,
+        pinned: current.pinned.filter((p) => p !== id),
+      })),
+    []
   )
 
   const hide = useCallback(
     (id: string) =>
-      commit({
-        pinned: layout.pinned.filter((p) => p !== id),
-        hidden: layout.hidden.includes(id) ? layout.hidden : [...layout.hidden, id],
-      }),
-    [commit, layout]
+      enqueueSidebarLayoutMutation((current) => ({
+        pinned: current.pinned.filter((p) => p !== id),
+        hidden: current.hidden.includes(id) ? current.hidden : [...current.hidden, id],
+      })),
+    []
   )
 
   const show = useCallback(
-    (id: string) => commit({ ...layout, hidden: layout.hidden.filter((h) => h !== id) }),
-    [commit, layout]
+    (id: string) =>
+      enqueueSidebarLayoutMutation((current) => ({
+        ...current,
+        hidden: current.hidden.filter((h) => h !== id),
+      })),
+    []
   )
 
   const reorderPinned = useCallback(
-    (ids: string[]) => commit({ ...layout, pinned: ids.filter((id) => validIds.has(id)) }),
-    [commit, layout, validIds]
+    (ids: string[]) =>
+      enqueueSidebarLayoutMutation((current) => ({
+        ...current,
+        pinned: ids.filter((id) => validIds.has(id)),
+      })),
+    [validIds]
   )
 
-  const reset = useCallback(() => commit({ ...DEFAULT_SIDEBAR_LAYOUT }), [commit])
+  const reset = useCallback(
+    () => enqueueSidebarLayoutMutation(() => ({ ...DEFAULT_SIDEBAR_LAYOUT })),
+    []
+  )
 
   return {
     catalog,

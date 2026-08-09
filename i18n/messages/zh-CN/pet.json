@@ -125,8 +125,13 @@
   "binding": {
     "clear": "清除",
     "empty": "还没有角色。",
+    "inheritAppearance": "继承全局外观",
+    "live2dOption": "Live2D · {name}",
+    "skinFor": "{name} 的皮肤",
     "speciesFor": "{name} 的物种",
-    "useGlobal": "使用全局宠物"
+    "spriteOption": "精灵图 · {name}",
+    "useGlobal": "使用全局宠物",
+    "useSvg": "内置矢量吉祥物"
   },
   "bubbles": {
     "achievementUnlocked": ["我们拿到徽章啦！", "成就达成！"],

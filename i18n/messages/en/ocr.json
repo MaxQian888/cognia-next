@@ -248,7 +248,9 @@
     "modelDir": "Stored in: {path}",
     "redownload": "Re-download",
     "shellUnavailable": "Local model management is only available in the desktop app.",
-    "title": "Local models"
+    "title": "Local models",
+    "cancelDownload": "Cancel download",
+    "legacyDetected": "Legacy model files detected"
   },
   "overlay": {
     "ariaLabel": "Selectable extracted text over the source image",
@@ -548,5 +550,8 @@
         "label": "Web screenshots / UI text"
       }
     }
+  },
+  "runtime": {
+    "defaultNormalized": "The default provider was normalized to {provider}."
   }
 }

@@ -163,7 +163,8 @@
     "subscriptionAll": "All events",
     "subscriptionSummary": "{count, plural, =0 {All events} one {# event type} other {# event types}}",
     "subscriptionsHelp": "Deliver only the selected event types to this endpoint. Select none to receive every event.",
-    "subscriptionsLabel": "Event subscriptions"
+    "subscriptionsLabel": "Event subscriptions",
+    "secretUnavailable": "Signing secret unavailable"
   },
   "overview": {
     "endpointUrlLabel": "Endpoint URL",

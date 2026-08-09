@@ -72,6 +72,25 @@ describe("getDb", () => {
     __resetDbForTesting()
   })
 
+  it("v155 adds the durable session peer-message receipt table", async () => {
+    const name = `cognia-session-peer-message-v155-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(154).stores({ sessions: "id, updatedAt", messages: "id, sessionId" })
+    await legacy.open()
+    await legacy.table("sessions").put({ id: "session-1", updatedAt: 1 })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    expect(upgraded.verno).toBeGreaterThanOrEqual(155)
+    expect(upgraded.tables.map((table) => table.name)).toContain("sessionPeerMessages")
+    expect(await upgraded.sessions.get("session-1")).toEqual({ id: "session-1", updatedAt: 1 })
+
+    upgraded.close()
+    await Dexie.delete(name)
+  }, 30_000)
+
   it("constructs an explicit database name for account-local databases", () => {
     const db = new CogniaDB("cognia-account-acct_one")
     expect(db.name).toBe("cognia-account-acct_one")
@@ -681,6 +700,58 @@ describe("getDb", () => {
       expect.arrayContaining(["turnKey", "[sessionId+turnKey]"])
     )
     expect(await upgraded.messages.get("legacy-message")).toBeDefined()
+
+    upgraded.close()
+    await Dexie.delete(name)
+  }, 30_000)
+
+  it("v154 backfills stable unique portable skill slugs", async () => {
+    const name = `cognia-skill-slug-v154-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(153).stores({ skills: "id, name, updatedAt, isBuiltIn" })
+    await legacy.open()
+    await legacy.table("skills").bulkPut([
+      {
+        id: "skill_native",
+        name: "显示名",
+        nativeDirectory: "/tmp/native-skill",
+        content: "body",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "skill_native_priority",
+        slug: "frontmatter-name",
+        name: "Display Name",
+        nativeDirectory: "/tmp/native-priority",
+        content: "body",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "skill_ascii",
+        name: "Native Skill",
+        content: "body",
+        createdAt: 2,
+        updatedAt: 2,
+      },
+      {
+        id: "skill_中文abcdef",
+        name: "中文技能",
+        content: "body",
+        createdAt: 3,
+        updatedAt: 3,
+      },
+    ])
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBeGreaterThanOrEqual(154)
+    expect((await upgraded.skills.get("skill_native"))?.slug).toBe("native-skill")
+    expect((await upgraded.skills.get("skill_native_priority"))?.slug).toBe("native-priority")
+    expect((await upgraded.skills.get("skill_ascii"))?.slug).toBe("native-skill-2")
+    expect((await upgraded.skills.get("skill_中文abcdef"))?.slug).toBe("skill-abcdef")
 
     upgraded.close()
     await Dexie.delete(name)

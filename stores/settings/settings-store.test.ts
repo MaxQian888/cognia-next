@@ -47,7 +47,13 @@ jest.mock("@/stores/network-proxy", () => ({
   maybeAutoDetectProxy: jest.fn(),
 }))
 
+const migrateLegacyProxyPasswordMock = jest.fn()
+jest.mock("@/lib/network/proxy-credentials", () => ({
+  migrateLegacyProxyPassword: (...args: unknown[]) => migrateLegacyProxyPasswordMock(...args),
+}))
+
 jest.mock("@/lib/tts/keyring", () => ({
+  HOST_KEY_PRESENT: "__cognia_host_key_present__",
   setProviderKey: jest.fn(),
   clearProviderKey: jest.fn(),
   loadAllProviderKeys: jest.fn(),
@@ -118,6 +124,7 @@ beforeEach(() => {
   jest.spyOn(console, "error").mockImplementation(() => {})
   dispatchDiagnosticMock.mockClear()
   applyProxyToRustMock.mockReset().mockResolvedValue(undefined)
+  migrateLegacyProxyPasswordMock.mockReset()
   useSettingsStore.setState(RESET)
 })
 
@@ -128,6 +135,66 @@ afterEach(() => {
 // ---- load ----
 
 describe("load", () => {
+  it("migrates a legacy proxy password before applying a sanitized runtime config", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    const legacyProxy = {
+      mode: "manual" as const,
+      protocol: "http" as const,
+      host: "proxy.example",
+      port: 8080,
+      username: "alice",
+      password: "secret",
+      bypass: ["localhost"],
+      proxyWebsockets: true,
+      ipLookupEnabled: true,
+    }
+    const { password: _password, ...sanitized } = legacyProxy
+    dbSettings.getSettings.mockResolvedValue(baseSettings({ networkProxy: legacyProxy }))
+    dbSettings.saveSettings.mockResolvedValue(baseSettings({ networkProxy: sanitized }))
+    migrateLegacyProxyPasswordMock.mockImplementation(async (_cfg, persist) => {
+      await persist(sanitized)
+      return { settings: sanitized, credentialConfigured: true, migrated: true }
+    })
+
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith(
+      { networkProxy: sanitized },
+      { mirrorToHost: false }
+    )
+    expect(useSettingsStore.getState().settings?.networkProxy).not.toHaveProperty("password")
+    expect(applyProxyToRustMock).toHaveBeenCalledWith(sanitized)
+  })
+
+  it("keeps Rust fail-closed when a legacy credential migration fails", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    const legacyProxy = {
+      mode: "manual" as const,
+      protocol: "http" as const,
+      host: "proxy.example",
+      port: 8080,
+      username: "alice",
+      password: "secret",
+      bypass: ["localhost"],
+      proxyWebsockets: true,
+      ipLookupEnabled: true,
+    }
+    dbSettings.getSettings.mockResolvedValue(baseSettings({ networkProxy: legacyProxy }))
+    migrateLegacyProxyPasswordMock.mockRejectedValue(new Error("keyring unavailable"))
+
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+
+    expect(useSettingsStore.getState().settings?.networkProxy).not.toHaveProperty("password")
+    expect(applyProxyToRustMock).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "manual", username: "alice" })
+    )
+    expect(dispatchDiagnosticMock).toHaveBeenCalled()
+  })
+
   it("fetches settings and pushes the api key, but does NOT pull keyring keys at boot", async () => {
     dbSettings.getSettings.mockResolvedValue(baseSettings({ apiKey: "sk-x" }))
     keyring.loadAllProviderKeys.mockResolvedValue({ openai: "sk-openai" })
@@ -811,6 +878,19 @@ describe("self-invocation tool toggles", () => {
     })
     expect(dbSettings.saveSettings).toHaveBeenCalledWith({
       selfInvokeTools: { skill: true, spawnTask: true },
+    })
+  })
+
+  it("persists the session-messaging tool flag, preserving other toggles", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ selfInvokeTools: { skill: true } }),
+      loaded: true,
+    })
+    await act(async () => {
+      await useSettingsStore.getState().setSessionMessagingToolEnabled(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      selfInvokeTools: { skill: true, sessionMessaging: true },
     })
   })
 
@@ -1776,6 +1856,15 @@ describe("provider keys (TTS keyring)", () => {
       await useSettingsStore.getState().setProviderApiKey("openai", "    ")
     })
     expect(useSettingsStore.getState().providerKeys.openai).toBeUndefined()
+  })
+
+  it("keeps only a presence marker after saving a desktop key", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    keyring.setProviderKey.mockResolvedValue(undefined)
+    await act(async () => {
+      await useSettingsStore.getState().setProviderApiKey("openai", "sk-desktop")
+    })
+    expect(useSettingsStore.getState().providerKeys.openai).toBe("__cognia_host_key_present__")
   })
 
   it("clearProviderApiKey removes the slot", async () => {

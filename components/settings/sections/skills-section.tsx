@@ -19,19 +19,37 @@
  */
 
 import { SkillPanel } from "@/components/skills"
+import { BuiltInSkillsSection } from "@/components/settings/built-in-skills"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
+import { useTranslations } from "next-intl"
 
 interface Props {
   className?: string
 }
 
 export function SkillsSection({ className }: Props) {
+  const t = useTranslations("settings")
+
   return (
     <div
       className={cn("flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden", className)}
       data-testid="skills-section"
     >
-      <SkillPanel />
+      <Tabs defaultValue="installed" className="flex h-full min-h-0 flex-1 flex-col">
+        <div className="shrink-0 border-b px-4 py-2">
+          <TabsList>
+            <TabsTrigger value="installed">{t("tabs.skills")}</TabsTrigger>
+            <TabsTrigger value="built-in">{t("builtInSkills.title")}</TabsTrigger>
+          </TabsList>
+        </div>
+        <TabsContent value="installed" className="mt-0 min-h-0 flex-1 overflow-hidden">
+          <SkillPanel />
+        </TabsContent>
+        <TabsContent value="built-in" className="mt-0 min-h-0 flex-1 overflow-y-auto p-4">
+          <BuiltInSkillsSection />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

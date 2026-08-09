@@ -1,9 +1,9 @@
 /**
  * Rust → Dexie event bridge for the mobile-companion subsystem.
  *
- * The Rust pair handler emits `companion://device-paired` after a successful
- * pair-JWT exchange (`src-tauri/src/companion_api/auth.rs`); the JWT verifier
- * middleware emits `companion://device-seen` on every authenticated request
+ * The Rust registration handler emits `companion://device-paired` after a
+ * successful cgnp3 device registration; the DPoP verifier middleware emits
+ * `companion://device-seen` on every authenticated request
  * (`src-tauri/src/companion_api/middleware.rs`). This module subscribes to
  * both via the shared `transport` and persists the payloads to Dexie's
  * `pairedDevices` table so the M2.8 settings UI sees real-time updates.

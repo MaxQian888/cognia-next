@@ -51,7 +51,9 @@
     "clone": "Duplicate {name}",
     "favorite": "Pin {name} to favorites",
     "selectAria": "Select {name}",
-    "unfavorite": "Unpin {name} from favorites"
+    "unfavorite": "Unpin {name} from favorites",
+    "reviewTrust": "Review trust",
+    "reviewed": "Reviewed"
   },
   "chips": {
     "addingToast": "{agent}: adding \"{name}\"…",
@@ -61,7 +63,8 @@
     "tooltipDesktopOnly": "{name} (desktop only)",
     "tooltipMissing": "{name} not detected on this machine",
     "tooltipReadOnly": "{name} (read-only)",
-    "tooltipRemove": "Click to remove from {name}"
+    "tooltipRemove": "Click to remove from {name}",
+    "plaintextCredentialWarning": "This server configuration contains a plaintext credential."
   },
   "delete": {
     "body": "\"{name}\" will be removed from Cognia and from every external agent it's currently projected to.",
@@ -184,7 +187,31 @@
     "statServers": "Servers",
     "stopped": "Stopped",
     "title": "Health & logs",
-    "windowNote": "Showing the most recent log lines."
+    "windowNote": "Showing the most recent log lines.",
+    "colAgent": "Agent",
+    "colAttempts": "Attempts",
+    "colCapability": "Capability",
+    "colConnectP95": "Connect p95",
+    "colEvents": "Events",
+    "colFailureRate": "Failure rate",
+    "colLag": "Lag",
+    "colLastError": "Last error",
+    "colServer": "Server",
+    "colStatus": "Status",
+    "exportLog": "Export log",
+    "exported": "MCP health log exported.",
+    "metricCacheHits": "Capability cache hits",
+    "metricConnectLatency": "Connect latency p95",
+    "metricDenials": "Policy denials",
+    "metricRetries": "Retries",
+    "metricTimeouts": "Timeouts",
+    "metricWarmReuse": "Warm reuses",
+    "operationsEmpty": "No MCP operations recorded yet.",
+    "operationsSubtitle": "Aggregated connection and capability outcomes by server.",
+    "operationsTitle": "Operations",
+    "syncEmpty": "No agent projection jobs recorded yet.",
+    "syncLagValue": "{seconds}s",
+    "syncTitle": "Agent projection sync"
   },
   "import": {
     "back": "Back",

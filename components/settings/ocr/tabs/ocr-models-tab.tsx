@@ -16,6 +16,8 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 
+export type PaddleModelVariant = "v6-small" | "v6-tiny"
+
 /** Backends that ship their own downloaded model files. */
 export const BACKENDS_WITH_MANAGED_MODELS: ReadonlySet<string> = new Set<string>([
   "ocrs",
@@ -27,14 +29,20 @@ export interface ModelFileStatus {
   installed: boolean
   expected_bytes: number
   actual_bytes?: number
+  integrity?: "verified" | "missing" | "corrupt" | "unknown"
 }
 
 export interface ModelStatus {
   backend: string
+  variant?: string
+  version?: string
+  integrity?: "verified" | "missing" | "corrupt" | "unknown"
   installed: boolean
   model_dir: string
   files: ModelFileStatus[]
   total_bytes: number
+  legacy_files?: string[]
+  legacy_model_dir?: string
   reason?: string
 }
 
@@ -52,8 +60,9 @@ export interface DownloadProgressEvent {
  * drive the UI without spinning up a Tauri runtime.
  */
 export interface OcrModelBridge {
-  status(backend: string): Promise<ModelStatus>
-  download(backend: string): Promise<ModelStatus>
+  status(backend: string, variant?: string): Promise<ModelStatus>
+  download(backend: string, variant?: string, requestId?: string): Promise<ModelStatus>
+  cancel?(requestId: string): Promise<boolean>
   /** Subscribe to download-progress events. Returns an unsubscribe fn. */
   onProgress(handler: (event: DownloadProgressEvent) => void): () => void
 }
@@ -66,10 +75,15 @@ interface OcrModelsTabProps {
    * `null` to suppress the manager entirely (e.g. on the browser shell).
    */
   bridge?: OcrModelBridge | null
+  modelVariant?: PaddleModelVariant
 }
 
 /** Top-level component rendered inside the OCR detail panel's Models tab. */
-export function OcrModelsTab({ providerId, bridge }: OcrModelsTabProps): React.ReactElement {
+export function OcrModelsTab({
+  providerId,
+  bridge,
+  modelVariant = "v6-small",
+}: OcrModelsTabProps): React.ReactElement {
   const t = useTranslations()
 
   if (!BACKENDS_WITH_MANAGED_MODELS.has(providerId)) {
@@ -86,7 +100,13 @@ export function OcrModelsTab({ providerId, bridge }: OcrModelsTabProps): React.R
       </p>
     )
   }
-  return <LocalModelManager backend={providerId} bridge={bridge} />
+  return (
+    <LocalModelManager
+      backend={providerId}
+      bridge={bridge}
+      modelVariant={providerId === "paddle-ocr" ? modelVariant : undefined}
+    />
+  )
 }
 
 /* ─────────────────────────── LocalModelManager ─────────────────────────── */
@@ -94,6 +114,7 @@ export function OcrModelsTab({ providerId, bridge }: OcrModelsTabProps): React.R
 interface LocalModelManagerProps {
   backend: string
   bridge?: OcrModelBridge
+  modelVariant?: PaddleModelVariant
 }
 
 /**
@@ -108,18 +129,19 @@ export function LocalModelManager(props: LocalModelManagerProps): React.ReactEle
   const [error, setError] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [progress, setProgress] = useState<DownloadProgressEvent | null>(null)
+  const [activeRequestId, setActiveRequestId] = useState<string | null>(null)
 
   // Fetch initial status. Re-fetched after every download attempt.
   const refresh = useCallback(async () => {
     if (!bridge) return
     try {
-      const s = await bridge.status(props.backend)
+      const s = await bridge.status(props.backend, props.modelVariant)
       setStatus(s)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
-  }, [bridge, props.backend])
+  }, [bridge, props.backend, props.modelVariant])
 
   useEffect(() => {
     // Initial mount-time fetch of model status. The setState inside
@@ -142,19 +164,26 @@ export function LocalModelManager(props: LocalModelManagerProps): React.ReactEle
 
   const handleDownload = useCallback(async () => {
     if (!bridge) return
+    if (downloading && activeRequestId) {
+      await bridge.cancel?.(activeRequestId)
+      return
+    }
+    const requestId = globalThis.crypto?.randomUUID?.() ?? `ocr-model-${Date.now()}`
     setDownloading(true)
+    setActiveRequestId(requestId)
     setError(null)
     setProgress(null)
     try {
-      const after = await bridge.download(props.backend)
+      const after = await bridge.download(props.backend, props.modelVariant, requestId)
       setStatus(after)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setDownloading(false)
+      setActiveRequestId(null)
       setProgress(null)
     }
-  }, [bridge, props.backend])
+  }, [activeRequestId, bridge, downloading, props.backend, props.modelVariant])
 
   if (!bridge)
     return <p className="text-xs text-muted-foreground">{t("ocr.modelStatus.description")}</p>
@@ -176,13 +205,25 @@ export function LocalModelManager(props: LocalModelManagerProps): React.ReactEle
           variant="outline"
           size="sm"
           onClick={() => void handleDownload()}
-          disabled={downloading}
-          aria-label={t("ocr.modelStatus.download")}
+          aria-label={
+            downloading ? t("ocr.modelStatus.cancelDownload") : t("ocr.modelStatus.download")
+          }
         >
-          {status?.installed ? t("ocr.modelStatus.redownload") : t("ocr.modelStatus.download")}
+          {downloading
+            ? t("ocr.modelStatus.cancelDownload")
+            : status?.installed
+              ? t("ocr.modelStatus.redownload")
+              : t("ocr.modelStatus.download")}
         </Button>
       </div>
-      {status && status.reason ? (
+      {status?.legacy_files?.length ? (
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          {t("ocr.modelStatus.legacyDetected", {
+            count: status.legacy_files.length,
+            path: status.legacy_model_dir ?? status.model_dir,
+          })}
+        </p>
+      ) : status && status.reason ? (
         <p className="text-xs text-muted-foreground">{status.reason}</p>
       ) : status ? (
         <p className="text-xs text-muted-foreground">
@@ -245,14 +286,18 @@ export function buildTauriModelBridge(): OcrModelBridge | null {
     return listenFnPromise
   }
   return {
-    async status(backend) {
+    async status(backend, variant) {
       const invoke = await getInvoke()
-      return invoke<ModelStatus>("ocr_model_status", { backend })
+      return invoke<ModelStatus>("ocr_model_status", { backend, variant })
     },
-    async download(backend) {
+    async download(backend, variant, requestId) {
       const invoke = await getInvoke()
-      await invoke<unknown>("ocr_download_model", { backend })
-      return invoke<ModelStatus>("ocr_model_status", { backend })
+      await invoke<unknown>("ocr_download_model", { backend, variant, requestId })
+      return invoke<ModelStatus>("ocr_model_status", { backend, variant })
+    },
+    async cancel(requestId) {
+      const invoke = await getInvoke()
+      return invoke<boolean>("ocr_cancel_model_download", { requestId })
     },
     onProgress(handler) {
       let unlisten: (() => void) | null = null

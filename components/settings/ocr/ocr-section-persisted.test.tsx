@@ -21,7 +21,7 @@ jest.mock("@/lib/db/ocr-results", () => ({
   clearOcrCacheForProvider: jest.fn(async () => 0),
 }))
 
-const buildOcrDeps = jest.fn((_opts?: unknown) => ({ marker: "deps" }))
+const buildOcrDeps = jest.fn<unknown, [unknown?]>(() => ({ marker: "deps" }))
 jest.mock("@/lib/ocr/deps", () => ({
   buildOcrDeps: (o: unknown) => buildOcrDeps(o),
 }))
@@ -54,7 +54,9 @@ jest.mock("./ocr-section", () => ({
   ),
 }))
 
-jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn() } }))
+jest.mock("sonner", () => ({
+  toast: { error: jest.fn(), success: jest.fn(), warning: jest.fn() },
+}))
 
 beforeEach(() => {
   liveSettings = DEFAULT_OCR_SETTINGS
@@ -92,5 +94,66 @@ describe("OcrSectionPersisted", () => {
     await waitFor(() => screen.getByText("deps"))
     fireEvent.click(screen.getByText("deps"))
     expect(buildOcrDeps).toHaveBeenCalledWith({ settings: DEFAULT_OCR_SETTINGS })
+  })
+
+  it("migrates a legacy local HTTP plaintext key into the OCR keyring", async () => {
+    liveSettings = {
+      ...DEFAULT_OCR_SETTINGS,
+      providerConfig: {
+        "local-http": { endpoint: "http://localhost:1224/api/ocr", apiKey: "legacy-key" },
+      },
+    }
+    render(<OcrSectionPersisted />)
+
+    await waitFor(() =>
+      expect(setOcrSecret).toHaveBeenCalledWith("local-http", "apiKey", "legacy-key")
+    )
+    const migrated = saveSettings.mock.calls.at(-1)![0].ocrSettings
+    expect(migrated.providerConfig["local-http"].apiKey).toBeUndefined()
+    expect(migrated.providerConfig["local-http"].endpoint).toBe("http://localhost:1224/api/ocr")
+  })
+
+  it("normalizes an unavailable saved default provider to auto", async () => {
+    liveSettings = { ...DEFAULT_OCR_SETTINGS, defaultProviderId: "mistral-ocr" }
+    buildOcrDeps.mockReturnValue({
+      registry: { list: () => [{ id: "mistral-ocr" }] },
+      platform: "tauri",
+      runtimeStatus: async () => ({
+        providerId: "mistral-ocr",
+        shellSupported: true,
+        ready: false,
+        reason: "missing-credentials",
+      }),
+    })
+
+    render(<OcrSectionPersisted />)
+
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({
+        ocrSettings: expect.objectContaining({ defaultProviderId: "auto" }),
+      })
+    )
+  })
+
+  it("normalizes a removed saved default provider to auto", async () => {
+    liveSettings = { ...DEFAULT_OCR_SETTINGS, defaultProviderId: "removed-provider" }
+    buildOcrDeps.mockReturnValue({
+      registry: { list: () => [{ id: "mistral-ocr" }] },
+      platform: "tauri",
+      runtimeStatus: async () => ({
+        providerId: "mistral-ocr",
+        shellSupported: true,
+        credentialsConfigured: true,
+        ready: true,
+      }),
+    })
+
+    render(<OcrSectionPersisted />)
+
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({
+        ocrSettings: expect.objectContaining({ defaultProviderId: "auto" }),
+      })
+    )
   })
 })

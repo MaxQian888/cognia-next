@@ -46,6 +46,14 @@ jest.mock("@/lib/db/skill-resources", () => ({
   updateResource: jest.fn(),
 }))
 
+const ensureWorkspaceFilesMock: jest.Mock = jest.fn(async () => undefined)
+const disposeWorkspaceMock: jest.Mock = jest.fn(async () => undefined)
+jest.mock("@/lib/plugin/vscode-shim/lsp-workspace-manager", () => ({
+  ensureWorkspaceFiles: (...args: unknown[]) => ensureWorkspaceFilesMock(...args),
+  disposeWorkspace: (...args: unknown[]) => disposeWorkspaceMock(...args),
+  isLspWorkspaceManagerConfigured: () => true,
+}))
+
 const mobileRef = { current: false }
 jest.mock("@/hooks/ui/use-mobile", () => ({
   useIsMobile: () => mobileRef.current,
@@ -111,6 +119,8 @@ beforeEach(() => {
   liveQueryIdx = 0
   mobileRef.current = false
   updateSkillMock.mockClear()
+  ensureWorkspaceFilesMock.mockClear()
+  disposeWorkspaceMock.mockClear()
   useSkillsStore.setState({
     editorWorkspace: {
       activeSkillId: null,
@@ -141,6 +151,51 @@ describe("SkillEditorWorkspace", () => {
     // SKILL.md appears multiple times — desktop file tree + tab strip + mobile sheet body.
     expect(screen.getAllByText("SKILL.md").length).toBeGreaterThanOrEqual(2)
     expect(screen.getByTestId("monaco")).toBeInTheDocument()
+  })
+
+  it("materializes the complete bundle workspace and disposes it on unmount", async () => {
+    skillRef.current = {
+      id: "s1",
+      name: "Test",
+      content: "body",
+      codexOpenAiYaml: "interface:\n  display_name: Test\n",
+      createdAt: 0,
+      updatedAt: 0,
+      source: "custom",
+    } as never
+    resourcesRef.current = [
+      {
+        id: "r1",
+        skillId: "s1",
+        kind: "script",
+        name: "check.ts",
+        path: "scripts/check.ts",
+        content: "export const ok = true",
+        encoding: "utf-8",
+        createdAt: 0,
+        updatedAt: 0,
+      },
+    ] as never
+    useSkillsStore.getState().openSkillInEditor("s1", "body")
+
+    const { unmount } = render(<SkillEditorWorkspace />)
+
+    await waitFor(() => expect(ensureWorkspaceFilesMock).toHaveBeenCalledTimes(1))
+    expect(ensureWorkspaceFilesMock.mock.calls[0][0]).toMatchObject({
+      surface: "skill",
+      workspaceId: "s1",
+      files: [
+        { fileName: "SKILL.md", initialContent: "body" },
+        {
+          fileName: "agents/openai.yaml",
+          initialContent: "interface:\n  display_name: Test\n",
+        },
+        { fileName: "scripts/check.ts", initialContent: "export const ok = true" },
+      ],
+    })
+
+    unmount()
+    expect(disposeWorkspaceMock).toHaveBeenCalledWith({ surface: "skill", documentId: "s1" })
   })
 
   it("on mobile, swaps Monaco for the CodeMirror light editor", () => {

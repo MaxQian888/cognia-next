@@ -102,6 +102,7 @@
     "invalid": "无法解析该配对载荷——请从服务器完整复制 cgnp2|… 字符串后重新粘贴。",
     "versionMismatch": "该配对载荷版本为 {got}，当前应用无法识别。请升级应用或服务器，使两端载荷版本一致。"
   },
+  "payloadPlaceholder": "cgnp3|…",
   "permissions": {
     "localNetwork": {
       "description": "请授予本地网络访问权限，本机才能在 Wi-Fi 上发现桌面端。",
@@ -151,5 +152,6 @@
     "storageNotice": "设备凭据保存在此浏览器的 localStorage 中：能访问此浏览器配置文件、或向此源注入脚本的人都可以使用它。请在可信设备上配对，用完及时退出登录。",
     "storageNoticeTitle": "凭据保存在此浏览器中",
     "title": "连接到服务器"
-  }
+  },
+  "persistenceError": "设备已注册，但无法安全保存其凭据。请重新配对。"
 }

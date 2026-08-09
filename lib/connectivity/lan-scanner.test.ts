@@ -340,12 +340,12 @@ describe("scanLan", () => {
     // /24 fan-out is short-circuited — we hit the gateway alias 10.0.2.2
     // only, but now across PROBE_PORTS (7890/7891/7900/8443) so dev
     // overrides still surface. No 254-IP scan.
-    const whoamiCalls = calls.filter((u) => u.endsWith("/api/v1/whoami"))
+    const whoamiCalls = calls.filter((u) => u.endsWith("/api/whoami"))
     const probedIps = new Set(whoamiCalls.map((u) => new URL(u).hostname))
     expect(probedIps).toEqual(new Set(["10.0.2.2"]))
     // PROBE_PORTS coverage on the emulator host alias.
     for (const p of PROBE_PORTS) {
-      expect(whoamiCalls.some((u) => u === `https://10.0.2.2:${p}/api/v1/whoami`)).toBe(true)
+      expect(whoamiCalls.some((u) => u === `https://10.0.2.2:${p}/api/whoami`)).toBe(true)
     }
     // 7890 returned cognia; the other ports returned okResp (non-401) so
     // only the 7890 entry surfaces.
@@ -411,7 +411,7 @@ describe("scanLan — paired tier and multi-port", () => {
     })
     // Emulator host alias + paired status → all 4 PROBE_PORTS.
     for (const p of PROBE_PORTS) {
-      expect(calls.has(`https://10.0.2.2:${p}/api/v1/whoami`)).toBe(true)
+      expect(calls.has(`https://10.0.2.2:${p}/api/whoami`)).toBe(true)
     }
   })
 

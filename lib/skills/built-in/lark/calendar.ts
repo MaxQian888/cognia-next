@@ -46,6 +46,7 @@ function mkRead<S extends z.ZodTypeAny>(input: {
   schema: S
   subcommand: readonly string[]
   skipFlags?: readonly string[]
+  buildArgs?: (args: z.infer<S>) => string[]
 }): BuiltInSkill<S> {
   return {
     id: input.id,
@@ -61,7 +62,8 @@ function mkRead<S extends z.ZodTypeAny>(input: {
       runLarkCli({
         args: [
           ...input.subcommand,
-          ...argsToFlags(args as Record<string, unknown>, input.skipFlags),
+          ...(input.buildArgs?.(args) ??
+            argsToFlags(args as Record<string, unknown>, input.skipFlags)),
         ],
         confirmed: ctx.hitlBypass === true,
         adapterId: larkAdapterIdFromCtx(ctx),
@@ -84,6 +86,7 @@ function mkWrite<S extends z.ZodTypeAny>(input: {
   mutation?: "write" | "destructive"
   imAccess?: "always" | "opt-in"
   skipFlags?: readonly string[]
+  buildArgs?: (args: z.infer<S>) => string[]
 }): BuiltInSkill<S> {
   return {
     id: input.id,
@@ -99,7 +102,8 @@ function mkWrite<S extends z.ZodTypeAny>(input: {
       runLarkCli({
         args: [
           ...input.subcommand,
-          ...argsToFlags(args as Record<string, unknown>, input.skipFlags),
+          ...(input.buildArgs?.(args) ??
+            argsToFlags(args as Record<string, unknown>, input.skipFlags)),
         ],
         confirmed: ctx.hitlBypass === true,
         adapterId: larkAdapterIdFromCtx(ctx),
@@ -153,7 +157,14 @@ registerBuiltInSkill(
         .optional()
         .describe("Max events to return (1–500)."),
     }),
-    subcommand: ["calendar", "+list-events"],
+    subcommand: ["calendar", "+search-event"],
+    buildArgs: (args) =>
+      argsToFlags({
+        calendarId: args.calendarId,
+        start: args.startTime,
+        end: args.endTime,
+        pageSize: args.pageSize,
+      }),
   })
 )
 
@@ -167,11 +178,13 @@ registerBuiltInSkill(
       "zh-CN": "查询一组用户在指定时间范围内的忙闲信息。",
     },
     schema: z.object({
-      userIds: userOpenIdsParam.min(1),
+      userIds: userOpenIdsParam.length(1).describe("Exactly one user open_id."),
       startTime: startTimeParam,
       endTime: endTimeParam,
     }),
     subcommand: ["calendar", "+freebusy"],
+    buildArgs: (args) =>
+      argsToFlags({ userId: args.userIds[0], start: args.startTime, end: args.endTime }),
   })
 )
 
@@ -193,8 +206,17 @@ registerBuiltInSkill(
         .optional()
         .describe("Only rooms seating at least this many."),
       buildingId: z.string().optional().describe("Optional building id to scope the search."),
+      startTime: startTimeParam,
+      endTime: endTimeParam,
     }),
-    subcommand: ["calendar", "+search-rooms"],
+    subcommand: ["calendar", "+room-find"],
+    buildArgs: (args) =>
+      argsToFlags({
+        roomName: args.query,
+        minCapacity: args.minCapacity,
+        building: args.buildingId,
+        slot: [`${args.startTime}~${args.endTime}`],
+      }),
   })
 )
 
@@ -221,7 +243,16 @@ registerBuiltInSkill(
         .optional()
         .describe("Optional meeting-room ids (from lark.calendar.search_rooms) to book."),
     }),
-    subcommand: ["calendar", "+create-event"],
+    subcommand: ["calendar", "+create"],
+    buildArgs: (args) =>
+      argsToFlags({
+        calendarId: args.calendarId,
+        summary: args.summary,
+        start: args.startTime,
+        end: args.endTime,
+        attendeeIds: [...(args.attendees ?? []), ...(args.roomIds ?? [])].join(",") || undefined,
+        description: args.description,
+      }),
     confirmTitle: "Create calendar event",
     confirmSummary: (args) => ({
       summary: `Create "${args.summary}" on calendar ${args.calendarId}.`,
@@ -253,7 +284,16 @@ registerBuiltInSkill(
       endTime: z.string().optional().describe("New end time in RFC3339."),
       description: z.string().optional().describe("New event description."),
     }),
-    subcommand: ["calendar", "+update-event"],
+    subcommand: ["calendar", "+update"],
+    buildArgs: (args) =>
+      argsToFlags({
+        calendarId: args.calendarId,
+        eventId: args.eventId,
+        summary: args.summary,
+        start: args.startTime,
+        end: args.endTime,
+        description: args.description,
+      }),
     confirmTitle: "Update calendar event",
     confirmSummary: (args) => ({
       summary: `Update event ${args.eventId} on calendar ${args.calendarId}.`,
@@ -281,6 +321,12 @@ registerBuiltInSkill(
       response: z.enum(["accept", "decline", "tentative"]).describe("Your RSVP response."),
     }),
     subcommand: ["calendar", "+rsvp"],
+    buildArgs: (args) =>
+      argsToFlags({
+        calendarId: args.calendarId,
+        eventId: args.eventId,
+        rsvpStatus: args.response,
+      }),
     confirmTitle: "Respond to invitation",
     confirmSummary: (args) => ({
       summary: `${args.response.toUpperCase()} the invitation to event ${args.eventId}.`,
@@ -302,7 +348,13 @@ registerBuiltInSkill(
       eventId: eventIdParam,
       roomId: z.string().min(1).describe("Meeting-room id from lark.calendar.search_rooms."),
     }),
-    subcommand: ["calendar", "+book-room"],
+    subcommand: ["calendar", "+update"],
+    buildArgs: (args) =>
+      argsToFlags({
+        calendarId: args.calendarId,
+        eventId: args.eventId,
+        addAttendeeIds: args.roomId,
+      }),
     confirmTitle: "Book meeting room",
     confirmSummary: (args) => ({
       summary: `Book room ${args.roomId} for event ${args.eventId}.`,
@@ -329,7 +381,14 @@ registerBuiltInSkill(
         .optional()
         .describe("Notify attendees of the cancellation (default false)."),
     }),
-    subcommand: ["calendar", "+delete-event"],
+    subcommand: ["calendar", "events", "delete"],
+    buildArgs: (args) =>
+      argsToFlags({
+        calendarId: args.calendarId,
+        eventId: args.eventId,
+        needNotification:
+          args.notifyAttendees === undefined ? undefined : String(args.notifyAttendees),
+      }),
     confirmTitle: "Delete calendar event",
     mutation: "destructive",
     imAccess: "opt-in",

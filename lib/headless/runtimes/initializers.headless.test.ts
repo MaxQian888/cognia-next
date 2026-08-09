@@ -16,6 +16,7 @@ import {
 } from "@/lib/workflow/triggers/registry"
 import type { PluginTriggerDef } from "@/types/plugin/plugin-workflow"
 import { createWorkflow } from "@/lib/db/workflows"
+import { __resetDbForTesting, whenSeeded } from "@/lib/db/schema"
 import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
 import { _waitForPluginTriggerReconciliationForTest } from "@/lib/workflow/triggers/lifecycle"
 
@@ -24,6 +25,7 @@ const EXPECTED = [
   "workflow-runtime",
   "agent-team-runtime",
   "external-agent",
+  "ocr-runtime",
   "automation-policy",
   "audit-retention",
   "storage-retention",
@@ -51,6 +53,15 @@ function makeCtx(): HeadlessRuntimeContext {
 describe("initializer batch headless smoke", () => {
   it("starts and stops every batch runtime in Node", async () => {
     await installFakeIndexedDb()
+    // schedulerDb captures Dexie's dependencies when its singleton is
+    // constructed. Import it only after the Node shim is installed; a static
+    // import here makes the smoke test report a started scheduler even though
+    // its database initialization failed with MissingAPIError.
+    const { schedulerDb } = await import("@/lib/scheduler/scheduler-db")
+    // Production starts durability (including the full seed pass) before the
+    // runtime batch. Mirror that ordering so the first workflow write cannot
+    // race the skill/resource seeder inside Dexie's opening transaction.
+    await whenSeeded()
     __resetHeadlessRuntimesForTesting()
     await import("./initializers")
 
@@ -74,6 +85,7 @@ describe("initializer batch headless smoke", () => {
         },
       ],
     })
+    expect(workflow.id).toMatch(/^wf_/)
     await publishWorkflow(workflow.id, Date.now())
     const stop = jest.fn(async () => undefined)
     const start = jest.fn(async () => ({ stop }))
@@ -103,5 +115,7 @@ describe("initializer batch headless smoke", () => {
     await result.stop()
     expect(stop).toHaveBeenCalledTimes(1)
     expect(getPluginTrigger("trigger.headless.watch", 1)?.instances.size).toBe(0)
+    schedulerDb.close()
+    __resetDbForTesting()
   }, 60_000)
 })

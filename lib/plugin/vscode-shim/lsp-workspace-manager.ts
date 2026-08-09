@@ -51,7 +51,7 @@ export interface LspWorkspaceSpec {
   /** Filename to materialise (e.g. `skill-abc.ts`). The extension drives LSP language detection. */
   fileName: string
   /** Initial content to write. */
-  initialContent: string
+  initialContent: string | Uint8Array
   /** The Monaco URI this workspace is anchored to — used for reverse lookup. */
   monacoUri: string
 }
@@ -64,6 +64,8 @@ export interface LspWorkspaceFsAdapter {
   createDir(path: string): Promise<void>
   /** Atomically write `content` to `path`. */
   writeFile(path: string, content: string): Promise<void>
+  /** Write binary content when a workspace contains non-text Skill assets. */
+  writeBinaryFile?(path: string, content: Uint8Array): Promise<void>
   /** Remove `path` recursively. Idempotent — missing path is not an error. */
   removeDir(path: string): Promise<void>
   /**
@@ -95,6 +97,14 @@ interface AllocatedWorkspace {
   filePath: string
   fileUri: string
   pendingFlush?: PendingFlush
+  documents: Map<
+    string,
+    {
+      filePath: string
+      fileUri: string
+      pendingFlush?: PendingFlush
+    }
+  >
 }
 
 /** Debounce window for content flushes — bursts of typing coalesce. */
@@ -107,16 +117,33 @@ export function configureLspWorkspaceManager(adapter: LspWorkspaceFsAdapter | nu
   fsImpl = adapter
 }
 
+export function isLspWorkspaceManagerConfigured(): boolean {
+  return fsImpl !== null
+}
+
 /** Test-only: clear every cached workspace + restore default state. */
 export function __resetLspWorkspaceManagerForTesting(): void {
   workspaces.clear()
   monacoUriToWorkspace.clear()
+  fileUriToMonacoUri.clear()
+  workspaceFolderListeners.clear()
   projectWorkspaces.clear()
   fsImpl = null
 }
 
 const workspaces = new Map<string, AllocatedWorkspace>()
 const monacoUriToWorkspace = new Map<string, string>()
+const fileUriToMonacoUri = new Map<string, string>()
+const workspaceFolderListeners = new Set<() => void>()
+
+export function onWorkspaceFoldersChanged(listener: () => void): () => void {
+  workspaceFolderListeners.add(listener)
+  return () => workspaceFolderListeners.delete(listener)
+}
+
+function notifyWorkspaceFoldersChanged(): void {
+  for (const listener of workspaceFolderListeners) listener()
+}
 
 // ────────────────────────────────────────────────────────────────────────
 // Real-project workspaces (the Monaco `file` surface / project editor).
@@ -167,13 +194,14 @@ export function registerProjectWorkspace(root: string, name?: string): string {
     name: name ?? deriveWorkspaceName(root),
   })
   workspaceLogger.debug("project workspace registered", { root, rootUri })
+  notifyWorkspaceFoldersChanged()
   return rootUri
 }
 
 /** Remove a previously-registered project root. Idempotent. */
 export function unregisterProjectWorkspace(root: string): void {
   const rootUri = pathToFileUri(root.replace(/\/+$/g, ""))
-  projectWorkspaces.delete(rootUri)
+  if (projectWorkspaces.delete(rootUri)) notifyWorkspaceFoldersChanged()
 }
 
 /** Test-only helper mirroring the reset above for focused suites. */
@@ -208,6 +236,27 @@ function assertConfigured(): LspWorkspaceFsAdapter {
   return fsImpl
 }
 
+function normalizeRelativeFileName(fileName: string): string {
+  const normalized = fileName.replace(/\\/g, "/").replace(/^\/+/, "")
+  const segments = normalized.split("/")
+  if (!normalized || segments.some((segment) => !segment || segment === "." || segment === "..")) {
+    throw new Error(`lsp-workspace-manager: unsafe relative file name ${fileName}`)
+  }
+  return normalized
+}
+
+async function writeInitialFile(
+  fs: LspWorkspaceFsAdapter,
+  path: string,
+  content: string | Uint8Array
+): Promise<void> {
+  if (typeof content === "string") return fs.writeFile(path, content)
+  if (!fs.writeBinaryFile) {
+    throw new Error("lsp-workspace-manager: binary workspace writes are unavailable")
+  }
+  return fs.writeBinaryFile(path, content)
+}
+
 /**
  * Allocate (or return) the workspace for a Monaco document. Materialises
  * the initial content on first call; subsequent calls with the same
@@ -217,8 +266,21 @@ function assertConfigured(): LspWorkspaceFsAdapter {
 export async function ensureWorkspace(spec: LspWorkspaceSpec): Promise<string> {
   const fs = assertConfigured()
   const key = makeKey(spec)
+  const fileName = normalizeRelativeFileName(spec.fileName)
   const existing = workspaces.get(key)
-  if (existing) return existing.workspacePath
+  if (existing) {
+    if (!existing.documents.has(spec.monacoUri)) {
+      const filePath = fs.joinPath(existing.workspacePath, fileName)
+      const parent = filePath.replace(/\\/g, "/").replace(/\/[^/]+$/, "")
+      if (parent && parent !== existing.workspacePath) await fs.createDir(parent)
+      await writeInitialFile(fs, filePath, spec.initialContent)
+      const fileUri = fs.pathToFileUri(filePath)
+      existing.documents.set(spec.monacoUri, { filePath, fileUri })
+      monacoUriToWorkspace.set(spec.monacoUri, key)
+      fileUriToMonacoUri.set(fileUri, spec.monacoUri)
+    }
+    return existing.workspacePath
+  }
 
   const appData = await fs.appDataDir()
   const workspacePath = fs.joinPath(
@@ -229,17 +291,23 @@ export async function ensureWorkspace(spec: LspWorkspaceSpec): Promise<string> {
   )
   await fs.createDir(workspacePath)
 
-  const filePath = fs.joinPath(workspacePath, spec.fileName)
-  await fs.writeFile(filePath, spec.initialContent)
+  const filePath = fs.joinPath(workspacePath, fileName)
+  const parent = filePath.replace(/\\/g, "/").replace(/\/[^/]+$/, "")
+  if (parent && parent !== workspacePath) await fs.createDir(parent)
+  await writeInitialFile(fs, filePath, spec.initialContent)
 
   const record: AllocatedWorkspace = {
     spec,
     workspacePath,
     filePath,
     fileUri: fs.pathToFileUri(filePath),
+    documents: new Map(),
   }
+  record.documents.set(spec.monacoUri, { filePath: record.filePath, fileUri: record.fileUri })
   workspaces.set(key, record)
   monacoUriToWorkspace.set(spec.monacoUri, key)
+  fileUriToMonacoUri.set(record.fileUri, spec.monacoUri)
+  notifyWorkspaceFoldersChanged()
 
   workspaceLogger.debug("workspace allocated", {
     surface: spec.surface,
@@ -247,6 +315,23 @@ export async function ensureWorkspace(spec: LspWorkspaceSpec): Promise<string> {
     workspacePath,
   })
 
+  return workspacePath
+}
+
+/** Materialise every file belonging to one logical editor workspace. */
+export async function ensureWorkspaceFiles(input: {
+  surface: LspWorkspaceSurface
+  workspaceId: string
+  files: Array<Pick<LspWorkspaceSpec, "fileName" | "initialContent" | "monacoUri">>
+}): Promise<string | null> {
+  let workspacePath: string | null = null
+  for (const file of input.files) {
+    workspacePath = await ensureWorkspace({
+      surface: input.surface,
+      documentId: input.workspaceId,
+      ...file,
+    })
+  }
   return workspacePath
 }
 
@@ -292,6 +377,51 @@ export function flushDocument(
       resolvers: [resolve],
       rejectors: [reject],
     }
+  })
+}
+
+/** Flush a materialised editor document by its stable Monaco URI. */
+export function flushMaterializedDocument(monacoUri: string, content: string): Promise<void> {
+  const fs = assertConfigured()
+  const key = monacoUriToWorkspace.get(monacoUri)
+  const record = key ? workspaces.get(key) : undefined
+  const document = record?.documents.get(monacoUri)
+  if (!record || !document) {
+    return Promise.reject(
+      new Error(`lsp-workspace-manager: no materialised document for ${monacoUri}`)
+    )
+  }
+  if (monacoUri === record.spec.monacoUri) {
+    return flushDocument(
+      { surface: record.spec.surface, documentId: record.spec.documentId },
+      content
+    )
+  }
+  return new Promise<void>((resolve, reject) => {
+    if (document.pendingFlush) {
+      clearTimeout(document.pendingFlush.handle)
+      document.pendingFlush.content = content
+      document.pendingFlush.resolvers.push(resolve)
+      document.pendingFlush.rejectors.push(reject)
+    } else {
+      document.pendingFlush = {
+        content,
+        handle: 0 as never,
+        resolvers: [resolve],
+        rejectors: [reject],
+      }
+    }
+    document.pendingFlush.handle = setTimeout(() => {
+      const pending = document.pendingFlush
+      if (!pending) return
+      document.pendingFlush = undefined
+      fs.writeFile(document.filePath, pending.content)
+        .then(() => pending.resolvers.forEach((done) => done()))
+        .catch((error) => {
+          const err = error instanceof Error ? error : new Error(String(error))
+          pending.rejectors.forEach((fail) => fail(err))
+        })
+    }, FLUSH_DEBOUNCE_MS)
   })
 }
 
@@ -348,8 +478,25 @@ export async function disposeWorkspace(
     }
   }
 
+  for (const [monacoUri, document] of record.documents) {
+    if (monacoUri === record.spec.monacoUri || !document.pendingFlush) continue
+    const pending = document.pendingFlush
+    clearTimeout(pending.handle)
+    document.pendingFlush = undefined
+    try {
+      await fs.writeFile(document.filePath, pending.content)
+      for (const done of pending.resolvers) done()
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error))
+      for (const fail of pending.rejectors) fail(err)
+    }
+  }
+
   workspaces.delete(key)
-  monacoUriToWorkspace.delete(record.spec.monacoUri)
+  for (const [monacoUri, document] of record.documents) {
+    monacoUriToWorkspace.delete(monacoUri)
+    fileUriToMonacoUri.delete(document.fileUri)
+  }
 
   try {
     await fs.removeDir(record.workspacePath)
@@ -360,6 +507,7 @@ export async function disposeWorkspace(
       error: err instanceof Error ? err.message : String(err),
     })
   }
+  notifyWorkspaceFoldersChanged()
 }
 
 /**
@@ -406,6 +554,19 @@ export function resolveWorkspaceFolder(monacoUri: string): { uri: string; name: 
     uri: dirUri,
     name: `${record.spec.surface}-${record.spec.documentId}`,
   }
+}
+
+/** Translate an editor model URI to the materialised URI sent to an LSP. */
+export function resolveMaterializedDocumentUri(monacoUri: string): string | null {
+  if (monacoUri.startsWith("file://")) return monacoUri
+  const key = monacoUriToWorkspace.get(monacoUri)
+  const record = key ? workspaces.get(key) : undefined
+  return record?.documents.get(monacoUri)?.fileUri ?? null
+}
+
+/** Translate an LSP `file://` URI back to the stable Monaco model URI. */
+export function resolveMonacoDocumentUri(fileUri: string): string {
+  return fileUriToMonacoUri.get(fileUri) ?? fileUri
 }
 
 /**
@@ -455,6 +616,9 @@ export async function createDefaultTauriFsAdapter(): Promise<LspWorkspaceFsAdapt
     },
     async writeFile(path, content) {
       await fs.writeTextFile(path, content)
+    },
+    async writeBinaryFile(path, content) {
+      await fs.writeFile(path, content)
     },
     async removeDir(path) {
       try {

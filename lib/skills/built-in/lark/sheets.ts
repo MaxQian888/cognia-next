@@ -45,6 +45,7 @@ function mk<S extends z.ZodTypeAny>(input: {
     summary: string
     details?: { label: string; value: string }[]
   }
+  buildArgs?: (args: z.infer<S>) => string[]
 }): BuiltInSkill<S> {
   const skill: BuiltInSkill<S> = {
     id: input.id,
@@ -58,7 +59,10 @@ function mk<S extends z.ZodTypeAny>(input: {
     inputSchema: input.schema,
     execute: async (args, ctx) =>
       runLarkCli({
-        args: [...input.subcommand, ...argsToFlags(args as Record<string, unknown>)],
+        args: [
+          ...input.subcommand,
+          ...(input.buildArgs?.(args) ?? argsToFlags(args as Record<string, unknown>)),
+        ],
         confirmed: ctx.hitlBypass === true,
         adapterId: larkAdapterIdFromCtx(ctx),
       }),
@@ -92,7 +96,7 @@ registerBuiltInSkill(
       sheetId: sheetIdParam,
       range: z.string().min(1).describe("A1 notation, e.g. A1:D20."),
     }),
-    subcommand: ["sheets", "+read-range"],
+    subcommand: ["sheets", "+cells-get"],
     mutation: "read",
     imAccess: "always",
   })
@@ -117,7 +121,15 @@ registerBuiltInSkill(
         .optional()
         .describe("Require the whole cell to equal the query (default false)."),
     }),
-    subcommand: ["sheets", "+find"],
+    subcommand: ["sheets", "+cells-search"],
+    buildArgs: (args) =>
+      argsToFlags({
+        spreadsheetToken: args.spreadsheetToken,
+        sheetId: args.sheetId,
+        find: args.query,
+        matchCase: args.matchCase,
+        matchEntireCell: args.matchEntireCell,
+      }),
     mutation: "read",
     imAccess: "always",
   })
@@ -138,8 +150,38 @@ registerBuiltInSkill(
         .string()
         .optional()
         .describe("Optional Drive folder token to create it in; omit for the root."),
+      sheets: z
+        .array(
+          z.object({
+            title: z.string().min(1),
+            values: grid,
+          })
+        )
+        .min(1)
+        .optional()
+        .describe("Optional workbook sheets and their values."),
     }),
-    subcommand: ["sheets", "+create"],
+    subcommand: ["sheets", "+workbook-create"],
+    buildArgs: (args) =>
+      argsToFlags({
+        title: args.title,
+        folderToken: args.folderToken,
+        ...(args.sheets
+          ? {
+              sheets: {
+                sheets: args.sheets.map((sheet) => {
+                  const width = Math.max(0, ...sheet.values.map((row) => row.length))
+                  return {
+                    name: sheet.title,
+                    header: false,
+                    columns: Array.from({ length: width }, (_, index) => `column_${index + 1}`),
+                    data: sheet.values,
+                  }
+                }),
+              },
+            }
+          : {}),
+      }),
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Create spreadsheet",
@@ -167,7 +209,14 @@ registerBuiltInSkill(
         .describe("A1 range to overwrite; its size should match the values grid."),
       values: grid,
     }),
-    subcommand: ["sheets", "+write-range"],
+    subcommand: ["sheets", "+cells-set"],
+    buildArgs: (args) =>
+      argsToFlags({
+        spreadsheetToken: args.spreadsheetToken,
+        sheetId: args.sheetId,
+        range: args.range,
+        cells: args.values.map((row) => row.map((value) => ({ value }))),
+      }),
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Write sheet range",
@@ -189,9 +238,27 @@ registerBuiltInSkill(
     schema: z.object({
       spreadsheetToken: spreadsheetTokenParam,
       sheetId: sheetIdParam,
+      sheetName: z.string().min(1).optional().describe("Preferred sheet name for append mode."),
       rows: grid.describe("2D array of rows to append after the last used row."),
     }),
-    subcommand: ["sheets", "+append-rows"],
+    subcommand: ["sheets", "+table-put"],
+    buildArgs: (args) => {
+      const width = Math.max(0, ...args.rows.map((row) => row.length))
+      return argsToFlags({
+        spreadsheetToken: args.spreadsheetToken,
+        sheets: {
+          sheets: [
+            {
+              name: args.sheetName ?? args.sheetId,
+              mode: "append",
+              header: false,
+              columns: Array.from({ length: width }, (_, index) => `column_${index + 1}`),
+              data: args.rows,
+            },
+          ],
+        },
+      })
+    },
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Append rows",
@@ -215,7 +282,13 @@ registerBuiltInSkill(
       format: z.enum(["xlsx", "csv", "pdf"]).describe("Export file format."),
       outputPath: z.string().min(1).describe("Local file path to write the exported file to."),
     }),
-    subcommand: ["sheets", "+export"],
+    subcommand: ["sheets", "+workbook-export"],
+    buildArgs: (args) =>
+      argsToFlags({
+        spreadsheetToken: args.spreadsheetToken,
+        fileExtension: args.format,
+        outputPath: args.outputPath,
+      }),
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Export sheet",

@@ -203,7 +203,9 @@ export function createExportAPI(pluginId: string): PluginExportAPI {
     },
 
     getCustomExporters: (): CustomExporter[] => {
-      return Array.from(customExporters.values())
+      return Array.from(customExporters.entries())
+        .filter(([id]) => id.startsWith(`${pluginId}:`))
+        .map(([, exporter]) => exporter)
     },
 
     generateFilename: (title: string, extension: string): string => {
@@ -240,7 +242,7 @@ export function createExportAPI(pluginId: string): PluginExportAPI {
 async function performExport(
   data: ExportData,
   options: ExportOptions,
-  _pluginId: string
+  pluginId: string
 ): Promise<ExportResult> {
   const { format, ...restOptions } = options
 
@@ -249,7 +251,12 @@ async function performExport(
   let extension: string
 
   // Check for custom exporter first
-  const customExporter = Array.from(customExporters.values()).find((e) => e.format === format)
+  const requestedExporterId = String(format).includes(":")
+    ? String(format)
+    : `${pluginId}:${String(format)}`
+  const customExporter = requestedExporterId.startsWith(`${pluginId}:`)
+    ? customExporters.get(requestedExporterId)
+    : undefined
 
   if (customExporter) {
     try {

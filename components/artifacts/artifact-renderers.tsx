@@ -7,8 +7,9 @@
  * renderer-registry plugin extension surface.
  */
 
-import { Suspense, lazy, useEffect, useRef, useState } from "react"
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react"
 import { Loader2 } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { MermaidBlock } from "@/components/chat/renderers/mermaid-block"
 import { MathBlock } from "@/components/chat/renderers/math-block"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
@@ -105,9 +106,43 @@ export function PluginArtifactRendererHost({
   fallback?: React.ReactNode
   onRuntimeStateChange?: (state: ArtifactRuntimeHealth, error?: string) => void
 }) {
+  const t = useTranslations("artifacts.pluginRenderer")
   const containerRef = useRef<HTMLDivElement>(null)
+  const handleRef = useRef<ReturnType<PluginArtifactRenderer["mount"]> | null>(null)
+  const mountedArtifactRef = useRef<Artifact | null>(null)
+  const latestArtifactRef = useRef(artifact)
+  const translationsRef = useRef(t)
+  const runtimeStateCallbackRef = useRef(onRuntimeStateChange)
   const renderContextKey = `${renderer.id}:${artifact.id}`
-  const [renderError, setRenderError] = useState<{ key: string; message: string } | null>(null)
+  const [renderState, setRenderState] = useState<{
+    key: string
+    status: "loading" | "ready" | "error"
+    message?: string
+  }>({ key: renderContextKey, status: "loading" })
+
+  useEffect(() => {
+    latestArtifactRef.current = artifact
+    translationsRef.current = t
+    runtimeStateCallbackRef.current = onRuntimeStateChange
+  }, [artifact, onRuntimeStateChange, t])
+
+  const reportReady = useCallback(() => {
+    queueMicrotask(() => {
+      setRenderState({ key: renderContextKey, status: "ready" })
+    })
+    runtimeStateCallbackRef.current?.("ready")
+  }, [renderContextKey])
+
+  const reportError = useCallback(
+    (error: unknown) => {
+      const message = error instanceof Error ? error.message : translationsRef.current("failed")
+      queueMicrotask(() => {
+        setRenderState({ key: renderContextKey, status: "error", message })
+      })
+      runtimeStateCallbackRef.current?.("error", message)
+    },
+    [renderContextKey]
+  )
 
   useEffect(() => {
     const container = containerRef.current
@@ -116,45 +151,89 @@ export function PluginArtifactRendererHost({
     }
 
     try {
-      const element = renderer.render(artifact)
-      onRuntimeStateChange?.("ready")
-      // Plugin renderer returns a React element; for the registry contract we
-      // surface a minimal mount via setHTML — plugins that need richer
-      // lifecycle should use the React renderer directly.
-      if (element) {
-        container.innerHTML = ""
-        const wrapper = document.createElement("div")
-        container.appendChild(wrapper)
+      container.replaceChildren()
+      const artifactToMount = latestArtifactRef.current
+      const handle = renderer.mount(artifactToMount, container)
+      if (!handle || typeof handle.dispose !== "function") {
+        throw new Error(translationsRef.current("missingDisposer"))
       }
+      handleRef.current = handle
+      mountedArtifactRef.current = artifactToMount
+      reportReady()
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to render plugin artifact"
-      queueMicrotask(() => {
-        setRenderError({ key: renderContextKey, message })
-      })
-      onRuntimeStateChange?.("error", message)
+      reportError(error)
     }
 
     return () => {
-      if (container) {
-        container.innerHTML = ""
+      try {
+        handleRef.current?.dispose()
+      } catch (error) {
+        runtimeStateCallbackRef.current?.(
+          "error",
+          error instanceof Error ? error.message : translationsRef.current("disposeFailed")
+        )
       }
+      handleRef.current = null
+      mountedArtifactRef.current = null
+      container.replaceChildren()
     }
-  }, [artifact, onRuntimeStateChange, renderContextKey, renderer])
+  }, [renderContextKey, renderer, reportError, reportReady])
 
-  const activeRenderError = renderError?.key === renderContextKey ? renderError.message : null
+  useEffect(() => {
+    if (mountedArtifactRef.current === artifact) return
+    const container = containerRef.current
+    const currentHandle = handleRef.current
+    if (!container || !currentHandle) return
+    try {
+      if (currentHandle.update) {
+        currentHandle.update(artifact)
+      } else {
+        currentHandle.dispose()
+        handleRef.current = null
+        container.replaceChildren()
+        const nextHandle = renderer.mount(artifact, container)
+        if (!nextHandle || typeof nextHandle.dispose !== "function") {
+          throw new Error(translationsRef.current("missingDisposer"))
+        }
+        handleRef.current = nextHandle
+      }
+      mountedArtifactRef.current = artifact
+      reportReady()
+    } catch (error) {
+      reportError(error)
+    }
+  }, [artifact, renderer, reportError, reportReady])
 
-  if (activeRenderError) {
+  const activeState =
+    renderState.key === renderContextKey
+      ? renderState
+      : { key: renderContextKey, status: "loading" as const }
+
+  if (activeState.status === "error") {
     return (
       <>
         <Alert variant="destructive" className="m-4">
-          <AlertDescription>{activeRenderError}</AlertDescription>
+          <AlertDescription>{activeState.message ?? t("failed")}</AlertDescription>
         </Alert>
         {fallback}
       </>
     )
   }
 
-  return <div ref={containerRef} className={cn("min-h-full w-full", className)} />
+  return (
+    <div
+      className={cn("relative min-h-full w-full", className)}
+      aria-busy={activeState.status === "loading"}
+    >
+      {activeState.status === "loading" && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/70">
+          <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden="true" />
+          <span className="sr-only">{t("loading")}</span>
+        </div>
+      )}
+      <div ref={containerRef} className="min-h-full w-full" />
+    </div>
+  )
 }
 
 /**

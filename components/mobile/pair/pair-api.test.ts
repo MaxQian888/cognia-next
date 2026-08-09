@@ -1,241 +1,145 @@
-/**
- * @jest-environment jsdom
- */
+/** @jest-environment jsdom */
 
-import { redeemPairCode, redeemPairJwt, type PairFetcher } from "./pair-api"
-import {
-  buildRoomDescriptorV2,
-  generateV2SigningKeyPair,
-} from "@/lib/signaling/v2-crypto"
+import { encodePairPayload } from "@/lib/qr/pair-payload"
+import { fetchCompanionAuthConfig, registerCompanionDevice } from "@/lib/tauri/companion-auth"
+import { getActiveLogtoSession, signInToLogto } from "@/lib/logto/app-session"
 
-function makeFetcher(
-  handler: (url: string, init: RequestInit) => Response | Promise<Response>
-): PairFetcher {
-  return jest.fn((url: string, init: RequestInit) => handler(url, init)) as unknown as PairFetcher
+import { registerDecodedPairPayload, registerPairPayload } from "./pair-api"
+
+jest.mock("@/lib/tauri/companion-auth", () => ({
+  registerCompanionDevice: jest.fn(),
+  fetchCompanionAuthConfig: jest.fn(),
+}))
+jest.mock("@/lib/logto/app-session", () => ({
+  getActiveLogtoSession: jest.fn(),
+  signInToLogto: jest.fn(),
+}))
+jest.mock("@/lib/logto/web-popup", () => ({ createLogtoWebPopupDrivers: () => ({}) }))
+jest.mock("./pair-helpers", () => ({ getDeviceLabel: () => "Test phone" }))
+
+const register = registerCompanionDevice as jest.MockedFunction<typeof registerCompanionDevice>
+const activeSession = getActiveLogtoSession as jest.MockedFunction<typeof getActiveLogtoSession>
+const authConfig = fetchCompanionAuthConfig as jest.MockedFunction<typeof fetchCompanionAuthConfig>
+const signIn = signInToLogto as jest.MockedFunction<typeof signInToLogto>
+const payload = {
+  baseUrl: "https://host.local:27890",
+  mode: "owner-invitation" as const,
+  invitation: "owner-invitation",
+  hostId: "host-1",
+  tenantId: "tenant-1",
+  expiresAt: Date.now() + 60_000,
+  serverVersion: "1.2.3",
+  fingerprint: "ab".repeat(32),
+}
+const config = {
+  baseUrl: payload.baseUrl,
+  deviceId: "device-1",
+  devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "secret" },
+  deviceKeyThumbprint: "thumbprint",
+  accountId: payload.tenantId,
+  serverVersion: payload.serverVersion,
 }
 
-function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  })
-}
-
-async function validPairResponse(init: RequestInit): Promise<Response> {
-  const request = JSON.parse(init.body as string) as { mobile_signing_key: string }
-  const desktop = await generateV2SigningKeyPair()
-  const roomDescriptor = await buildRoomDescriptorV2({
-    roomNonce: "AAECAwQFBgcICQoLDA0ODw",
-    desktopSigningKey: desktop.encodedPublicKey,
-    mobileSigningKey: request.mobile_signing_key,
-    notAfter: Date.now() + 60_000,
-  })
-  return jsonResponse(200, {
-    device_id: "device-1",
-    device_jwt: "eyJ.device.jwt",
-    server_version: "0.1.0",
-    rendezvous_id: roomDescriptor.roomId,
-    room_descriptor: roomDescriptor,
-    signaling_key_ref: "device-1",
-  })
-}
-
-describe("redeemPairJwt", () => {
-  it("returns ok with CompanionConfig on 200", async () => {
-    const fetcher = makeFetcher((url, init) => {
-      expect(url).toBe("https://10.0.2.2:7890/api/v1/auth/pair")
-      expect(JSON.parse(init.body as string)).toMatchObject({
-        pair_jwt: "eyJ.pair.jwt",
-        device_label: expect.any(String),
-        device_platform: expect.any(String),
-      })
-      expect(JSON.parse(init.body as string).mobile_signing_key).toMatch(
-        /^[A-Za-z0-9_-]{87}$/
-      )
-      return validPairResponse(init)
-    })
-    const result = await redeemPairJwt(
-      {
-        baseUrl: "https://10.0.2.2:7890",
-        pairJwt: "eyJ.pair.jwt",
-      },
-      fetcher
-    )
-    expect(result.kind).toBe("ok")
-    if (result.kind === "ok") {
-      expect(result.config.deviceId).toBe("device-1")
-      expect(result.config.deviceJwt).toBe("eyJ.device.jwt")
-      expect(result.config.rendezvousId).toBe(result.config.signalingRoomDescriptor?.roomId)
-      expect(result.config.signalingPrivateKeyJwk?.d).toBeTruthy()
-    }
-  })
-
-  it("strips trailing slash on baseUrl", async () => {
-    const seen: string[] = []
-    const fetcher = makeFetcher((url, init) => {
-      seen.push(url)
-      return validPairResponse(init)
-    })
-    const result = await redeemPairJwt(
-      { baseUrl: "https://10.0.2.2:7890///", pairJwt: "eyJ.pair.jwt" },
-      fetcher
-    )
-    expect(seen[0]).toBe("https://10.0.2.2:7890/api/v1/auth/pair")
-    if (result.kind === "ok") {
-      expect(result.config.baseUrl).toBe("https://10.0.2.2:7890")
-    }
-  })
-
-  it("propagates serverFingerprint into the request and config", async () => {
-    const fetcher = makeFetcher((_url, init) => {
-      expect((init as { serverFingerprint?: string }).serverFingerprint).toBe("ABCDEF")
-      return validPairResponse(init)
-    })
-    const result = await redeemPairJwt(
-      {
-        baseUrl: "https://10.0.2.2:7890",
-        pairJwt: "eyJ.pair.jwt",
-        serverFingerprint: "ABCDEF",
-      },
-      fetcher
-    )
-    if (result.kind === "ok") {
-      expect(result.config.serverFingerprint).toBe("ABCDEF")
-    }
-  })
+beforeEach(() => {
+  register.mockReset()
+  activeSession.mockReset()
+  authConfig.mockReset()
+  signIn.mockReset()
 })
 
-describe("redeemPairCode", () => {
-  it("returns ok on 200 with device JWT", async () => {
-    const fetcher = makeFetcher((url, init) => {
-      expect(url).toBe("https://10.0.2.2:7890/api/v1/auth/pair/redeem-code")
-      expect(JSON.parse(init.body as string)).toMatchObject({
-        code: "123456",
-        device_label: expect.any(String),
-      })
-      return validPairResponse(init)
-    })
-    const result = await redeemPairCode(
-      { baseUrl: "https://10.0.2.2:7890", code: "123456" },
-      fetcher
-    )
-    expect(result.kind).toBe("ok")
+it("registers the invitation through the canonical device-key flow", async () => {
+  register.mockResolvedValue(config)
+  await expect(registerPairPayload(encodePairPayload(payload))).resolves.toEqual({
+    kind: "ok",
+    config: { ...config, targetId: payload.hostId },
   })
+  expect(register).toHaveBeenCalledWith(
+    {
+      baseUrl: payload.baseUrl,
+      mode: payload.mode,
+      invitation: payload.invitation,
+      hostId: payload.hostId,
+      tenantId: payload.tenantId,
+      displayName: "Test phone",
+      serverVersion: payload.serverVersion,
+      serverFingerprint: payload.fingerprint,
+    },
+    undefined
+  )
+})
 
-  it("rejects non-6-digit codes locally without calling fetcher", async () => {
-    const fetcher = jest.fn() as unknown as PairFetcher
-    for (const bad of ["12345", "1234567", "12345a", "", "abcdef"]) {
-      const result = await redeemPairCode({ baseUrl: "https://10.0.2.2:7890", code: bad }, fetcher)
-      expect(result.kind).toBe("code_error")
-      if (result.kind === "code_error") {
-        expect(result.code).toBe("invalid_pair_code")
-      }
-    }
-    expect(fetcher).not.toHaveBeenCalled()
+it("reuses the active OIDC session for an oidc pairing", async () => {
+  const session = {
+    issuer: "https://id.example/oidc",
+    clientId: "web-client",
+    resource: "https://host.example/api",
+    organizationId: payload.tenantId,
+    accessToken: "oidc-access",
+    scopes: ["openid"],
+  }
+  activeSession.mockResolvedValue(session)
+  register.mockResolvedValue(config)
+
+  await registerDecodedPairPayload({ ...payload, mode: "oidc", invitation: undefined })
+
+  expect(register).toHaveBeenCalledWith(
+    expect.objectContaining({ mode: "oidc", invitation: undefined, oidc: session }),
+    undefined
+  )
+})
+
+it("starts canonical Logto PKCE when an oidc pairing has no active session", async () => {
+  const session = {
+    issuer: "https://id.example/oidc",
+    clientId: "web-client",
+    resource: "https://host.example/api",
+    organizationId: payload.tenantId,
+    accessToken: "oidc-access",
+    scopes: ["openid"],
+  }
+  activeSession.mockResolvedValue(null)
+  authConfig.mockResolvedValue({
+    deploymentMode: "multi-tenant",
+    hostId: payload.hostId,
+    oidc: {
+      issuer: session.issuer,
+      audience: session.resource,
+      webClientId: session.clientId,
+      scopes: ["openid", "offline_access"],
+    },
+    signaling: { url: "wss://host.example/v2/signaling", iceServers: [] },
   })
+  signIn.mockResolvedValue(session)
+  register.mockResolvedValue(config)
 
-  it("trims whitespace before validating", async () => {
-    const fetcher = makeFetcher((_url, init) => validPairResponse(init))
-    const result = await redeemPairCode(
-      { baseUrl: "https://10.0.2.2:7890", code: "  123456  " },
-      fetcher
-    )
-    expect(result.kind).toBe("ok")
+  await registerDecodedPairPayload({ ...payload, mode: "oidc", invitation: undefined })
+
+  expect(signIn).toHaveBeenCalledWith(
+    expect.objectContaining({
+      issuer: session.issuer,
+      clientId: session.clientId,
+      resource: session.resource,
+      organizationId: payload.tenantId,
+    }),
+    expect.any(Object)
+  )
+  expect(register).toHaveBeenCalledWith(expect.objectContaining({ oidc: session }), undefined)
+})
+
+it("rejects old and malformed payloads without registering", async () => {
+  await expect(registerPairPayload("cgnp2|legacy")).resolves.toMatchObject({
+    kind: "invalid_payload",
   })
-
-  it("maps pair_code_not_found onto code_error", async () => {
-    const fetcher = makeFetcher(() =>
-      jsonResponse(404, {
-        code: "pair_code_not_found",
-        message: "pair code is unknown or already used",
-      })
-    )
-    const result = await redeemPairCode(
-      { baseUrl: "https://10.0.2.2:7890", code: "654321" },
-      fetcher
-    )
-    expect(result.kind).toBe("code_error")
-    if (result.kind === "code_error") {
-      expect(result.code).toBe("pair_code_not_found")
-    }
+  await expect(registerPairPayload("not-cognia")).resolves.toMatchObject({
+    kind: "invalid_payload",
   })
+  expect(register).not.toHaveBeenCalled()
+})
 
-  it("maps pair_code_expired onto code_error", async () => {
-    const fetcher = makeFetcher(() =>
-      jsonResponse(410, {
-        code: "pair_code_expired",
-        message: "pair code has expired",
-      })
-    )
-    const result = await redeemPairCode(
-      { baseUrl: "https://10.0.2.2:7890", code: "111111" },
-      fetcher
-    )
-    expect(result.kind).toBe("code_error")
-    if (result.kind === "code_error") {
-      expect(result.code).toBe("pair_code_expired")
-    }
-  })
-
-  it("falls back to http_error for unknown error codes", async () => {
-    const fetcher = makeFetcher(() =>
-      jsonResponse(500, {
-        code: "internal_explosion",
-        message: "boom",
-      })
-    )
-    const result = await redeemPairCode(
-      { baseUrl: "https://10.0.2.2:7890", code: "654321" },
-      fetcher
-    )
-    expect(result.kind).toBe("http_error")
-    if (result.kind === "http_error") {
-      expect(result.status).toBe(500)
-    }
-  })
-
-  it("falls back to http_error when body is not JSON", async () => {
-    const fetcher = makeFetcher(() => new Response("not json", { status: 503 }))
-    const result = await redeemPairCode(
-      { baseUrl: "https://10.0.2.2:7890", code: "654321" },
-      fetcher
-    )
-    expect(result.kind).toBe("http_error")
-    if (result.kind === "http_error") {
-      expect(result.status).toBe(503)
-      expect(result.rawBody).toBe("not json")
-    }
-  })
-
-  it("returns network_error on thrown fetch", async () => {
-    const fetcher = jest.fn(() =>
-      Promise.reject(new Error("connection refused"))
-    ) as unknown as PairFetcher
-    const result = await redeemPairCode(
-      { baseUrl: "https://10.0.2.2:7890", code: "654321" },
-      fetcher
-    )
-    expect(result.kind).toBe("network_error")
-    if (result.kind === "network_error") {
-      expect(result.message).toBe("connection refused")
-    }
-  })
-
-  it("rejects a response without the required v2 descriptor", async () => {
-    const fetcher = makeFetcher(() =>
-      jsonResponse(200, {
-        device_id: "d",
-        device_jwt: "j",
-        server_version: "0.1.0",
-      })
-    )
-    const result = await redeemPairCode(
-      { baseUrl: "https://10.0.2.2:7890", code: "654321" },
-      fetcher
-    )
-    expect(result.kind).toBe("http_error")
-    if (result.kind === "http_error") {
-      expect(result.rawBody).toMatch(/v2 room descriptor/i)
-    }
+it("normalizes registration failures", async () => {
+  register.mockRejectedValue(new Error("invitation already consumed"))
+  await expect(registerDecodedPairPayload(payload)).resolves.toEqual({
+    kind: "registration_error",
+    message: "invitation already consumed",
   })
 })

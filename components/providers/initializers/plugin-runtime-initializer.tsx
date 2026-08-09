@@ -44,7 +44,14 @@ declare global {
  * Following the `LocalCharacterPackInitializer` shape so the entry under
  * `app/layout.tsx` stays homogeneous.
  */
-export function PluginRuntimeInitializer() {
+export interface PluginRuntimeInitializerProps {
+  /** Keep the pre-account E2E initializer off unrelated real-browser lanes. */
+  onlyForPluginSurfaceE2E?: boolean
+}
+
+export function PluginRuntimeInitializer({
+  onlyForPluginSurfaceE2E = false,
+}: PluginRuntimeInitializerProps = {}) {
   const hasInitialized = useRef(false)
   useSyncExternalStore(
     subscribeBootCapabilities,
@@ -52,17 +59,21 @@ export function PluginRuntimeInitializer() {
     getBootCapabilitySnapshot
   )
   const requested = isBootCapabilityRequested("plugin-runtime")
+  const isAllowedRoute =
+    !onlyForPluginSurfaceE2E ||
+    (typeof window !== "undefined" &&
+      window.location.pathname.startsWith("/e2e/plugin-ui-surfaces"))
 
   // Dependency warnings involving theme packs must stay current in every
   // runtime profile. Theme packs are contributed by regular plugins, while
   // local character-pack scanning only runs in the desktop shell.
   useEffect(() => {
-    if (!requested) return
+    if (!requested || !isAllowedRoute) return
     return installPackWarningRefreshWiring()
-  }, [requested])
+  }, [isAllowedRoute, requested])
 
   useEffect(() => {
-    if (!requested) return
+    if (!requested || !isAllowedRoute) return
     if (hasInitialized.current) return
     hasInitialized.current = true
     window.__cogniaPluginRuntimeReady = false
@@ -130,18 +141,18 @@ export function PluginRuntimeInitializer() {
     }
 
     void initialize()
-  }, [requested])
+  }, [isAllowedRoute, requested])
 
   // Emit `APP_CLOSING` on page unload so plugins can flush state / cancel
   // in-flight work. The handler must be synchronous (a dynamic import wouldn't
   // resolve before the page is gone), hence the static `emitSystemBusEvent`
   // import above. Best-effort: a no-op when no plugin subscribed.
   useEffect(() => {
-    if (!requested) return
+    if (!requested || !isAllowedRoute) return
     const handleBeforeUnload = () => emitSystemBusEvent(SystemEvents.APP_CLOSING, {})
     window.addEventListener("beforeunload", handleBeforeUnload)
     return () => window.removeEventListener("beforeunload", handleBeforeUnload)
-  }, [requested])
+  }, [isAllowedRoute, requested])
 
   return null
 }

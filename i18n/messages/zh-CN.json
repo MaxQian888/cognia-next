@@ -3105,6 +3105,10 @@
     "noVersions": "暂无版本历史",
     "openFullDesigner": "打开完整设计器",
     "openWithDefault": "用默认应用打开",
+    "pluginRenderer": {
+      "failed": "插件渲染器运行失败。",
+      "loading": "正在加载插件渲染器…"
+    },
     "preview": "预览",
     "previewInDesigner": "在设计器中预览",
     "previousVersion": "旧版本",
@@ -3214,6 +3218,14 @@
       "reviewEmpty": "请选择一个改动文件以审阅差异",
       "scopeLabel": "工作区范围",
       "taskResources": {
+        "adoptionGenerationOnly": "生成了 {lines} 行 · 旧回退链路无法判断采用情况",
+        "adoptionPending": "建议变更 {lines} 行 · 等待审阅",
+        "adoptionRate": "采用率 {rate}% · 已采用 {accepted}/{proposed} 行变更",
+        "adoptionRejected": "未采用 · 建议变更 {lines} 行",
+        "adoptionReverted": "采用已撤销 · 建议变更 {lines} 行",
+        "adoptionTitle": "AI 代码采用率",
+        "adoptionTruncated": "跟踪覆盖不完整",
+        "adoptionUnavailable": "无法获得采用率覆盖数据",
         "agent": "Agent",
         "allCaptureClasses": "源码和生成产物",
         "allOrigins": "全部来源",
@@ -3806,6 +3818,7 @@
       "title": "预览网页"
     },
     "errors": {
+      "httpsProxyUnsupported": "此浏览器预览不支持 HTTPS 代理。",
       "navigate": "无法导航到该地址"
     },
     "find": {
@@ -4956,6 +4969,12 @@
       "skills": {
         "enabled": "已启用技能「{name}」。"
       },
+      "smartSnapshot": {
+        "captureFailed": "智能快照失败",
+        "captureTooltip": "智能快照",
+        "captured": "已附加智能快照：{appName}",
+        "switchPrompt": "请切换到目标应用，Cognia 稍后会截取它。"
+      },
       "stopTooltip": "停止",
       "toolbar": {
         "breakdownAgents": "子智能体",
@@ -5046,13 +5065,6 @@
       "webLabel": "Web",
       "workflowRefs": {
         "removeAria": "移除对 {label} 的引用"
-      },
-      "smartSnapshot": {
-        "captureAria": "截取智能快照",
-        "captureFailed": "智能快照失败",
-        "captureTooltip": "智能快照",
-        "captured": "已附加智能快照：{appName}",
-        "switchPrompt": "请切换到目标应用，Cognia 稍后会截取它。"
       }
     },
     "concurrent": {
@@ -5170,10 +5182,13 @@
         "active": "当前",
         "aria": "切换本会话使用的账号",
         "effective": "当前生效账号",
+        "error": "无法切换账号。",
         "inheritedToast": "正在使用继承账号 {label}",
         "noOverride": "继承",
         "switchFailed": "无法切换账号：{error}",
         "toast": "下一条消息将使用账号 {label}",
+        "toastInherited": "正在使用继承的账号。",
+        "unavailable": "账号切换当前不可用。",
         "unavailableWithId": "账号 {id} 当前不可用。",
         "useInherited": "使用继承账号"
       },
@@ -5264,6 +5279,9 @@
       "memoryUse": "在此对话使用记忆",
       "noApiKey": "未配置 API Key",
       "openBrowser": "打开浏览器面板",
+      "openInCodexApp": "在 Codex App 中打开",
+      "openInCodexAppFailed": "无法在 Codex App 中打开此任务。",
+      "openedInCodexApp": "已在 Codex App 中打开。",
       "permissionModeAppDefault": "使用应用默认",
       "permissionModeLabel": "权限模式",
       "pickDirAria": "选择目录",
@@ -5302,6 +5320,7 @@
       "providerUndoWarningDescription": "提供商可能会还原对话状态和文件更改。这是提供商原生撤销，并非恢复压缩前上下文。系统会针对当前外部智能体配置记住此确认。",
       "providerUndoWarningTitle": "提供商撤销可能会更改文件",
       "save": "保存",
+      "sessionCommunication": "会话通信",
       "sheet": {
         "sections": {
           "account": "模型与账号",
@@ -5840,6 +5859,69 @@
     "selection": {
       "askError": "无法为这段内容开旁支。",
       "askInAside": "开旁支追问"
+    },
+    "sessionCommunication": {
+      "acceptHeld": "接受",
+      "agentOrigin": "来自 {name} 的智能体消息 · 不受信任",
+      "attachedCreateError": "无法创建附加会话。",
+      "attachedCreated": "已创建附加会话。",
+      "attachedPromptLabel": "初始提示词",
+      "attachedStatus": {
+        "closed": "已关闭",
+        "completed": "已完成",
+        "interrupted": "已中断",
+        "running": "运行中",
+        "staged": "待运行"
+      },
+      "attachedTab": "附加会话",
+      "attachedTitleLabel": "任务标题",
+      "closeAttached": "关闭",
+      "contextFull": "完整父会话上下文",
+      "contextLabel": "上下文分叉",
+      "contextLastN": "最近若干消息",
+      "contextNone": "不携带父会话上下文",
+      "createAttached": "创建附加会话",
+      "description": "管理由父会话持有的子会话，以及独立会话之间的实时纯文本交接。",
+      "from": "来自 {name}",
+      "inboxTitle": "收件箱",
+      "intentLabel": "投递意图",
+      "intentNote": "仅作为备注",
+      "intentTrigger": "触发新一轮对话",
+      "interruptAttached": "中断",
+      "messageLabel": "消息",
+      "messageStatus": {
+        "delivered": "已投递",
+        "expired": "已过期",
+        "held": "等待审批",
+        "queued": "排队中",
+        "refused": "已拒绝",
+        "targetUnavailable": "目标不可用"
+      },
+      "noAttached": "还没有附加会话。",
+      "noInbox": "没有收到消息。",
+      "noOutbox": "没有已发送消息。",
+      "noReachable": "当前工作区没有其他在线会话。",
+      "openAttached": "打开",
+      "outboxTitle": "投递回执",
+      "peerTab": "消息其他会话",
+      "policyAccept": "接受",
+      "policyHold": "等待审批",
+      "policyLabel": "接收策略",
+      "policyRefuse": "拒绝",
+      "policyUpdateError": "无法更新消息接收策略。",
+      "refuseHeld": "拒绝",
+      "resultLabel": "结果",
+      "send": "发送消息",
+      "sendError": "无法发送消息。",
+      "sent": "消息状态：{status}",
+      "targetLabel": "目标会话",
+      "targetPlaceholder": "选择在线会话",
+      "title": "会话通信",
+      "turnsLabel": "携带消息数",
+      "userOrigin": "来自 {name} 的消息 · 不受信任",
+      "workspaceIndependent": "独立工作区",
+      "workspaceLabel": "工作区",
+      "workspaceShared": "共享父会话工作区"
     },
     "sessionCost": {
       "byModelTitle": "按模型拆分",
@@ -6739,6 +6821,7 @@
         "moreEmpty": "「更多」菜单为空——所有项均已固定或隐藏。",
         "moveToMore": "移至更多",
         "pin": "固定到导航栏",
+        "pinItem": "固定项目",
         "pinned": "已固定",
         "pinnedEmpty": "暂无固定项——所有项都在「更多」菜单中。",
         "restoreDefaults": "恢复默认",
@@ -7128,8 +7211,11 @@
       "deselect": "取消选择",
       "dragHandle": "拖拽以重新排序或移动到文件夹",
       "moveToFolder": "移动到文件夹",
+      "openInCodexApp": "在 Codex App 中打开",
+      "openInCodexAppFailed": "无法在 Codex App 中打开此任务。",
       "openInTerminal": "在终端打开",
       "openInTerminalFailed": "无法导出此会话到终端",
+      "openedInCodexApp": "已在 Codex App 中打开。",
       "openedInTerminal": "在终端运行：{command}",
       "pin": "置顶",
       "pinned": "已置顶",
@@ -7680,20 +7766,20 @@
     },
     "chipStripAria": "发现分类",
     "connectorDescriptions": {
-      "dingtalk": "钉钉工作台机器人（规划中）。",
+      "dingtalk": "内置钉钉工作台机器人，使用 AppKey/AppSecret 凭据。",
       "discord": "面向服务器和私信的 Bot 集成。",
       "email": "邮件入站 + 出站桥（规划中）。",
       "github": "PR / Issue / Release 事件路由至收件箱。",
       "kook": "KOOK 语音/文字机器人（规划中）。",
       "lark": "飞书互动卡片与机器人集成。",
       "line": "LINE 通信机器人（规划中）。",
-      "matrix": "联邦化 Matrix 桥（规划中）。",
+      "matrix": "内置联邦化 Matrix 桥，支持 /sync 与原生媒体。",
       "mattermost": "Mattermost 工作区机器人（规划中）。",
       "onebot": "基于反向 WebSocket 的 QQ OneBot 桥。",
-      "qq-official": "QQ 官方机器人平台（规划中）。",
+      "qq-official": "内置 QQ 官方机器人适配器。",
       "slack": "面向工作区的 Block Kit 集成。",
       "telegram": "面向频道、群组和私聊的 Bot API。",
-      "wechat-oa": "微信公众号集成（规划中）。",
+      "wechat-oa": "内置微信公众号 Webhook 集成。",
       "wechat-personal": "个人微信经 iLink 网关接入（扫码登录，仅回复）。非官方——存在封号风险。",
       "wecom": "企业微信智能机器人长连接——流式回复 + 主动推送。"
     },
@@ -10329,16 +10415,44 @@
   "integrations": {
     "accounts": {
       "add": "添加账号",
+      "advanced": "高级",
       "approvedOrigin": "已授权的 self-hosted HTTPS origin（可选）",
       "authStrategy": "认证方式",
+      "checkHealth": "检查账号健康状态",
+      "configFields": {
+        "accountLabel": "账号名称",
+        "appId": "App ID",
+        "privateKey": "私钥",
+        "token": "个人访问令牌"
+      },
+      "configured": "已配置",
       "credentialHandle": "凭据句柄",
+      "dedicatedAppConfirmation": "我确认这是专用的集成应用。",
+      "discoverInstallations": "发现安装实例",
+      "installation": "安装实例",
       "integration": "Integration",
       "label": "账号名称",
+      "lastSync": "最近同步",
+      "missingPermissions": "缺少权限",
+      "notConfigured": "未配置",
       "providerId": "认证提供方 ID",
+      "rateLimitReset": "速率限制重置时间",
+      "recommended": "推荐",
       "remoteAccountId": "远端账号 ID",
       "selectAuthStrategy": "选择认证方式",
+      "selectInstallation": "选择安装实例",
       "selectIntegration": "选择 Integration",
-      "title": "账号"
+      "statusMessages": {
+        "installationRevoked": "GitHub App 安装实例已被撤销。",
+        "installationSuspended": "GitHub App 安装实例已暂停。",
+        "permissionsMissing": "GitHub App 安装实例缺少所需权限。",
+        "remoteReconciliationUnavailable": "暂时无法与远端账号核对状态。",
+        "webhookVerified": "Webhook 配置已验证。"
+      },
+      "title": "账号",
+      "validateAndAdd": "验证并添加",
+      "webhookUrl": "Webhook 地址",
+      "webhookVerification": "Webhook 验证"
     },
     "approvals": {
       "approve": "批准",
@@ -10354,6 +10468,14 @@
     "disable": "停用",
     "emptyPlugins": "请先安装支持 Integration 的 Marketplace 插件。",
     "enable": "启用",
+    "errors": {
+      "accountSetup": "无法配置集成账号。",
+      "confirmDedicatedApp": "请确认这是专用的集成应用。",
+      "installationDiscovery": "无法发现 GitHub App 安装实例。",
+      "projectionRequired": "请选择收件箱投影。",
+      "resourceDiscovery": "无法发现资源。",
+      "subscriptionSetup": "无法创建订阅。"
+    },
     "health": {
       "degraded": "异常",
       "healthy": "健康",
@@ -10381,14 +10503,55 @@
       "account": "账号",
       "add": "添加订阅",
       "allResources": "全部资源",
+      "deliverToInbox": "将事件投递到收件箱",
+      "disabledByProvider": "已被提供方停用",
+      "discover": "发现",
+      "eventLabels": {
+        "checkRunCompleted": "检查运行已完成",
+        "githubAppAuthorizationRevoked": "GitHub App 授权已撤销",
+        "installationCreated": "安装实例已创建",
+        "installationDeleted": "安装实例已删除",
+        "installationPermissionsAccepted": "安装实例权限已接受",
+        "installationSuspended": "安装实例已暂停",
+        "installationUnsuspended": "安装实例已恢复",
+        "issueAssigned": "议题已分配",
+        "issueClosed": "议题已关闭",
+        "issueCommentCreated": "议题评论已创建",
+        "issueLabeled": "议题标签已更新",
+        "issueOpened": "议题已创建",
+        "pullRequestClosed": "拉取请求已关闭",
+        "pullRequestOpened": "拉取请求已创建",
+        "pullRequestReviewRequested": "已请求拉取请求审查",
+        "pullRequestReviewSubmitted": "拉取请求审查已提交",
+        "pullRequestSynchronized": "拉取请求已同步",
+        "pushReceived": "已收到推送",
+        "releasePublished": "版本已发布",
+        "repositoriesAdded": "仓库已加入安装实例",
+        "repositoriesRemoved": "仓库已从安装实例移除"
+      },
       "eventTypes": "事件类型（逗号分隔）",
+      "events": "事件",
+      "failedDeliveries": "失败投递",
       "ingressSecret": "Webhook 密钥（启用 ingress 时必填）",
+      "loadMore": "加载更多",
+      "noFailedDeliveries": "没有失败投递。",
+      "projection": "收件箱投影",
+      "projectionLabels": {
+        "issueCommentThread": "议题评论线程",
+        "issueThread": "议题线程",
+        "pullRequestThread": "拉取请求线程"
+      },
+      "repository": "仓库",
+      "requeue": "重新入队",
       "resourceId": "资源 ID（可选）",
       "resourceKind": "资源类型（可选）",
+      "searchResources": "搜索资源",
       "selectAccount": "选择账号",
+      "selectProjection": "选择投影",
       "title": "订阅"
     },
-    "title": "Integrations"
+    "title": "Integrations",
+    "unsupportedWeb": "集成管理需要桌面应用。"
   },
   "larkEntry": {
     "errors": {
@@ -11357,12 +11520,15 @@
     "card": {
       "clone": "复制 {name}",
       "favorite": "将 {name} 加入收藏",
+      "reviewTrust": "检查信任设置",
+      "reviewed": "已审查",
       "selectAria": "选择 {name}",
       "unfavorite": "将 {name} 移出收藏"
     },
     "chips": {
       "addingToast": "{agent}：正在添加 “{name}”…",
       "label": "Apps",
+      "plaintextCredentialWarning": "此服务器配置包含明文凭据。",
       "removingToast": "{agent}：正在从配置中移除 “{name}”…",
       "tooltipAdd": "点击投影到 {name}",
       "tooltipDesktopOnly": "{name}（仅桌面端）",
@@ -11468,17 +11634,38 @@
       "bridgeTitle": "External Bridge 服务器",
       "clearLog": "清空日志",
       "cleared": "审计日志已清空。",
+      "colAgent": "智能体",
+      "colAttempts": "尝试次数",
+      "colCapability": "能力",
+      "colConnectP95": "连接 p95",
+      "colEvents": "事件",
+      "colFailureRate": "失败率",
+      "colLag": "延迟",
+      "colLastError": "最近错误",
       "colLatency": "耗时",
       "colResult": "结果",
       "colScope": "权限范围",
+      "colServer": "服务器",
+      "colStatus": "状态",
       "colTime": "时间",
       "colTool": "工具",
       "denied": "拒绝",
       "deniedOnly": "仅看被拒",
       "desktopOnly": "桥接状态与审计日志仅在桌面端可用。",
+      "exportLog": "导出日志",
+      "exported": "已导出 MCP 健康日志。",
       "logsSubtitle": "已连接 MCP 服务器最新输出的日志行。",
       "logsTitle": "近期日志",
+      "metricCacheHits": "能力缓存命中",
+      "metricConnectLatency": "连接延迟 p95",
+      "metricDenials": "策略拒绝",
+      "metricRetries": "重试",
+      "metricTimeouts": "超时",
+      "metricWarmReuse": "热复用",
       "openBridgeSettings": "打开 External Bridge 设置",
+      "operationsEmpty": "尚无 MCP 操作记录。",
+      "operationsSubtitle": "按服务器聚合连接与能力结果。",
+      "operationsTitle": "操作",
       "outboundSubtitle": "本应用所连接 MCP 服务器的实时会话与近期日志。",
       "outboundTitle": "MCP 服务器",
       "port": "端口 {port}",
@@ -11490,6 +11677,9 @@
       "statLogs": "日志行数",
       "statServers": "服务器",
       "stopped": "已停止",
+      "syncEmpty": "尚无智能体投影任务记录。",
+      "syncLagValue": "{seconds} 秒",
+      "syncTitle": "智能体投影同步",
       "title": "健康与日志",
       "windowNote": "仅显示最近的日志行。"
     },
@@ -13278,12 +13468,14 @@
         "invalid": "无法解析该配对载荷——请从服务器完整复制 cgnp2|… 字符串后重新粘贴。",
         "versionMismatch": "该配对载荷版本为 {got}，当前应用无法识别。请升级应用或服务器，使两端载荷版本一致。"
       },
+      "payloadPlaceholder": "cgnp3|…",
       "permissions": {
         "localNetwork": {
           "description": "请授予本地网络访问权限，本机才能在 Wi-Fi 上发现桌面端。",
           "title": "需要本地网络权限"
         }
       },
+      "persistenceError": "设备已注册，但无法安全保存其凭据。请重新配对。",
       "scanCta": "扫码配对",
       "scanError": {
         "failed": "扫码失败：{message}",
@@ -14421,6 +14613,7 @@
       "manageButton": "管理语言包"
     },
     "modelStatus": {
+      "cancelDownload": "取消下载",
       "description": "纯 Rust 的 OCR 引擎不随安装包附带模型权重以保持安装体积；首次使用时会下载到用户数据目录。",
       "download": "下载模型",
       "downloadAll": "下载全部模型文件",
@@ -14430,6 +14623,7 @@
       "downloadingDetail": "{bytesDone} / {bytesTotal} 字节 — 第 {index} / {count} 个文件",
       "emptyNoModelFiles": "该后端没有需要管理的模型文件。",
       "installed": "模型就绪",
+      "legacyDetected": "检测到旧版模型文件",
       "missing": "缺少 {count} 个模型文件",
       "modelDir": "存储位置：{path}",
       "redownload": "重新下载",
@@ -14631,6 +14825,9 @@
         "description": "Windows 自带 OCR，经 winocr crate 调用。需要 MSIX 打包的构建。",
         "label": "Windows.Media.Ocr"
       }
+    },
+    "runtime": {
+      "defaultNormalized": "默认提供方已调整为 {provider}。"
     },
     "sidebar": {
       "categoryAll": "全部",
@@ -15066,8 +15263,13 @@
     "binding": {
       "clear": "清除",
       "empty": "还没有角色。",
+      "inheritAppearance": "继承全局外观",
+      "live2dOption": "Live2D · {name}",
+      "skinFor": "{name} 的皮肤",
       "speciesFor": "{name} 的物种",
-      "useGlobal": "使用全局宠物"
+      "spriteOption": "精灵图 · {name}",
+      "useGlobal": "使用全局宠物",
+      "useSvg": "内置矢量吉祥物"
     },
     "bubbles": {
       "achievementUnlocked": [
@@ -17613,11 +17815,16 @@
     "cancel": "取消",
     "capabilityAudio": "音频",
     "capabilityChat": "对话",
+    "capabilityChatApi": "聊天 API",
     "capabilityContextHint": "由服务器上报。上下文窗口:{tokens, number} tokens。",
     "capabilityEmbed": "嵌入",
     "capabilityEmbedding": "嵌入",
     "capabilityImageGen": "图像生成",
     "capabilityInferredHint": "根据模型名推测 —— 该服务器不上报能力信息。",
+    "capabilityModelDelete": "删除模型",
+    "capabilityModelList": "列出模型",
+    "capabilityModelPull": "拉取模型",
+    "capabilityModelUnload": "卸载模型",
     "capabilityReranking": "重排序",
     "capabilityStream": "流式",
     "capabilityTools": "工具",
@@ -18186,6 +18393,7 @@
     "lmstudioDescription": "运行本地大模型的桌面应用",
     "local": "本地",
     "localProvider": "本地",
+    "localProviderApiKeyHint": "用于受保护本地端点的可选 API Key。",
     "localProvidersDescription": "在本地运行 AI 模型",
     "localProvidersTitle": "本地提供商",
     "localai": "LocalAI",
@@ -18807,6 +19015,7 @@
     "transportHeadersValue": "请求头值",
     "transportHeadersValuePlaceholder": "请求头值",
     "unknownProviderType": "未知服务商类型。",
+    "unknownVersion": "未知版本",
     "unlimited": "无限制",
     "usage": "用量",
     "valid": "有效",
@@ -21179,6 +21388,10 @@
             "description": "保留相互隔离的预热 SDK 进程，以处理下一次兼容请求。",
             "label": "预热池"
           },
+          "resolver": {
+            "description": "使用统一执行解析器选择正确的智能体运行时。",
+            "label": "统一执行解析器"
+          },
           "sessionStore": {
             "description": "将原生 SDK 会话记录镜像到加密且租户隔离的主机存储。",
             "label": "会话存储"
@@ -21999,6 +22212,13 @@
       },
       "description": "经过代码审查的第一方 MCP 工具，助手可在桌面对话或 IM 渠道中调用。",
       "lark": {
+        "diagnostics": {
+          "affectedTools": "受影响工具：{tools}",
+          "missing": "缺少 {count} 项必需能力。",
+          "missingCapabilities": "缺少能力：{capabilities}",
+          "unknown": "未知",
+          "versions": "检测到 lark-cli {detected}；认证版本 {certified}。"
+        },
         "emptyHint": "尚未注册飞书技能。",
         "intro": {
           "body": "这些技能将 lark-cli 子命令包装为强类型 MCP 工具，助手直接调用，执行运行在桌面 sidecar 中。",
@@ -22626,7 +22846,13 @@
       "skillsCount": "{count} 项技能",
       "support": {
         "diagnostics": "允许读取已脱敏的本机诊断",
-        "diagnosticsDescription": "本地诊断总开关。关闭后，支持 Agent 仅接收内置产品文档。"
+        "diagnosticsDescription": "本地诊断总开关。关闭后，支持 Agent 仅接收内置产品文档。",
+        "hidePreview": "隐藏预览",
+        "openIssue": "打开问题",
+        "preview": "预览",
+        "previewUnavailable": "预览不可用",
+        "supportResponse": "支持回复",
+        "userReport": "用户反馈"
       },
       "title": "角色",
       "trust": {
@@ -23688,16 +23914,21 @@
           "title": "会话白/黑名单"
         },
         "whoami": {
+          "avatarPublishHint": "请在飞书开发者后台发布此头像，以保持机器人身份一致。",
           "dingtalkNoProbe": "钉钉适配器没有主动探测身份的接口 — 下方的凭据是配置时录入的。",
+          "downloadAvatar": "下载头像",
           "lastProbeAt": "上次探测：{time}",
           "missingScopesHint": "请在飞书开发者后台 → 权限管理中开启这些权限并重新发布应用，然后重新探测。群管理需要 im:chat:create、im:chat:update、im:chat.members:write_only 和 contact:user.id:readonly。",
           "missingScopesTitle": "检测到缺失的权限 scope",
           "onebotNoProbe": "OneBot 身份会在客户端连接后自动读取 — 下方的 QQ UIN 是你配置的值；机器人连接后这里会显示其真实身份。",
           "onebotUinMismatch": "已连接机器人的 UIN（{actual}）与配置的 UIN（{configured}）不一致，请将适配器的 Bot UIN 改为一致。",
+          "openDeveloperConsole": "打开开发者后台",
           "openId": "Open ID",
           "probeButton": "探测身份",
           "probeFailed": "探测失败",
           "qqOfficialNoProbe": "QQ 官方适配器没有主动探测身份的接口 — 下方的 AppID 是配置时录入的。",
+          "recommendedAvatarHint": "建议为此飞书应用使用生成的头像。",
+          "recommendedAvatarTitle": "推荐头像",
           "reprobeButton": "重新探测",
           "requiresDesktop": "机器人身份探测需要桌面端运行时。",
           "tenant": "租户",
@@ -25615,6 +25846,7 @@
         "clearEnded": "清除已结束",
         "count": "{count} 个会话",
         "delete": "从历史中移除",
+        "detachedAgo": "{ago} 前已脱离",
         "empty": "尚无会话记录。",
         "endedAgo": "{ago}前结束",
         "filterAll": "全部",
@@ -26037,12 +26269,15 @@
         "headersAdd": "新建头部",
         "headersEmpty": "暂无自定义头部。",
         "headersLabel": "请求头",
+        "httpCapability": "HTTP 请求需要网络能力。",
         "removeAria": "移除处理器",
         "timeoutLabel": "超时 (ms)",
         "timeoutPlaceholder": "5000",
         "typeCommand": "命令",
+        "typeHttp": "HTTP 请求",
         "typeLabel": "类型",
         "typeWebhook": "Webhook",
+        "typeWebhookLegacy": "旧版 Webhook",
         "urlInvalid": "请输入有效的 http(s) URL。",
         "urlLabel": "URL",
         "urlPlaceholder": "https://example.com/hook",
@@ -26055,6 +26290,7 @@
       "noTriggerBadge": "暂无触发源",
       "noTriggerNote": "该事件可被识别并保存,但运行时暂无对应的触发源——在此配置的 hook 不会被触发。",
       "revert": "还原",
+      "runtimeSummary": "运行时 Hook 会通过已配置的宿主环境执行。",
       "save": "保存",
       "saveError": "保存失败：{detail}",
       "saved": "已保存。",
@@ -26500,9 +26736,12 @@
         "addBypass": "添加",
         "bypass": "绕过列表",
         "bypassHint": "命中以下主机或域名后缀的请求直接走直连。以「.」开头表示匹配域名后缀，例如「.internal」。",
+        "clearPassword": "清除已保存密码",
         "host": "主机",
         "optionalPlaceholder": "可选",
         "password": "密码",
+        "passwordConfiguredPlaceholder": "密码已配置",
+        "passwordKeyringError": "无法在安全存储中更新代理密码。",
         "port": "端口",
         "protocol": "协议",
         "proxyWebsocketsHint": "通过 HTTP CONNECT 隧道或 SOCKS5 转发 Discord Gateway、Slack Socket Mode 等 WSS 长连接。",
@@ -26672,8 +26911,21 @@
         "description": "显示浮动宠物挂件。",
         "label": "启用宠物"
       },
+      "gaze": {
+        "description": "仅使用本地指针位置；该数据永远不会被保存或发送。",
+        "label": "跟随指针"
+      },
       "live2d": {
         "active": "当前",
+        "compatibility": {
+          "diagnosticWithPath": "{message} — {path}",
+          "status": {
+            "degraded": "降级可用",
+            "invalid": "无效",
+            "legacy": "待验证",
+            "ready": "可用"
+          }
+        },
         "config": {
           "cancel": "取消",
           "columnKey": "状态",
@@ -26688,6 +26940,24 @@
           "optionDefault": "默认",
           "optionEngine": "引擎默认",
           "optionNoExpression": "无表情",
+          "parameters": {
+            "auto": "自动检测",
+            "custom": "自定义",
+            "description": "将标准宠物行为映射到该模型的参数 ID，或停用模型不支持的参数角色。",
+            "disabled": "已停用",
+            "parameterIdFor": "{role}的参数 ID",
+            "parameterIdPlaceholder": "ParamAngleX",
+            "roles": {
+              "bodyX": "身体水平",
+              "bodyY": "身体垂直",
+              "eyeX": "眼睛水平",
+              "eyeY": "眼睛垂直",
+              "headX": "头部水平",
+              "headY": "头部垂直",
+              "headZ": "头部倾斜",
+              "mouthOpen": "嘴巴张合"
+            }
+          },
           "previewState": "预览状态",
           "previewUnavailable": "实时预览需要 Live2D 运行时 —— 设置仍可保存。",
           "resetAll": "全部重置",
@@ -26696,6 +26966,7 @@
           "save": "保存",
           "scale": "缩放",
           "tabMotion": "动作映射",
+          "tabParameters": "参数",
           "tabTransform": "变换",
           "test": "测试",
           "title": "自定义 {name}"
@@ -26706,12 +26977,22 @@
         "download": "下载示例模型",
         "downloading": "下载中…",
         "errors": {
+          "ambiguousPath": "资源包包含仅大小写不同的路径。",
+          "corruptTexture": "必需纹理已损坏或无法解码。",
           "cubism2Unsupported": "暂不支持 Cubism 2 模型。",
           "downloadFailed": "无法下载示例模型。",
+          "duplicatePath": "资源包包含重复的规范化路径。",
           "invalidJson": "配置文件不是有效的 JSON。",
+          "missingExpression": "缺失的表情引用已停用。",
+          "missingMetadata": "缺失的可选模型元数据已停用。",
+          "missingMotion": "缺失的动作引用已停用。",
+          "missingPhysics": "缺失的物理数据已停用。",
+          "missingPose": "缺失的姿势数据已停用。",
           "missingReferenced": "模型缺少其引用的文件。",
+          "missingSound": "缺失的动作音频已停用。",
           "multipleSettings": "找到多个 .model3.json，请只保留一个。",
           "noSettings": "未找到 .model3.json 配置文件。",
+          "pathTraversal": "资源包包含不安全的路径穿越。",
           "tooLarge": "模型超过 50 MB 上限。",
           "zipFailed": "无法读取 .zip 压缩包。"
         },
@@ -26824,6 +27105,35 @@
           "sprite-v2": "AI 精灵图（v2）",
           "svg": "矢量吉祥物"
         }
+      },
+      "skinStatus": {
+        "configure": "配置",
+        "diagnostics": {
+          "ambiguousPath": "两个资源路径仅大小写不同：{path}。",
+          "assetMissing": "所选资源不存在：{path}。",
+          "assetTooLarge": "资源超过配置的大小限制：{path}。",
+          "contextLost": "WebGL 上下文已丢失两次。渲染已暂停，请手动重试。",
+          "corruptTexture": "引用的纹理无法解码：{path}。",
+          "cubism2Unsupported": "不支持 Cubism 2 模型：{path}。",
+          "duplicatePath": "资源包包含重复的规范化路径：{path}。",
+          "invalidSettings": "模型配置无效：{path}。",
+          "missingOptionalResource": "可选资源缺失，相关功能已停用：{path}。",
+          "missingRequiredResource": "必需资源缺失：{path}。",
+          "pathTraversal": "资源包包含不安全的路径穿越：{path}。",
+          "renderFailed": "所选皮肤渲染失败。请重试或配置其他资源。",
+          "runtimeUnavailable": "所需渲染运行时不可用。",
+          "unknownSkin": "已保存的皮肤不再受支持：{path}。"
+        },
+        "effective": "实际皮肤：{skin}",
+        "fallback": "当前正在回退渲染，请求的皮肤未生效。",
+        "requested": "请求皮肤：{skin}",
+        "retry": "重试",
+        "skins": {
+          "live2d": "Live2D 模型",
+          "sprite-v2": "AI 精灵图（v2）",
+          "svg": "矢量吉祥物"
+        },
+        "unknownResource": "未知资源"
       },
       "sound": {
         "description": "在你抚摸宠物或它作出反应时播放短促音效。默认关闭。",
@@ -27156,6 +27466,7 @@
         "secretSaveError": "保存密钥失败：{error}",
         "secretSaved": "签名密钥已保存。",
         "secretSet": "已配置签名密钥。",
+        "secretUnavailable": "签名密钥不可用",
         "setSecret": "保存密钥",
         "signingSecret": "签名密钥",
         "signingSecretHelp": "在桌面端存放在 OS 钥匙串。投递会带上 Standard Webhooks 三件套请求头（webhook-id / webhook-timestamp / webhook-signature）。",
@@ -27743,6 +28054,7 @@
         "edgeRate": "语速",
         "elevenSimilarity": "相似度增强",
         "elevenStability": "稳定性",
+        "elevenVoiceIdPlaceholder": "ElevenLabs Voice ID",
         "label": {
           "cartesia": "Cartesia API 密钥",
           "deepgram": "Deepgram API 密钥",
@@ -27750,16 +28062,24 @@
           "google": "Google AI Studio API 密钥",
           "hume": "Hume AI API 密钥",
           "lmnt": "LMNT API 密钥",
+          "local-openai-compatible": "本地 OpenAI 兼容服务",
           "mistral": "Mistral API 密钥",
           "openai": "OpenAI API 密钥",
           "xiaomi": "小米 MiMo API 密钥"
         },
+        "localEndpoint": "本地端点",
+        "localEndpointHint": "请输入 OpenAI 兼容语音服务器的基础地址。",
+        "localEndpointPlaceholder": "http://127.0.0.1:8000/v1",
+        "localModelPlaceholder": "本地模型名称",
+        "localOpenaiIntro": "连接本地 OpenAI 兼容文本转语音服务器。",
+        "localVoicePlaceholder": "音色名称",
         "mistralVoiceIdHint": "请输入在 Mistral 控制台创建的 Voice Library ID。",
         "mistralVoiceIdPlaceholder": "voice_…",
         "model": "模型",
         "realtimeDesktopOnly": "OpenAI Realtime 经 WebSocket 流式传输,仅在桌面应用中可用。",
         "realtimeIntro": "低延迟流式声音,首个音频块到达即开始朗读。使用你的 OpenAI API 密钥。",
         "speed": "语速",
+        "timeoutSeconds": "超时（秒）",
         "voice": "声音",
         "voiceAuto": "按语言自动选择",
         "voiceAutoPlaceholder": "按语言自动选择",
@@ -27802,6 +28122,7 @@
         "fallback": "失败时回退到系统语音",
         "fallbackHint": "云端服务商失败时,改用免费的浏览器语音读完,而不是直接中断。",
         "loading": "加载中…",
+        "mobileSystemPlayback": "移动端使用系统音频播放。",
         "pitch": "音调",
         "pronunciationDict": "发音词典",
         "pronunciationDictHint": "将单词映射到其发音。按整词不区分大小写匹配。",
@@ -27825,7 +28146,8 @@
         "streamingHint": "部分服务商能首字节即播,降低延迟。",
         "testVoice": "测试声音",
         "title": "文字转语音",
-        "volume": "音量"
+        "volume": "音量",
+        "webCloudWarning": "网页播放会将文本发送到已配置的云提供方。"
       }
     },
     "subagents": {
@@ -29172,6 +29494,15 @@
     "description": "在发送时拼接到系统提示词的可复用指令片段。",
     "detail": {
       "addResource": "添加资源",
+      "bundleFilterName": "技能 Bundle",
+      "compatibilityExportCancel": "取消",
+      "compatibilityExportCodex": "agents/openai.yaml",
+      "compatibilityExportContinue": "导出 Markdown",
+      "compatibilityExportDescription": "单个 SKILL.md 无法容纳 Bundle 中的全部文件，请确认以下省略内容后继续。",
+      "compatibilityExportResources": "{count} 个 Bundle 资源",
+      "compatibilityExportTitle": "兼容导出可能丢失内容",
+      "exportBundle": "导出标准 Bundle（.zip）",
+      "exportMarkdownCompatibility": "导出 Markdown（兼容模式）",
       "metaAuthor": "作者",
       "metaCategory": "类别",
       "metaCreated": "创建时间",
@@ -29221,19 +29552,27 @@
       "closeDirtyKeep": "继续编辑",
       "closeDirtyTitle": "未保存的更改",
       "closeTab": "关闭 {path}",
+      "compatibility": "兼容性要求",
+      "compatibilityPlaceholder": "需要 git 和网络访问",
       "content": "内容（Markdown）",
       "contentHint": "渲染时按系统提示词形式：`## 名称` 后接内容。",
       "contentPlaceholder": "对系统提示词的追加。可以在每个会话中临时关闭。",
       "create": "创建",
       "creating": "创建中…",
       "description": "描述",
-      "descriptionPlaceholder": "（可选）一句话摘要",
+      "descriptionPlaceholder": "说明该技能做什么以及何时使用",
       "emptyPickSkill": "从左侧选择一个技能开始编辑。",
       "errorEmpty": "技能内容不能为空。",
       "errorRequired": "该字段必填。",
       "errorTooLong": "过长（最大 {max}）。",
       "fileTreeAria": "技能文件",
+      "invocationExplicit": "仅显式调用",
+      "invocationImplicit": "允许自动发现",
+      "invocationPolicy": "调用策略",
       "license": "许可",
+      "metadata": "元数据",
+      "metadataHint": "每行填写一个 key=value；导出为 Agent Skills metadata。",
+      "metadataPlaceholder": "owner=acme\ntier=stable",
       "name": "名称",
       "namePlaceholder": "引用来源",
       "openFileTree": "打开文件树",
@@ -29245,11 +29584,20 @@
         "validationHandle": "调整校验面板宽度"
       },
       "save": "保存",
+      "saveBlocked": "保存被阻止",
+      "saveBlockedDetail": "草稿无效，未写入存储。",
+      "saveConflict": "内容冲突——重新加载后再保存",
+      "saveConflictDetail": "存储中的文件在打开后已发生变化，请重新加载后再保存。",
+      "saveError": "保存失败",
+      "saveErrorDetail": "草稿仍保留在编辑器中，可继续编辑或使用保存快捷键重试。",
       "saved": "已保存",
       "savedAll": "已全部保存。",
       "saving": "保存中…",
       "settingsSaved": "设置已保存。",
       "settingsTitle": "技能设置",
+      "slug": "可移植标识",
+      "slugHint": "同时作为 SKILL.md 名称和 bundle 目录；只能使用小写字母、数字和单连字符。",
+      "slugPlaceholder": "cite-sources",
       "tabEdit": "编辑",
       "tabPreview": "预览",
       "tags": "标签（用逗号分隔）",
@@ -29844,7 +30192,8 @@
       "disabledCount": "已停用 {count} 个技能。",
       "duplicatedAs": "已复制为「{name}」。",
       "enabledCount": "已启用 {count} 个技能。",
-      "exportedCount": "已导出 {count} 个技能文件。",
+      "exportFailed": "导出失败：{error}",
+      "exportedCount": "已将 {count} 个技能导出为 Bundle。",
       "exportedPartial": "已导出 {ok}/{total}（{failed} 个失败）。",
       "exportedSingle": "已导出「{name}」。",
       "importFromClaudeDesktopOnly": "从 ~/.claude/skills/ 导入需要桌面端。",
@@ -31567,6 +31916,8 @@
     "riskMedium": "中",
     "selfInvokeCardDesc": "让 Agent 调用工具自驱动——加载某个技能的指令，或运行斜杠命令。宿主路由；浏览器与 CLI 均可用。默认关闭。",
     "selfInvokeCardTitle": "Agent 自调用工具",
+    "sessionMessagingToolDesc": "允许智能体发现当前工作区内其他在线会话，并发送不受信任的纯文本请求。",
+    "sessionMessagingToolTitle": "会话消息工具",
     "shellExecution": "受限 Shell",
     "shellExecutionDesc": "带白名单 + 黑名单 + 危险模式守卫的 shell 执行。默认关闭 —— 与 SDK Bash 部分重叠且属于高风险。",
     "showTools": "查看 {count} 个工具",

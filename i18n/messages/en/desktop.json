@@ -210,7 +210,8 @@
       "side": "Rail position",
       "sideLeft": "Left",
       "sideRight": "Right",
-      "title": "Customize sidebar"
+      "title": "Customize sidebar",
+      "pinItem": "Pin item"
     },
     "directMessages": "Direct Messages",
     "discover": "Discover",
@@ -602,7 +603,10 @@
     "select": "Select",
     "unarchive": "Unarchive",
     "unpin": "Unpin",
-    "untitled": "(untitled)"
+    "untitled": "(untitled)",
+    "openInCodexApp": "Open in Codex app",
+    "openInCodexAppFailed": "Couldn't open this task in the Codex app.",
+    "openedInCodexApp": "Opened in the Codex app."
   },
   "shell": {
     "desktopOnlyBodyMiddle": " rather than ",

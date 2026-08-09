@@ -116,7 +116,8 @@
     "title": "预览网页"
   },
   "errors": {
-    "navigate": "无法导航到该地址"
+    "navigate": "无法导航到该地址",
+    "httpsProxyUnsupported": "此浏览器预览不支持 HTTPS 代理。"
   },
   "find": {
     "close": "关闭查找",

@@ -6,12 +6,18 @@
  * — that handler is exercised indirectly via `send` / `respondToApproval`.
  */
 import { act, renderHook } from "@testing-library/react"
+import type { SendOptions } from "@cognia/agent-config-types"
 
 import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
 
 const mockTrackEvent = jest.fn().mockResolvedValue(true)
 jest.mock("@/lib/telemetry/events/track-event", () => ({
   trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+}))
+
+const releaseSkillLoadContextMock = jest.fn()
+jest.mock("@/lib/skills/runtime-loader", () => ({
+  releaseSkillLoadContext: (sessionId: string) => releaseSkillLoadContextMock(sessionId),
 }))
 
 jest.mock("@/lib/perf/chat-turn-performance", () => ({
@@ -202,7 +208,10 @@ jest.mock("@/lib/files/project-editor-bridge", () => ({
   flushProjectEditorEdits: () => flushProjectEditorEdits(),
 }))
 jest.mock("sonner", () => ({ toast: { warning: (msg: string) => toastWarning(msg) } }))
-const resolveSendOptionsMock = jest.fn(async () => ({ model: "sonnet", systemPrompt: "sys" }))
+const resolveSendOptionsMock = jest.fn<Promise<SendOptions>, []>(async () => ({
+  model: "sonnet",
+  systemPrompt: "sys",
+}))
 jest.mock("@/lib/claude/build-options", () => ({
   resolveSendOptions: (...args: unknown[]) => resolveSendOptionsMock(...(args as [])),
 }))
@@ -532,6 +541,7 @@ beforeEach(() => {
   runStandaloneTurnMock.mockReset().mockResolvedValue(undefined)
   gateWorkbenchProviderPayloadMock.mockClear()
   runTurnMemoryMock.mockReset().mockResolvedValue(undefined)
+  releaseSkillLoadContextMock.mockClear()
   closeSessionIpcMock.mockReset().mockResolvedValue(undefined)
   approveToolMock.mockReset().mockResolvedValue(undefined)
   persistMessagesMock.mockReset().mockResolvedValue(undefined)
@@ -664,6 +674,9 @@ describe("useClaudeChat — actions", () => {
     expect(touchSessionMock).toHaveBeenCalledWith("sess-1")
     expect(chatTurnPerformanceMock.begin).toHaveBeenCalledWith("sess-1")
     expect(chatTurnPerformanceMock.markDispatched).toHaveBeenCalledWith("sess-1")
+    expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ skillRenderMode: "hybrid" })
+    )
     // Plugin bus: the committed send announces MESSAGE_SENT + AGENT_STARTED.
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.MESSAGE_SENT, { sessionId: "sess-1" })
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.AGENT_STARTED, { sessionId: "sess-1" })
@@ -1268,6 +1281,7 @@ describe("useClaudeChat — actions", () => {
     })
 
     expect(hasSessionGrant("sess-1", "click_text")).toBe(false)
+    expect(releaseSkillLoadContextMock).toHaveBeenCalledWith("sess-1")
   })
 
   it("respondToApproval (allow): forwards to approveTool", async () => {
@@ -1536,6 +1550,7 @@ describe("useClaudeChat — actions", () => {
     })
     expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
     expect(chatTurnPerformanceMock.finish).toHaveBeenCalledWith("sess-1", "completed")
+    expect(releaseSkillLoadContextMock).toHaveBeenCalledWith("sess-1")
     expect(mockTrackEvent).toHaveBeenCalledWith(
       "chat.turn.completed",
       expect.objectContaining({
@@ -1936,6 +1951,7 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     expect(chatTurnPerformanceMock.beginFinalPersistence).toHaveBeenCalledWith("sess-1")
     expect(chatTurnPerformanceMock.endFinalPersistence).toHaveBeenCalledWith("sess-1")
     expect(chatTurnPerformanceMock.finish).toHaveBeenCalledWith("sess-1", "completed")
+    expect(releaseSkillLoadContextMock).toHaveBeenCalledWith("sess-1")
   })
 
   it("passes the sealed assistant message id to long-term memory extraction", async () => {

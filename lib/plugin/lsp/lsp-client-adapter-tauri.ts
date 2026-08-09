@@ -421,6 +421,11 @@ export class TauriLspClientAdapter implements LspClientAdapter {
       this.stateListeners.delete(cb)
     }
   }
+
+  /** Shared registry lifecycle surface; delegates to the richer settings feed. */
+  onStateChange(cb: (p: LspStatePushEvent) => void): () => void {
+    return this.onStatePush(cb)
+  }
 }
 
 /** `lsp:detect` / `lsp:install` result entry (sidecar lsp-installer). */

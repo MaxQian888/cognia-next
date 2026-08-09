@@ -125,8 +125,13 @@
   "binding": {
     "clear": "Clear",
     "empty": "No characters yet.",
+    "inheritAppearance": "Inherit global appearance",
+    "live2dOption": "Live2D · {name}",
+    "skinFor": "Skin for {name}",
     "speciesFor": "Species for {name}",
-    "useGlobal": "Use global pet"
+    "spriteOption": "Sprite · {name}",
+    "useGlobal": "Use global pet",
+    "useSvg": "Built-in vector mascot"
   },
   "bubbles": {
     "achievementUnlocked": ["We earned a badge!", "Achievement get!"],

@@ -541,7 +541,7 @@ export interface ConsentPromptPayload {
 /**
  * Screen thumbnail attached to a consent request so a remote approver isn't
  * deciding blind. Display-only: it never affects the decision, the session
- * grant, or the audit row, and it rides the authenticated `/ws/v1/events`
+ * grant, or the audit row, and it rides the authenticated `/ws/events`
  * frame only — never a push payload.
  */
 export interface ConsentThumbnail {

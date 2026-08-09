@@ -37,6 +37,7 @@ import type {
   AppSettings,
   ChatSession,
 } from "@cognia/agent-config-types"
+import type { AgentExecutionSendSpec } from "@cognia/agent-config-types/agent-execution"
 import type { AuditKind } from "@/types/connectors/audit"
 import type { InboxSendPolicy } from "@/lib/claude/build-options"
 import { getDb } from "@/lib/db/schema"
@@ -68,13 +69,30 @@ import { startWorkflowFromIM } from "@/lib/workflow/runtime/start-from-im"
 import { evaluateImRate } from "@/lib/connectors/im-rate/registry"
 import { getRunningAdapter } from "./lifecycle"
 import { makeImPermissionResponder } from "./hitl/tool-approval"
-import { createExecutionRun, putExecutionRunBinding } from "@/lib/db/execution-runs"
+import {
+  createExecutionRun,
+  putExecutionRunBinding,
+  runEventJournal,
+  semanticRunEvent,
+} from "@/lib/db/execution-runs"
 import { AgentRunEventProducer } from "@/lib/execution/sources/agent-turn"
 import { registerAgentRunController } from "@/lib/execution/control-handlers"
 import type { ConnectorLiveSteerCoordinator } from "./live-steer"
 import { resolveSessionProjectRoot } from "@/lib/workspace/roots"
 import { getAllProjects } from "@/lib/db/projects"
 import { waitForExecutionRunPresentationFreeze } from "./run-presentation/runner"
+import { markConnectorInboundJobRecoveryRequired } from "@/lib/db/connector-inbound-jobs"
+import { setSdkSessionId } from "@/lib/db/sessions"
+import {
+  buildAgentRunRecoveryAnchor,
+  parseAgentRunRecoveryAnchor,
+  validateRecoveryContinuation,
+} from "@/lib/ai/agent/recovery/reconcile-crashed-runs"
+import { appendCanonicalEnvelopes } from "@/lib/ai/agent/recovery/canonical-log"
+import {
+  canonicalEventFromCaptureEvent,
+  createEnvelopeSequencer,
+} from "@/lib/ai/agent/execution/event-envelope"
 
 /**
  * Turn-capture timeout for connector AI-run turns. Raised above the 5-min chat
@@ -100,6 +118,88 @@ const CONNECTOR_TURN_TIMEOUT_MS = 15 * 60 * 1000
  * runs to {@link CONNECTOR_TURN_TIMEOUT_MS}.
  */
 const CONNECTOR_TURN_IDLE_TIMEOUT_MS = 2 * 60 * 1000
+
+function candidateDeploymentIds(
+  sendOptions: Awaited<ReturnType<typeof resolveSendOptions>>,
+  execution: AgentExecutionSendSpec | undefined = sendOptions.execution
+): string[] {
+  const routed = sendOptions.routingPlan?.orderedCandidates.map(
+    (candidate) => candidate.deploymentId
+  )
+  if (routed && routed.length > 0) return routed
+  const directRef =
+    execution?.route.kind === "direct" ? execution.route.credentialProfileRef : undefined
+  return [directRef ?? sendOptions.provider ?? "inherit"]
+}
+
+export async function resolveRecoveryExecutionSpec(
+  sendOptions: Awaited<ReturnType<typeof resolveSendOptions>>,
+  sessionId: string,
+  identity: { runId: string; attemptId?: string },
+  recoveringSafely: boolean,
+  requiredRouteKind?: "gateway" | "direct"
+): Promise<AgentExecutionSendSpec> {
+  // The initial send already resolved and (for gateway) minted its exact
+  // ticket in build-options. Reuse it; only a recovery attempt needs remint.
+  if (sendOptions.execution && !recoveringSafely) return sendOptions.execution
+  const [{ resolveAgentExecutionShadowSpec }, { sendSpecFromResolved }, { isTauri }] =
+    await Promise.all([
+      import("@/lib/ai/agent/execution/agent-execution-service"),
+      import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
+      import("@/lib/tauri"),
+    ])
+  const resolution = await resolveAgentExecutionShadowSpec(
+    {
+      sessionId,
+      provider: sendOptions.provider,
+      model: sendOptions.model,
+      toolsEnabled: true,
+    },
+    { isTauri: isTauri(), isHeadlessHost: false },
+    {
+      surface: "connector",
+      policy: { executionKind: "agent" },
+      identity,
+    }
+  )
+  if (recoveringSafely && requiredRouteKind === "gateway") {
+    if (resolution.spec.route.kind !== "gateway") {
+      throw new Error("recovery_gateway_ticket_remint_failed")
+    }
+    // build-options already runs for this recovery turn. Reuse its freshly
+    // minted ticket when it was issued for the same frozen fingerprint; this
+    // avoids minting and leaking a second provisional ticket.
+    if (
+      sendOptions.execution?.route.kind === "gateway" &&
+      sendOptions.execution.executionFingerprint === resolution.spec.executionFingerprint
+    ) {
+      return sendSpecFromResolved(resolution.spec, {
+        endpoint: sendOptions.execution.route.endpoint,
+        ticketId: sendOptions.execution.route.ticketId,
+      })
+    }
+    const { mintSessionRouteTicket } = await import("@/lib/gateway/mint-session-ticket")
+    const minted = await mintSessionRouteTicket({
+      sessionId,
+      executionFingerprint: resolution.spec.executionFingerprint,
+      model: sendOptions.model ?? resolution.spec.modelBindings.primary,
+      routePolicy: resolution.spec.route.routePolicy,
+    })
+    if (minted) {
+      sendOptions.env = {
+        ...sendOptions.env,
+        ANTHROPIC_BASE_URL: minted.endpoint,
+        ANTHROPIC_API_KEY: minted.secret,
+      }
+      return sendSpecFromResolved(resolution.spec, {
+        endpoint: minted.endpoint,
+        ticketId: minted.ticketId,
+      })
+    }
+    throw new Error("recovery_gateway_ticket_remint_failed")
+  }
+  return sendSpecFromResolved(resolution.spec)
+}
 
 /**
  * Canned user-facing texts for proactive IM failure notifications
@@ -326,6 +426,7 @@ export type RunAndCaptureFn = (
    * close the connector turn's root trace span with LLM accounting.
    */
   usage?: import("@/lib/claude/adapter").UsageInfo
+  sdkSessionId?: string
 }>
 
 export interface RuntimeOptions {
@@ -572,13 +673,14 @@ async function resolveInboundSendOptions(params: {
   override: ConversationOverrideRow | null
   adapterRow: AdapterInstanceRow
   emitTrace: boolean
+  executionIdentity?: { runId: string; attemptId?: string }
 }): Promise<{
   sendOptions: Awaited<ReturnType<typeof resolveSendOptions>>
   appSettings: AppSettings | undefined
   runTitle: string
   workspaceRoot?: string
 }> {
-  const { event, session, resolved, override, adapterRow, emitTrace } = params
+  const { event, session, resolved, override, adapterRow, emitTrace, executionIdentity } = params
 
   let appSettings: AppSettings | undefined
   try {
@@ -668,6 +770,7 @@ async function resolveInboundSendOptions(params: {
     // (guarded in the resolver).
     emitTrace,
     traceSurface: "connector",
+    executionIdentity,
   })
 
   const projects = await getAllProjects().catch(() => [])
@@ -961,6 +1064,16 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           await auditRuleDecision({ characterId: routing.characterId })
         }
 
+        const executionRunId = `execution:agent:${session.id}:${storedMsg.id}`
+        const recoveringSafely = event.channelData?.recoveryIntent === "continue_safely"
+        const previousRecoveryAnchor = recoveringSafely
+          ? parseAgentRunRecoveryAnchor(event.channelData?.recoveryAnchor)
+          : undefined
+        const executionIdentity = {
+          runId: previousRecoveryAnchor?.executionIdentityRunId ?? executionRunId,
+          ...(previousRecoveryAnchor ? { attemptId: previousRecoveryAnchor.attemptId } : {}),
+        }
+
         // Resolve the send options (character + twin + memory context) through
         // the shared helper so an ai-run and a draft prepare from identical
         // grounding. `emitTrace: true` mints the connector root span, ended on
@@ -973,7 +1086,69 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             override,
             adapterRow,
             emitTrace: true,
+            executionIdentity,
           })
+
+        let recoveryExecution: AgentExecutionSendSpec
+        try {
+          recoveryExecution = await resolveRecoveryExecutionSpec(
+            sendOptions,
+            session.id,
+            executionIdentity,
+            recoveringSafely,
+            previousRecoveryAnchor?.routeKind
+          )
+        } catch (error) {
+          if (
+            recoveringSafely &&
+            error instanceof Error &&
+            error.message === "recovery_gateway_ticket_remint_failed"
+          ) {
+            await markConnectorInboundJobRecoveryRequired(
+              routeContext.inboundJobId,
+              "recovery_gateway_ticket_remint_failed"
+            )
+            await runEventJournal.append(
+              executionRunId,
+              semanticRunEvent("run.recovery_required", {
+                reason: "gateway-ticket-remint-failed",
+              })
+            )
+            break
+          }
+          throw error
+        }
+        // Preserve rollout semantics: only update the on-wire spec when this
+        // send already opted into canonical dispatch. The shadow spec still
+        // owns recovery identity and journaling while the flag is off.
+        if (sendOptions.execution) sendOptions.execution = recoveryExecution
+
+        if (recoveringSafely) {
+          const current = {
+            sdkSessionId: session.sdkSessionId,
+            executionFingerprint: recoveryExecution.executionFingerprint,
+            candidateDeploymentIds: candidateDeploymentIds(sendOptions, recoveryExecution),
+            modelBindings: recoveryExecution.modelBindings,
+          }
+          const validation = previousRecoveryAnchor
+            ? validateRecoveryContinuation(previousRecoveryAnchor, current)
+            : { action: "pause" as const, mismatches: ["recoveryAnchor"] }
+          if (validation.action === "pause") {
+            await markConnectorInboundJobRecoveryRequired(
+              routeContext.inboundJobId,
+              "recovery_execution_drift",
+              { error: validation.mismatches.join(",") }
+            )
+            await runEventJournal.append(
+              executionRunId,
+              semanticRunEvent("run.recovery_required", {
+                reason: "execution-drift",
+                detail: validation.mismatches,
+              })
+            )
+            break
+          }
+        }
 
         // ── Suppression gate: short-circuit before the sidecar call ──
         if (sendOptions.suppressedReason) {
@@ -1023,27 +1198,28 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         const streamsThroughReceiver =
           outboundTarget.adapterId === event.adapterId &&
           outboundTarget.conversationKey === event.conversationKey
-        const executionRunId = `execution:agent:${session.id}:${storedMsg.id}`
-        await createExecutionRun({
-          id: executionRunId,
-          kind: "agent-turn",
-          sourceId: storedMsg.id,
-          sessionId: session.id,
-          projectId: session.projectId,
-          title: runTitle,
-          status: "queued",
-          initiator: {
-            platformIdentityId: event.sender.id,
-            remoteUserId: event.sender.remoteUserId,
-            displayName: event.sender.displayName,
-            ...(readResolvedPrincipal(event.channelData) ?? {}),
-          },
-          currentRevision: 0,
-          startedAt: Date.now(),
-          updatedAt: Date.now(),
-        })
+        if (!recoveringSafely) {
+          await createExecutionRun({
+            id: executionRunId,
+            kind: "agent-turn",
+            sourceId: storedMsg.id,
+            sessionId: session.id,
+            projectId: session.projectId,
+            title: runTitle,
+            status: "queued",
+            initiator: {
+              platformIdentityId: event.sender.id,
+              remoteUserId: event.sender.remoteUserId,
+              displayName: event.sender.displayName,
+              ...(readResolvedPrincipal(event.channelData) ?? {}),
+            },
+            currentRevision: 0,
+            startedAt: Date.now(),
+            updatedAt: Date.now(),
+          })
+        }
         await routeContext.bindExecutionRun(executionRunId)
-        if (liveActivityEnabled) {
+        if (liveActivityEnabled && !recoveringSafely) {
           const teamId =
             typeof event.conversationRef.teamId === "string"
               ? event.conversationRef.teamId
@@ -1069,7 +1245,16 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         const runProducer = new AgentRunEventProducer(executionRunId, undefined, {
           workspaceRoot,
         })
-        await runProducer.start()
+        let recoveryAnchor = buildAgentRunRecoveryAnchor({
+          inboundJobId: routeContext.inboundJobId,
+          sessionId: session.id,
+          sdkSessionId: session.sdkSessionId,
+          execution: recoveryExecution,
+          candidateDeploymentIds: candidateDeploymentIds(sendOptions, recoveryExecution),
+          restoredPermissions: previousRecoveryAnchor?.restoredPermissions,
+          partialOutput: previousRecoveryAnchor?.partialOutput,
+        })
+        await runProducer.start(Date.now(), { recoveryAnchor })
         // Abort propagation: thread the per-adapter teardown signal (aborted
         // by the install teardown and by a lifecycle requeue/stop) into the
         // capture, so tearing the runtime down halts an in-flight turn instead
@@ -1086,6 +1271,43 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         const captureSignal = adapterSignal
           ? AbortSignal.any([adapterSignal, runController.signal])
           : runController.signal
+        const envelope = createEnvelopeSequencer({
+          sessionId: session.id,
+          runId: executionRunId,
+          attemptId: recoveryAnchor.attemptId,
+          hostRef: recoveryExecution.hostRef,
+          runtime: recoveryExecution.runtimeAdapter,
+          turnId: crypto.randomUUID(),
+        })
+        let canonicalTail: Promise<unknown> = Promise.resolve()
+        let canonicalFailure: unknown
+        let recoveryMetadataTail: Promise<unknown> = Promise.resolve()
+        const persistCanonicalEvent = (canonical: Parameters<typeof envelope>[0]) => {
+          const nextEnvelope = envelope(canonical)
+          canonicalTail = canonicalTail
+            .catch(() => undefined)
+            .then(() => appendCanonicalEnvelopes(executionRunId, [nextEnvelope]))
+            .catch((error) => {
+              canonicalFailure ??= error
+              throw error
+            })
+          return canonicalTail
+        }
+        const basePermissionResponder = makeImPermissionResponder({
+          runId: executionRunId,
+          sessionId: session.id,
+          adapterId: event.adapterId,
+          conversationKey: event.conversationKey,
+          conversationRef: event.conversationRef,
+          initiatorUserId: event.sender.remoteUserId,
+          deliveryTarget: deliveryTargetFromEvent(event),
+          approvalMode: override?.approvalMode,
+        })
+        const restoredDeniedRequests = new Set(
+          (previousRecoveryAnchor?.restoredPermissions ?? [])
+            .filter((permission) => permission.state === "denied")
+            .map((permission) => permission.requestId)
+        )
         const cap: import("@/lib/claude/run-and-capture").RunAndCaptureOptions & {
           adapterId?: string
           conversationKey?: string
@@ -1097,23 +1319,42 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           timeoutMs: CONNECTOR_TURN_TIMEOUT_MS,
           idleTimeoutMs: CONNECTOR_TURN_IDLE_TIMEOUT_MS,
           signal: captureSignal,
-          onPermissionRequest: makeImPermissionResponder({
-            runId: executionRunId,
-            sessionId: session.id,
-            adapterId: event.adapterId,
-            conversationKey: event.conversationKey,
-            conversationRef: event.conversationRef,
-            initiatorUserId: event.sender.remoteUserId,
-            deliveryTarget: deliveryTargetFromEvent(event),
-            approvalMode: override?.approvalMode,
-          }),
-          onEvent: (ev: import("@/lib/claude/run-and-capture").CaptureStreamEvent) => {
-            void runProducer.onCaptureEvent(ev, Date.now()).catch((error) => {
-              console.error(
-                `[execution-run] capture mapping failed for run=${executionRunId}`,
-                error
-              )
+          onPermissionRequest: async (request) => {
+            await persistCanonicalEvent({
+              kind: "permission-request",
+              requestId: request.requestId,
+              toolName: request.toolName,
+              input: request.input,
             })
+            const decision = restoredDeniedRequests.has(request.requestId)
+              ? { decision: "deny" as const, message: "permission denied by recovered state" }
+              : await basePermissionResponder(request)
+            await persistCanonicalEvent({
+              kind: "permission-resolved",
+              requestId: request.requestId,
+              behavior: decision.decision === "deny" ? "deny" : "allow",
+            })
+            return decision
+          },
+          onSdkSessionId: (sdkSessionId) => {
+            recoveryAnchor = { ...recoveryAnchor, sdkSessionId }
+            recoveryMetadataTail = recoveryMetadataTail
+              .catch(() => undefined)
+              .then(async () => {
+                await setSdkSessionId(session.id, sdkSessionId)
+                await runEventJournal.append(
+                  executionRunId,
+                  semanticRunEvent("resource.changed", {
+                    resourceId: `sdk-session:${session.id}`,
+                    recoveryAnchor,
+                  })
+                )
+              })
+          },
+          onEvent: (ev: import("@/lib/claude/run-and-capture").CaptureStreamEvent) => {
+            const canonical = canonicalEventFromCaptureEvent(ev)
+            void runProducer.onCaptureEvent(ev, Date.now()).catch(() => undefined)
+            if (canonical) void persistCanonicalEvent(canonical).catch(() => undefined)
           },
           ...(streamsThroughReceiver && typeof targetAdapter?.streamReply === "function"
             ? {
@@ -1135,7 +1376,15 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         let captured: Awaited<ReturnType<RunAndCaptureFn>>
         try {
           captured = await opts.runAndCapture(session.id, prompt, sendOptions, cap)
+          await Promise.all([
+            canonicalTail.catch(() => undefined),
+            recoveryMetadataTail.catch(() => undefined),
+          ])
         } catch (err) {
+          await Promise.all([
+            canonicalTail.catch(() => undefined),
+            recoveryMetadataTail.catch(() => undefined),
+          ])
           // The PII gate (`safeSendPrompt`) throws `PiiGateBlocked` and has
           // ALREADY written the precise `adapter.error / pii_blocked` audit
           // row before throwing. Detect it by name (no heavy import) and skip
@@ -1184,6 +1433,35 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         unregisterRunController()
         unregisterLiveSteer?.()
 
+        if (canonicalFailure) {
+          await markConnectorInboundJobRecoveryRequired(
+            routeContext.inboundJobId,
+            "canonical_log_write_failed",
+            {
+              error:
+                canonicalFailure instanceof Error
+                  ? canonicalFailure.message
+                  : String(canonicalFailure),
+            }
+          )
+          await runEventJournal.append(
+            executionRunId,
+            semanticRunEvent("run.recovery_required", {
+              reason: "canonical-log-write-failed",
+            })
+          )
+          notifyImFailure(
+            event.conversationKey,
+            IM_FAILURE_NOTICE.replyFailed,
+            `airun-canonical:${event.conversationKey}`
+          )
+          break
+        }
+
+        if (captured.sdkSessionId) {
+          await setSdkSessionId(session.id, captured.sdkSessionId).catch(() => undefined)
+        }
+
         let terminalProjectionRecorded = false
         try {
           await runProducer.finish("completed", Date.now(), "Response ready")
@@ -1216,8 +1494,13 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // platform (Slack Block Kit / Lark Interactive Card / Telegram
         // InlineKeyboardMarkup / Discord Embed+Components / OneBot
         // basic segments + plainTextMirror).
+        const recoveredPrefix = previousRecoveryAnchor?.partialOutput ?? ""
+        const recoveredText =
+          recoveredPrefix && !captured.text.startsWith(recoveredPrefix)
+            ? `${recoveredPrefix}${captured.text}`
+            : captured.text
         const outboundSegments: MessageSegment[] = assistantReplyToSegments({
-          text: captured.text,
+          text: recoveredText,
           a2uiSurfaces: captured.a2uiSurfaces,
           a2uiSurfaceOrder: captured.a2uiSurfaceOrder,
           telemetry: {

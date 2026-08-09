@@ -1,6 +1,16 @@
+const loadSkillForSessionMock = jest.fn()
+const loadSkillResourceForSessionMock = jest.fn()
+jest.mock("@/lib/skills/runtime-loader", () => ({
+  loadSkillForSession: (...args: unknown[]) => loadSkillForSessionMock(...args),
+  loadSkillResourceForSession: (...args: unknown[]) => loadSkillResourceForSessionMock(...args),
+}))
+
 import {
   SKILL_TOOL_NAME,
   SKILL_BUILTIN_PLUGIN_ID,
+  LOAD_SKILL_RESOURCE_TOOL_NAME,
+  LOAD_SKILL_TOOL_NAME,
+  buildProgressiveSkillManifestEntries,
   buildSkillManifestEntries,
   isSkillBuiltinTool,
   runSkillBuiltinTool,
@@ -9,6 +19,55 @@ import {
 import { getCatalogSkill } from "@/lib/skills/built-in-catalog"
 
 describe("skill-builtin-tools", () => {
+  beforeEach(() => {
+    loadSkillForSessionMock.mockReset()
+    loadSkillResourceForSessionMock.mockReset()
+  })
+
+  it("builds scoped progressive loader manifests", () => {
+    const entries = buildProgressiveSkillManifestEntries(
+      [{ id: "s1", slug: "demo", name: "Demo", description: "Does demos" }],
+      true
+    )
+    expect(entries.map((entry) => entry.name)).toEqual([
+      LOAD_SKILL_TOOL_NAME,
+      LOAD_SKILL_RESOURCE_TOOL_NAME,
+    ])
+    expect(entries[0].jsonSchema).toEqual(
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          skill_id: expect.objectContaining({ enum: ["s1"] }),
+        }),
+      })
+    )
+  })
+
+  it("routes load_skill through the session scope", async () => {
+    loadSkillForSessionMock.mockResolvedValueOnce({ ok: true, content: "body" })
+    await expect(
+      runSkillBuiltinTool(
+        LOAD_SKILL_TOOL_NAME,
+        { skill_id: "s1" },
+        { listSkillResources: async () => [] },
+        { sessionId: "sess" }
+      )
+    ).resolves.toEqual({ ok: true, content: "body" })
+    expect(loadSkillForSessionMock).toHaveBeenCalledWith(
+      "sess",
+      "s1",
+      expect.objectContaining({ listResources: expect.any(Function) })
+    )
+    loadSkillForSessionMock.mockResolvedValueOnce({ ok: false, code: "out_of_scope" })
+    await expect(
+      runSkillBuiltinTool(
+        LOAD_SKILL_TOOL_NAME,
+        { skill_id: "other" },
+        { listSkillResources: async () => [] },
+        { sessionId: "sess" }
+      )
+    ).resolves.toEqual({ ok: false, code: "out_of_scope" })
+  })
+
   it("builds a single Skill manifest entry that lists built-in skills", () => {
     const entries = buildSkillManifestEntries()
     expect(entries).toHaveLength(1)

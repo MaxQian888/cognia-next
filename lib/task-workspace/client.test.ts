@@ -1,5 +1,10 @@
 const call = jest.fn()
 const subscribe = jest.fn()
+const recordOutcome = jest.fn()
+
+jest.mock("@/lib/code-adoption/outcome", () => ({
+  recordTaskWorkspaceOutcome: (...args: unknown[]) => recordOutcome(...args),
+}))
 
 jest.mock("@/lib/tauri", () => ({
   transport: { call: (...args: unknown[]) => call(...args) },
@@ -26,6 +31,7 @@ describe("task workspace client", () => {
   beforeEach(() => {
     call.mockReset()
     subscribe.mockReset()
+    recordOutcome.mockReset()
     useTaskWorkspaceStore.getState().clear()
   })
 
@@ -121,7 +127,9 @@ describe("task workspace client", () => {
   })
 
   it("forwards the one-shot irreversible apply override", async () => {
-    call.mockResolvedValueOnce({ state: "applied", revision: 2, conflicts: [] })
+    call
+      .mockResolvedValueOnce({ state: "applied", revision: 2, conflicts: [] })
+      .mockResolvedValueOnce({ runId: "run:session:1", state: "applied" })
 
     await applyTaskWorkspace("run:session:1", [], true)
 
@@ -130,6 +138,10 @@ describe("task workspace client", () => {
       selection: [],
       allowIrreversible: true,
     })
+    expect(recordOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run:session:1" }),
+      "apply"
+    )
   })
 
   it("exposes durable resource timeline, summary, and manifest commands", async () => {

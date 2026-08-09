@@ -31,6 +31,13 @@ const workspaceLease = jest.fn(
   })
 )
 
+const resolveActiveCertification = jest.fn<Promise<unknown>, [unknown]>(async () => undefined)
+
+jest.mock("./certification-store", () => ({
+  resolveActiveCertification: (...args: unknown[]) =>
+    resolveActiveCertification(...(args as [unknown])),
+}))
+
 jest.mock("@/lib/task-workspace/run-lease", () => ({
   withTaskWorkspaceRun: (...args: unknown[]) =>
     workspaceLease(...(args as [unknown, (cwd: string) => Promise<unknown>])),
@@ -61,6 +68,7 @@ const completionRail = runCompletionRail as jest.Mock
 
 beforeEach(() => {
   jest.clearAllMocks()
+  resolveActiveCertification.mockResolvedValue(undefined)
 })
 
 it("routes an intentional completion (toolsEnabled absent) to the completion rail and stamps the spec", async () => {
@@ -189,6 +197,88 @@ it("openAgentSession fails closed on unsatisfied hard capabilities before creati
       options: { policy: { requires: [UNSERVED_BY_CLAUDE] } },
     })
   ).rejects.toBeInstanceOf(AgentCapabilityUnsatisfiedError)
+})
+
+it("passes the accepted active certification into the single resolver", async () => {
+  resolveActiveCertification.mockResolvedValueOnce({
+    accepted: true,
+    certifiedPath: {
+      recordRef: "bundle-a:path-a",
+      evidence: "cognia-verified",
+      suiteVersion: "1",
+      disabledOptional: ["compaction"],
+    },
+  })
+
+  const { openAgentSession } = await import("./agent-execution-service")
+  const { spec } = await openAgentSession({
+    sessionId: "s-certified",
+    environment: { isTauri: true, isHeadlessHost: false },
+    legacy: {
+      providerId: "anthropic",
+      modelId: "claude-opus-4-8",
+      toolsEnabled: true,
+    },
+    options: {
+      policy: {
+        runtimePolicy: "auto",
+        deploymentRef: "conf-anthropic",
+        routePolicy: "direct",
+        prefers: ["compaction"],
+      },
+    },
+  })
+
+  expect(resolveActiveCertification).toHaveBeenCalledTimes(1)
+  expect(spec.compatibility).toEqual({
+    evidence: "cognia-verified",
+    recordRef: "bundle-a:path-a",
+    suiteVersion: "1",
+  })
+  expect(spec.capabilities.disabledOptional).toContain("compaction")
+})
+
+it("fails before spend when the active certification health gate blocks a hard requirement", async () => {
+  const required = RUNTIME_CAPABILITIES["claude-agent-sdk"][0]
+  resolveActiveCertification.mockResolvedValueOnce({
+    accepted: false,
+    reasons: [`required capability ${required} is unknown`],
+    blockedRequired: [required],
+  })
+
+  await expect(
+    executeAgentTurn(
+      "p",
+      { provider: "anthropic", toolsEnabled: true },
+      { isTauri: true, isHeadlessHost: false },
+      {
+        policy: {
+          runtimePolicy: "auto",
+          deploymentRef: "conf-anthropic",
+          routePolicy: "direct",
+          requires: [required],
+        },
+      }
+    )
+  ).rejects.toBeInstanceOf(AgentCapabilityUnsatisfiedError)
+  expect(agentRail).not.toHaveBeenCalled()
+  expect(completionRail).not.toHaveBeenCalled()
+})
+
+it("records the resolver decision without changing the legacy path while the flag is off", async () => {
+  const { recordAgentExecutionShadow } = await import("./agent-execution-service")
+  await recordAgentExecutionShadow(
+    { provider: "anthropic", model: "claude-opus-4-8", toolsEnabled: true },
+    { isTauri: true, isHeadlessHost: false }
+  )
+
+  expect(trackEvent).toHaveBeenCalledWith(
+    "agent.execution.shadow",
+    expect.objectContaining({
+      runtimeAdapter: "claude-agent-sdk",
+      executionKind: "agent",
+    })
+  )
 })
 
 it("threads the caller session id into the resolved identity fingerprint deterministically", async () => {

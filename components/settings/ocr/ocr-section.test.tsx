@@ -88,6 +88,27 @@ describe("OcrSection", () => {
     expect(screen.queryByTestId("ocr-auto-router-panel")).not.toBeInTheDocument()
   })
 
+  it("renders the structured runtime unavailable reason in provider details", async () => {
+    const user = userEvent.setup()
+    renderSection({}, null, {
+      platform: "tauri",
+      runtimeStatuses: {
+        "paddle-ocr": {
+          providerId: "paddle-ocr",
+          shellSupported: true,
+          backendBound: true,
+          ready: false,
+          reason: "model-corrupt",
+        },
+      },
+    })
+
+    await user.click(screen.getAllByTestId("ocr-sidebar-item-paddle-ocr")[0]!)
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /model files failed integrity verification/i
+    )
+  })
+
   it("fires onClearCache from the sidebar footer button", async () => {
     const user = userEvent.setup()
     const { onClearCache } = renderSection()
@@ -103,7 +124,9 @@ describe("OcrSection", () => {
       input,
       "en,zh"
     )
-    input.dispatchEvent(new Event("input", { bubbles: true }))
+    act(() => {
+      input.dispatchEvent(new Event("input", { bubbles: true }))
+    })
     expect(onChange).toHaveBeenCalled()
     const last = onChange.mock.calls.at(-1)![0] as UserOcrSettings
     expect(last.defaultLanguages).toEqual(["en", "zh"])

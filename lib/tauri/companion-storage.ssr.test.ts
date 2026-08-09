@@ -7,7 +7,8 @@ import { CompanionConfig, LocalStorageCompanionStorage } from "./companion-stora
 
 const MOCK: CompanionConfig = {
   baseUrl: "https://192.168.1.42:7890",
-  deviceJwt: "jwt.token.value",
+  devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-key" },
+  deviceKeyThumbprint: "thumbprint",
   deviceId: "device-abc",
   serverVersion: "0.1.0",
 }

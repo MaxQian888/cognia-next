@@ -315,6 +315,25 @@ describe("text parts", () => {
     )
   })
 
+  it("renders the untrusted peer-origin badge from message metadata", () => {
+    const message = {
+      ...userMsg("peer-1", "Please review this"),
+      metadata: {
+        sessionPeerMessage: {
+          messageId: "receipt-1",
+          senderSessionId: "sender-1",
+          senderTitle: "Review session",
+          origin: "agent",
+          authority: "untrusted_agent_message",
+        },
+      },
+    } as UIMessage
+
+    render(<MessageRenderer message={message} />)
+
+    expect(screen.getByText("agentOrigin")).toBeInTheDocument()
+  })
+
   it("defers distant finalized Markdown blocks for oversized responses", () => {
     const text = Array.from(
       { length: 200 },

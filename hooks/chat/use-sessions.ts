@@ -8,6 +8,7 @@ import {
   assignSessionToFolder,
   bulkArchiveSessions,
   bulkDeleteSessions,
+  bulkSetSessionsPinned,
   bulkUnarchiveSessions,
   deleteSession,
   getSession,
@@ -297,7 +298,7 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
 
   const bulkSetPinned = useCallback(async (ids: readonly string[], pinned: boolean) => {
     if (ids.length === 0) return
-    await Promise.all(ids.map((id) => updateSession(id, { pinned })))
+    await bulkSetSessionsPinned(ids, pinned)
   }, [])
 
   const archive = useCallback(

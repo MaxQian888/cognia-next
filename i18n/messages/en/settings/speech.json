@@ -66,7 +66,8 @@
       "lmnt": "LMNT API key",
       "mistral": "Mistral API key",
       "openai": "OpenAI API key",
-      "xiaomi": "Xiaomi MiMo API key"
+      "xiaomi": "Xiaomi MiMo API key",
+      "local-openai-compatible": "Local OpenAI-compatible"
     },
     "mistralVoiceIdHint": "Enter a Voice Library ID created in the Mistral console.",
     "mistralVoiceIdPlaceholder": "voice_…",
@@ -90,7 +91,15 @@
     "xiaomiIntro": "Xiaomi MiMo TTS with style tags and dialect support. V2.5 adds VoiceDesign and VoiceClone.",
     "xiaomiStyle": "Style",
     "xiaomiStyleHint": "Style tags: 开心, 悲伤, 生气, 东北话, 四川话, 粤语, 台湾腔, 变快, 变慢, 唱歌, 孙悟空, 林黛玉",
-    "xiaomiStylePlaceholder": "No style"
+    "xiaomiStylePlaceholder": "No style",
+    "elevenVoiceIdPlaceholder": "ElevenLabs voice ID",
+    "localEndpoint": "Local endpoint",
+    "localEndpointHint": "Use the base URL of an OpenAI-compatible speech server.",
+    "localEndpointPlaceholder": "http://127.0.0.1:8000/v1",
+    "localModelPlaceholder": "Local model name",
+    "localOpenaiIntro": "Connect to a local OpenAI-compatible text-to-speech server.",
+    "localVoicePlaceholder": "Voice name",
+    "timeoutSeconds": "Timeout (seconds)"
   },
   "stt": {
     "description": "The composer's voice-input button uses your browser's Web Speech API. Pick the language you usually speak and the microphone you want to use.",
@@ -139,6 +148,8 @@
     "streamingHint": "Some providers stream first-byte audio for lower latency.",
     "testVoice": "Test voice",
     "title": "Text-to-speech",
-    "volume": "Volume"
+    "volume": "Volume",
+    "mobileSystemPlayback": "Mobile uses system audio playback.",
+    "webCloudWarning": "Web playback sends text to the configured cloud provider."
   }
 }

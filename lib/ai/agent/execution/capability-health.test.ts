@@ -1,6 +1,7 @@
 import {
   CIRCUIT_OPEN_MS,
   CIRCUIT_OPEN_THRESHOLD,
+  isCapabilityProtocolFailure,
   isCircuitOpen,
   recordCapabilityFailure,
   recordCapabilitySuccess,
@@ -60,5 +61,20 @@ describe("capability circuit breaking", () => {
     const entries = recordCapabilityFailure([other], "key-1", "mcp", now)
     expect(entries).toHaveLength(2)
     expect(recordCapabilitySuccess(entries, "key-1", "mcp")).toEqual([other])
+  })
+
+  it("counts only explicit capability or protocol failures", () => {
+    expect(isCapabilityProtocolFailure(new Error("RPC method not found: reloadPlugins"))).toBe(true)
+    expect(isCapabilityProtocolFailure({ code: "CAPABILITY_UNAVAILABLE" })).toBe(true)
+    expect(isCapabilityProtocolFailure({ code: "NOT_IMPLEMENTED" })).toBe(true)
+    expect(isCapabilityProtocolFailure({ status: 501 })).toBe(true)
+    expect(isCapabilityProtocolFailure(new Error("unsupported endpoint"))).toBe(true)
+    expect(isCapabilityProtocolFailure(new Error("unsupported capability: checkpoint"))).toBe(true)
+
+    expect(isCapabilityProtocolFailure(new DOMException("cancelled", "AbortError"))).toBe(false)
+    expect(isCapabilityProtocolFailure(new Error("permission denied by user"))).toBe(false)
+    expect(isCapabilityProtocolFailure(new Error("authentication failed"))).toBe(false)
+    expect(isCapabilityProtocolFailure(new Error("quota exceeded"))).toBe(false)
+    expect(isCapabilityProtocolFailure(new Error("model overloaded"))).toBe(false)
   })
 })

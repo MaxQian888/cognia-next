@@ -10,6 +10,8 @@ describe("languageFromPath", () => {
     ["setup.sh", "shell"],
     ["conf.json", "json"],
     ["data.JSONC", "json"],
+    ["agents/openai.yaml", "yaml"],
+    ["config.yml", "yaml"],
   ])("%s → %s", (path, expected) => {
     expect(languageFromPath(path)).toBe(expected)
   })
@@ -28,6 +30,7 @@ describe("editorLanguageFromMonacoId", () => {
     ["python", "python"],
     ["shellscript", "shell"],
     ["JSON", "json"],
+    ["YAML", "yaml"],
   ])("%s → %s", (id, expected) => {
     expect(editorLanguageFromMonacoId(id)).toBe(expected)
   })

@@ -3105,6 +3105,10 @@
     "noVersions": "No version history",
     "openFullDesigner": "Open Full Designer",
     "openWithDefault": "Open with Default App",
+    "pluginRenderer": {
+      "failed": "The plugin renderer failed.",
+      "loading": "Loading plugin renderer…"
+    },
     "preview": "Preview",
     "previewInDesigner": "Preview in Designer",
     "previousVersion": "Previous version",
@@ -3214,6 +3218,14 @@
       "reviewEmpty": "Select a changed file to review its diff",
       "scopeLabel": "Workspace scope",
       "taskResources": {
+        "adoptionGenerationOnly": "{lines} generated lines · adoption unavailable for the legacy fallback",
+        "adoptionPending": "{lines} proposed lines · awaiting review",
+        "adoptionRate": "{rate}% adopted · {accepted} of {proposed} changed lines",
+        "adoptionRejected": "Not adopted · {lines} proposed lines",
+        "adoptionReverted": "Adoption reverted · {lines} proposed lines",
+        "adoptionTitle": "AI code adoption",
+        "adoptionTruncated": "Partial tracking coverage",
+        "adoptionUnavailable": "Adoption coverage unavailable",
         "agent": "Agent",
         "allCaptureClasses": "Source and generated",
         "allOrigins": "All sources",
@@ -3806,6 +3818,7 @@
       "title": "Preview a web page"
     },
     "errors": {
+      "httpsProxyUnsupported": "HTTPS proxying is not supported in this browser preview.",
       "navigate": "Could not navigate to that URL"
     },
     "find": {
@@ -4956,6 +4969,12 @@
       "skills": {
         "enabled": "Enabled skill \"{name}\"."
       },
+      "smartSnapshot": {
+        "captureFailed": "Smart snapshot failed",
+        "captureTooltip": "Smart snapshot",
+        "captured": "Smart snapshot attached: {appName}",
+        "switchPrompt": "Switch to the target app now; Cognia will capture it in a moment."
+      },
       "stopTooltip": "Stop",
       "toolbar": {
         "breakdownAgents": "Subagents",
@@ -5046,13 +5065,6 @@
       "webLabel": "Web",
       "workflowRefs": {
         "removeAria": "Remove reference to {label}"
-      },
-      "smartSnapshot": {
-        "captureAria": "Capture smart snapshot",
-        "captureFailed": "Smart snapshot failed",
-        "captureTooltip": "Smart snapshot",
-        "captured": "Smart snapshot attached: {appName}",
-        "switchPrompt": "Switch to the target app now; Cognia will capture it in a moment."
       }
     },
     "concurrent": {
@@ -5170,10 +5182,13 @@
         "active": "active",
         "aria": "Switch account for this session",
         "effective": "Effective account",
+        "error": "Couldn't switch accounts.",
         "inheritedToast": "Using inherited account {label}",
         "noOverride": "Inherit",
         "switchFailed": "Couldn't switch accounts: {error}",
         "toast": "Next message will use account {label}",
+        "toastInherited": "Using the inherited account.",
+        "unavailable": "Account switching is unavailable.",
         "unavailableWithId": "Account {id} is unavailable.",
         "useInherited": "Use inherited account"
       },
@@ -5264,6 +5279,9 @@
       "memoryUse": "Use memories in this chat",
       "noApiKey": "No API key",
       "openBrowser": "Open browser panel",
+      "openInCodexApp": "Open in Codex app",
+      "openInCodexAppFailed": "Couldn't open this task in the Codex app.",
+      "openedInCodexApp": "Opened in the Codex app.",
       "permissionModeAppDefault": "Use app default",
       "permissionModeLabel": "Permission mode",
       "pickDirAria": "Pick directory",
@@ -5302,6 +5320,7 @@
       "providerUndoWarningDescription": "The provider may revert conversation state and file changes. This is provider-native undo, not a compaction restore. This warning is remembered for this external-agent configuration.",
       "providerUndoWarningTitle": "Provider Undo may change files",
       "save": "Save",
+      "sessionCommunication": "Session communication",
       "sheet": {
         "sections": {
           "account": "Model & account",
@@ -5840,6 +5859,69 @@
     "selection": {
       "askError": "Couldn't open an aside for that.",
       "askInAside": "Ask in an aside"
+    },
+    "sessionCommunication": {
+      "acceptHeld": "Accept",
+      "agentOrigin": "Agent message from {name} · untrusted",
+      "attachedCreateError": "Couldn't create the attached session.",
+      "attachedCreated": "Attached session created.",
+      "attachedPromptLabel": "Initial prompt",
+      "attachedStatus": {
+        "closed": "Closed",
+        "completed": "Completed",
+        "interrupted": "Interrupted",
+        "running": "Running",
+        "staged": "Ready"
+      },
+      "attachedTab": "Attached sessions",
+      "attachedTitleLabel": "Task title",
+      "closeAttached": "Close",
+      "contextFull": "Full parent context",
+      "contextLabel": "Context fork",
+      "contextLastN": "Last messages",
+      "contextNone": "No parent context",
+      "createAttached": "Create attached session",
+      "description": "Manage parent-owned child chats and live plain-text handoffs between independent sessions.",
+      "from": "From {name}",
+      "inboxTitle": "Inbox",
+      "intentLabel": "Delivery intent",
+      "intentNote": "Note only",
+      "intentTrigger": "Start a turn",
+      "interruptAttached": "Interrupt",
+      "messageLabel": "Message",
+      "messageStatus": {
+        "delivered": "Delivered",
+        "expired": "Expired",
+        "held": "Awaiting approval",
+        "queued": "Queued",
+        "refused": "Refused",
+        "targetUnavailable": "Target unavailable"
+      },
+      "noAttached": "No attached sessions yet.",
+      "noInbox": "No incoming messages.",
+      "noOutbox": "No sent messages.",
+      "noReachable": "No other live sessions in this workspace.",
+      "openAttached": "Open",
+      "outboxTitle": "Receipts",
+      "peerTab": "Message session",
+      "policyAccept": "Accept",
+      "policyHold": "Hold for approval",
+      "policyLabel": "Incoming policy",
+      "policyRefuse": "Refuse",
+      "policyUpdateError": "Couldn't update the incoming-message policy.",
+      "refuseHeld": "Refuse",
+      "resultLabel": "Result",
+      "send": "Send message",
+      "sendError": "Couldn't send the message.",
+      "sent": "Message status: {status}",
+      "targetLabel": "Target session",
+      "targetPlaceholder": "Choose a live session",
+      "title": "Session communication",
+      "turnsLabel": "Messages to carry",
+      "userOrigin": "Message from {name} · untrusted",
+      "workspaceIndependent": "Independent workspace",
+      "workspaceLabel": "Workspace",
+      "workspaceShared": "Share parent workspace"
     },
     "sessionCost": {
       "byModelTitle": "By model",
@@ -6739,6 +6821,7 @@
         "moreEmpty": "Nothing in the More menu — every item is pinned or hidden.",
         "moveToMore": "Move to More",
         "pin": "Pin to rail",
+        "pinItem": "Pin item",
         "pinned": "Pinned",
         "pinnedEmpty": "No pinned items — everything is in the More menu.",
         "restoreDefaults": "Restore defaults",
@@ -7128,8 +7211,11 @@
       "deselect": "Deselect",
       "dragHandle": "Drag to reorder or move to a folder",
       "moveToFolder": "Move to folder",
+      "openInCodexApp": "Open in Codex app",
+      "openInCodexAppFailed": "Couldn't open this task in the Codex app.",
       "openInTerminal": "Open in terminal",
       "openInTerminalFailed": "Could not export this session for the terminal",
+      "openedInCodexApp": "Opened in the Codex app.",
       "openedInTerminal": "Run in your terminal: {command}",
       "pin": "Pin",
       "pinned": "Pinned",
@@ -7680,20 +7766,20 @@
     },
     "chipStripAria": "Discover categories",
     "connectorDescriptions": {
-      "dingtalk": "DingTalk workspace bot (planned).",
+      "dingtalk": "Built-in DingTalk workspace bot using AppKey/AppSecret credentials.",
       "discord": "Bot integration for servers and DMs.",
       "email": "Inbound + outbound mail bridge (planned).",
       "github": "PR / Issue / Release events routed to the inbox.",
       "kook": "KOOK voice / text bot (planned).",
       "lark": "Interactive cards + bot for Feishu / Lark.",
       "line": "LINE messaging bot (planned).",
-      "matrix": "Federated Matrix bridge (planned).",
+      "matrix": "Built-in federated Matrix bridge with /sync and native media support.",
       "mattermost": "Mattermost workspace bot (planned).",
       "onebot": "Reverse-WebSocket bridge for QQ via OneBot.",
-      "qq-official": "QQ Official Robot platform (planned).",
+      "qq-official": "Built-in QQ Official Robot adapter.",
       "slack": "Block Kit integration for workspaces.",
       "telegram": "Bot API for chats, channels, and groups.",
-      "wechat-oa": "WeChat Official Account integration (planned).",
+      "wechat-oa": "Built-in WeChat Official Account webhook integration.",
       "wechat-personal": "Personal WeChat via the iLink gateway (QR login, reply-only). Unofficial — account-ban risk.",
       "wecom": "WeCom 智能机器人 long connection — streaming replies + proactive push."
     },
@@ -10329,16 +10415,44 @@
   "integrations": {
     "accounts": {
       "add": "Add account",
+      "advanced": "Advanced",
       "approvedOrigin": "Approved self-hosted HTTPS origin (optional)",
       "authStrategy": "Authentication method",
+      "checkHealth": "Check account health",
+      "configFields": {
+        "accountLabel": "Account label",
+        "appId": "App ID",
+        "privateKey": "Private key",
+        "token": "Personal access token"
+      },
+      "configured": "Configured",
       "credentialHandle": "Credential handle",
+      "dedicatedAppConfirmation": "I confirm this is a dedicated integration app.",
+      "discoverInstallations": "Discover installations",
+      "installation": "Installation",
       "integration": "Integration",
       "label": "Account label",
+      "lastSync": "Last sync",
+      "missingPermissions": "Missing permissions",
+      "notConfigured": "Not configured",
       "providerId": "Auth provider ID",
+      "rateLimitReset": "Rate limit resets",
+      "recommended": "Recommended",
       "remoteAccountId": "Remote account ID",
       "selectAuthStrategy": "Select an authentication method",
+      "selectInstallation": "Select an installation",
       "selectIntegration": "Select an integration",
-      "title": "Accounts"
+      "statusMessages": {
+        "installationRevoked": "The GitHub App installation was revoked.",
+        "installationSuspended": "The GitHub App installation is suspended.",
+        "permissionsMissing": "The GitHub App installation is missing required permissions.",
+        "remoteReconciliationUnavailable": "Remote account reconciliation is unavailable.",
+        "webhookVerified": "The webhook configuration was verified."
+      },
+      "title": "Accounts",
+      "validateAndAdd": "Validate and add",
+      "webhookUrl": "Webhook URL",
+      "webhookVerification": "Webhook verification"
     },
     "approvals": {
       "approve": "Approve",
@@ -10354,6 +10468,14 @@
     "disable": "Disable",
     "emptyPlugins": "Install an Integration-capable Marketplace plugin to begin.",
     "enable": "Enable",
+    "errors": {
+      "accountSetup": "Couldn't set up the integration account.",
+      "confirmDedicatedApp": "Confirm that this is a dedicated integration app.",
+      "installationDiscovery": "Couldn't discover GitHub App installations.",
+      "projectionRequired": "Select an inbox projection.",
+      "resourceDiscovery": "Couldn't discover resources.",
+      "subscriptionSetup": "Couldn't create the subscription."
+    },
     "health": {
       "degraded": "Degraded",
       "healthy": "Healthy",
@@ -10381,14 +10503,55 @@
       "account": "Account",
       "add": "Add subscription",
       "allResources": "All resources",
+      "deliverToInbox": "Deliver events to Inbox",
+      "disabledByProvider": "Disabled by the provider",
+      "discover": "Discover",
+      "eventLabels": {
+        "checkRunCompleted": "Check run completed",
+        "githubAppAuthorizationRevoked": "GitHub App authorization revoked",
+        "installationCreated": "Installation created",
+        "installationDeleted": "Installation deleted",
+        "installationPermissionsAccepted": "Installation permissions accepted",
+        "installationSuspended": "Installation suspended",
+        "installationUnsuspended": "Installation unsuspended",
+        "issueAssigned": "Issue assigned",
+        "issueClosed": "Issue closed",
+        "issueCommentCreated": "Issue comment created",
+        "issueLabeled": "Issue labeled",
+        "issueOpened": "Issue opened",
+        "pullRequestClosed": "Pull request closed",
+        "pullRequestOpened": "Pull request opened",
+        "pullRequestReviewRequested": "Pull request review requested",
+        "pullRequestReviewSubmitted": "Pull request review submitted",
+        "pullRequestSynchronized": "Pull request synchronized",
+        "pushReceived": "Push received",
+        "releasePublished": "Release published",
+        "repositoriesAdded": "Repositories added to installation",
+        "repositoriesRemoved": "Repositories removed from installation"
+      },
       "eventTypes": "Event types, comma-separated",
+      "events": "Events",
+      "failedDeliveries": "Failed deliveries",
       "ingressSecret": "Webhook secret (required when ingress is enabled)",
+      "loadMore": "Load more",
+      "noFailedDeliveries": "No failed deliveries.",
+      "projection": "Inbox projection",
+      "projectionLabels": {
+        "issueCommentThread": "Issue comment thread",
+        "issueThread": "Issue thread",
+        "pullRequestThread": "Pull request thread"
+      },
+      "repository": "Repository",
+      "requeue": "Requeue",
       "resourceId": "Resource ID (optional)",
       "resourceKind": "Resource kind (optional)",
+      "searchResources": "Search resources",
       "selectAccount": "Select an account",
+      "selectProjection": "Select a projection",
       "title": "Subscriptions"
     },
-    "title": "Integrations"
+    "title": "Integrations",
+    "unsupportedWeb": "Integration management requires the desktop app."
   },
   "larkEntry": {
     "errors": {
@@ -11357,12 +11520,15 @@
     "card": {
       "clone": "Duplicate {name}",
       "favorite": "Pin {name} to favorites",
+      "reviewTrust": "Review trust",
+      "reviewed": "Reviewed",
       "selectAria": "Select {name}",
       "unfavorite": "Unpin {name} from favorites"
     },
     "chips": {
       "addingToast": "{agent}: adding \"{name}\"…",
       "label": "Apps",
+      "plaintextCredentialWarning": "This server configuration contains a plaintext credential.",
       "removingToast": "{agent}: removing \"{name}\" from config…",
       "tooltipAdd": "Click to project to {name}",
       "tooltipDesktopOnly": "{name} (desktop only)",
@@ -11468,17 +11634,38 @@
       "bridgeTitle": "External Bridge server",
       "clearLog": "Clear log",
       "cleared": "Audit log cleared.",
+      "colAgent": "Agent",
+      "colAttempts": "Attempts",
+      "colCapability": "Capability",
+      "colConnectP95": "Connect p95",
+      "colEvents": "Events",
+      "colFailureRate": "Failure rate",
+      "colLag": "Lag",
+      "colLastError": "Last error",
       "colLatency": "Latency",
       "colResult": "Result",
       "colScope": "Scope",
+      "colServer": "Server",
+      "colStatus": "Status",
       "colTime": "Time",
       "colTool": "Tool",
       "denied": "denied",
       "deniedOnly": "Denied only",
       "desktopOnly": "Bridge status and the audit log are only available in desktop mode.",
+      "exportLog": "Export log",
+      "exported": "MCP health log exported.",
       "logsSubtitle": "The latest log lines emitted by connected MCP servers.",
       "logsTitle": "Recent logs",
+      "metricCacheHits": "Capability cache hits",
+      "metricConnectLatency": "Connect latency p95",
+      "metricDenials": "Policy denials",
+      "metricRetries": "Retries",
+      "metricTimeouts": "Timeouts",
+      "metricWarmReuse": "Warm reuses",
       "openBridgeSettings": "Open External Bridge settings",
+      "operationsEmpty": "No MCP operations recorded yet.",
+      "operationsSubtitle": "Aggregated connection and capability outcomes by server.",
+      "operationsTitle": "Operations",
       "outboundSubtitle": "Live sessions and recent logs for the MCP servers this app connects to.",
       "outboundTitle": "MCP servers",
       "port": "Port {port}",
@@ -11490,6 +11677,9 @@
       "statLogs": "Log lines",
       "statServers": "Servers",
       "stopped": "Stopped",
+      "syncEmpty": "No agent projection jobs recorded yet.",
+      "syncLagValue": "{seconds}s",
+      "syncTitle": "Agent projection sync",
       "title": "Health & logs",
       "windowNote": "Showing the most recent log lines."
     },
@@ -13278,12 +13468,14 @@
         "invalid": "That pairing payload couldn't be decoded — copy the full cgnp2|… string from the server and paste it again.",
         "versionMismatch": "This pairing payload is version {got}, which this app doesn't understand. Update the app or the server so both speak the same payload version."
       },
+      "payloadPlaceholder": "cgnp3|…",
       "permissions": {
         "localNetwork": {
           "description": "Grant local-network access so the phone can find the desktop on your Wi-Fi.",
           "title": "Local network access required"
         }
       },
+      "persistenceError": "The device was registered, but its credential couldn't be saved securely. Pair again.",
       "scanCta": "Scan QR",
       "scanError": {
         "failed": "Scan failed: {message}",
@@ -14421,6 +14613,7 @@
       "manageButton": "Manage language packs"
     },
     "modelStatus": {
+      "cancelDownload": "Cancel download",
       "description": "Pure-Rust OCR engines ship without weights to keep the installer slim. Models are downloaded to your user data directory on first use.",
       "download": "Download models",
       "downloadAll": "Download all model files",
@@ -14430,6 +14623,7 @@
       "downloadingDetail": "{bytesDone} / {bytesTotal} bytes — file {index} of {count}",
       "emptyNoModelFiles": "No managed model files for this backend.",
       "installed": "Models ready",
+      "legacyDetected": "Legacy model files detected",
       "missing": "{count} model file(s) missing",
       "modelDir": "Stored in: {path}",
       "redownload": "Re-download",
@@ -14631,6 +14825,9 @@
         "description": "Windows-bundled OCR via the winocr crate. Requires an MSIX-packaged build.",
         "label": "Windows.Media.Ocr"
       }
+    },
+    "runtime": {
+      "defaultNormalized": "The default provider was normalized to {provider}."
     },
     "sidebar": {
       "categoryAll": "All",
@@ -15066,8 +15263,13 @@
     "binding": {
       "clear": "Clear",
       "empty": "No characters yet.",
+      "inheritAppearance": "Inherit global appearance",
+      "live2dOption": "Live2D · {name}",
+      "skinFor": "Skin for {name}",
       "speciesFor": "Species for {name}",
-      "useGlobal": "Use global pet"
+      "spriteOption": "Sprite · {name}",
+      "useGlobal": "Use global pet",
+      "useSvg": "Built-in vector mascot"
     },
     "bubbles": {
       "achievementUnlocked": [
@@ -17613,11 +17815,16 @@
     "cancel": "Cancel",
     "capabilityAudio": "Audio",
     "capabilityChat": "Chat",
+    "capabilityChatApi": "Chat API",
     "capabilityContextHint": "Reported by the server. Context window: {tokens, number} tokens.",
     "capabilityEmbed": "Embed",
     "capabilityEmbedding": "Embedding",
     "capabilityImageGen": "Image Generation",
     "capabilityInferredHint": "Guessed from the model name — this server does not report capabilities.",
+    "capabilityModelDelete": "Delete models",
+    "capabilityModelList": "List models",
+    "capabilityModelPull": "Pull models",
+    "capabilityModelUnload": "Unload models",
     "capabilityReranking": "Reranking",
     "capabilityStream": "Stream",
     "capabilityTools": "Tools",
@@ -18186,6 +18393,7 @@
     "lmstudioDescription": "Desktop app for running local LLMs",
     "local": "Local",
     "localProvider": "Local",
+    "localProviderApiKeyHint": "Optional API key for secured local endpoints.",
     "localProvidersDescription": "Run AI models locally on your machine",
     "localProvidersTitle": "Local Providers",
     "localai": "LocalAI",
@@ -18807,6 +19015,7 @@
     "transportHeadersValue": "Header value",
     "transportHeadersValuePlaceholder": "Header value",
     "unknownProviderType": "Unknown provider type.",
+    "unknownVersion": "Unknown version",
     "unlimited": "Unlimited",
     "usage": "Usage",
     "valid": "Valid",
@@ -21179,6 +21388,10 @@
             "description": "Keep isolated warm SDK processes ready for the next compatible request.",
             "label": "Prewarm pool"
           },
+          "resolver": {
+            "description": "Use the unified execution resolver to select the correct agent runtime.",
+            "label": "Unified execution resolver"
+          },
           "sessionStore": {
             "description": "Mirror native SDK session records into the encrypted, tenant-isolated host store.",
             "label": "Session store"
@@ -21999,6 +22212,13 @@
       },
       "description": "Code-reviewed first-party MCP tools the assistant can call from desktop chat or IM channels.",
       "lark": {
+        "diagnostics": {
+          "affectedTools": "Affected tools: {tools}",
+          "missing": "{count, plural, one {# required capability is missing.} other {# required capabilities are missing.}}",
+          "missingCapabilities": "Missing capabilities: {capabilities}",
+          "unknown": "unknown",
+          "versions": "Detected lark-cli {detected}; certified {certified}."
+        },
         "emptyHint": "No Lark skills are registered.",
         "intro": {
           "body": "These skills wrap lark-cli subcommands behind typed MCP tools. The assistant calls them directly; execution runs in the desktop sidecar.",
@@ -22626,7 +22846,13 @@
       "skillsCount": "{count, plural, =1 {# skill} other {# skills}}",
       "support": {
         "diagnostics": "Allow redacted local diagnostics",
-        "diagnosticsDescription": "Local kill switch. When off, the Support Agent receives bundled product docs only."
+        "diagnosticsDescription": "Local kill switch. When off, the Support Agent receives bundled product docs only.",
+        "hidePreview": "Hide preview",
+        "openIssue": "Open issue",
+        "preview": "Preview",
+        "previewUnavailable": "Preview unavailable",
+        "supportResponse": "Support response",
+        "userReport": "User report"
       },
       "title": "Characters",
       "trust": {
@@ -23688,16 +23914,21 @@
           "title": "Chat allow/blocklist"
         },
         "whoami": {
+          "avatarPublishHint": "Publish this avatar in the Lark developer console for consistent bot identity.",
           "dingtalkNoProbe": "DingTalk adapters don't expose an active identity probe — the credentials below were entered when the adapter was configured.",
+          "downloadAvatar": "Download avatar",
           "lastProbeAt": "Last probed at {time}",
           "missingScopesHint": "Enable these permissions in the Lark developer console → Permissions, re-publish the app, then re-probe. Chat management needs im:chat:create, im:chat:update, im:chat.members:write_only and contact:user.id:readonly.",
           "missingScopesTitle": "Missing permission scopes detected",
           "onebotNoProbe": "OneBot identity is read from the connected client automatically — the QQ UIN below is what you configured; the bot's real identity appears here once it connects.",
           "onebotUinMismatch": "Connected bot UIN ({actual}) differs from the configured UIN ({configured}). Update the adapter's Bot UIN to match.",
+          "openDeveloperConsole": "Open developer console",
           "openId": "Open ID",
           "probeButton": "Probe identity",
           "probeFailed": "Probe failed",
           "qqOfficialNoProbe": "QQ Official adapters don't expose an active identity probe — the AppID below was entered when the adapter was configured.",
+          "recommendedAvatarHint": "Use the generated avatar for this Lark app.",
+          "recommendedAvatarTitle": "Recommended avatar",
           "reprobeButton": "Re-probe",
           "requiresDesktop": "Bot identity probe requires the desktop runtime.",
           "tenant": "Tenant",
@@ -25615,6 +25846,7 @@
         "clearEnded": "Clear ended",
         "count": "{count, plural, one {# session} other {# sessions}}",
         "delete": "Remove from history",
+        "detachedAgo": "detached {ago} ago",
         "empty": "No sessions recorded yet.",
         "endedAgo": "ended {ago} ago",
         "filterAll": "All",
@@ -26037,12 +26269,15 @@
         "headersAdd": "Add header",
         "headersEmpty": "No custom headers.",
         "headersLabel": "Headers",
+        "httpCapability": "HTTP requests require the network capability.",
         "removeAria": "Remove handler",
         "timeoutLabel": "Timeout (ms)",
         "timeoutPlaceholder": "5000",
         "typeCommand": "Command",
+        "typeHttp": "HTTP request",
         "typeLabel": "Type",
         "typeWebhook": "Webhook",
+        "typeWebhookLegacy": "Legacy webhook",
         "urlInvalid": "Enter a valid http(s) URL.",
         "urlLabel": "URL",
         "urlPlaceholder": "https://example.com/hook",
@@ -26055,6 +26290,7 @@
       "noTriggerBadge": "No trigger source yet",
       "noTriggerNote": "This event is recognised and saved, but the runtime has no trigger source for it yet — hooks configured here will not fire.",
       "revert": "Revert",
+      "runtimeSummary": "Runtime hooks execute through the configured host environment.",
       "save": "Save",
       "saveError": "Save failed: {detail}",
       "saved": "Saved.",
@@ -26500,9 +26736,12 @@
         "addBypass": "Add",
         "bypass": "Bypass list",
         "bypassHint": "Hosts and domain suffixes that should skip the proxy. Add a leading dot to match a domain suffix (e.g. \".internal\").",
+        "clearPassword": "Clear saved password",
         "host": "Host",
         "optionalPlaceholder": "Optional",
         "password": "Password",
+        "passwordConfiguredPlaceholder": "Password configured",
+        "passwordKeyringError": "Couldn't update the proxy password in secure storage.",
         "port": "Port",
         "protocol": "Protocol",
         "proxyWebsocketsHint": "Tunnel Discord Gateway, Slack Socket Mode, and other WSS connections through the proxy via HTTP CONNECT or SOCKS5.",
@@ -26672,8 +26911,21 @@
         "description": "Show the floating pet widget.",
         "label": "Enable pet"
       },
+      "gaze": {
+        "description": "Use only the local pointer position; it is never saved or sent anywhere.",
+        "label": "Follow pointer"
+      },
       "live2d": {
         "active": "Active",
+        "compatibility": {
+          "diagnosticWithPath": "{message} — {path}",
+          "status": {
+            "degraded": "Degraded",
+            "invalid": "Invalid",
+            "legacy": "Needs validation",
+            "ready": "Ready"
+          }
+        },
         "config": {
           "cancel": "Cancel",
           "columnKey": "State",
@@ -26688,6 +26940,24 @@
           "optionDefault": "Default",
           "optionEngine": "Engine default",
           "optionNoExpression": "No expression",
+          "parameters": {
+            "auto": "Auto-detect",
+            "custom": "Custom",
+            "description": "Map standard pet behavior to this model's parameter IDs, or disable unsupported roles.",
+            "disabled": "Disabled",
+            "parameterIdFor": "Parameter ID for {role}",
+            "parameterIdPlaceholder": "ParamAngleX",
+            "roles": {
+              "bodyX": "Body horizontal",
+              "bodyY": "Body vertical",
+              "eyeX": "Eyes horizontal",
+              "eyeY": "Eyes vertical",
+              "headX": "Head horizontal",
+              "headY": "Head vertical",
+              "headZ": "Head tilt",
+              "mouthOpen": "Mouth open"
+            }
+          },
           "previewState": "Preview state",
           "previewUnavailable": "Live preview needs the Live2D runtime — settings still save.",
           "resetAll": "Reset all",
@@ -26696,6 +26966,7 @@
           "save": "Save",
           "scale": "Scale",
           "tabMotion": "Motion mapping",
+          "tabParameters": "Parameters",
           "tabTransform": "Transform",
           "test": "Test",
           "title": "Customize {name}"
@@ -26706,12 +26977,22 @@
         "download": "Download sample",
         "downloading": "Downloading…",
         "errors": {
+          "ambiguousPath": "The package contains paths that differ only by letter case.",
+          "corruptTexture": "A required texture is corrupt or cannot be decoded.",
           "cubism2Unsupported": "Cubism 2 models aren't supported.",
           "downloadFailed": "The sample model couldn't be downloaded.",
+          "duplicatePath": "The package contains a duplicate normalized path.",
           "invalidJson": "The settings file isn't valid JSON.",
+          "missingExpression": "A missing expression was disabled.",
+          "missingMetadata": "Missing optional model metadata was disabled.",
+          "missingMotion": "A missing motion was disabled.",
+          "missingPhysics": "Missing physics was disabled.",
+          "missingPose": "Missing pose data was disabled.",
           "missingReferenced": "The model is missing files it references.",
+          "missingSound": "A missing motion sound was disabled.",
           "multipleSettings": "More than one .model3.json was found — keep just one.",
           "noSettings": "No .model3.json settings file was found.",
+          "pathTraversal": "The package contains an unsafe traversal path.",
           "tooLarge": "The model is larger than the 50 MB limit.",
           "zipFailed": "The .zip couldn't be read."
         },
@@ -26824,6 +27105,35 @@
           "sprite-v2": "AI sprite (v2)",
           "svg": "Vector mascot"
         }
+      },
+      "skinStatus": {
+        "configure": "Configure",
+        "diagnostics": {
+          "ambiguousPath": "Two resources differ only by letter case: {path}.",
+          "assetMissing": "The selected asset is missing: {path}.",
+          "assetTooLarge": "The asset exceeds the configured size limit: {path}.",
+          "contextLost": "The WebGL context was lost twice. Rendering is paused until you retry.",
+          "corruptTexture": "A referenced texture cannot be decoded: {path}.",
+          "cubism2Unsupported": "Cubism 2 models are not supported: {path}.",
+          "duplicatePath": "The package contains a duplicate normalized path: {path}.",
+          "invalidSettings": "The model settings are invalid: {path}.",
+          "missingOptionalResource": "An optional resource is missing and was disabled: {path}.",
+          "missingRequiredResource": "A required resource is missing: {path}.",
+          "pathTraversal": "The package contains an unsafe traversal path: {path}.",
+          "renderFailed": "The selected skin failed while rendering. Retry or configure another asset.",
+          "runtimeUnavailable": "The required rendering runtime is unavailable.",
+          "unknownSkin": "This saved skin is no longer supported: {path}."
+        },
+        "effective": "Effective skin: {skin}",
+        "fallback": "Fallback is active; the requested skin is not being rendered.",
+        "requested": "Requested skin: {skin}",
+        "retry": "Retry",
+        "skins": {
+          "live2d": "Live2D model",
+          "sprite-v2": "AI sprite (v2)",
+          "svg": "Vector mascot"
+        },
+        "unknownResource": "unknown resource"
       },
       "sound": {
         "description": "Play short sounds when you touch the pet or it reacts. Off by default.",
@@ -27156,6 +27466,7 @@
         "secretSaveError": "Failed to save secret: {error}",
         "secretSaved": "Signing secret saved.",
         "secretSet": "A signing secret is configured.",
+        "secretUnavailable": "Signing secret unavailable",
         "setSecret": "Save secret",
         "signingSecret": "Signing secret",
         "signingSecretHelp": "Stored in the OS keyring on desktop. Deliveries then carry the Standard Webhooks header trio (webhook-id / webhook-timestamp / webhook-signature).",
@@ -27743,6 +28054,7 @@
         "edgeRate": "Rate",
         "elevenSimilarity": "Similarity boost",
         "elevenStability": "Stability",
+        "elevenVoiceIdPlaceholder": "ElevenLabs voice ID",
         "label": {
           "cartesia": "Cartesia API key",
           "deepgram": "Deepgram API key",
@@ -27750,16 +28062,24 @@
           "google": "Google AI Studio API key",
           "hume": "Hume AI API key",
           "lmnt": "LMNT API key",
+          "local-openai-compatible": "Local OpenAI-compatible",
           "mistral": "Mistral API key",
           "openai": "OpenAI API key",
           "xiaomi": "Xiaomi MiMo API key"
         },
+        "localEndpoint": "Local endpoint",
+        "localEndpointHint": "Use the base URL of an OpenAI-compatible speech server.",
+        "localEndpointPlaceholder": "http://127.0.0.1:8000/v1",
+        "localModelPlaceholder": "Local model name",
+        "localOpenaiIntro": "Connect to a local OpenAI-compatible text-to-speech server.",
+        "localVoicePlaceholder": "Voice name",
         "mistralVoiceIdHint": "Enter a Voice Library ID created in the Mistral console.",
         "mistralVoiceIdPlaceholder": "voice_…",
         "model": "Model",
         "realtimeDesktopOnly": "OpenAI Realtime streams over a WebSocket and only works in the desktop app.",
         "realtimeIntro": "Low-latency streaming voices that start speaking on the first audio chunk. Uses your OpenAI API key.",
         "speed": "Speed",
+        "timeoutSeconds": "Timeout (seconds)",
         "voice": "Voice",
         "voiceAuto": "Auto-select for language",
         "voiceAutoPlaceholder": "Auto-select for language",
@@ -27802,6 +28122,7 @@
         "fallback": "Fall back to system voice",
         "fallbackHint": "If a cloud provider fails, finish reading with the free browser voice instead of stopping.",
         "loading": "Loading…",
+        "mobileSystemPlayback": "Mobile uses system audio playback.",
         "pitch": "Pitch",
         "pronunciationDict": "Pronunciation dictionary",
         "pronunciationDictHint": "Map words to their pronunciation. Matched case-insensitively as whole words.",
@@ -27825,7 +28146,8 @@
         "streamingHint": "Some providers stream first-byte audio for lower latency.",
         "testVoice": "Test voice",
         "title": "Text-to-speech",
-        "volume": "Volume"
+        "volume": "Volume",
+        "webCloudWarning": "Web playback sends text to the configured cloud provider."
       }
     },
     "subagents": {
@@ -29172,6 +29494,15 @@
     "description": "Reusable instruction blobs appended to the system prompt at send time.",
     "detail": {
       "addResource": "Add resource",
+      "bundleFilterName": "Skill bundle",
+      "compatibilityExportCancel": "Cancel",
+      "compatibilityExportCodex": "agents/openai.yaml",
+      "compatibilityExportContinue": "Export Markdown",
+      "compatibilityExportDescription": "A single SKILL.md cannot contain every bundle file. Review the omitted content before continuing.",
+      "compatibilityExportResources": "{count, plural, =1 {1 bundled resource} other {# bundled resources}}",
+      "compatibilityExportTitle": "Compatibility export may lose data",
+      "exportBundle": "Export standard bundle (.zip)",
+      "exportMarkdownCompatibility": "Export Markdown (compatibility)",
       "metaAuthor": "Author",
       "metaCategory": "Category",
       "metaCreated": "Created",
@@ -29221,19 +29552,27 @@
       "closeDirtyKeep": "Keep editing",
       "closeDirtyTitle": "Unsaved changes",
       "closeTab": "Close {path}",
+      "compatibility": "Compatibility requirements",
+      "compatibilityPlaceholder": "Requires git and internet access",
       "content": "Content (markdown)",
       "contentHint": "Rendered as it'll appear in the system prompt: `## name` followed by your content.",
       "contentPlaceholder": "Append-only system-prompt augmentation. The user can disable this per session.",
       "create": "Create",
       "creating": "Creating…",
       "description": "Description",
-      "descriptionPlaceholder": "(optional) one-line summary",
+      "descriptionPlaceholder": "What this skill does and when to use it",
       "emptyPickSkill": "Pick a skill from the list to start editing.",
       "errorEmpty": "Skill content cannot be empty.",
       "errorRequired": "This field is required.",
       "errorTooLong": "Too long (max {max}).",
       "fileTreeAria": "Skill files",
+      "invocationExplicit": "Explicit only",
+      "invocationImplicit": "Allow automatic discovery",
+      "invocationPolicy": "Invocation policy",
       "license": "License",
+      "metadata": "Metadata",
+      "metadataHint": "One key=value pair per line. Values are exported as Agent Skills metadata.",
+      "metadataPlaceholder": "owner=acme\ntier=stable",
       "name": "Name",
       "namePlaceholder": "Cite sources",
       "openFileTree": "Open file tree",
@@ -29245,11 +29584,20 @@
         "validationHandle": "Resize validation panel"
       },
       "save": "Save",
+      "saveBlocked": "Save blocked",
+      "saveBlockedDetail": "The draft is invalid and was not written.",
+      "saveConflict": "Conflict — reload before saving",
+      "saveConflictDetail": "The stored file changed after it was opened. Reload it before saving.",
+      "saveError": "Save failed",
+      "saveErrorDetail": "The draft is still available. Edit it or use the save shortcut to retry.",
       "saved": "saved",
       "savedAll": "All saved.",
       "saving": "Saving…",
       "settingsSaved": "Settings saved.",
       "settingsTitle": "Skill settings",
+      "slug": "Portable slug",
+      "slugHint": "Used as the SKILL.md name and bundle directory. Lowercase letters, numbers, and single hyphens only.",
+      "slugPlaceholder": "cite-sources",
       "tabEdit": "Edit",
       "tabPreview": "Preview",
       "tags": "Tags (comma-sep)",
@@ -29844,7 +30192,8 @@
       "disabledCount": "{count, plural, =1 {Disabled 1 skill.} other {Disabled # skills.}}",
       "duplicatedAs": "Duplicated as \"{name}\".",
       "enabledCount": "{count, plural, =1 {Enabled 1 skill.} other {Enabled # skills.}}",
-      "exportedCount": "{count, plural, =1 {Exported 1 skill file.} other {Exported # skill files.}}",
+      "exportFailed": "Export failed: {error}",
+      "exportedCount": "{count, plural, =1 {Exported 1 skill bundle.} other {Exported # skills in one bundle.}}",
       "exportedPartial": "Exported {ok}/{total} ({failed} failed).",
       "exportedSingle": "Exported \"{name}\".",
       "importFromClaudeDesktopOnly": "Importing from ~/.claude/skills/ requires desktop mode.",
@@ -31567,6 +31916,8 @@
     "riskMedium": "Medium",
     "selfInvokeCardDesc": "Let the agent call tools to drive itself — load a skill's instructions, or run a slash command. Host-routed; works in the browser and the CLI. Off by default.",
     "selfInvokeCardTitle": "Agent self-invocation",
+    "sessionMessagingToolDesc": "Let the agent discover and send untrusted plain-text requests to other live sessions in the same workspace.",
+    "sessionMessagingToolTitle": "Session messaging",
     "shellExecution": "Guarded shell",
     "shellExecutionDesc": "Allowlist + blocklist + dangerous-pattern guard for shell commands. Off by default — overlaps SDK Bash and is high-risk.",
     "showTools": "Show {count} tools",

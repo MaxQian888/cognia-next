@@ -14,7 +14,7 @@
  * ordered/reliable DataChannel named `cognia.v2`. Responses come back as
  * `{ id, ok, result | error }`. Events flow as `{ event, payload, seq }`
  * with the same EventBus `seq` semantics as the existing
- * `/ws/v1/events` channel.
+ * `/ws/events` channel.
  *
  * Signaling v2 authenticates each role with ECDSA P-256, derives directional
  * session keys with ephemeral P-256 ECDH + HKDF-SHA-256, and encrypts SDP/ICE
@@ -852,7 +852,9 @@ export class TransportRtc {
     pc.onicecandidate = (event: RTCPeerConnectionIceEvent) => {
       if (!event.candidate || !this.signaling) return
       const body: RtcIceBody = { candidate: event.candidate.toJSON() }
-      void this.signaling.send("rtc:ice", body)
+      void this.signaling.send("rtc:ice", body).catch((error) => {
+        console.warn("TransportRtc: failed to queue local ICE candidate", error)
+      })
     }
     pc.oniceconnectionstatechange = () => {
       const ice = pc.iceConnectionState

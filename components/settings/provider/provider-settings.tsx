@@ -46,6 +46,7 @@ import { useOpenRouterCatalog } from "@/hooks/settings/use-openrouter-catalog"
 import { buildBuiltInProviderModelDiscoverySnapshot } from "@cognia/provider-core/providers/model-discovery"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { CustomProviderSettings, ProviderUIPreferences } from "@cognia/provider-types/provider"
+import type { LocalProviderName, LocalModelInfo } from "@cognia/provider-types/local-provider"
 import { validateBedrockConnectionSettings } from "@cognia/provider-types"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
 import { ProviderDetailPanel } from "./provider-detail-panel"
@@ -113,6 +114,10 @@ const QuickAddProviderDialog = dynamic(
 )
 const LocalProviderSettings = dynamic(
   () => import("./local-provider-settings").then((m) => m.LocalProviderSettings),
+  { ssr: false }
+)
+const LocalProviderModelManager = dynamic(
+  () => import("./local-provider-model-manager").then((m) => m.LocalProviderModelManager),
   { ssr: false }
 )
 // Provider-specific config panels — lazy because each is 18-27 KB and only
@@ -658,6 +663,39 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
     return Array.from(byId, ([id, name]) => ({ id, name }))
   }, [selectedBuiltIn, selectedId, selectedSettings?.discoveredModels, openRouterCatalogRow])
 
+  const persistLocalProviderModels = useCallback(
+    async (models: LocalModelInfo[]) => {
+      if (!selectedId || !isLocalProvider) return
+      const discoveredModels = models.map((model) => ({
+        id: model.id,
+        name: model.id,
+        provider: model.owned_by,
+        contextLength: model.context_length,
+      }))
+      const enabledDiscoveredModel = selectedSettings?.enabledModels?.find((id) =>
+        discoveredModels.some((model) => model.id === id)
+      )
+      const nextDefaultModel =
+        discoveredModels.length > 0 &&
+        !discoveredModels.some((model) => model.id === selectedSettings?.defaultModel)
+          ? (enabledDiscoveredModel ?? discoveredModels[0]?.id)
+          : undefined
+
+      await setProviderConfig(selectedId, {
+        discoveredModels,
+        discoveredModelsLastFetched: Date.now(),
+        ...(nextDefaultModel ? { defaultModel: nextDefaultModel } : {}),
+      })
+    },
+    [
+      isLocalProvider,
+      selectedId,
+      selectedSettings?.defaultModel,
+      selectedSettings?.enabledModels,
+      setProviderConfig,
+    ]
+  )
+
   /**
    * Actually refresh the model list for the selected built-in provider.
    *
@@ -956,7 +994,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                   // detail shell so it keeps the header, enable switch, default
                   // badge and status the rest of the list has.
                   isLocalProvider ? (
-                    <LocalProviderSettings />
+                    <LocalProviderSettings providerId={selectedId as LocalProviderName} />
                   ) : isCustom && selectedCustom ? (
                     <CustomProviderInlineConfig
                       cp={selectedCustom}
@@ -1076,11 +1114,20 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                     </div>
                   )
                 }
-                // Local engines manage their own models/setup inside the config
-                // dashboard, and have no per-token cost or cloud routing — so
-                // these slots stay empty and the tabs simply don't render.
                 modelsTab={
-                  isLocalProvider ? undefined : isCustom ? (
+                  isLocalProvider ? (
+                    <LocalProviderModelManager
+                      providerId={selectedId as LocalProviderName}
+                      baseUrl={selectedSettings?.baseURL || selectedBuiltIn?.defaultBaseURL}
+                      apiKey={selectedSettings?.apiKey}
+                      customHeaders={selectedSettings?.customHeaders}
+                      selectedModel={selectedSettings?.defaultModel}
+                      onModelSelect={(modelId) =>
+                        void setProviderConfig(selectedId, { defaultModel: modelId })
+                      }
+                      onModelsChange={(models) => void persistLocalProviderModels(models)}
+                    />
+                  ) : isCustom ? (
                     // The Models slot is fill-height (it owns its own scroller),
                     // so these text fallbacks bring their own padding.
                     <div className="p-4 text-sm text-muted-foreground">

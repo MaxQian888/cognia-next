@@ -15,6 +15,7 @@ jest.mock("@/lib/tauri", () => ({
 import { isTauri } from "@/lib/tauri"
 import * as core from "@tauri-apps/api/core"
 import {
+  HOST_KEY_PRESENT,
   KEYRING_PROVIDER_IDS,
   clearProviderKey,
   getProviderKey,
@@ -48,6 +49,7 @@ describe("keyringProviderFor", () => {
     expect(keyringProviderFor("cartesia")).toBe("cartesia")
     expect(keyringProviderFor("deepgram")).toBe("deepgram")
     expect(keyringProviderFor("mistral")).toBe("mistral")
+    expect(keyringProviderFor("local-openai-compatible")).toBe("local-openai-compatible")
   })
 
   it("returns null for free providers", () => {
@@ -58,8 +60,8 @@ describe("keyringProviderFor", () => {
 
 describe("KEYRING_PROVIDER_IDS", () => {
   it("lists every keyring account exactly once", () => {
-    expect(KEYRING_PROVIDER_IDS).toHaveLength(10)
-    expect(new Set(KEYRING_PROVIDER_IDS).size).toBe(10)
+    expect(KEYRING_PROVIDER_IDS).toHaveLength(11)
+    expect(new Set(KEYRING_PROVIDER_IDS).size).toBe(11)
   })
 
   it("carries xai, which is a live-voice account with no TTS provider", () => {
@@ -151,17 +153,14 @@ describe("loadAllProviderKeys", () => {
     expect(map).toEqual({ openai: "k1", hume: "k2" })
   })
 
-  it("queries Tauri keyring for every listed provider and skips empty values", async () => {
+  it("loads only Tauri key presence and never requests secret values", async () => {
     mockIsTauri.mockReturnValue(true)
     // first call: list providers
     mockInvoke.mockImplementationOnce(async () => ["openai", "hume"])
-    // subsequent calls: getProviderKey -> tts_keyring_get
-    mockInvoke.mockImplementationOnce(async () => "key-1") // openai
-    mockInvoke.mockImplementationOnce(async () => "") // hume — empty -> dropped
-
     const map = await loadAllProviderKeys()
-    expect(map).toEqual({ openai: "key-1" })
+    expect(map).toEqual({ openai: HOST_KEY_PRESENT, hume: HOST_KEY_PRESENT })
     expect(mockInvoke).toHaveBeenCalledWith("tts_keyring_list_providers")
+    expect(mockInvoke).not.toHaveBeenCalledWith("tts_keyring_get", expect.anything())
   })
 })
 
@@ -173,6 +172,12 @@ describe("providerKeyMapToSettingsMap", () => {
 
   it("ignores undefined providers", () => {
     expect(providerKeyMapToSettingsMap({})).toEqual({})
+  })
+
+  it("turns a desktop presence marker into a non-secret host placeholder", () => {
+    expect(providerKeyMapToSettingsMap({ openai: HOST_KEY_PRESENT })).toEqual({
+      openai: { apiKey: "host-key" },
+    })
   })
 })
 

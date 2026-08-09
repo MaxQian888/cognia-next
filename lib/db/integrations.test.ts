@@ -8,10 +8,13 @@ import {
   createIntegrationAccount,
   createIntegrationSubscription,
   enqueueIntegrationActionJob,
+  getIntegrationAccount,
+  getIntegrationIngressEndpoint,
   getIntegrationActionJob,
   insertIntegrationEvent,
   listIntegrationAccounts,
   listIntegrationSubscriptions,
+  updateIntegrationSubscription,
   updateIntegrationActionJob,
 } from "./integrations"
 
@@ -51,6 +54,72 @@ describe("Integration persistence", () => {
     await expect(listIntegrationSubscriptions("gitlab-delivery", github.id)).resolves.toHaveLength(
       0
     )
+  })
+
+  it("shares one host-owned ingress endpoint across account subscriptions", async () => {
+    const account = await createIntegrationAccount("github-delivery", {
+      integrationId: "github",
+      providerId: "github-app",
+      authSessionId: "opaque-gh",
+      remoteAccountId: "42",
+      label: "Installation 42",
+    })
+    const first = await createIntegrationSubscription("github-delivery", {
+      integrationId: "github",
+      accountId: account.id,
+      resourceKind: "repository",
+      resourceId: "cognia/one",
+      eventTypes: ["issues.opened"],
+      ingressSecretHandle: "github-hook-secret",
+    })
+    const second = await createIntegrationSubscription("github-delivery", {
+      integrationId: "github",
+      accountId: account.id,
+      resourceKind: "repository",
+      resourceId: "cognia/two",
+      eventTypes: ["issues.opened"],
+      ingressSecretHandle: "github-hook-secret",
+    })
+
+    expect(first.ingressRouteId).toBe(second.ingressRouteId)
+    expect(await getIntegrationIngressEndpoint("github-delivery", account.id)).toMatchObject({
+      accountId: account.id,
+      routeId: first.ingressRouteId,
+      secretHandle: "github-hook-secret",
+    })
+    expect((await getIntegrationAccount("github-delivery", account.id))?.ingressEndpoint).toEqual(
+      await getIntegrationIngressEndpoint("github-delivery", account.id)
+    )
+  })
+
+  it("disables a subscription without deleting provider-owned configuration", async () => {
+    const account = await createIntegrationAccount("github-delivery", {
+      integrationId: "github",
+      providerId: "github-app",
+      authSessionId: "opaque-gh",
+      remoteAccountId: "42",
+      label: "Installation 42",
+    })
+    const subscription = await createIntegrationSubscription("github-delivery", {
+      integrationId: "github",
+      accountId: account.id,
+      resourceId: "cognia/private",
+      eventTypes: ["issues.opened"],
+    })
+
+    const disabled = await updateIntegrationSubscription("github-delivery", subscription.id, {
+      enabled: false,
+      disabledByProvider: true,
+      disabledReason: "repository_removed",
+    })
+
+    expect(disabled).toMatchObject({
+      resourceId: "cognia/private",
+      eventTypes: ["issues.opened"],
+      enabled: false,
+      disabledByProvider: true,
+      disabledReason: "repository_removed",
+    })
   })
 
   it("deduplicates normalized deliveries per account", async () => {

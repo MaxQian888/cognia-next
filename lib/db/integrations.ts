@@ -4,6 +4,7 @@ import type {
   IntegrationActionJob,
   IntegrationAuditEntry,
   IntegrationEventEnvelope,
+  IntegrationIngressEndpoint,
   IntegrationSubscription,
   IntegrationSubscriptionInput,
 } from "@/types/plugin/plugin-integration"
@@ -44,6 +45,7 @@ export async function createIntegrationAccount(
     label: input.label,
     enabled: input.enabled ?? true,
     health: "unknown",
+    dedicatedAppConfirmed: input.dedicatedAppConfirmed,
     createdAt: now,
     updatedAt: now,
   }
@@ -75,7 +77,12 @@ export async function getIntegrationAccount(
 export async function updateIntegrationAccount(
   pluginId: string,
   accountId: string,
-  patch: Partial<Pick<IntegrationAccount, "label" | "enabled" | "health">>
+  patch: Partial<
+    Pick<
+      IntegrationAccount,
+      "label" | "enabled" | "health" | "status" | "ingressEndpoint" | "dedicatedAppConfirmed"
+    >
+  >
 ): Promise<IntegrationAccount> {
   const existing = await getIntegrationAccount(pluginId, accountId)
   if (!existing) throw new Error(`Integration account "${accountId}" was not found`)
@@ -105,6 +112,59 @@ export async function removeIntegrationAccount(pluginId: string, accountId: stri
   )
 }
 
+export async function getIntegrationIngressEndpoint(
+  pluginId: string,
+  accountId: string
+): Promise<IntegrationIngressEndpoint | undefined> {
+  const account = await getIntegrationAccount(pluginId, accountId)
+  if (!account) return undefined
+  if (account.ingressEndpoint) return account.ingressEndpoint
+  const legacy = await getDb()
+    .integrationSubscriptions.where("accountId")
+    .equals(accountId)
+    .filter(
+      (subscription) =>
+        subscription.pluginId === pluginId &&
+        Boolean(subscription.ingressRouteId && subscription.ingressSecretHandle)
+    )
+    .first()
+  if (!legacy?.ingressRouteId || !legacy.ingressSecretHandle) return undefined
+  const endpoint: IntegrationIngressEndpoint = {
+    id: crypto.randomUUID(),
+    accountId,
+    routeId: legacy.ingressRouteId,
+    secretHandle: legacy.ingressSecretHandle,
+    enabled: legacy.enabled,
+    createdAt: legacy.createdAt,
+    updatedAt: nowIso(),
+  }
+  await updateIntegrationAccount(pluginId, accountId, { ingressEndpoint: endpoint })
+  return endpoint
+}
+
+export async function ensureIntegrationIngressEndpoint(
+  pluginId: string,
+  accountId: string,
+  secretHandle: string
+): Promise<IntegrationIngressEndpoint> {
+  const existing = await getIntegrationIngressEndpoint(pluginId, accountId)
+  if (existing) return existing
+  const account = await getIntegrationAccount(pluginId, accountId)
+  if (!account) throw new Error(`Integration account "${accountId}" was not found`)
+  const now = nowIso()
+  const endpoint: IntegrationIngressEndpoint = {
+    id: crypto.randomUUID(),
+    accountId,
+    routeId: crypto.randomUUID(),
+    secretHandle,
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  }
+  await updateIntegrationAccount(pluginId, accountId, { ingressEndpoint: endpoint })
+  return endpoint
+}
+
 export async function createIntegrationSubscription(
   pluginId: string,
   input: IntegrationSubscriptionInput
@@ -114,6 +174,9 @@ export async function createIntegrationSubscription(
     throw new Error(`Integration account "${input.accountId}" does not belong to this integration`)
   }
   const now = nowIso()
+  const endpoint = input.ingressSecretHandle
+    ? await ensureIntegrationIngressEndpoint(pluginId, input.accountId, input.ingressSecretHandle)
+    : undefined
   const row: IntegrationSubscription = {
     id: crypto.randomUUID(),
     pluginId,
@@ -123,8 +186,8 @@ export async function createIntegrationSubscription(
     resourceId: input.resourceId,
     eventTypes: [...new Set(input.eventTypes)].sort(),
     inboxProjectionId: input.inboxProjectionId,
-    ingressRouteId: input.ingressSecretHandle ? crypto.randomUUID() : undefined,
-    ingressSecretHandle: input.ingressSecretHandle,
+    ingressRouteId: endpoint?.routeId,
+    ingressSecretHandle: endpoint?.secretHandle,
     enabled: input.enabled ?? true,
     createdAt: now,
     updatedAt: now,
@@ -143,6 +206,25 @@ export async function listIntegrationSubscriptions(
   return rows
     .filter((row) => row.pluginId === pluginId)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+}
+
+export async function updateIntegrationSubscription(
+  pluginId: string,
+  subscriptionId: string,
+  patch: Partial<
+    Pick<
+      IntegrationSubscription,
+      "enabled" | "disabledByProvider" | "disabledReason" | "inboxProjectionId" | "eventTypes"
+    >
+  >
+): Promise<IntegrationSubscription> {
+  const existing = await getDb().integrationSubscriptions.get(subscriptionId)
+  if (!existing || existing.pluginId !== pluginId) {
+    throw new Error(`Integration subscription "${subscriptionId}" was not found`)
+  }
+  const row = { ...existing, ...patch, updatedAt: nowIso() }
+  await getDb().integrationSubscriptions.put(row)
+  return row
 }
 
 export async function removeIntegrationSubscription(

@@ -392,6 +392,8 @@ export interface RunAndCaptureOptions {
    * throwing callback is swallowed. Default `undefined` → no events emitted.
    */
   onEvent?: (event: CaptureStreamEvent) => void
+  /** Persist the SDK resume identity as soon as its stream event arrives. */
+  onSdkSessionId?: (sdkSessionId: string) => void | Promise<void>
   /**
    * Headless permission responder. When the sidecar emits a
    * `permission_request` (an *ask*-tier tool) for this session, the wrapper
@@ -863,6 +865,11 @@ async function captureAssistantReplyCore(
       if (evt.type === "sdk_session_id") {
         if (typeof evt.sdkSessionId === "string" && evt.sdkSessionId) {
           capturedSdkSessionId = evt.sdkSessionId
+          try {
+            void Promise.resolve(cap?.onSdkSessionId?.(evt.sdkSessionId)).catch(() => undefined)
+          } catch {
+            /* best-effort — the result still surfaces the id at turn completion */
+          }
         }
         return
       }

@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { isAgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 
 import {
+  canonicalEventFromCaptureEvent,
   canonicalEventFromExternalEvent,
   captureEventFromCanonical,
   createEnvelopeSequencer,
@@ -109,6 +110,46 @@ describe("canonicalEventFromExternalEvent", () => {
       runtime: "external",
       payload: { type: "vendor_specific", weird: true },
     })
+  })
+})
+
+describe("canonicalEventFromCaptureEvent", () => {
+  it("preserves text and tool identities for the durable recovery log", () => {
+    expect(canonicalEventFromCaptureEvent({ type: "text-delta", delta: "partial" })).toEqual({
+      kind: "text-delta",
+      delta: "partial",
+    })
+    expect(
+      canonicalEventFromCaptureEvent({
+        type: "tool-call",
+        toolName: "Read",
+        input: { path: "a.ts" },
+        id: "call-1",
+      })
+    ).toEqual({
+      kind: "tool-call",
+      toolName: "Read",
+      input: { path: "a.ts" },
+      toolCallId: "call-1",
+    })
+    expect(
+      canonicalEventFromCaptureEvent({
+        type: "tool-result",
+        toolName: "Read",
+        id: "call-1",
+        result: "ok",
+      })
+    ).toMatchObject({ kind: "tool-result", toolCallId: "call-1", result: "ok" })
+  })
+
+  it("omits the legacy-only tool summary event", () => {
+    expect(
+      canonicalEventFromCaptureEvent({
+        type: "tool-summary",
+        summary: "done",
+        toolCallIds: ["call-1"],
+      })
+    ).toBeNull()
   })
 })
 

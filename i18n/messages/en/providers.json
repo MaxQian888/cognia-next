@@ -1314,5 +1314,12 @@
     "waitingForTest": "Waiting to run connection test..."
   },
   "xai": "xAI (Grok)",
-  "xaiDescription": "Grok 3, Grok 3 Mini"
+  "xaiDescription": "Grok 3, Grok 3 Mini",
+  "capabilityChatApi": "Chat API",
+  "capabilityModelDelete": "Delete models",
+  "capabilityModelList": "List models",
+  "capabilityModelPull": "Pull models",
+  "capabilityModelUnload": "Unload models",
+  "localProviderApiKeyHint": "Optional API key for secured local endpoints.",
+  "unknownVersion": "Unknown version"
 }

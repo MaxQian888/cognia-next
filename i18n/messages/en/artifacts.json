@@ -185,6 +185,14 @@
       "allStatuses": "All changes",
       "allTime": "All time",
       "any": "Filesystem change",
+      "adoptionGenerationOnly": "{lines} generated lines · adoption unavailable for the legacy fallback",
+      "adoptionPending": "{lines} proposed lines · awaiting review",
+      "adoptionRate": "{rate}% adopted · {accepted} of {proposed} changed lines",
+      "adoptionRejected": "Not adopted · {lines} proposed lines",
+      "adoptionReverted": "Adoption reverted · {lines} proposed lines",
+      "adoptionTitle": "AI code adoption",
+      "adoptionTruncated": "Partial tracking coverage",
+      "adoptionUnavailable": "Adoption coverage unavailable",
       "applyAll": "Apply all",
       "applyFile": "Apply file",
       "applySelectedHunks": "Apply {count} hunks",
@@ -256,5 +264,9 @@
       "description": "Workspace editing requires the desktop app or a paired companion filesystem.",
       "title": "Workspace is unavailable"
     }
+  },
+  "pluginRenderer": {
+    "failed": "The plugin renderer failed.",
+    "loading": "Loading plugin renderer…"
   }
 }

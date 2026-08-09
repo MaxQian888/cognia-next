@@ -51,6 +51,7 @@ function mk<S extends z.ZodTypeAny>(input: {
     summary: string
     details?: { label: string; value: string }[]
   }
+  buildArgs?: (args: z.infer<S>) => string[]
 }): BuiltInSkill<S> {
   const skill: BuiltInSkill<S> = {
     id: input.id,
@@ -64,7 +65,10 @@ function mk<S extends z.ZodTypeAny>(input: {
     inputSchema: input.schema,
     execute: async (args, ctx) =>
       runLarkCli({
-        args: [...input.subcommand, ...argsToFlags(args as Record<string, unknown>)],
+        args: [
+          ...input.subcommand,
+          ...(input.buildArgs?.(args) ?? argsToFlags(args as Record<string, unknown>)),
+        ],
         confirmed: ctx.hitlBypass === true,
         adapterId: larkAdapterIdFromCtx(ctx),
       }),
@@ -96,7 +100,8 @@ registerBuiltInSkill(
     schema: z.object({
       query: z.string().min(1).describe("Base name or keywords to search for."),
     }),
-    subcommand: ["base", "+search"],
+    subcommand: ["base", "+title-resolve"],
+    buildArgs: (args) => argsToFlags({ title: args.query }),
     mutation: "read",
     imAccess: "always",
   })
@@ -112,7 +117,8 @@ registerBuiltInSkill(
       "zh-CN": "列出 Lark 多维表格中的所有表。",
     },
     schema: z.object({ appToken: appTokenParam }),
-    subcommand: ["base", "+list-tables"],
+    subcommand: ["base", "+table-list"],
+    buildArgs: (args) => argsToFlags({ baseToken: args.appToken }),
     mutation: "read",
     imAccess: "always",
   })
@@ -143,7 +149,15 @@ registerBuiltInSkill(
         .optional()
         .describe("Max records to return (1–500; default is the server's page size)."),
     }),
-    subcommand: ["base", "+list-records"],
+    subcommand: ["base", "+record-list"],
+    buildArgs: (args) =>
+      argsToFlags({
+        baseToken: args.appToken,
+        tableId: args.tableId,
+        viewId: args.viewId,
+        filterJson: args.filter,
+        limit: args.pageSize,
+      }),
     mutation: "read",
     imAccess: "always",
   })
@@ -163,7 +177,9 @@ registerBuiltInSkill(
       tableId: tableIdParam,
       recordId: recordIdParam,
     }),
-    subcommand: ["base", "+read-record"],
+    subcommand: ["base", "+record-get"],
+    buildArgs: (args) =>
+      argsToFlags({ baseToken: args.appToken, tableId: args.tableId, recordId: [args.recordId] }),
     mutation: "read",
     imAccess: "always",
   })
@@ -188,7 +204,13 @@ registerBuiltInSkill(
           'One or more records to add. Each object maps field NAME → value, e.g. {"Name":"Acme","Stage":"Lead"}.'
         ),
     }),
-    subcommand: ["base", "+append-records"],
+    subcommand: ["base", "+record-batch-create"],
+    buildArgs: (args) =>
+      argsToFlags({
+        baseToken: args.appToken,
+        tableId: args.tableId,
+        json: { create_records: args.records },
+      }),
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Append Bitable records",
@@ -215,7 +237,13 @@ registerBuiltInSkill(
         .record(z.string(), z.unknown())
         .describe("Field NAME → new value map. Only the fields you include are changed."),
     }),
-    subcommand: ["base", "+update-record"],
+    subcommand: ["base", "+record-batch-update"],
+    buildArgs: (args) =>
+      argsToFlags({
+        baseToken: args.appToken,
+        tableId: args.tableId,
+        json: { update_records: { [args.recordId]: args.fields } },
+      }),
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Update Bitable record",
@@ -252,7 +280,17 @@ registerBuiltInSkill(
           "Type-specific config, e.g. select options or number formatting. Shape depends on fieldType."
         ),
     }),
-    subcommand: ["base", "+create-field"],
+    subcommand: ["base", "+field-create"],
+    buildArgs: (args) =>
+      argsToFlags({
+        baseToken: args.appToken,
+        tableId: args.tableId,
+        json: {
+          name: args.fieldName,
+          type: args.fieldType,
+          ...(args.property ?? {}),
+        },
+      }),
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Add Bitable field",
@@ -276,7 +314,9 @@ registerBuiltInSkill(
       tableId: tableIdParam,
       recordId: recordIdParam,
     }),
-    subcommand: ["base", "+delete-record"],
+    subcommand: ["base", "+record-delete"],
+    buildArgs: (args) =>
+      argsToFlags({ baseToken: args.appToken, tableId: args.tableId, recordId: [args.recordId] }),
     mutation: "destructive",
     imAccess: "opt-in",
     confirmTitle: "Delete Bitable record",

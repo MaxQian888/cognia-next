@@ -5,6 +5,8 @@ import { getDb } from "@/lib/db/schema"
 
 import {
   getCodeAdoptionTurn,
+  getCodeAdoptionTurnByTaskWorkspaceRun,
+  listCodeAdoptionTurnsInRange,
   listCodeAdoptionTurnsBySession,
   listRecentCodeAdoptionTurns,
   persistCodeAdoptionTurn,
@@ -73,4 +75,20 @@ it("prunes to the newest kept rows", async () => {
 it("prune is a no-op below the cap", async () => {
   await persistCodeAdoptionTurn(turn("s1", 1, 10))
   expect(await pruneCodeAdoptionTurns(5)).toBe(0)
+})
+
+it("resolves a row from its authoritative Task Workspace run", async () => {
+  await persistCodeAdoptionTurn({
+    ...turn("s1", 1, 10),
+    taskWorkspaceRunId: "run:s1:1",
+    measurement: "taskWorkspace",
+  })
+  expect((await getCodeAdoptionTurnByTaskWorkspaceRun("run:s1:1"))?.id).toBe("s1:1")
+})
+
+it("returns every row in an explicit inclusive time window", async () => {
+  await persistCodeAdoptionTurn(turn("s1", 1, 100))
+  await persistCodeAdoptionTurn(turn("s1", 2, 200))
+  await persistCodeAdoptionTurn(turn("s1", 3, 300))
+  expect((await listCodeAdoptionTurnsInRange(100, 200)).map((row) => row.ts)).toEqual([100, 200])
 })

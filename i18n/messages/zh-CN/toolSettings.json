@@ -42,6 +42,8 @@
   "slashToolTitle": "SlashCommand 工具",
   "spawnTaskToolDesc": "允许 Agent 将明确范围的后续工作暂存到命名侧聊中，供你检查并启动。",
   "spawnTaskToolTitle": "派生任务",
+  "sessionMessagingToolDesc": "允许智能体发现当前工作区内其他在线会话，并发送不受信任的纯文本请求。",
+  "sessionMessagingToolTitle": "会话消息工具",
   "teamCollabToolDesc": "让队友在团队运行期间协作——给同伴发消息、共享黑板、发起或参与共识投票、委派子任务。仅对 Agent 团队会话生效。",
   "teamCollabToolTitle": "团队协作工具",
   "terminalRepl": "交互式 REPL",

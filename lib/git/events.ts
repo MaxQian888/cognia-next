@@ -21,7 +21,7 @@ export const GIT_EVENT_COALESCE_MS = 120
  * once per `GIT_EVENT_COALESCE_MS` window with the most recent payload. Returns
  * a synchronous unsubscribe (no-op on an unpaired browser). Works over the
  * companion transport too: the desktop forwards `git://status-changed` onto
- * the `/ws/v1/events` bus (see `companion_api/commands.rs`), so remote clients
+ * the `/ws/events` bus (see `companion_api/commands.rs`), so remote clients
  * observe the same frames without running the watcher themselves.
  */
 export function subscribeGitStatusChanged(

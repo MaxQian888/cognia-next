@@ -39,6 +39,8 @@ import type { DocumentType } from "@/types/document"
 import type { SendContent, SendContentBlock } from "@cognia/agent-config-types"
 import { COMPOSER_IMAGE_MAX_LONG_EDGE } from "./prepare"
 import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
+import { getCustomImporterOwnersForFile } from "@/lib/plugin/api/import-api"
+import { authorizePluginAttachment } from "@/lib/plugin/api/files-api"
 
 /**
  * The longest edge (px) we downscale large images to before base64-encoding.
@@ -110,6 +112,8 @@ export interface AttachmentManifestEntry {
   filename: string
   mediaType: string
   kind: "image" | "document"
+  /** Opaque byte handles keyed by the enabled importer plugin that owns them. */
+  pluginHandles?: Record<string, string>
 }
 
 export interface DispatchResult {
@@ -275,6 +279,29 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return out
 }
 
+function authorizeMatchingPluginAttachments(
+  file: SubmittedFile,
+  filename: string,
+  mediaType: string
+): Record<string, string> | undefined {
+  const decoded = file.url?.startsWith("data:") ? decodeDataUrl(file.url) : null
+  if (!decoded) return undefined
+  const effectiveMimeType = mediaType || decoded.mimeType || "application/octet-stream"
+  const owners = getCustomImporterOwnersForFile(filename, effectiveMimeType)
+  if (owners.length === 0) return undefined
+  return Object.fromEntries(
+    owners.map((pluginId) => [
+      pluginId,
+      authorizePluginAttachment(pluginId, {
+        name: filename,
+        mimeType: effectiveMimeType,
+        size: decoded.bytes.byteLength,
+        bytes: decoded.bytes,
+      }),
+    ])
+  )
+}
+
 function reject(kind: "image" | "document", reason: RejectReason): ExtractedAttachment {
   return { kind, block: null, tokens: 0, rejectReason: reason }
 }
@@ -398,12 +425,27 @@ export async function buildAttachmentBlocks(
       ? gateCachedAttachment(cached)
       : await extractAttachment(f, options, index)
     if (result.block) {
+      const mediaType = f.mediaType || result.image?.mediaType || ""
+      const pluginHandles =
+        result.kind === "document"
+          ? authorizeMatchingPluginAttachments(f, filename, mediaType)
+          : undefined
       const entry: AttachmentManifestEntry = {
         filename,
-        mediaType: f.mediaType || result.image?.mediaType || "",
+        mediaType,
         kind: result.kind,
+        ...(pluginHandles ? { pluginHandles } : {}),
       }
-      blocks.push(result.block)
+      if (result.block.type === "text" && pluginHandles) {
+        const handleHint = Object.entries(pluginHandles)
+          .map(([pluginId, handle]) => `${pluginId}: ${handle}`)
+          .join(", ")
+        const text = `${result.block.text}\n\nAuthorized plugin attachment handles: ${handleHint}`
+        blocks.push({ ...result.block, text })
+        tokens += estimateFallbackTokens(text) - estimateFallbackTokens(result.block.text)
+      } else {
+        blocks.push(result.block)
+      }
       // Pushed in lockstep with `blocks` so index alignment holds even when an
       // earlier file was rejected.
       manifest.push(entry)

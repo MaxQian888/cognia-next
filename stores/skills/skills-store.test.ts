@@ -226,11 +226,18 @@ describe("useSkillsStore", () => {
       expect(result.current.importStaging?.parseErrors).toHaveLength(1)
     })
 
-    it("setImportStaging carries bundle-specific fields (resources, flavor, nativeDirectory, canonicalId)", () => {
+    it("setImportStaging preserves standard, vendor, and bundle-specific fields", () => {
       const staging: ImportStaging = {
         drafts: [
           {
             name: "Reviewer",
+            slug: "reviewer",
+            description: "Review changes",
+            compatibility: "Requires git",
+            metadata: { owner: "platform" },
+            invocationPolicy: "explicit",
+            frontmatterExtensions: { "disable-model-invocation": true },
+            codexOpenAiYaml: "interface:\n  display_name: Reviewer\n",
             content: "body",
             canonicalId: "bundle:zip:reviewer",
             nativeDirectory: "/tmp/reviewer",
@@ -249,6 +256,14 @@ describe("useSkillsStore", () => {
       expect(result.current.importStaging?.drafts[0].canonicalId).toBe("bundle:zip:reviewer")
       expect(result.current.importStaging?.drafts[0].nativeDirectory).toBe("/tmp/reviewer")
       expect(result.current.importStaging?.drafts[0].resources).toHaveLength(1)
+      expect(result.current.importStaging?.drafts[0]).toMatchObject({
+        slug: "reviewer",
+        compatibility: "Requires git",
+        metadata: { owner: "platform" },
+        invocationPolicy: "explicit",
+        frontmatterExtensions: { "disable-model-invocation": true },
+        codexOpenAiYaml: "interface:\n  display_name: Reviewer\n",
+      })
     })
   })
 
@@ -316,6 +331,30 @@ describe("useSkillsStore", () => {
       act(() => result.current.markSaved("main", "edited"))
       const f = result.current.editorWorkspace.openFiles[0]
       expect(f.savedContent).toBe(f.draftContent)
+      expect(f.saveState).toBe("saved")
+      expect(f.saveError).toBeUndefined()
+    })
+
+    it("tracks save failures without clearing the dirty draft", () => {
+      const { result } = renderHook(() => useSkillsStore())
+      act(() => result.current.openSkillInEditor("skill_1", "body"))
+      act(() => result.current.updateDraftContent("main", "edited"))
+      act(() => result.current.markFileSaveState(["main"], "conflict", "changed elsewhere"))
+      const failed = result.current.editorWorkspace.openFiles[0]
+      expect(failed).toMatchObject({
+        draftContent: "edited",
+        savedContent: "body",
+        saveState: "conflict",
+        saveError: "changed elsewhere",
+      })
+
+      act(() => result.current.updateDraftContent("main", "retry"))
+      expect(result.current.editorWorkspace.openFiles[0]).toMatchObject({
+        draftContent: "retry",
+        savedContent: "body",
+        saveState: "clean",
+      })
+      expect(result.current.editorWorkspace.openFiles[0].saveError).toBeUndefined()
     })
 
     it("closeFile removes the file and updates activeFileId", () => {

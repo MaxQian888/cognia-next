@@ -29,19 +29,28 @@ import { CompanionOutboundRunnerProvider } from "./companion-outbound-runner-pro
 export function CompanionEventBridgeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (typeof window === "undefined") return
-    const detach = installCompanionEventBridge()
-    return detach
+    let detachEventBridge = () => {}
+    let detachCompanionSignaling = () => {}
+
+    const bindActiveTransport = () => {
+      detachEventBridge()
+      detachCompanionSignaling()
+      detachEventBridge = installCompanionEventBridge()
+      detachCompanionSignaling = installCompanionSignalingController()
+    }
+
+    bindActiveTransport()
+    window.addEventListener("cognia:companion-config-changed", bindActiveTransport)
+    return () => {
+      window.removeEventListener("cognia:companion-config-changed", bindActiveTransport)
+      detachEventBridge()
+      detachCompanionSignaling()
+    }
   }, [])
 
   useEffect(() => {
     if (typeof window === "undefined") return
     const detach = installDesktopSignalingController()
-    return detach
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    const detach = installCompanionSignalingController()
     return detach
   }, [])
 

@@ -47,7 +47,7 @@ export function remoteBrowserWebSocketUrl(
 ): string {
   const base = new URL(serverBaseUrl)
   base.protocol = base.protocol === "https:" ? "wss:" : "ws:"
-  base.pathname = `/ws/v1/browser/${encodeURIComponent(sessionId)}`
+  base.pathname = `/ws/browser/${encodeURIComponent(sessionId)}`
   base.search = new URLSearchParams({ ticket }).toString()
   base.hash = ""
   return base.toString()

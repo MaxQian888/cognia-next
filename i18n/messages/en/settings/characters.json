@@ -412,7 +412,13 @@
   "skillsCount": "{count, plural, =1 {# skill} other {# skills}}",
   "support": {
     "diagnostics": "Allow redacted local diagnostics",
-    "diagnosticsDescription": "Local kill switch. When off, the Support Agent receives bundled product docs only."
+    "diagnosticsDescription": "Local kill switch. When off, the Support Agent receives bundled product docs only.",
+    "hidePreview": "Hide preview",
+    "openIssue": "Open issue",
+    "preview": "Preview",
+    "previewUnavailable": "Preview unavailable",
+    "supportResponse": "Support response",
+    "userReport": "User report"
   },
   "title": "Characters",
   "trust": {

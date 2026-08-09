@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
@@ -43,6 +43,12 @@ import { SkillValidationPanel } from "./skill-validation-panel"
 import { useEditorWorkspace } from "./use-editor-workspace"
 import { languageFromPath } from "./language-from-path"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
+import { buildWorkbenchUri } from "@/lib/editor-workbench/monaco-workbench"
+import {
+  disposeWorkspace,
+  ensureWorkspaceFiles,
+  isLspWorkspaceManagerConfigured,
+} from "@/lib/plugin/vscode-shim/lsp-workspace-manager"
 
 /** localStorage key for the desktop three-pane split (percent layout, v4). */
 const SKILL_EDITOR_LAYOUT_KEY = "cognia-skill-editor-layout"
@@ -71,11 +77,72 @@ export function SkillEditorWorkspace() {
     () => (ws.activeSkillId ? getSkill(ws.activeSkillId) : Promise.resolve(undefined)),
     [ws.activeSkillId]
   )
-  const resources =
-    useLiveQuery(
-      () => (ws.activeSkillId ? listResourcesForSkill(ws.activeSkillId) : Promise.resolve([])),
-      [ws.activeSkillId]
-    ) ?? []
+  const queriedResources = useLiveQuery(
+    () => (ws.activeSkillId ? listResourcesForSkill(ws.activeSkillId) : Promise.resolve([])),
+    [ws.activeSkillId]
+  )
+  const resources = useMemo(() => queriedResources ?? [], [queriedResources])
+
+  useEffect(() => {
+    if (!skill || !isLspWorkspaceManagerConfigured()) return
+    const files = [
+      {
+        fileName: "SKILL.md",
+        initialContent: skill.content,
+        monacoUri: buildWorkbenchUri({
+          surface: "skill",
+          skillId: skill.id,
+          documentId: "main",
+          pathSegments: ["SKILL.md"],
+          language: "markdown",
+          initialContent: skill.content,
+        }),
+      },
+      ...(skill.codexOpenAiYaml !== undefined
+        ? [
+            {
+              fileName: "agents/openai.yaml",
+              initialContent: skill.codexOpenAiYaml,
+              monacoUri: buildWorkbenchUri({
+                surface: "skill",
+                skillId: skill.id,
+                documentId: "codex",
+                pathSegments: ["agents", "openai.yaml"],
+                language: "yaml",
+                initialContent: skill.codexOpenAiYaml,
+              }),
+            },
+          ]
+        : []),
+      ...resources.map((resource) => ({
+        fileName: resource.path,
+        initialContent:
+          resource.encoding === "base64"
+            ? Uint8Array.from(atob(resource.content), (char) => char.charCodeAt(0))
+            : resource.content,
+        monacoUri: buildWorkbenchUri({
+          surface: "skill",
+          skillId: skill.id,
+          documentId: resource.id,
+          pathSegments: resource.path.split("/"),
+          language: languageFromPath(resource.path),
+          initialContent: resource.content,
+        }),
+      })),
+    ]
+    void ensureWorkspaceFiles({ surface: "skill", workspaceId: skill.id, files }).catch(() => {
+      // LSP workspaces are desktop-only and best-effort; editing remains local.
+    })
+  }, [resources, skill])
+
+  useEffect(() => {
+    const skillId = skill?.id
+    return () => {
+      if (skillId && isLspWorkspaceManagerConfigured()) {
+        void disposeWorkspace({ surface: "skill", documentId: skillId })
+      }
+    }
+  }, [skill?.id])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -109,6 +176,28 @@ export function SkillEditorWorkspace() {
   }
 
   const activeFile = ws.openFiles.find((f) => f.id === ws.activeFileId) ?? ws.openFiles[0]
+  const activeSaveLabel = activeFile
+    ? activeFile.saveState === "saving"
+      ? t("saving")
+      : activeFile.saveState === "conflict"
+        ? t("saveConflict")
+        : activeFile.saveState === "blocked"
+          ? t("saveBlocked")
+          : activeFile.saveState === "error"
+            ? t("saveError")
+            : activeFile.draftContent !== activeFile.savedContent
+              ? t("unsaved")
+              : t("saved")
+    : ""
+  const activeSaveDetail = activeFile
+    ? activeFile.saveState === "conflict"
+      ? t("saveConflictDetail")
+      : activeFile.saveState === "blocked"
+        ? t("saveBlockedDetail")
+        : activeFile.saveState === "error"
+          ? t("saveErrorDetail")
+          : undefined
+    : undefined
 
   const handleClose = (id: string, dirty: boolean) => {
     if (dirty) {
@@ -127,6 +216,15 @@ export function SkillEditorWorkspace() {
       onSelect={(sel) => {
         if (sel.kind === "main") {
           setActiveFile("main")
+        } else if (sel.kind === "codex") {
+          openFile({
+            id: sel.id,
+            kind: "codex",
+            path: "agents/openai.yaml",
+            language: "yaml",
+            draftContent: sel.content,
+            savedContent: sel.content,
+          })
         } else {
           openFile({
             id: sel.resource.id,
@@ -185,11 +283,8 @@ export function SkillEditorWorkspace() {
 
   const statusBar = (
     <div className="flex items-center justify-between gap-2 border-t bg-muted/30 px-3 py-1 font-mono text-[10px] text-muted-foreground">
-      <span>
-        {activeFile?.language} •{" "}
-        {activeFile && activeFile.draftContent !== activeFile.savedContent
-          ? t("unsaved")
-          : t("saved")}
+      <span title={activeSaveDetail}>
+        {activeFile?.language} • {activeSaveLabel}
       </span>
       {isMobile ? (
         <Button
@@ -225,13 +320,18 @@ export function SkillEditorWorkspace() {
               onSave={async (draft) => {
                 await updateSkill(skill.id, {
                   name: draft.name,
+                  slug: draft.slug,
                   description: draft.description,
+                  compatibility: draft.compatibility,
+                  metadata: draft.metadata,
+                  invocationPolicy: draft.invocationPolicy,
                   category: draft.category,
                   tags: draft.tags,
                   allowedTools: draft.allowedTools,
                   version: draft.version,
                   author: draft.author,
                   license: draft.license,
+                  syncFingerprint: undefined,
                 })
                 toast.success(t("settingsSaved"))
                 setSettingsOpen(false)
@@ -373,6 +473,7 @@ export function SkillEditorWorkspace() {
                 onChange={(v) => updateDraftContent(activeFile.id, v)}
                 skillId={ws.activeSkillId ?? undefined}
                 documentId={activeFile.id}
+                path={activeFile.path}
               />
             ) : null}
             {statusBar}

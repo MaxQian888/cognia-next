@@ -15,7 +15,7 @@ jest.mock("@/lib/claude/ipc", () => ({
   closeSession: jest.fn(async () => undefined),
 }))
 
-const mockSaveAgentEnvSecret = jest.fn(async () => undefined)
+const mockSaveAgentEnvSecret = jest.fn(async (_secretRef: string, _value: string) => undefined)
 jest.mock("@/lib/agent/agent-env-keyring", () => ({
   createAgentEnvSecretRef: (sessionId: string, name: string) => `${sessionId}:${name}:new`,
   saveAgentEnvSecret: (secretRef: string, value: string) =>
@@ -37,6 +37,10 @@ jest.mock("./header-account-switcher", () => ({
 
 jest.mock("@/components/chat/dialogs/single-export-trigger", () => ({
   SingleExportTrigger: () => null,
+}))
+
+jest.mock("./session-communication-sheet", () => ({
+  SessionCommunicationSheet: () => null,
 }))
 
 // Branch + active-session + toast are exercised by the branch action tests.

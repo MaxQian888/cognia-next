@@ -3,6 +3,7 @@ import { TELEMETRY_EVENT_CATALOG } from "./catalog"
 it("registers every supported behavior event name", () => {
   expect(Object.keys(TELEMETRY_EVENT_CATALOG).sort()).toEqual([
     "agent.execution.resolved",
+    "agent.execution.shadow",
     "agent.teammate.completed",
     "agent.teammate.failed",
     "agent.teammate.started",

@@ -123,14 +123,18 @@ export interface ConversationListModel {
  * Sort newest-first with stable tie-breakers.
  *
  * Dexie's index order is not a display-order contract when several rows share
- * the same millisecond `updatedAt`. Without a total ordering, a live-query
+ * the same millisecond activity timestamp. Without a total ordering, a live-query
  * refresh can hand us those equal rows in a different order, making the
  * conversation list visibly swap them while the user is creating or switching
  * chats.
  */
+function activityAt(session: ChatSession): number {
+  return session.lastMessageAt ?? session.updatedAt ?? 0
+}
+
 function byRecent(a: ChatSession, b: ChatSession): number {
   return (
-    (b.updatedAt ?? 0) - (a.updatedAt ?? 0) ||
+    activityAt(b) - activityAt(a) ||
     (b.createdAt ?? 0) - (a.createdAt ?? 0) ||
     a.id.localeCompare(b.id)
   )
@@ -187,10 +191,10 @@ function byManualThenRecent(sectionKey: string): (a: ChatSession, b: ChatSession
   }
 }
 
-/** Map a session's `updatedAt` to its relative date bucket (local calendar). */
-export function dateBucketFor(now: number, updatedAt: number): DateBucket {
+/** Map a session activity timestamp to its relative date bucket (local calendar). */
+export function dateBucketFor(now: number, activityTimestamp: number): DateBucket {
   // Future timestamps (clock skew) clamp to "today".
-  const days = differenceInCalendarDays(now, updatedAt)
+  const days = differenceInCalendarDays(now, activityTimestamp)
   if (days <= 0) return "today"
   if (days === 1) return "yesterday"
   if (days <= 7) return "prev7"
@@ -380,7 +384,7 @@ export function buildConversationSections(
     // sessions the caller hands us (the guild rail filters them).
     const buckets = new Map<DateBucket, ChatSession[]>()
     for (const s of loose) {
-      const bucket = dateBucketFor(now, s.updatedAt ?? 0)
+      const bucket = dateBucketFor(now, activityAt(s))
       const list = buckets.get(bucket)
       if (list) list.push(s)
       else buckets.set(bucket, [s])

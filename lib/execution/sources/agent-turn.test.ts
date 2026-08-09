@@ -13,7 +13,9 @@ describe("AgentRunEventProducer", () => {
       { workspaceRoot: "/workspace/project" }
     )
 
-    await producer.start(1_000)
+    await producer.start(1_000, {
+      recoveryAnchor: { version: 1, attemptId: "attempt-1" },
+    })
     await producer.onCaptureEvent({ type: "thinking-delta", delta: "private reasoning" }, 1_001)
     await producer.onCaptureEvent({ type: "text-delta", delta: "draft answer" }, 1_001)
     await producer.onCaptureEvent(
@@ -49,6 +51,9 @@ describe("AgentRunEventProducer", () => {
       "step.completed",
       "run.completed",
     ])
+    expect(appended[0].payload).toEqual({
+      recoveryAnchor: { version: 1, attemptId: "attempt-1" },
+    })
     const wire = JSON.stringify(appended)
     expect(wire).not.toContain("private reasoning")
     expect(wire).not.toContain("draft answer")

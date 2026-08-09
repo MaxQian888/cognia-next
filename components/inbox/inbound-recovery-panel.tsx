@@ -12,10 +12,10 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import {
-  continueConnectorInboundJobSafely,
   dismissConnectorInboundJobRecovery,
   retryConnectorInboundJobFromStart,
 } from "@/lib/db/connector-inbound-jobs"
+import { resumeCrashedAgentRun } from "@/lib/ai/agent/recovery/reconcile-crashed-runs"
 import { getBus } from "@/lib/connectors/bus"
 import type { ConnectorInboundJobRow } from "@/lib/db/connector-types"
 import { NoticeItem } from "./notices/notice-item"
@@ -36,7 +36,8 @@ export function InboundRecoveryNotice({ jobs }: InboundRecoveryNoticeProps) {
     try {
       const changed =
         action === "continue"
-          ? await continueConnectorInboundJobSafely(id)
+          ? (await resumeCrashedAgentRun(jobs.find((job) => job.id === id)?.executionRunId ?? ""))
+              .resumed
           : action === "retry"
             ? await retryConnectorInboundJobFromStart(id, { confirmed: true })
             : await dismissConnectorInboundJobRecovery(id)

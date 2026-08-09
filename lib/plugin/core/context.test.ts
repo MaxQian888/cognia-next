@@ -40,6 +40,7 @@ import { __resetSkillsForTesting } from "@/lib/plugin/registries/skill-registry"
 import { __resetMcpServerPresetsForTesting } from "@/lib/plugin/registries/mcp-server-preset-registry"
 import { __resetNativeAnthropicToolsForTesting } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 import { PluginDisposableScope } from "./disposable-scope"
+import { PluginRegistry } from "./registry"
 import { subscribePluginApiAudit } from "../contracts/interface-catalog"
 
 // Mock Tauri invoke
@@ -1413,12 +1414,52 @@ describe("createFullPluginContext", () => {
 
     context.events.on("test-event", () => undefined)
 
-    await expect(scope.dispose()).resolves.toEqual({ disposed: 1, failures: [] })
+    await expect(scope.dispose()).resolves.toEqual({ disposed: 2, failures: [] })
     expect(audit).toHaveBeenCalledTimes(1)
     expect(audit).toHaveBeenCalledWith(
       expect.objectContaining({ methodId: "events.on", outcome: "allowed" })
     )
     unsubscribeAudit()
+  })
+
+  it("stamps and removes runtime tools through the plugin lifecycle scope", async () => {
+    const scope = new PluginDisposableScope("test-plugin")
+    const registry = new PluginRegistry()
+    const manager = {
+      getPluginPointGovernanceMode: jest.fn(() => "warn"),
+      getPluginDisposableScope: jest.fn(() => scope),
+      getRegistry: jest.fn(() => registry),
+    } as unknown as PluginManager
+    const context = createFullPluginContext(createMockPlugin(), manager)
+
+    context.agent.registerTool({
+      name: "office_test",
+      pluginId: "spoofed-owner",
+      definition: { name: "office_test", description: "test", parametersSchema: {} },
+      execute: jest.fn(),
+    })
+
+    expect(registry.getTool("office_test")?.pluginId).toBe("test-plugin")
+    const report = await scope.dispose()
+    expect(report.failures).toEqual([])
+    expect(registry.getTool("office_test")).toBeUndefined()
+  })
+
+  it("does not let a plugin unregister a dependency-owned tool", () => {
+    const registry = new PluginRegistry()
+    registry.registerTool("dependency", {
+      name: "dependency_tool",
+      pluginId: "dependency",
+      definition: { name: "dependency_tool", description: "test", parametersSchema: {} },
+      execute: jest.fn(),
+    })
+    const context = createFullPluginContext(createMockPlugin(), {
+      getPluginPointGovernanceMode: jest.fn(() => "warn"),
+      getRegistry: jest.fn(() => registry),
+    } as unknown as PluginManager)
+
+    expect(() => context.agent.unregisterTool("dependency_tool")).toThrow("does not own")
+    expect(registry.getTool("dependency_tool")?.pluginId).toBe("dependency")
   })
 
   it("should have session API methods", () => {

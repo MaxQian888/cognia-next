@@ -109,11 +109,20 @@ describe("ArtifactPreview — extra coverage", () => {
   it("uses the plugin host when a renderer claims the artifact and surfaces ready/error states", () => {
     const r: PluginArtifactRenderer = {
       id: "x",
-      canRender: () => true,
-      render: () => null,
+      kind: "test/html",
+      mount: () => ({ dispose() {} }),
     }
-    registerArtifactRenderer("x", r)
-    render(<ArtifactPreview artifact={dummy({ type: "html" })} />)
+    registerArtifactRenderer(r.id, r)
+    render(
+      <ArtifactPreview
+        artifact={dummy({
+          type: "html",
+          metadata: {
+            plugin: { kind: "test/html", schemaVersion: 1, ownerPluginId: "test" },
+          },
+        })}
+      />
+    )
     expect(screen.getByTestId("plugin-host")).toBeInTheDocument()
   })
 

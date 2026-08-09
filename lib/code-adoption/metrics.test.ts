@@ -35,11 +35,58 @@ describe("rollup", () => {
       turn({ totalFiles: 2, totalAdded: 5, totalRemoved: 1 }),
       turn({ totalFiles: 1, totalAdded: 3, totalRemoved: 4 }),
     ])
-    expect(r).toEqual({ turns: 2, files: 3, added: 8, removed: 5 })
+    expect(r).toEqual(expect.objectContaining({ turns: 2, files: 3, added: 8, removed: 5 }))
   })
 
   it("is zero for no rows", () => {
-    expect(rollup([])).toEqual({ turns: 0, files: 0, added: 0, removed: 0 })
+    expect(rollup([])).toEqual(
+      expect.objectContaining({ turns: 0, files: 0, added: 0, removed: 0 })
+    )
+  })
+
+  it("computes adoption only from finalized Task Workspace decisions", () => {
+    const result = rollup([
+      turn({
+        measurement: "taskWorkspace",
+        trackingState: "tracked",
+        adoptionState: "partiallyAccepted",
+        proposedFiles: 2,
+        proposedAdded: 8,
+        proposedRemoved: 2,
+        acceptedFiles: 1,
+        acceptedAdded: 4,
+        acceptedRemoved: 1,
+      }),
+      turn({
+        id: "s:2",
+        measurement: "taskWorkspace",
+        trackingState: "tracked",
+        adoptionState: "pending",
+        proposedFiles: 1,
+        proposedAdded: 100,
+        proposedRemoved: 0,
+        acceptedFiles: 0,
+        acceptedAdded: 0,
+        acceptedRemoved: 0,
+      }),
+      turn({
+        id: "s:3",
+        measurement: "legacyFingerprint",
+        trackingState: "unavailable",
+        adoptionState: "notApplicable",
+      }),
+    ])
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        proposedLines: 10,
+        acceptedLines: 5,
+        lineAdoptionRate: 0.5,
+        fileAdoptionRate: 0.5,
+        pendingTurns: 1,
+        unavailableTurns: 1,
+      })
+    )
   })
 })
 
@@ -60,7 +107,9 @@ describe("Dexie-backed rollups", () => {
     await persistCodeAdoptionTurn(turn({ id: "a:2", model: "opus", totalAdded: 3 }))
     await persistCodeAdoptionTurn(turn({ id: "b:1", model: null, totalAdded: 7 }))
     const byModel = await rollupByModel()
-    expect(byModel.opus).toEqual({ turns: 2, files: 2, added: 5, removed: 2 })
+    expect(byModel.opus).toEqual(
+      expect.objectContaining({ turns: 2, files: 2, added: 5, removed: 2 })
+    )
     expect(byModel.unknown.added).toBe(7)
   })
 

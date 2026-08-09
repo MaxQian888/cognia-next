@@ -114,6 +114,7 @@ import { MessagePluginMenu } from "@/components/chat/message-plugin-menu"
 import { BranchDialog } from "@/components/chat/branch-dialog"
 import { TruncateFromDialog } from "@/components/chat/truncate-from-dialog"
 import { SteerStatusBadge } from "@/components/chat/message-parts/steer-status-badge"
+import { SessionPeerOriginBadge } from "@/components/chat/session-peer-origin-badge"
 import { dispatchComposerAppend } from "@/components/chat/composer"
 import { useAsideTarget } from "@/components/context-workbench/aside-target"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -568,6 +569,7 @@ function MessageRendererInner({
         {/* Delivery state of a mid-run follow-up. Self-hides for every message
             that is not a pending steer. */}
         <SteerStatusBadge message={message} sessionId={branchSessionId} />
+        <SessionPeerOriginBadge metadata={message.metadata} />
 
         <PluginExtensionSlot point="chat.message.after" className="mt-1 empty:hidden" />
 

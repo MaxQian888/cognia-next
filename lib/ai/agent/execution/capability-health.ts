@@ -7,9 +7,16 @@
 // circuit. The overlay is UNSIGNED by design and can only DOWN-rank.
 
 import type { CapabilityHealthEntry } from "./certification-store"
+import { isExplicitlyUnsupportedCapabilityError } from "../external/session-capabilities"
 
 export const CIRCUIT_OPEN_THRESHOLD = 3
 export const CIRCUIT_OPEN_MS = 10 * 60 * 1000
+
+/** Only failures proving that the frozen capability contract is wrong count. */
+export function isCapabilityProtocolFailure(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === "AbortError") return false
+  return isExplicitlyUnsupportedCapabilityError(error)
+}
 
 export function recordCapabilityFailure(
   entries: CapabilityHealthEntry[],

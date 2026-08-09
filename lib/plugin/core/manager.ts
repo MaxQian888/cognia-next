@@ -135,7 +135,6 @@ import {
   type WasmCapabilityGrantDecision,
 } from "@/lib/plugin/security/wasm-grant"
 import { canUseTauriInvoke } from "@/lib/native/utils"
-import { isHeadlessHost } from "@/lib/platform/detect"
 import {
   validateActivationEvent,
   validateHookPoint,
@@ -198,17 +197,6 @@ import {
 } from "@/lib/plugin/error-bus"
 import { PluginDisposableScope } from "./disposable-scope"
 
-async function invokePluginRuntime<T = unknown>(
-  command: string,
-  args?: Record<string, unknown>
-): Promise<T> {
-  if (!isHeadlessHost()) {
-    return invoke<T>(command, args)
-  }
-  const { transport } = await import("@/lib/tauri/transport-instance")
-  return transport.call<T>(command, args)
-}
-
 // =============================================================================
 // Governance mode resolution
 // =============================================================================
@@ -252,6 +240,11 @@ export interface PluginManagerConfig {
   frontendImporter?: (absPath: string, pluginId: string) => Promise<Record<string, unknown>>
   /** Host-neutral native lifecycle transport for Node-target plugins. */
   nodeHostInvoker?: import("../launcher/launchPluginJs").PluginJsHostInvoker
+  /** Host-neutral native event subscription transport for Node-target plugins. */
+  nodeHostSubscriber?: <T>(
+    event: string,
+    handler: (payload: T) => void
+  ) => Promise<() => void> | (() => void)
   /**
    * Max plugins enabled concurrently within a single dependency layer at
    * startup restore. Bounds the thundering-herd of module loads against the
@@ -637,6 +630,20 @@ export class PluginManager {
     }
   }
 
+  private canInvokeNativeHost(): boolean {
+    return Boolean(this.config.nodeHostInvoker) || canUseTauriInvoke()
+  }
+
+  private async invokeNativeHost<T = unknown>(
+    command: string,
+    args: Record<string, unknown> = {}
+  ): Promise<T> {
+    if (this.config.nodeHostInvoker) {
+      return this.config.nodeHostInvoker<T>(command, args)
+    }
+    return invoke<T>(command, args)
+  }
+
   getPluginDisposableScope(pluginId: string): PluginDisposableScope {
     const existing = this.disposableScopes.get(pluginId)
     if (existing) return existing
@@ -815,6 +822,41 @@ export class PluginManager {
     return this.collectRuntimeProfileDiagnostics(manifest).some(
       (diagnostic) => diagnostic.severity === "error"
     )
+  }
+
+  /**
+   * Startup activation must preflight the complete required-dependency chain,
+   * not only the candidate itself. Otherwise a headless-compatible frontend
+   * plugin can enter the restore set and recursively enable a native-only
+   * dependency, turning a declared host limitation into a noisy load failure.
+   * Manual enable remains unchanged and still returns the actionable error.
+   */
+  private isAutomaticActivationBlocked(
+    plugin: Plugin,
+    pluginsById: ReadonlyMap<string, Plugin>,
+    visiting: Set<string> = new Set()
+  ): boolean {
+    if (
+      this.isBlockedByRuntimeProfile(plugin.manifest) ||
+      this.applyCompatibilityPolicy(plugin.manifest, "enable").blocked ||
+      this.isRetiredBuiltin(plugin) ||
+      this.requiresExplicitFrontendTrust(plugin)
+    ) {
+      return true
+    }
+
+    if (visiting.has(plugin.manifest.id)) return false
+    visiting.add(plugin.manifest.id)
+    try {
+      return Object.keys(plugin.manifest.dependencies ?? {}).some((dependencyId) => {
+        const dependency = pluginsById.get(dependencyId)
+        return dependency
+          ? this.isAutomaticActivationBlocked(dependency, pluginsById, visiting)
+          : false
+      })
+    } finally {
+      visiting.delete(plugin.manifest.id)
+    }
   }
 
   private isRetiredBuiltin(plugin: Plugin): boolean {
@@ -1011,7 +1053,7 @@ export class PluginManager {
 
   private async initializePythonRuntime(): Promise<void> {
     try {
-      await invokePluginRuntime("plugin_python_initialize", {
+      await this.invokeNativeHost("plugin_python_initialize", {
         pythonPath: this.config.pythonPath,
       })
       await this.subscribePythonEvents()
@@ -1045,9 +1087,8 @@ export class PluginManager {
       return
     }
     try {
-      if (isHeadlessHost()) {
-        const { transport } = await import("@/lib/tauri/transport-instance")
-        this.pythonEventsUnlisten = transport.subscribe<PythonPluginEvent>(
+      if (this.config.nodeHostSubscriber) {
+        this.pythonEventsUnlisten = await this.config.nodeHostSubscriber<PythonPluginEvent>(
           "plugin:python",
           appendPythonEvent
         )
@@ -1211,6 +1252,7 @@ export class PluginManager {
   private async restorePluginStates(): Promise<void> {
     const store = usePluginStore.getState()
     const plugins = Object.values(store.plugins)
+    const pluginsById = new Map(plugins.map((plugin) => [plugin.manifest.id, plugin]))
 
     const candidateIds = new Set(
       plugins
@@ -1218,19 +1260,10 @@ export class PluginManager {
           (plugin) =>
             plugin.status === "installed" &&
             (this.config.autoEnable || this.shouldActivateOnStartup(plugin.manifest)) &&
-            // Don't auto-enable plugins the active runtime profile blocks
-            // (e.g. desktop-native built-ins on the browser/mobile shell) —
-            // each would throw in loadPlugin and fire a failure toast at boot.
-            !this.isBlockedByRuntimeProfile(plugin.manifest) &&
-            // Removed first-party plugins can survive in the persisted store
-            // across an app upgrade. A builtin:// path is not fetchable, so
-            // only entries still present in the static registry may restore.
-            !this.isRetiredBuiltin(plugin) &&
-            // Same for renderer-JS plugins awaiting the user's frontend trust
-            // grant: enabling would throw PluginFrontendTrustError and toast
-            // on EVERY boot until re-trusted. They stay visible in /plugins
-            // (the detail Permissions tab shows the trust toggle).
-            !this.requiresExplicitFrontendTrust(plugin)
+            // Preflight both the plugin and every required dependency. A
+            // compatible parent with a host-blocked dependency must remain
+            // installed/visible instead of being reported as a load failure.
+            !this.isAutomaticActivationBlocked(plugin, pluginsById)
         )
         .map((plugin) => plugin.manifest.id)
     )
@@ -3132,19 +3165,28 @@ export class PluginManager {
     pluginId: string,
     permissions: PluginPermission[]
   ): Promise<void> {
-    if (!canUseTauriInvoke() && !isHeadlessHost()) return
+    if (!this.canInvokeNativeHost()) return
     const guard = getPermissionGuard()
     for (const permission of permissions) {
       if (guard.getTier(pluginId, permission) !== "silent") continue
       try {
-        await grantPluginPermission(pluginId, permission, "manifest")
+        if (this.config.nodeHostInvoker) {
+          await this.invokeNativeHost("plugin_permission_grant", {
+            pluginId,
+            permission,
+            grantedBy: "manifest",
+            expiresAt: null,
+          })
+        } else {
+          await grantPluginPermission(pluginId, permission, "manifest")
+        }
       } catch (error) {
         recordSilentFailure(
           pluginId,
           {
             site: "manager.registerPluginPermissions.mirror",
             message: `Could not mirror declared permission "${permission}" to the host ledger.`,
-            expected: !canUseTauriInvoke(),
+            expected: !this.canInvokeNativeHost(),
           },
           error
         )
@@ -3159,22 +3201,16 @@ export class PluginManager {
    * (where there is no shell backend at all).
    */
   private async syncShellAllowlistToHost(pluginId: string, commands: string[]): Promise<void> {
-    if (!canUseTauriInvoke() && !isHeadlessHost()) return
+    if (!this.canInvokeNativeHost()) return
     try {
-      if (isHeadlessHost()) {
-        const { transport } = await import("@/lib/tauri/transport-instance")
-        await transport.call("plugin_set_shell_allowlist", { pluginId, commands })
-      } else {
-        const { invoke } = await import("@tauri-apps/api/core")
-        await invoke("plugin_set_shell_allowlist", { pluginId, commands })
-      }
+      await this.invokeNativeHost("plugin_set_shell_allowlist", { pluginId, commands })
     } catch (error) {
       recordSilentFailure(
         pluginId,
         {
           site: "manager.syncShellAllowlistToHost",
           message: "Could not push the shell-command allowlist to the host.",
-          expected: !canUseTauriInvoke(),
+          expected: !this.canInvokeNativeHost(),
         },
         error
       )
@@ -3187,22 +3223,16 @@ export class PluginManager {
     domains: string[],
     rules: NonNullable<PluginManifest["networkAccess"]>["rules"] = []
   ): Promise<void> {
-    if (!canUseTauriInvoke() && !isHeadlessHost()) return
+    if (!this.canInvokeNativeHost()) return
     try {
-      if (isHeadlessHost()) {
-        const { transport } = await import("@/lib/tauri/transport-instance")
-        await transport.call("plugin_set_network_allowlist", { pluginId, domains, rules })
-      } else {
-        const { invoke } = await import("@tauri-apps/api/core")
-        await invoke("plugin_set_network_allowlist", { pluginId, domains, rules })
-      }
+      await this.invokeNativeHost("plugin_set_network_allowlist", { pluginId, domains, rules })
     } catch (error) {
       recordSilentFailure(
         pluginId,
         {
           site: "manager.syncNetworkAllowlistToHost",
           message: "Could not push the network egress allowlist to the host.",
-          expected: !canUseTauriInvoke(),
+          expected: !this.canInvokeNativeHost(),
         },
         error
       )
@@ -3350,6 +3380,7 @@ export class PluginManager {
   async handleActivationEvent(event: PluginActivationRuntimeEvent): Promise<void> {
     const store = usePluginStore.getState()
     const plugins = Object.values(store.plugins)
+    const pluginsById = new Map(plugins.map((plugin) => [plugin.manifest.id, plugin]))
 
     for (const plugin of plugins) {
       if (plugin.status === "enabled") {
@@ -3367,26 +3398,10 @@ export class PluginManager {
         continue
       }
 
-      // Skip plugins the active runtime profile blocks (e.g. desktop-native
-      // built-ins under the browser/mobile shell). Lazy-activating them would
-      // throw in loadPlugin and spam an activation-failure toast on every
-      // matching event. They remain enable-able manually from `/plugins`.
-      if (this.isBlockedByRuntimeProfile(plugin.manifest)) {
-        continue
-      }
-
-      if (this.isRetiredBuiltin(plugin)) {
-        continue
-      }
-
-      // Same rationale for renderer-JS plugins awaiting the user's frontend
-      // trust grant: lazy activation would throw PluginFrontendTrustError and
-      // toast on every matching event. Manual enable from /plugins still
-      // surfaces the error (pointing at the trust toggle).
-      if (this.requiresExplicitFrontendTrust(plugin)) {
-        loggers.manager.debug(
-          `[plugin:${plugin.manifest.id}] activation for "${event}" skipped: awaiting frontend trust grant`
-        )
+      // Preflight the complete required-dependency chain just like startup
+      // restore. A compatible parent must not recursively activate a
+      // host-blocked dependency on every matching event.
+      if (this.isAutomaticActivationBlocked(plugin, pluginsById)) {
         continue
       }
 
@@ -3582,14 +3597,14 @@ export class PluginManager {
       // `plugin_set_status` writes the status ledger; `plugin_set_state`
       // (the previously-invoked command) only persists opaque runtime_state and
       // ignored the status entirely, so this sync was a silent no-op.
-      await invoke("plugin_set_status", { pluginId, status })
+      await this.invokeNativeHost("plugin_set_status", { pluginId, status })
     } catch (error) {
       recordSilentFailure(
         pluginId,
         {
           site: "manager.syncBackendStatus",
           message: `Failed to sync plugin status to backend (${status}).`,
-          expected: !canUseTauriInvoke(),
+          expected: !this.canInvokeNativeHost(),
         },
         error
       )
@@ -4585,17 +4600,20 @@ export class PluginManager {
 
       // Load Python plugin via the subprocess host. The reply surfaces the
       // plugin's declared @hook handlers for TS-side dispatch.
-      const loadResult = await invokePluginRuntime<PythonLoadResult | null>("plugin_python_load", {
-        pluginId,
-        pluginPath: plugin.path,
-        mainModule: plugin.manifest.pythonMain,
-        dependencies: plugin.manifest.pythonDependencies,
-        config: plugin.config ?? null,
-        hostSettings: effectiveHostSettings,
-      })
+      const loadResult = await this.invokeNativeHost<PythonLoadResult | null>(
+        "plugin_python_load",
+        {
+          pluginId,
+          pluginPath: plugin.path,
+          mainModule: plugin.manifest.pythonMain,
+          dependencies: plugin.manifest.pythonDependencies,
+          config: plugin.config ?? null,
+          hostSettings: effectiveHostSettings,
+        }
+      )
 
       // Get registered tools from Python
-      const pythonTools = await invokePluginRuntime<
+      const pythonTools = await this.invokeNativeHost<
         Array<{
           name: string
           description: string
@@ -4614,7 +4632,7 @@ export class PluginManager {
             parametersSchema: toolDef.parameters,
           },
           execute: async (args: Record<string, unknown>, _context: PluginToolContext) => {
-            return invokePluginRuntime("plugin_python_call_tool", {
+            return this.invokeNativeHost("plugin_python_call_tool", {
               pluginId,
               toolName: toolDef.name,
               args,
@@ -4689,7 +4707,7 @@ export class PluginManager {
         continue
       }
       pythonHooks[event] = async (...args: unknown[]) =>
-        invokePluginRuntime("plugin_python_call_hook", {
+        this.invokeNativeHost("plugin_python_call_hook", {
           pluginId,
           event,
           name,
@@ -4720,7 +4738,7 @@ export class PluginManager {
     name: string,
     payload: unknown
   ): Promise<T> {
-    return invokePluginRuntime<T>("plugin_python_call_hook", {
+    return this.invokeNativeHost<T>("plugin_python_call_hook", {
       pluginId,
       event,
       name,
@@ -4733,7 +4751,7 @@ export class PluginManager {
    * (`on_config_updated`). A demoted host picks it up at respawn.
    */
   async pushPythonConfig(pluginId: string, config: Record<string, unknown>): Promise<void> {
-    await invokePluginRuntime("plugin_python_push_config", { pluginId, config })
+    await this.invokeNativeHost("plugin_python_push_config", { pluginId, config })
   }
 
   /**
@@ -4742,7 +4760,7 @@ export class PluginManager {
    * obtain explicit user consent first (network + disk side effects).
    */
   async installPythonDeps(pluginId: string, dependencies: string[]): Promise<void> {
-    await invokePluginRuntime("plugin_python_install_deps", { pluginId, dependencies })
+    await this.invokeNativeHost("plugin_python_install_deps", { pluginId, dependencies })
   }
 
   /** Host-level python settings (persisted on the Dexie plugins row). */
@@ -4784,7 +4802,7 @@ export class PluginManager {
   }
 
   async callPythonFunction<T>(pluginId: string, functionName: string, args: unknown[]): Promise<T> {
-    return invokePluginRuntime<T>("plugin_python_call", {
+    return this.invokeNativeHost<T>("plugin_python_call", {
       pluginId,
       functionName,
       args,
@@ -4820,21 +4838,21 @@ export class PluginManager {
    * Get Python runtime information
    */
   async getPythonRuntimeInfo(): Promise<PythonRuntimeInfo> {
-    return invokePluginRuntime<PythonRuntimeInfo>("plugin_python_runtime_info")
+    return this.invokeNativeHost<PythonRuntimeInfo>("plugin_python_runtime_info")
   }
 
   /**
    * Check if a Python plugin is initialized
    */
   async isPythonPluginInitialized(pluginId: string): Promise<boolean> {
-    return invokePluginRuntime<boolean>("plugin_python_is_initialized", { pluginId })
+    return this.invokeNativeHost<boolean>("plugin_python_is_initialized", { pluginId })
   }
 
   /**
    * Get Python plugin info (tool/hook counts)
    */
   async getPythonPluginInfo(pluginId: string): Promise<PythonPluginInfo | null> {
-    const info = await invokePluginRuntime<Record<string, unknown> | null>(
+    const info = await this.invokeNativeHost<Record<string, unknown> | null>(
       "plugin_python_get_info",
       { pluginId }
     )
@@ -4847,14 +4865,14 @@ export class PluginManager {
    * Unload a Python plugin
    */
   async unloadPythonPlugin(pluginId: string): Promise<void> {
-    return invokePluginRuntime("plugin_python_unload", { pluginId })
+    return this.invokeNativeHost("plugin_python_unload", { pluginId })
   }
 
   /**
    * List all loaded Python plugins
    */
   async listPythonPlugins(): Promise<string[]> {
-    return invokePluginRuntime<string[]>("plugin_python_list")
+    return this.invokeNativeHost<string[]>("plugin_python_list")
   }
 
   // ===========================================================================

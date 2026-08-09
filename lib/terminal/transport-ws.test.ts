@@ -21,6 +21,14 @@ import {
   RemoteTerminalSession,
 } from "./transport-ws"
 
+const COMPANION_ENDPOINT = {
+  baseUrl: "https://desktop.local:27890",
+  deviceId: "device-1",
+  devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-key" },
+  deviceKeyThumbprint: "thumbprint",
+  serverVersion: "1.0.0",
+}
+
 const SESSION_ID = "11111111-1111-4111-8111-111111111111"
 
 interface MockSocket {
@@ -205,8 +213,7 @@ beforeEach(() => {
   sockets.splice(0)
   ticketCounter = 0
   configureCompanionEndpointResolver(async () => ({
-    baseUrl: "https://desktop.local:27890",
-    token: "device-jwt",
+    ...COMPANION_ENDPOINT,
   }))
   __setSocketTicketIssuerForTesting(async () => ({
     ticket: `ticket-${++ticketCounter}`,
@@ -381,7 +388,10 @@ describe("RemoteTerminalSession canonical LAN transport", () => {
     await expect(
       RemoteTerminalSession.spawn({ shell: "ignored", rows: 24, cols: 80 })
     ).rejects.toMatchObject({ code: "unpaired" })
-    configureCompanionEndpointResolver(async () => ({ baseUrl: "https://host", token: "jwt" }))
+    configureCompanionEndpointResolver(async () => ({
+      ...COMPANION_ENDPOINT,
+      baseUrl: "https://host",
+    }))
     __setSocketTicketIssuerForTesting(async () => ({ ticket: "expired", expiresAt: 1 }))
     await expect(
       RemoteTerminalSession.spawn({ shell: "ignored", rows: 24, cols: 80 })

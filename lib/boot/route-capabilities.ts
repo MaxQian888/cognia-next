@@ -18,6 +18,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [string, BootCapability]> = [
   ["/agent-teams", "knowledge-agents"],
   ["/templates", "knowledge-agents"],
   ["/skills", "knowledge-agents"],
+  ["/skills", "desktop-tools"],
   ["/me/memory-settings", "knowledge-agents"],
   ["/me/agent-teams-settings", "knowledge-agents"],
   ["/me/ocr", "knowledge-agents"],
@@ -69,6 +70,7 @@ export function resolveRouteBootCapabilities(pathname: string, search = ""): Boo
     const section = new URLSearchParams(search).get("section")
     if (section && SETTINGS_CAPABILITIES[section]) {
       capabilities.add(SETTINGS_CAPABILITIES[section])
+      if (section === "skills") capabilities.add("desktop-tools")
     }
   }
   return [...capabilities]

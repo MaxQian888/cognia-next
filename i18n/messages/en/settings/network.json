@@ -35,7 +35,10 @@
     "proxyWebsocketsHint": "Tunnel Discord Gateway, Slack Socket Mode, and other WSS connections through the proxy via HTTP CONNECT or SOCKS5.",
     "proxyWebsocketsLabel": "Proxy WebSocket connections",
     "removeBypass": "Remove {entry} from bypass list",
-    "username": "Username"
+    "username": "Username",
+    "clearPassword": "Clear saved password",
+    "passwordConfiguredPlaceholder": "Password configured",
+    "passwordKeyringError": "Couldn't update the proxy password in secure storage."
   },
   "ipInfo": {
     "disabled": "IP lookup is off. Turn it on to fetch your current public IP and location from ipinfo.io.",

@@ -3,7 +3,7 @@
 import { capacitorHttpGet, combineAbortSignals, getCapacitorHttp } from "./capacitor-http"
 
 /**
- * Public `/api/v1/healthz` probe.
+ * Public `/healthz` probe.
  *
  * Read-only mobile-side companion to the Rust handler in
  * `src-tauri/src/companion_api/healthz.rs`. Used by:
@@ -45,7 +45,7 @@ export async function fetchHealthz(
 ): Promise<HealthzResult | null> {
   const { signal, timeoutMs = 600, fetchImpl } = opts
   if (signal.aborted) return null
-  const url = `${baseUrl.replace(/\/$/, "")}/api/v1/healthz`
+  const url = `${baseUrl.replace(/\/$/, "")}/healthz`
 
   // CapacitorHttp shortcut when running natively and the caller has not
   // injected a test fetch (the same gate the LAN scanner uses).

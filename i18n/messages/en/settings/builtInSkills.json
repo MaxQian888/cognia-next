@@ -12,6 +12,13 @@
       "body": "These skills wrap lark-cli subcommands behind typed MCP tools. The assistant calls them directly; execution runs in the desktop sidecar.",
       "gates": "Read skills run without confirmation. Write skills surface an A2UI confirm card by default in IM channels. Destructive skills require explicit opt-in via the conversation settings panel.",
       "title": "Lark productivity skills (lark-cli)"
+    },
+    "diagnostics": {
+      "affectedTools": "Affected tools: {tools}",
+      "missing": "{count, plural, one {# required capability is missing.} other {# required capabilities are missing.}}",
+      "missingCapabilities": "Missing capabilities: {capabilities}",
+      "unknown": "unknown",
+      "versions": "Detected lark-cli {detected}; certified {certified}."
     }
   },
   "mutation": {

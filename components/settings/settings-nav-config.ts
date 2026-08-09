@@ -30,7 +30,6 @@ import {
   ArrowLeftRightIcon,
   ShieldCheckIcon,
   ZapIcon,
-  RadioTowerIcon,
   BoxesIcon,
   WebhookIcon,
   NetworkIcon,
@@ -105,7 +104,7 @@ export type SettingsSectionId =
   | "scheduled-tasks"
   | "goals"
   | "pet"
-  | "remote-control"
+  | "webhooks"
   | "gateway"
   | "external-bridge"
   | "companion"
@@ -505,11 +504,11 @@ export const SETTINGS_NAV: NavItem[] = [
 
   // === System ===
   {
-    id: "remote-control",
-    labelKey: "remoteControl",
-    descriptionKey: "remoteControl",
+    id: "webhooks",
+    labelKey: "webhooks",
+    descriptionKey: "webhooks",
     group: "system",
-    icon: RadioTowerIcon,
+    icon: WebhookIcon,
     desktopOnly: true,
   },
   {
@@ -1314,17 +1313,7 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "机器人",
     "适配器",
   ],
-  "remote-control": [
-    "remote",
-    "webhook",
-    "remote-control",
-    "inbound",
-    "outbound",
-    "control",
-    "trigger",
-    "远程控制",
-    "外部触发",
-  ],
+  webhooks: ["webhook", "outbound", "standard webhooks", "signing", "egress", "出站", "签名"],
   gateway: [
     "gateway",
     "openai",

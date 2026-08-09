@@ -153,6 +153,7 @@ export async function publishWorkflowLifecycle(
         "rw",
         db.workflows,
         db.skills,
+        db.skillResources,
         db.workflowVersions,
         db.workflowDeployments,
         () =>
@@ -319,6 +320,7 @@ export async function rollbackWorkflowLifecycle(
     "rw",
     db.workflows,
     db.skills,
+    db.skillResources,
     db.workflowVersions,
     db.workflowDeployments,
     async () => {
@@ -500,6 +502,7 @@ export async function reconcileWorkflowPublications(): Promise<WorkflowPublicati
     "rw",
     db.workflows,
     db.skills,
+    db.skillResources,
     db.workflowVersions,
     db.workflowDeployments,
     async () => {

@@ -25,7 +25,11 @@
  * function — no second `configureMonacoBridge` call.
  */
 
-import { setDiagnostics } from "@/lib/plugin/vscode-shim/monaco-bridge"
+import {
+  getEditorById,
+  onEditorChange,
+  setDiagnostics,
+} from "@/lib/plugin/vscode-shim/monaco-bridge"
 import { listWorkspaceFolders } from "@/lib/plugin/vscode-shim/lsp-workspace-manager"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -100,6 +104,8 @@ export function bootstrapLspRegistry(deps: BootstrapDeps = {}): () => void {
         markers: input.markers,
       })
     },
+    onEditorChange,
+    getEditorById,
   }
 
   const resolveWorkspaceFolders =

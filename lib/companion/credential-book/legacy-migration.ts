@@ -4,7 +4,7 @@
  * One-time migration of the single-`CompanionConfig` record into the book.
  *
  * Ordering is the whole design. The legacy record is the only copy of the
- * device JWT until the migration completes, so it is dropped **last** and only
+ * device identity until the migration completes, so it is dropped **last** and only
  * after a verification read proves the book can produce the same pairing:
  *
  *   1. write the host record (public)
@@ -47,6 +47,7 @@ export interface LegacyMigrationDeps {
 
 export type LegacyMigrationOutcome =
   | { kind: "nothing-to-migrate" }
+  | { kind: "invalidated" }
   | { kind: "migrated"; record: CompanionHostRecord }
   | { kind: "failed"; reason: string }
 
@@ -92,6 +93,10 @@ export async function migrateLegacyCompanionConfig(
   const now = deps.now ?? Date.now
   const legacy = await deps.readLegacy()
   if (!legacy) return { kind: "nothing-to-migrate" }
+  if (!legacy.devicePrivateKeyJwk || !legacy.deviceKeyThumbprint) {
+    await deps.clearLegacy()
+    return { kind: "invalidated" }
+  }
 
   const key: CompanionHostKey = {
     hostId: legacyHostId(legacy),
@@ -102,6 +107,7 @@ export async function migrateLegacyCompanionConfig(
     const record = await deps.book.upsert({
       hostId: key.hostId,
       accountNamespace: key.accountNamespace,
+      tenantId: legacy.tenantId ?? legacy.accountId,
       label: legacyLabel(legacy),
       endpoints: {
         baseUrl: legacy.baseUrl,
@@ -110,13 +116,16 @@ export async function migrateLegacyCompanionConfig(
       },
       tlsPin: legacy.serverFingerprint ?? null,
       deviceId: legacy.deviceId,
+      deviceKeyThumbprint: legacy.deviceKeyThumbprint,
       serverVersion: legacy.serverVersion,
       rendezvousId: legacy.rendezvousId,
       signalingRoomDescriptor: legacy.signalingRoomDescriptor,
+      signalingUrl: legacy.signalingUrl,
+      iceServers: legacy.iceServers,
     })
 
     await deps.book.saveCredential(key, {
-      deviceJwt: legacy.deviceJwt,
+      devicePrivateKeyJwk: legacy.devicePrivateKeyJwk,
       signalingPrivateKeyJwk: legacy.signalingPrivateKeyJwk,
     })
 
@@ -146,8 +155,7 @@ export async function migrateLegacyCompanionConfig(
  *
  * Returns `null` on success, or the reason the legacy record must be kept.
  * Deliberately compares the fields that would cause a *silent* failure if they
- * were lost — the TLS pin (a dropped pin downgrades to unpinned TLS), the
- * device JWT (a dropped token means an unrecoverable re-pair), and the base URL.
+ * were lost — the TLS pin, device identity, and the base URL.
  */
 async function verifyMigration(
   book: CompanionCredentialBook,
@@ -165,10 +173,15 @@ async function verifyMigration(
   if (stored.deviceId !== legacy.deviceId) {
     return "the migrated host record has a different device id"
   }
+  if (stored.deviceKeyThumbprint !== legacy.deviceKeyThumbprint) {
+    return "the migrated host record lost its device-key thumbprint"
+  }
   const credential = await book.loadCredential(hostKeyOf(record))
   if (!credential) return "the migrated credential could not be read back"
-  if (credential.deviceJwt !== legacy.deviceJwt) {
-    return "the migrated credential holds a different device token"
+  if (
+    JSON.stringify(credential.devicePrivateKeyJwk) !== JSON.stringify(legacy.devicePrivateKeyJwk)
+  ) {
+    return "the migrated credential holds a different device key"
   }
   if (
     JSON.stringify(credential.signalingPrivateKeyJwk ?? null) !==

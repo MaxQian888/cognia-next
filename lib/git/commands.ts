@@ -5,7 +5,7 @@
  *
  * Every wrapper is gated by {@link hasGitBridge} — true on Tauri desktop
  * (invoke) AND on the Capacitor / web-companion transports, where the same
- * camelCase payloads ride `/api/v1/_rpc/git_*` (companion writes additionally
+ * camelCase payloads ride `/api/_rpc/git_*` (companion writes additionally
  * need the device's remote-control capability — the server answers 403
  * otherwise). Only on a plain unpaired browser do the wrappers degrade to
  * inert empty results. Exception: `gitWatchStart` / `gitWatchStop` stay

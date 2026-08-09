@@ -13,6 +13,7 @@ const setSlashCommandToolEnabled = jest.fn()
 const setTeamCollaborationToolEnabled = jest.fn()
 const setVectorToolEnabled = jest.fn()
 const setSpawnTaskToolEnabled = jest.fn()
+const setSessionMessagingToolEnabled = jest.fn()
 const toggleAlwaysAllow = jest.fn()
 
 jest.mock("next-intl", () => ({
@@ -52,6 +53,7 @@ const settingsState = {
   setTeamCollaborationToolEnabled,
   setVectorToolEnabled,
   setSpawnTaskToolEnabled,
+  setSessionMessagingToolEnabled,
   toggleAlwaysAllow,
 }
 
@@ -71,6 +73,7 @@ describe("ToolSettingsSection", () => {
     setTeamCollaborationToolEnabled.mockClear()
     setVectorToolEnabled.mockClear()
     setSpawnTaskToolEnabled.mockClear()
+    setSessionMessagingToolEnabled.mockClear()
     toggleAlwaysAllow.mockClear()
     isTauriMock.mockReturnValue(true)
     settingsState.settings.webTools = { enabled: true }
@@ -109,7 +112,7 @@ describe("ToolSettingsSection", () => {
     expect(screen.queryByText("webAllowPrivateTitle")).not.toBeInTheDocument()
   })
 
-  it("toggles the Skill, SlashCommand, spawn-task, and team-collaboration tools", () => {
+  it("toggles Skill, SlashCommand, spawn-task, session-messaging, and team tools", () => {
     render(<ToolSettingsSection />)
     fireEvent.click(screen.getByLabelText("toggleAriaLabel:skillToolTitle"))
     expect(setSkillToolEnabled).toHaveBeenCalledWith(true)
@@ -117,6 +120,8 @@ describe("ToolSettingsSection", () => {
     expect(setSlashCommandToolEnabled).toHaveBeenCalledWith(true)
     fireEvent.click(screen.getByLabelText("toggleAriaLabel:spawnTaskToolTitle"))
     expect(setSpawnTaskToolEnabled).toHaveBeenCalledWith(true)
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:sessionMessagingToolTitle"))
+    expect(setSessionMessagingToolEnabled).toHaveBeenCalledWith(true)
     fireEvent.click(screen.getByLabelText("toggleAriaLabel:teamCollabToolTitle"))
     expect(setTeamCollaborationToolEnabled).toHaveBeenCalledWith(true)
   })

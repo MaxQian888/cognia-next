@@ -547,6 +547,7 @@ describe("Permission Constants", () => {
     expect(PERMISSION_DESCRIPTIONS["network:fetch"]).toBeTruthy()
     expect(PERMISSION_DESCRIPTIONS["network:upload"]).toBeTruthy()
     expect(PERMISSION_DESCRIPTIONS["filesystem:write"]).toBeTruthy()
+    expect(PERMISSION_DESCRIPTIONS["builtin-skills:invoke"]).toMatch(/built-in skills/i)
     expect(PERMISSION_DESCRIPTIONS["extension:workflow"]).toBe(
       "Contribute workflow nodes, triggers, tasks, and templates"
     )

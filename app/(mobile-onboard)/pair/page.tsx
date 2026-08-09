@@ -1,9 +1,9 @@
 /**
  * /pair — Capacitor mobile onboarding.
  *
- * Drives the full pair flow: LAN scan / QR / 6-digit numeric code →
- * `POST /api/v1/auth/pair` (or `/redeem-code`) → device JWT in
- * SecureStorage → smoke RPC + WS event. The actual stepper UX +
+ * Drives the canonical pair flow: LAN discovery plus cgnp3 QR/manual input →
+ * P-256 device + signaling registration → private identities in Browser
+ * Vault/native secure storage → DPoP RPC and single-use-ticket WS events. The actual stepper UX +
  * client-side state machine lives in `PairOnboardingClient`.
  *
  * Server component entry — keeps page.tsx free of `"use client"` so the

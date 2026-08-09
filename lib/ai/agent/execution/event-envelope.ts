@@ -114,6 +114,56 @@ export function canonicalEventFromExternalEvent(event: {
   }
 }
 
+/** Map the legacy capture union into the canonical log without re-parsing wire events. */
+export function canonicalEventFromCaptureEvent(
+  event: CaptureStreamEvent
+): CanonicalAgentEvent | null {
+  switch (event.type) {
+    case "text-delta":
+      return { kind: "text-delta", delta: event.delta }
+    case "thinking-delta":
+      return { kind: "thinking-delta", delta: event.delta }
+    case "commentary-delta":
+      return {
+        kind: "commentary-delta",
+        delta: event.delta,
+        ...(event.messageId ? { messageId: event.messageId } : {}),
+        ...(typeof event.done === "boolean" ? { done: event.done } : {}),
+      }
+    case "tool-call":
+      return {
+        kind: "tool-call",
+        toolName: event.toolName,
+        input: event.input,
+        ...(event.id ? { toolCallId: event.id } : {}),
+      }
+    case "tool-result":
+      return {
+        kind: "tool-result",
+        toolName: event.toolName,
+        ...(event.id ? { toolCallId: event.id } : {}),
+        ...(event.input ? { input: event.input } : {}),
+        result: event.result,
+        ...(typeof event.isError === "boolean" ? { isError: event.isError } : {}),
+      }
+    case "usage":
+      return {
+        kind: "usage",
+        usage: { ...event.usage },
+        ...(event.partial ? { partial: true } : {}),
+      }
+    case "compact":
+      return {
+        kind: "compact",
+        trigger: event.trigger,
+        preTokens: event.preTokens,
+        postTokens: event.postTokens,
+      }
+    case "tool-summary":
+      return null
+  }
+}
+
 /**
  * Narrow a canonical event back to the legacy capture union. Returns null
  * for kinds the capture layer has no representation for (lifecycle,

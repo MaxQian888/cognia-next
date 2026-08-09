@@ -24,6 +24,7 @@ import {
 import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
 import { isTauri } from "@/lib/tauri"
+import { HOST_KEY_PRESENT } from "@/lib/tts/keyring"
 import { useSettingsStore } from "@/stores/settings"
 import {
   CARTESIA_TTS_MODELS,
@@ -45,6 +46,7 @@ import {
   XIAOMI_TTS_MODELS,
   XIAOMI_TTS_STYLES,
 } from "@cognia/tts/types"
+import { listElevenLabsVoices, type ElevenLabsVoice } from "@cognia/tts/providers/elevenlabs"
 import { ApiKeyInput } from "./api-key-input"
 import { TtsVoiceSelector } from "./tts-voice-selector"
 
@@ -131,7 +133,6 @@ const OPENAI_RESPONSE_FORMATS = [
   { id: "aac", name: "AAC" },
   { id: "flac", name: "FLAC" },
   { id: "wav", name: "WAV" },
-  { id: "pcm", name: "PCM" },
 ] as const
 
 export function OpenAiConfig() {
@@ -157,7 +158,10 @@ export function OpenAiConfig() {
           value={voice}
           options={OPENAI_TTS_VOICES}
           onValueChange={(v) => void save({ openaiVoice: v })}
-          getVoiceOverlay={(voiceId) => ({ ttsProvider: "openai", openaiVoice: voiceId })}
+          getVoiceOverlay={(voiceId) => ({
+            ttsProvider: "openai",
+            openaiVoice: voiceId as (typeof OPENAI_TTS_VOICES)[number]["id"],
+          })}
         />
       </div>
       <div className="space-y-2">
@@ -217,6 +221,102 @@ export function OpenAiConfig() {
   )
 }
 
+// -- Local OpenAI-compatible -------------------------------------------------
+
+export function LocalOpenAiCompatibleConfig() {
+  const t = useTranslations("settings.speech.provider")
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const baseUrl = settings?.localOpenaiBaseUrl ?? ""
+  const model = settings?.localOpenaiModel ?? ""
+  const voice = settings?.localOpenaiVoice ?? ""
+  const speed = settings?.localOpenaiSpeed ?? 1
+  const responseFormat = settings?.localOpenaiResponseFormat ?? "mp3"
+  const timeoutMs = settings?.localOpenaiTimeoutMs ?? 60_000
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">{t("localOpenaiIntro")}</p>
+      {!isTauri() && <p className="text-xs text-destructive">{t("localEndpointHint")}</p>}
+      <div className="space-y-2">
+        <Label className="text-xs">{t("localEndpoint")}</Label>
+        <Input
+          value={baseUrl}
+          onChange={(event) => void save({ localOpenaiBaseUrl: event.target.value })}
+          placeholder={t("localEndpointPlaceholder")}
+          spellCheck={false}
+        />
+        <p className="text-[10px] text-muted-foreground">{t("localEndpointHint")}</p>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">{t("model")}</Label>
+        <Input
+          value={model}
+          onChange={(event) => void save({ localOpenaiModel: event.target.value })}
+          placeholder={t("localModelPlaceholder")}
+          spellCheck={false}
+        />
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">{t("voice")}</Label>
+        <Input
+          value={voice}
+          onChange={(event) => void save({ localOpenaiVoice: event.target.value })}
+          placeholder={t("localVoicePlaceholder")}
+          spellCheck={false}
+        />
+      </div>
+      <ApiKeyInput
+        provider="local-openai-compatible"
+        label={t("label.local-openai-compatible")}
+        placeholder={t("apiKeyPlaceholder.generic")}
+      />
+      <div className="space-y-2">
+        <Label className="text-xs">{t("audioFormat")}</Label>
+        <Select
+          value={responseFormat === "pcm" ? "mp3" : responseFormat}
+          onValueChange={(value) => void save({ localOpenaiResponseFormat: value })}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {OPENAI_RESPONSE_FORMATS.map((format) => (
+              <SelectItem key={format.id} value={format.id}>
+                {format.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <NumberSlider
+        label={t("speed")}
+        value={speed}
+        min={0.25}
+        max={4}
+        step={0.05}
+        onChange={(value) => void save({ localOpenaiSpeed: value })}
+        format={(value) => `${value.toFixed(2)}x`}
+      />
+      <div className="space-y-2">
+        <Label className="text-xs">{t("timeoutSeconds")}</Label>
+        <Input
+          type="number"
+          min={1}
+          max={300}
+          value={Math.round(timeoutMs / 1000)}
+          onChange={(event) => {
+            const seconds = Number(event.target.value)
+            if (Number.isFinite(seconds)) {
+              void save({ localOpenaiTimeoutMs: Math.min(300, Math.max(1, seconds)) * 1000 })
+            }
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
 // -- Gemini ------------------------------------------------------------------
 
 export function GeminiConfig() {
@@ -254,7 +354,10 @@ export function GeminiConfig() {
           value={voice}
           options={GEMINI_TTS_VOICES}
           onValueChange={(v) => void save({ geminiVoice: v })}
-          getVoiceOverlay={(voiceId) => ({ ttsProvider: "gemini", geminiVoice: voiceId })}
+          getVoiceOverlay={(voiceId) => ({
+            ttsProvider: "gemini",
+            geminiVoice: voiceId as (typeof GEMINI_TTS_VOICES)[number]["id"],
+          })}
         />
       </div>
     </div>
@@ -344,7 +447,10 @@ export function EdgeConfig() {
           value={voice}
           options={list}
           onValueChange={(v) => void save({ edgeVoice: v })}
-          getVoiceOverlay={(voiceId) => ({ ttsProvider: "edge", edgeVoice: voiceId })}
+          getVoiceOverlay={(voiceId) => ({
+            ttsProvider: "edge",
+            edgeVoice: voiceId as (typeof EDGE_TTS_VOICES)[number]["id"],
+          })}
         />
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -388,6 +494,26 @@ export function ElevenLabsConfig() {
   const model = settings?.elevenlabsModel ?? "eleven_multilingual_v2"
   const stability = settings?.elevenlabsStability ?? 0.5
   const similarityBoost = settings?.elevenlabsSimilarityBoost ?? 0.75
+  const storedKey = useSettingsStore((s) => s.providerKeys.elevenlabs ?? "")
+  const [accountVoices, setAccountVoices] = useState<ElevenLabsVoice[]>([])
+
+  useEffect(() => {
+    if (!storedKey) return
+    const controller = new AbortController()
+    const key = storedKey === HOST_KEY_PRESENT ? "host-key" : storedKey
+    void listElevenLabsVoices(key, controller.signal).then((voices) => {
+      if (controller.signal.aborted) return
+      setAccountVoices(voices)
+      const matches = voices.filter((item) => item.name.toLowerCase() === voice.toLowerCase())
+      if (matches.length === 1 && matches[0].id !== voice) {
+        void save({ elevenlabsVoice: matches[0].id })
+      }
+    })
+    return () => controller.abort()
+  }, [storedKey, voice, save])
+
+  const voiceOptions = accountVoices.length > 0 ? accountVoices : ELEVENLABS_TTS_VOICES
+  const hasSelectedVoice = voiceOptions.some((item) => item.id === voice)
 
   return (
     <div className="space-y-3">
@@ -400,12 +526,18 @@ export function ElevenLabsConfig() {
         <Label className="text-xs">{t("voice")}</Label>
         <TtsVoiceSelector
           value={voice}
-          options={ELEVENLABS_TTS_VOICES}
+          options={hasSelectedVoice ? voiceOptions : [{ id: voice, name: voice }, ...voiceOptions]}
           onValueChange={(v) => void save({ elevenlabsVoice: v })}
           getVoiceOverlay={(voiceId) => ({
             ttsProvider: "elevenlabs",
             elevenlabsVoice: voiceId,
           })}
+        />
+        <Input
+          value={voice}
+          onChange={(event) => void save({ elevenlabsVoice: event.target.value })}
+          placeholder={t("elevenVoiceIdPlaceholder")}
+          spellCheck={false}
         />
       </div>
       <div className="space-y-2">
@@ -461,7 +593,10 @@ export function LmntConfig() {
           value={voice}
           options={LMNT_TTS_VOICES}
           onValueChange={(v) => void save({ lmntVoice: v })}
-          getVoiceOverlay={(voiceId) => ({ ttsProvider: "lmnt", lmntVoice: voiceId })}
+          getVoiceOverlay={(voiceId) => ({
+            ttsProvider: "lmnt",
+            lmntVoice: voiceId as (typeof LMNT_TTS_VOICES)[number]["id"],
+          })}
         />
       </div>
       <NumberSlider
@@ -494,7 +629,10 @@ export function HumeConfig() {
           value={voice}
           options={HUME_TTS_VOICES}
           onValueChange={(v) => void save({ humeVoice: v })}
-          getVoiceOverlay={(voiceId) => ({ ttsProvider: "hume", humeVoice: voiceId })}
+          getVoiceOverlay={(voiceId) => ({
+            ttsProvider: "hume",
+            humeVoice: voiceId as (typeof HUME_TTS_VOICES)[number]["id"],
+          })}
         />
       </div>
     </div>
@@ -533,7 +671,10 @@ export function CartesiaConfig() {
           value={voice}
           options={CARTESIA_TTS_VOICES}
           onValueChange={(v) => void save({ cartesiaVoice: v })}
-          getVoiceOverlay={(voiceId) => ({ ttsProvider: "cartesia", cartesiaVoice: voiceId })}
+          getVoiceOverlay={(voiceId) => ({
+            ttsProvider: "cartesia",
+            cartesiaVoice: voiceId as (typeof CARTESIA_TTS_VOICES)[number]["id"],
+          })}
         />
       </div>
       <div className="space-y-2">
@@ -609,7 +750,10 @@ export function DeepgramConfig() {
           value={voice}
           options={DEEPGRAM_TTS_VOICES}
           onValueChange={(v) => void save({ deepgramVoice: v })}
-          getVoiceOverlay={(voiceId) => ({ ttsProvider: "deepgram", deepgramVoice: voiceId })}
+          getVoiceOverlay={(voiceId) => ({
+            ttsProvider: "deepgram",
+            deepgramVoice: voiceId as (typeof DEEPGRAM_TTS_VOICES)[number]["id"],
+          })}
         />
       </div>
     </div>
@@ -641,7 +785,10 @@ export function XiaomiConfig() {
           value={voice}
           options={XIAOMI_TTS_VOICES}
           onValueChange={(v) => void save({ xiaomiVoice: v })}
-          getVoiceOverlay={(voiceId) => ({ ttsProvider: "xiaomi", xiaomiVoice: voiceId })}
+          getVoiceOverlay={(voiceId) => ({
+            ttsProvider: "xiaomi",
+            xiaomiVoice: voiceId as (typeof XIAOMI_TTS_VOICES)[number]["id"],
+          })}
         />
       </div>
       <div className="space-y-2">
@@ -716,7 +863,7 @@ export function OpenAiRealtimeConfig() {
           onValueChange={(v) => void save({ realtimeVoice: v })}
           getVoiceOverlay={(voiceId) => ({
             ttsProvider: "openai-realtime",
-            realtimeVoice: voiceId,
+            realtimeVoice: voiceId as (typeof REALTIME_TTS_VOICES)[number]["id"],
           })}
         />
       </div>
@@ -755,6 +902,7 @@ import type { TTSProvider } from "@cognia/tts/types"
 export const PROVIDER_CONFIG_COMPONENTS: Record<TTSProvider, () => React.ReactElement> = {
   system: SystemConfig,
   openai: OpenAiConfig,
+  "local-openai-compatible": LocalOpenAiCompatibleConfig,
   "openai-realtime": OpenAiRealtimeConfig,
   gemini: GeminiConfig,
   edge: EdgeConfig,

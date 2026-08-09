@@ -7,7 +7,7 @@
  * panels would be dead UI there. When unpaired we render a short "connect a
  * desktop" placeholder instead of the children.
  *
- * Pairing state comes from `useCompanionConfig().paired` (a valid device JWT),
+ * Pairing state comes from `useCompanionConfig().paired` (a recoverable P-256 device identity),
  * which is the operational requirement: editing these settings means remote-
  * editing the desktop sidecar via the companion `app_settings_update` RPC.
  */

@@ -17,7 +17,7 @@
  * The bridge shape the three data-plane installers already accept (previously
  * triplicated as a local `TauriBridge` interface in desktop-sync-source /
  * desktop-message-source / desktop-write-source). On desktop this is Tauri's
- * `{ listen, invoke }`; headless it is the `BridgeClient` over `/ws/v1/bridge`.
+ * `{ listen, invoke }`; headless it is the `BridgeClient` over `/internal/bridge`.
  */
 export interface RuntimeBridge {
   listen<T>(event: string, handler: (e: { payload: T }) => void): Promise<() => void>

@@ -96,10 +96,10 @@ describe("headless server auto-key", () => {
     const key = await getDefaultBackupPassphrase()
 
     expect(key).toBeTruthy()
-    expect(transportCall).toHaveBeenNthCalledWith(1, "keyring_secret_get", {
+    expect(transportCall).toHaveBeenNthCalledWith(1, "secret_store_get", {
       input: { namespace: "backup", key: "encryption.key.v1" },
     })
-    expect(transportCall).toHaveBeenNthCalledWith(2, "keyring_secret_set", {
+    expect(transportCall).toHaveBeenNthCalledWith(2, "secret_store_set", {
       input: { namespace: "backup", key: "encryption.key.v1", value: key },
     })
     expect(localStorage.getItem(WEB_BACKUP_KEY_STORAGE)).toBeNull()
@@ -109,12 +109,12 @@ describe("headless server auto-key", () => {
     transportCall.mockResolvedValue(undefined)
 
     const rotated = await rotateBackupKey()
-    expect(transportCall).toHaveBeenNthCalledWith(1, "keyring_secret_set", {
+    expect(transportCall).toHaveBeenNthCalledWith(1, "secret_store_set", {
       input: { namespace: "backup", key: "encryption.key.v1", value: rotated },
     })
 
     await clearBackupKey()
-    expect(transportCall).toHaveBeenNthCalledWith(2, "keyring_secret_clear", {
+    expect(transportCall).toHaveBeenNthCalledWith(2, "secret_store_delete", {
       input: { namespace: "backup", key: "encryption.key.v1" },
     })
     expect(localStorage.getItem(WEB_BACKUP_KEY_STORAGE)).toBeNull()

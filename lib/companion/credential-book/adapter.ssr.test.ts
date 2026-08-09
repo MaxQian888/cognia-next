@@ -50,7 +50,8 @@ function memoryCredentials(): HostCredentialStore {
 function config(): CompanionConfig {
   return {
     baseUrl: "https://studio.local:27890",
-    deviceJwt: "jwt.a",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+    deviceKeyThumbprint: "device-thumbprint",
     deviceId: "dev-1",
     serverVersion: "0.2.0",
   }
@@ -84,6 +85,7 @@ describe("CredentialBookCompanionStorage with no window", () => {
       endpoints: { baseUrl: "https://x" },
       tlsPin: null,
       deviceId: "dev-1",
+      deviceKeyThumbprint: "device-thumbprint",
       serverVersion: "0.2.0",
     })
     await expect(storage.clear()).resolves.toBeUndefined()
@@ -99,12 +101,13 @@ describe("CredentialBookCompanionStorage with no window", () => {
       endpoints: { baseUrl: "https://x" },
       tlsPin: null,
       deviceId: "dev-1",
+      deviceKeyThumbprint: "device-thumbprint",
       serverVersion: "0.2.0",
     })
     await book.saveCredential(
       { hostId: "dev-1", accountNamespace: "acct_a" },
-      { deviceJwt: "jwt.a" }
+      { devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" } }
     )
-    expect((await storage.load())?.deviceJwt).toBe("jwt.a")
+    expect((await storage.load())?.devicePrivateKeyJwk?.d).toBe("device-private")
   })
 })

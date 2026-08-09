@@ -16,7 +16,7 @@
  * is what lets `next.config.ts` drop the `NODE_ONLY_MODULES` aliases.
  */
 
-import { invoke } from "@tauri-apps/api/core"
+import { transport } from "@/lib/tauri"
 
 export type WorkspaceBackend = "local" | "e2b"
 
@@ -28,6 +28,8 @@ export interface WorkspaceHandle {
   repoFullName: string
   /** Branch checked out. */
   branch: string
+  /** Trusted source branch used to create the isolated target branch. */
+  baseBranch?: string
   /** Wall clock ms when allocated. */
   createdAt: number
 }
@@ -93,8 +95,10 @@ export function getE2BBackend(): E2BBackend | null {
 
 export interface CloneOptions {
   repoFullName: string
-  /** Branch to check out. */
+  /** Isolated target branch to check out. */
   branch: string
+  /** Existing branch to clone before creating `branch`. Defaults to `branch`. */
+  baseBranch?: string
   /** Auth token used for `git clone` (PAT or installation token). */
   token: string
   /** Backend selector. */
@@ -125,20 +129,25 @@ export async function cloneToWorkspace(opts: CloneOptions): Promise<WorkspaceHan
     })
   }
 
-  const result = await invoke<{ path: string; createdAt: number }>("github_workspace_clone", {
-    args: {
-      repoFullName: opts.repoFullName,
-      branch: opts.branch,
-      token: opts.token,
-      baseDir: opts.baseDir,
-    },
-  })
+  const result = await transport.call<{ path: string; createdAt: number }>(
+    "github_workspace_clone",
+    {
+      args: {
+        repoFullName: opts.repoFullName,
+        branch: opts.branch,
+        ...(opts.baseBranch ? { baseBranch: opts.baseBranch } : {}),
+        token: opts.token,
+        baseDir: opts.baseDir,
+      },
+    }
+  )
 
   return {
     backend: "local",
     path: result.path,
     repoFullName: opts.repoFullName,
     branch: opts.branch,
+    baseBranch: opts.baseBranch,
     createdAt: result.createdAt,
   }
 }
@@ -178,10 +187,12 @@ export async function commitAndPush(opts: CommitAndPushOptions): Promise<string>
     })
   }
 
-  return invoke<string>("github_workspace_commit_and_push", {
+  return transport.call<string>("github_workspace_commit_and_push", {
     args: {
       workspacePath: opts.workspace.path,
+      repoFullName: opts.workspace.repoFullName,
       branch: opts.workspace.branch,
+      baseBranch: opts.workspace.baseBranch,
       message: opts.message,
       remoteBranch: opts.remoteBranch,
       token: opts.token,
@@ -207,7 +218,7 @@ export async function removeWorkspace(handle: WorkspaceHandle): Promise<boolean>
     }
   }
   try {
-    return await invoke<boolean>("github_workspace_remove", { path: handle.path })
+    return await transport.call<boolean>("github_workspace_remove", { path: handle.path })
   } catch (err) {
     console.error(`removeWorkspace failed for ${handle.path}`, err)
     return false
@@ -220,7 +231,9 @@ export async function removeWorkspace(handle: WorkspaceHandle): Promise<boolean>
  */
 export async function statWorkspace(path: string): Promise<{ exists: boolean; mtime?: number }> {
   try {
-    return await invoke<{ exists: boolean; mtime?: number }>("github_workspace_stat", { path })
+    return await transport.call<{ exists: boolean; mtime?: number }>("github_workspace_stat", {
+      path,
+    })
   } catch {
     return { exists: false }
   }

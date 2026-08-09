@@ -24,6 +24,7 @@ const mockApplyCircuitBreakerSettings = jest.fn()
 const mockLiveSettingsState: { settings?: Record<string, unknown> } = {}
 const mockResolveProviderAttemptOptions = jest.fn()
 const mockHasNoLeakingPiiDeep = jest.fn((_value?: unknown) => true)
+const mockRecordAgentExecutionShadow = jest.fn(async (..._args: unknown[]) => undefined)
 
 jest.mock("ai", () => ({ streamText: jest.fn() }))
 jest.mock("@/lib/ai/provider-consumption", () => ({
@@ -54,6 +55,10 @@ jest.mock("@/lib/claude/provider-attempt-options", () => ({
 }))
 jest.mock("@cognia/redact", () => ({
   hasNoLeakingPiiDeep: (value: unknown) => mockHasNoLeakingPiiDeep(value),
+}))
+jest.mock("@/lib/ai/agent/execution/agent-execution-service", () => ({
+  ...jest.requireActual("@/lib/ai/agent/execution/agent-execution-service"),
+  recordAgentExecutionShadow: (...args: unknown[]) => mockRecordAgentExecutionShadow(...args),
 }))
 
 const mockStreamText = streamText as jest.MockedFunction<typeof streamText>
@@ -134,6 +139,7 @@ describe("executeAgent", () => {
     mockIsTauri.mockReturnValue(false)
     mockPlanRoute.mockResolvedValue(routingPlan())
     mockHasNoLeakingPiiDeep.mockReturnValue(true)
+    mockRecordAgentExecutionShadow.mockResolvedValue(undefined)
     mockResolveProviderAttemptOptions.mockResolvedValue({
       providerCredentials: { apiKey: "sk-fallback", protocol: "anthropic" },
     })
@@ -847,6 +853,34 @@ describe("executeAgent", () => {
       expect(result.text).toBe("ok")
       expect(result.channel).toBe("text")
       expect(result.degradedReason).toBeUndefined()
+    })
+
+    it("records a shadow decision without changing the legacy result when the flag is off", async () => {
+      primeTextChannel(["legacy"])
+
+      await expect(executeAgent("hi", { toolsEnabled: true })).resolves.toMatchObject({
+        text: "legacy",
+        channel: "text",
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(mockRecordAgentExecutionShadow).toHaveBeenCalledWith(
+        expect.objectContaining({ toolsEnabled: true }),
+        {
+          isTauri: false,
+          isHeadlessHost: false,
+        }
+      )
+    })
+
+    it("swallows shadow-recording failures so the legacy path stays available", async () => {
+      mockRecordAgentExecutionShadow.mockRejectedValue(new Error("shadow store unavailable"))
+      primeTextChannel(["legacy"])
+
+      await expect(executeAgent("hi")).resolves.toMatchObject({ text: "legacy", channel: "text" })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(mockRecordAgentExecutionShadow).toHaveBeenCalledTimes(1)
     })
   })
 })

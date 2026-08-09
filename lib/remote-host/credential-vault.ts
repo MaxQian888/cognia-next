@@ -3,7 +3,7 @@ import { clearSecret, getSecret, setSecret } from "@/lib/keyring"
 const NAMESPACE = "remote-host"
 
 export interface RemoteHostCredential {
-  deviceJwt: string
+  devicePrivateKeyJwk: JsonWebKey
   signalingPrivateKeyJwk?: JsonWebKey
 }
 
@@ -15,11 +15,13 @@ export async function saveRemoteHostCredential(
   hostId: string,
   credential: RemoteHostCredential
 ): Promise<string> {
-  if (!credential.deviceJwt) throw new Error("Remote host credential requires a device token")
+  if (!credential.devicePrivateKeyJwk) {
+    throw new Error("Remote host credential requires a device private key")
+  }
   await setSecret(
     { namespace: NAMESPACE, key: hostId },
     JSON.stringify({
-      deviceJwt: credential.deviceJwt,
+      devicePrivateKeyJwk: credential.devicePrivateKeyJwk,
       ...(credential.signalingPrivateKeyJwk
         ? { signalingPrivateKeyJwk: credential.signalingPrivateKeyJwk }
         : {}),
@@ -35,9 +37,9 @@ export async function loadRemoteHostCredential(
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as Partial<RemoteHostCredential>
-    if (typeof parsed.deviceJwt !== "string" || parsed.deviceJwt.length === 0) return null
+    if (!parsed.devicePrivateKeyJwk || typeof parsed.devicePrivateKeyJwk !== "object") return null
     return {
-      deviceJwt: parsed.deviceJwt,
+      devicePrivateKeyJwk: parsed.devicePrivateKeyJwk,
       ...(parsed.signalingPrivateKeyJwk && typeof parsed.signalingPrivateKeyJwk === "object"
         ? { signalingPrivateKeyJwk: parsed.signalingPrivateKeyJwk }
         : {}),

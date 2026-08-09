@@ -22,7 +22,7 @@
  * `app/scheduler/scheduler-content-header.tsx` (cleanup / import / export menu),
  * `components/settings/data/tabs/backup-restore-tab.tsx` (backup cron list),
  * `components/settings/sections/plugins-section.tsx` (plugin scheduled jobs UI),
- * or `components/settings/remote-control/tabs/outbound-tab.tsx`
+ * or `components/settings/webhooks/webhooks-section.tsx`
  * (the webhook signing-secret editor — we cross-link to it instead).
  */
 
@@ -799,7 +799,7 @@ function WebhookSigningCard({ tSigning }: WebhookSigningCardProps) {
         )}
 
         <Button asChild variant="outline" size="sm" className="w-fit">
-          <Link href="/settings?section=remote-control&remoteTab=outbound">
+          <Link href="/settings?section=webhooks">
             {tSigning("manageSecret")}
             <ExternalLinkIcon className="ml-1.5 h-3.5 w-3.5" />
           </Link>

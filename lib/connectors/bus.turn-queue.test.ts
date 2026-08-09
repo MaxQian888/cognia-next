@@ -23,6 +23,7 @@ import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { listRecent } from "@/lib/db/connector-audit"
+import { markConnectorInboundJobRecoveryRequired } from "@/lib/db/connector-inbound-jobs"
 import { getBus, __resetBusForTesting } from "./bus"
 import { __resetPruneCounterForTesting } from "./dedup"
 import { recordCallbackBinding } from "./adapters/_shared/a2ui-mapper"
@@ -189,6 +190,31 @@ describe("ConnectorBus turn queue — parallelism and ordering", () => {
 
     gate.resolve()
     await bus.flushInboundTurns()
+  })
+
+  it("preserves a recovery-required outcome returned by the route handler", async () => {
+    const adapterId = await seedAdapter()
+    const bus = getBus()
+    bus.routeHandler = async (_event, _decision, _resolved, _override, _adapter, context) => {
+      await markConnectorInboundJobRecoveryRequired(
+        context.inboundJobId,
+        "recovery_execution_drift"
+      )
+    }
+
+    await bus.dispatchInboundFull(privateEvent(adapterId, "msg_drift"))
+    await bus.flushInboundTurns()
+
+    expect(
+      await getDb()
+        .connectorInboundJobs.filter((row) => row.sourceMessageId === "msg_drift")
+        .first()
+    ).toEqual(
+      expect.objectContaining({
+        status: "recovery_required",
+        recoveryReason: "recovery_execution_drift",
+      })
+    )
   })
 
   it("a slow turn in conversation A does not delay conversation B", async () => {

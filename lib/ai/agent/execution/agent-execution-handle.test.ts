@@ -49,6 +49,7 @@ function makeDeps() {
       sessionControl: jest.fn().mockResolvedValue("control-result"),
     },
     closeSession: jest.fn().mockResolvedValue(undefined),
+    recordCapabilityOutcome: jest.fn().mockResolvedValue(undefined),
   }
 }
 makeDeps.lastSubscriber = undefined as unknown as (e: unknown) => void
@@ -76,6 +77,35 @@ describe("createAgentExecutionHandle", () => {
     )
     expect(deps.ipc.setSessionMode).toHaveBeenCalledWith("s1", "plan")
     expect(deps.closeSession).toHaveBeenCalledWith("s1")
+    expect(deps.recordCapabilityOutcome).toHaveBeenCalledWith("compaction", "success", undefined)
+    expect(deps.recordCapabilityOutcome).toHaveBeenCalledWith(
+      "permissions.interrupt-resume",
+      "success",
+      undefined
+    )
+    expect(deps.recordCapabilityOutcome).toHaveBeenCalledWith(
+      "permissions.set-mode",
+      "success",
+      undefined
+    )
+  })
+
+  it("records only explicit capability/protocol failures in the health circuit", async () => {
+    const deps = makeDeps()
+    const handle = createAgentExecutionHandle("s1", spec(), deps)
+
+    deps.ipc.compactSession.mockRejectedValueOnce(new Error("RPC method not found: compact"))
+    await expect(handle.compact()).rejects.toThrow("method not found")
+    expect(deps.recordCapabilityOutcome).toHaveBeenCalledWith(
+      "compaction",
+      "failure",
+      expect.any(Error)
+    )
+
+    deps.recordCapabilityOutcome.mockClear()
+    deps.ipc.compactSession.mockRejectedValueOnce(new Error("authentication failed"))
+    await expect(handle.compact()).rejects.toThrow("authentication failed")
+    expect(deps.recordCapabilityOutcome).not.toHaveBeenCalled()
   })
 
   it("throws typed capability errors BEFORE any IPC for unsupported commands", async () => {

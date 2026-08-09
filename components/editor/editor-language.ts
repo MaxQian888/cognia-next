@@ -8,7 +8,8 @@
  * (`load-language-support.ts`) maps them to lazily-imported grammars.
  */
 
-export type EditorLanguage = "markdown" | "typescript" | "python" | "shell" | "json" | "plaintext"
+export type EditorLanguage =
+  "markdown" | "typescript" | "python" | "shell" | "json" | "yaml" | "plaintext"
 
 const TABLE: Record<string, EditorLanguage> = {
   md: "markdown",
@@ -25,6 +26,8 @@ const TABLE: Record<string, EditorLanguage> = {
   bash: "shell",
   json: "json",
   jsonc: "json",
+  yaml: "yaml",
+  yml: "yaml",
 }
 
 export function languageFromPath(path: string): EditorLanguage {
@@ -51,6 +54,7 @@ const MONACO_ID_MAP: Record<string, EditorLanguage> = {
   bash: "shell",
   json: "json",
   jsonc: "json",
+  yaml: "yaml",
 }
 
 export function editorLanguageFromMonacoId(id: string | undefined | null): EditorLanguage {

@@ -3,8 +3,11 @@
 import { type RefObject, useCallback, useEffect, useRef } from "react"
 
 import { browserClient } from "@/lib/browser/client"
-import type { ElementRect } from "@/lib/browser/protocol"
+import { BROWSER_EVENTS, type BrowserProxyError, type ElementRect } from "@/lib/browser/protocol"
+import { NETWORK_PROXY_APPLIED_EVENT } from "@/lib/network/proxy-events"
 import { isTauri } from "@/lib/tauri"
+import { onTauriEvent } from "@/lib/tauri/events"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 
 import { readElementRect, useElementRect } from "./use-element-rect"
 
@@ -23,6 +26,8 @@ export interface UseBrowserPaneWebviewOptions {
   ownerId?: string
   /** Fires after this pane owns a successfully created native webview. */
   onReady?: () => void
+  /** Reports native creation/navigation failures to the owning UI surface. */
+  onError?: (error: unknown) => void
   /**
    * Fires on every reserved-rect change (rAF-coalesced). Rect tracking is
    * entirely ref-driven — a scroll/resize burst never re-renders the caller.
@@ -66,7 +71,14 @@ export function useBrowserPaneWebview(
   ref: RefObject<HTMLElement | null>,
   options: UseBrowserPaneWebviewOptions
 ): UseBrowserPaneWebview {
-  const { url, onReady, onRectChange, visible = true, ownerId = "browser-preview" } = options
+  const {
+    url,
+    onReady,
+    onError,
+    onRectChange,
+    visible = true,
+    ownerId = "browser-preview",
+  } = options
   const leaseTokenRef = useRef(`${ownerId}:${crypto.randomUUID()}`)
   const retryAttemptRef = useRef(0)
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -77,13 +89,48 @@ export function useBrowserPaneWebview(
   const urlRef = useRef(url)
   const visibleRef = useRef(visible)
   const onReadyRef = useRef(onReady)
+  const onErrorRef = useRef(onError)
   const onRectChangeRef = useRef(onRectChange)
   useEffect(() => {
     onReadyRef.current = onReady
   }, [onReady])
   useEffect(() => {
+    onErrorRef.current = onError
+  }, [onError])
+  useEffect(() => {
     onRectChangeRef.current = onRectChange
   }, [onRectChange])
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let cancelled = false
+    let unlisten: (() => void) | undefined
+    void onTauriEvent<BrowserProxyError>(BROWSER_EVENTS.proxyError, (payload) => {
+      if (createdRef.current && payload.paneId === "browser-embed") {
+        onErrorRef.current?.(new Error(payload.code))
+      }
+    }).then((nextUnlisten) => {
+      if (cancelled) nextUnlisten()
+      else unlisten = nextUnlisten
+    })
+    return () => {
+      cancelled = true
+      if (unlisten) safeUnlisten(unlisten)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isTauri()) return
+    const refreshRoute = () => {
+      const target = urlRef.current
+      if (!createdRef.current || !target) return
+      void browserClient.embedNavigate(target).catch((error: unknown) => {
+        onErrorRef.current?.(error)
+      })
+    }
+    window.addEventListener(NETWORK_PROXY_APPLIED_EVENT, refreshRoute)
+    return () => window.removeEventListener(NETWORK_PROXY_APPLIED_EVENT, refreshRoute)
+  }, [])
 
   // Create once the url and a rect are both known; navigate on later url
   // changes. Called from both the rect callback and the url effect so whichever
@@ -109,22 +156,25 @@ export function useBrowserPaneWebview(
         (error: unknown) => {
           createdRef.current = false
           releaseLease(leaseTokenRef.current, false)
-          if (
-            String(error).includes("owned by another Cognia surface") &&
-            retryTimerRef.current === null
-          ) {
-            const delay = Math.min(250 * 2 ** retryAttemptRef.current, 4_000)
-            retryAttemptRef.current += 1
-            retryTimerRef.current = setTimeout(() => {
-              retryTimerRef.current = null
-              syncRef.current()
-            }, delay)
+          if (String(error).includes("owned by another Cognia surface")) {
+            if (retryTimerRef.current === null) {
+              const delay = Math.min(250 * 2 ** retryAttemptRef.current, 4_000)
+              retryAttemptRef.current += 1
+              retryTimerRef.current = setTimeout(() => {
+                retryTimerRef.current = null
+                syncRef.current()
+              }, delay)
+            }
+          } else {
+            onErrorRef.current?.(error)
           }
         }
       )
     } else if (target !== lastUrlRef.current) {
       lastUrlRef.current = target
-      void browserClient.embedNavigate(target).catch(() => {})
+      void browserClient.embedNavigate(target).catch((error: unknown) => {
+        onErrorRef.current?.(error)
+      })
     }
   }, [ownerId])
   useEffect(() => {

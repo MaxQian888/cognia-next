@@ -15,6 +15,12 @@ export const HOST_FEATURE_IDS = [
   "external-bridge.lifecycle",
   "external-bridge.managed-relay",
   "external-bridge.direct-tls",
+  "automation.hitl",
+  "secrets.store",
+  "browser.remote",
+  "ocr.server",
+  "notifications.remote",
+  "workspace.files",
 ] as const
 
 export type HostFeatureId = (typeof HOST_FEATURE_IDS)[number]
@@ -58,7 +64,10 @@ export interface HostRuntimeOperationDescriptor {
   feature: HostFeatureId
   featureVersion: number
   healthy: boolean
+  reason?: string
 }
+
+export type HostOperationHealth = boolean | { healthy: boolean; reason?: string }
 
 export interface HostFeatureManifestV2 extends HostFeatureManifestBase {
   schemaVersion: 2
@@ -69,6 +78,10 @@ export interface HostFeatureManifestV2 extends HostFeatureManifestBase {
   protocol: {
     min: number
     max: number
+  }
+  transportCapabilities?: {
+    /** Server emits `stream_ready` after replay and before live events. */
+    eventStreamReady: 1
   }
   operations: HostRuntimeOperationDescriptor[]
   deviceGrants: string[]
@@ -97,11 +110,13 @@ export function buildLocalHostFeatureManifest({
   platform,
   hostId = `local-${platform}`,
   deviceGrants = [...DEFAULT_COMPANION_DEVICE_GRANTS],
+  operationHealth = {},
 }: {
   hostBuildId?: string
   platform: Platform
   hostId?: string
   deviceGrants?: string[]
+  operationHealth?: Readonly<Record<string, HostOperationHealth>>
 }): HostFeatureManifestV2 {
   const features: HostFeatureManifestV2["features"] = {
     "claude.host-tools": {
@@ -121,6 +136,101 @@ export function buildLocalHostFeatureManifest({
       operations: ["skills_catalog_get", "skills_load_registry", "skills_scan_native"],
     },
   }
+  if (platform === "tauri") {
+    features["automation.hitl"] = {
+      version: 1,
+      operations: ["automation_consent_pending", "automation_consent_respond"],
+    }
+  }
+  if (platform === "tauri" || platform === "headless") {
+    features["notifications.remote"] = {
+      version: 1,
+      operations: [
+        "register_push_token",
+        "revoke_push_token",
+        ...(platform === "headless" ? ["remote_notification_publish"] : []),
+        ...(platform === "headless" ? ["event:notification://remote"] : []),
+        ...(platform === "tauri" ? ["event:automation:consent-request"] : []),
+        "event:workflow://approval-request",
+        "event:workflow://approval-resolved",
+        "event:workflow://step-execute",
+        "event:ocr://download-progress",
+      ],
+    }
+    features["workspace.files"] = {
+      version: 1,
+      operations: [
+        "fs_search_workspace",
+        "fs_search_content_workspace",
+        "fs_read_workspace_file",
+        "fs_write_workspace_file",
+        "fs_list_workspace_dir",
+        "fs_stat_workspace_file",
+        "fs_create_workspace_dir",
+        "fs_delete_workspace_entry",
+        "fs_rename_workspace_entry",
+        "fs_copy_workspace_entry",
+      ],
+    }
+  }
+  if (platform === "headless") {
+    features["secrets.store"] = {
+      version: 1,
+      operations: ["secret_store_get", "secret_store_set", "secret_store_delete"],
+    }
+    features["browser.remote"] = {
+      version: 1,
+      operations: [
+        "browser_runtime_status",
+        "browser_capability",
+        "browser_session_ensure",
+        "browser_session_get",
+        "browser_session_close",
+        "browser_navigate",
+        "browser_snapshot",
+        "browser_act",
+        "browser_press_key",
+        "browser_scroll",
+        "browser_evaluate",
+        "browser_read_console",
+        "browser_read_network",
+        "browser_back",
+        "browser_forward",
+        "browser_reload",
+        "browser_stop",
+        "browser_get_page",
+        "browser_pages",
+        "browser_switch_page",
+        "browser_close_page",
+        "browser_wait_for",
+        "browser_wait_for_load",
+        "browser_screenshot",
+        "browser_set_files",
+        "browser_downloads",
+        "browser_set_zoom",
+        "browser_find",
+        "browser_find_clear",
+      ],
+    }
+  }
+  if (platform === "tauri" || platform === "headless") {
+    features["ocr.server"] = {
+      version: 1,
+      operations: [
+        "ocr_list_native_backends",
+        "ocr_list_available_backends",
+        "ocr_extract_native",
+        "ocr_model_status",
+        "ocr_download_model",
+        "ocr_cancel_model_download",
+      ],
+    }
+  }
+  const healthFor = (name: string): { healthy: boolean; reason?: string } => {
+    const health = operationHealth[name]
+    if (typeof health === "boolean") return { healthy: health }
+    return health ?? { healthy: true }
+  }
   return {
     schemaVersion: HOST_FEATURE_MANIFEST_SCHEMA_VERSION,
     hostBuildId,
@@ -134,14 +244,21 @@ export function buildLocalHostFeatureManifest({
       min: HOST_PROTOCOL_MIN_VERSION,
       max: HOST_PROTOCOL_MAX_VERSION,
     },
+    transportCapabilities: {
+      eventStreamReady: 1,
+    },
     features,
     operations: Object.entries(features).flatMap(([feature, descriptor]) =>
-      (descriptor?.operations ?? []).map((name) => ({
-        name,
-        feature: feature as HostFeatureId,
-        featureVersion: descriptor!.version,
-        healthy: true,
-      }))
+      (descriptor?.operations ?? []).map((name) => {
+        const health = healthFor(name)
+        return {
+          name,
+          feature: feature as HostFeatureId,
+          featureVersion: descriptor!.version,
+          healthy: health.healthy,
+          ...(health.reason ? { reason: health.reason } : {}),
+        }
+      })
     ),
     deviceGrants: [...new Set(deviceGrants)],
     limits: { ...DEFAULT_LIMITS },
@@ -222,6 +339,7 @@ export function parseHostFeatureManifest(value: unknown): HostFeatureManifest | 
     const v2 = candidate as Partial<HostFeatureManifestV2>
     const protocolMin = v2.protocol?.min
     const protocolMax = v2.protocol?.max
+    const transportCapabilities = v2.transportCapabilities
     if (
       !v2.hostIdentity ||
       typeof v2.hostIdentity.id !== "string" ||
@@ -233,6 +351,10 @@ export function parseHostFeatureManifest(value: unknown): HostFeatureManifest | 
       !Number.isSafeInteger(protocolMax) ||
       protocolMin < 1 ||
       protocolMax < protocolMin ||
+      (transportCapabilities !== undefined &&
+        (!transportCapabilities ||
+          typeof transportCapabilities !== "object" ||
+          transportCapabilities.eventStreamReady !== 1)) ||
       !Array.isArray(v2.operations) ||
       !Array.isArray(v2.deviceGrants) ||
       !v2.deviceGrants.every((grant) => typeof grant === "string" && grant.length > 0) ||
@@ -250,13 +372,18 @@ export function parseHostFeatureManifest(value: unknown): HostFeatureManifest | 
       }
     }
     if (
+      v2.operations.length !== declaredOperations.size ||
       v2.operations.some((operation) => {
+        if (!operation || typeof operation !== "object") return true
         const declared = declaredOperations.get(operation.name)
         return (
+          typeof operation.name !== "string" ||
           !declared ||
           operation.feature !== declared.feature ||
           operation.featureVersion !== declared.version ||
-          typeof operation.healthy !== "boolean"
+          typeof operation.healthy !== "boolean" ||
+          (operation.reason !== undefined &&
+            (typeof operation.reason !== "string" || operation.reason.length === 0))
         )
       }) ||
       new Set(v2.operations.map((operation) => operation.name)).size !== v2.operations.length

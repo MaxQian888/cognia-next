@@ -2,6 +2,8 @@
 
 import {
   __resetIntegrationRegistryForTesting,
+  getIntegrationAccountStatusProvider,
+  getIntegrationResourceProvider,
   listRegisteredIntegrations,
 } from "@/lib/integrations/registry"
 import { getExecutor, __resetRegistryForTesting } from "@/lib/workflow/nodes/registry"
@@ -37,6 +39,8 @@ describe("Integration manifest bridge", () => {
           authStrategies: [],
           resourceKinds: ["issue"],
           eventTypes: [],
+          resourceProvider: { handler: "listResources", kinds: ["issue"] },
+          healthProvider: { handler: "checkHealth" },
           actions: [
             {
               id: "issue.comment",
@@ -55,10 +59,18 @@ describe("Integration manifest bridge", () => {
       ],
     } as PluginManifest
     const commentIssue = jest.fn()
+    const listResources = jest.fn()
+    const checkHealth = jest.fn()
 
-    await registerIntegrationsForPlugin("example-delivery", manifest, { commentIssue })
+    await registerIntegrationsForPlugin("example-delivery", manifest, {
+      commentIssue,
+      listResources,
+      checkHealth,
+    })
 
     expect(listRegisteredIntegrations("example-delivery")).toHaveLength(1)
+    expect(getIntegrationResourceProvider("example-delivery", "example")).toBe(listResources)
+    expect(getIntegrationAccountStatusProvider("example-delivery", "example")).toBe(checkHealth)
     expect(getExecutor("example-delivery.action.issue.comment" as never, 1)).toBeDefined()
     expect(
       getPluginCatalogSnapshot().find(

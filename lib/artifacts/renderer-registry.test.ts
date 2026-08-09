@@ -30,23 +30,37 @@ describe("renderer-registry", () => {
     expect(resolveRegisteredArtifactRenderer(dummyArtifact())).toBeNull()
   })
 
-  it("registers and resolves a renderer by canRender result", () => {
+  it("registers and resolves a renderer by namespaced artifact kind", () => {
     const claimed: PluginArtifactRenderer = {
       id: "p-html",
-      canRender: (a) => a.type === "html",
-      render: () => null,
+      kind: "test/html",
+      mount: () => ({ dispose: jest.fn() }),
     }
     registerArtifactRenderer(claimed.id, claimed)
-    const resolved = resolveRegisteredArtifactRenderer(dummyArtifact({ type: "html" }))
+    const resolved = resolveRegisteredArtifactRenderer(
+      dummyArtifact({
+        metadata: {
+          plugin: { kind: "test/html", schemaVersion: 1, ownerPluginId: "test" },
+        },
+      })
+    )
     expect(resolved).toBe(claimed)
-    expect(resolveRegisteredArtifactRenderer(dummyArtifact({ type: "code" }))).toBeNull()
+    expect(
+      resolveRegisteredArtifactRenderer(
+        dummyArtifact({
+          metadata: {
+            plugin: { kind: "test/code", schemaVersion: 1, ownerPluginId: "test" },
+          },
+        })
+      )
+    ).toBeNull()
   })
 
   it("getRegisteredArtifactRenderers returns the registered set", () => {
     const r: PluginArtifactRenderer = {
       id: "any",
-      canRender: () => true,
-      render: () => null,
+      kind: "test/any",
+      mount: () => ({ dispose: jest.fn() }),
     }
     registerArtifactRenderer("any", r)
     expect(getRegisteredArtifactRenderers()).toEqual([r])
@@ -55,42 +69,59 @@ describe("renderer-registry", () => {
   it("returned dispose function removes the renderer", () => {
     const r: PluginArtifactRenderer = {
       id: "x",
-      canRender: () => true,
-      render: () => null,
+      kind: "test/x",
+      mount: () => ({ dispose: jest.fn() }),
     }
     const dispose = registerArtifactRenderer("x", r)
     dispose()
     expect(getRegisteredArtifactRenderers()).toHaveLength(0)
   })
 
-  it("treats canRender exceptions as a non-claim and logs a warning", () => {
-    const warnSpy = jest.spyOn(loggers.plugin, "warn").mockImplementation()
-    const r: PluginArtifactRenderer = {
-      id: "boom",
-      canRender: () => {
-        throw new Error("nope")
-      },
-      render: () => null,
+  it("does not let an old disposer remove a replacement for the same kind", () => {
+    const first: PluginArtifactRenderer = {
+      id: "first",
+      kind: "test/workbook",
+      mount: () => ({ dispose: jest.fn() }),
     }
-    registerArtifactRenderer("boom", r)
-    expect(resolveRegisteredArtifactRenderer(dummyArtifact())).toBeNull()
-    expect(warnSpy).toHaveBeenCalledWith(
-      "artifacts.plugin.canRender-failed",
-      expect.objectContaining({ rendererId: "boom" })
+    const second: PluginArtifactRenderer = {
+      id: "second",
+      kind: "test/workbook",
+      mount: () => ({ dispose: jest.fn() }),
+    }
+    const disposeFirst = registerArtifactRenderer(first.id, first)
+    registerArtifactRenderer(second.id, second)
+
+    disposeFirst()
+
+    expect(getRegisteredArtifactRenderers()).toEqual([second])
+  })
+
+  it("logs a diagnostic when an artifact kind has no registered renderer", () => {
+    const debugSpy = jest.spyOn(loggers.plugin, "debug").mockImplementation()
+    const artifact = dummyArtifact({
+      metadata: {
+        plugin: { kind: "test/missing", schemaVersion: 1, ownerPluginId: "test" },
+      },
+    })
+
+    expect(resolveRegisteredArtifactRenderer(artifact)).toBeNull()
+    expect(debugSpy).toHaveBeenCalledWith(
+      "artifacts.plugin.renderer-missing",
+      expect.objectContaining({ artifactId: "a1", kind: "test/missing" })
     )
-    warnSpy.mockRestore()
+    debugSpy.mockRestore()
   })
 
   it("clearRegisteredArtifactRenderers wipes the set", () => {
     registerArtifactRenderer("a", {
       id: "a",
-      canRender: () => true,
-      render: () => null,
+      kind: "test/a",
+      mount: () => ({ dispose: jest.fn() }),
     })
     registerArtifactRenderer("b", {
       id: "b",
-      canRender: () => true,
-      render: () => null,
+      kind: "test/b",
+      mount: () => ({ dispose: jest.fn() }),
     })
     clearRegisteredArtifactRenderers()
     expect(getRegisteredArtifactRenderers()).toHaveLength(0)

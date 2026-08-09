@@ -132,6 +132,9 @@ import {
   createPermissionAPI,
   createMediaAPI,
   createStorageAPI,
+  createFilesAPI,
+  revokePluginFileHandles,
+  createSkillsAPI,
   createContextPanelAPI,
   createTemplatesAPI,
 } from "../api"
@@ -308,6 +311,8 @@ export function createFullPluginContext(
     i18n: createI18nAPI(pluginId),
     canvas: createCanvasAPI(pluginId),
     artifact: createArtifactAPI(pluginId),
+    files: createFilesAPI(pluginId),
+    skills: createSkillsAPI(pluginId, plugin.manifest.builtInSkills),
     media: createMediaAPI(pluginId, manager),
     notifications: createNotificationCenterAPI(pluginId),
     storage: createStorageAPI(pluginId),
@@ -405,6 +410,7 @@ export function createFullPluginContext(
     hasPermission: (permission) => permissionsAPI.hasPermission(permission),
   })
   const scope = manager.getPluginDisposableScope?.(pluginId)
+  scope?.track(() => revokePluginFileHandles(pluginId), "ctx.files.handles")
   return (
     scope ? withPluginDisposableScope(scope, "ctx", governedContext) : governedContext
   ) as FullPluginContext
@@ -701,11 +707,26 @@ function gateToolEnabledRun(pluginId: string, toolsEnabled: boolean | undefined)
 function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAPI {
   return {
     registerTool: (tool: PluginTool) => {
-      manager.getRegistry().registerTool(pluginId, tool)
-      usePluginStore.getState().registerPluginTool(pluginId, tool)
+      const ownedTool = { ...tool, pluginId }
+      manager.getRegistry().registerTool(pluginId, ownedTool)
+      usePluginStore.getState().registerPluginTool(pluginId, ownedTool)
+      let registered = true
+      return () => {
+        if (!registered) return
+        registered = false
+        const current = manager.getRegistry().getTool(tool.name)
+        if (current?.pluginId === pluginId) {
+          manager.getRegistry().unregisterTool(tool.name)
+          usePluginStore.getState().unregisterPluginTool(pluginId, tool.name)
+        }
+      }
     },
 
     unregisterTool: (name: string) => {
+      const current = manager.getRegistry().getTool(name)
+      if (current?.pluginId !== pluginId) {
+        throw new Error(`plugin ${pluginId} does not own tool ${name}`)
+      }
       manager.getRegistry().unregisterTool(name)
       usePluginStore.getState().unregisterPluginTool(pluginId, name)
     },
@@ -717,6 +738,13 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
       }
       manager.getRegistry().registerMode(pluginId, prefixedMode)
       usePluginStore.getState().registerPluginMode(pluginId, prefixedMode)
+      let registered = true
+      return () => {
+        if (!registered) return
+        registered = false
+        manager.getRegistry().unregisterMode(prefixedMode.id)
+        usePluginStore.getState().unregisterPluginMode(pluginId, prefixedMode.id)
+      }
     },
 
     unregisterMode: (id: string) => {
@@ -754,6 +782,26 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
       const { result } = await invokePluginTool(pluginId, name, args ?? {}, {
         ...(opts?.signal ? { signal: opts.signal } : {}),
         reason: `plugin ${pluginId} invoked tool ${name}`,
+      })
+      return result
+    },
+
+    invokeDependencyTool: async (dependencyId, name, args, opts) => {
+      if (!pluginHasApiPermission(pluginId, "agent:control")) {
+        throw new Error(
+          'agent.invokeDependencyTool requires the "agent:control" permission — declare it in the plugin manifest.'
+        )
+      }
+      const caller = manager.getPlugin(pluginId)
+      if (!caller?.manifest.dependencies?.[dependencyId]) {
+        throw new Error(`plugin ${pluginId} has not declared dependency ${dependencyId}`)
+      }
+      if (!name) throw new Error("agent.invokeDependencyTool requires a tool name")
+      const { result } = await invokePluginTool(dependencyId, name, args ?? {}, {
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+        ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
+        ...(opts?.messageId ? { messageId: opts.messageId } : {}),
+        reason: `plugin ${pluginId} invoked dependency tool ${dependencyId}/${name}`,
       })
       return result
     },

@@ -1,10 +1,12 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { IntegrationsHub } from "./integrations-hub"
 
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => [[], [], [], []],
 }))
 jest.mock("@/lib/integrations/registry", () => ({
+  getIntegrationRegistryRevision: () => 1,
+  subscribeIntegrationRegistry: () => () => undefined,
   listRegisteredIntegrationEntries: () => [
     {
       pluginId: "demo-delivery",
@@ -18,6 +20,17 @@ jest.mock("@/lib/integrations/registry", () => ({
             type: "personal-access-token",
             label: "Token",
             providerId: "demo-token",
+            configSchema: {
+              type: "object",
+              required: ["token"],
+              properties: { token: { type: "string", format: "secret" } },
+            },
+          },
+          {
+            id: "pat",
+            type: "personal-access-token",
+            label: "Advanced token",
+            providerId: "demo-pat",
           },
         ],
         resourceKinds: ["workspace"],
@@ -46,5 +59,17 @@ describe("IntegrationsHub", () => {
     expect(screen.getByText("Subscriptions")).toBeInTheDocument()
     expect(screen.getByText("Approvals and jobs")).toBeInTheDocument()
     expect(screen.getByText("Audit")).toBeInTheDocument()
+  })
+
+  it("guides authentication configuration instead of asking for raw provider IDs", () => {
+    render(<IntegrationsHub />)
+    fireEvent.change(screen.getByLabelText("Integration"), {
+      target: { value: "demo-delivery:demo" },
+    })
+    expect(screen.getByRole("button", { name: /Token Recommended/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Advanced token Advanced/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /Token Recommended/ }))
+    expect(screen.getByLabelText("Personal access token")).toHaveAttribute("type", "password")
+    expect(screen.queryByPlaceholderText("Auth provider ID")).not.toBeInTheDocument()
   })
 })

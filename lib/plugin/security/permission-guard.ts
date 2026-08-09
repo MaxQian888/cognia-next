@@ -185,6 +185,8 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "media:video:write": "Write video media assets",
   "media:video:export": "Export rendered video outputs",
   "agent:control": "Control agent execution",
+  "builtin-skills:invoke":
+    "Invoke manifest-allowlisted built-in skills through the host policy gate",
   "agent:dispatch-external": "Dispatch external coding agents (Claude Code / Codex / …)",
   "agent:dispatch": "Dispatch built-in subagents and agent teams",
   "agent:shared-memory:read": "Read team shared-memory entries",

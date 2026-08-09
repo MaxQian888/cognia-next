@@ -58,7 +58,7 @@ import type { BrowserPageSummary } from "@/lib/browser/session-types"
 import type { BrowserSelection, SnapshotNode } from "@/lib/browser/protocol"
 import { buildTimeServerUrl } from "@/lib/platform/web-companion"
 import { openExternal } from "@/lib/tauri/opener"
-import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
+import { issueCompanionSocketTicket, loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import { transport } from "@/lib/tauri/transport-instance"
 
 interface RemoteSessionRpcSummary {
@@ -227,7 +227,7 @@ export function RemoteBrowserPreview({
           sessionId: summary.id,
           serverBaseUrl: baseUrl,
           issueTicket: () =>
-            transport.call("browser_stream_ticket_issue", { browserSessionId: summary.id }),
+            issueCompanionSocketTicket({ channel: "browser", sessionId: summary.id }),
           onFrame: (frame) => void drawFrame(frame),
           onLease: setLease,
           onEvent: (event) => {

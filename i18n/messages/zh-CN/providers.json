@@ -1314,5 +1314,12 @@
     "waitingForTest": "等待运行连接测试..."
   },
   "xai": "xAI (Grok)",
-  "xaiDescription": "Grok 3、Grok 3 Mini"
+  "xaiDescription": "Grok 3、Grok 3 Mini",
+  "capabilityChatApi": "聊天 API",
+  "capabilityModelDelete": "删除模型",
+  "capabilityModelList": "列出模型",
+  "capabilityModelPull": "拉取模型",
+  "capabilityModelUnload": "卸载模型",
+  "localProviderApiKeyHint": "用于受保护本地端点的可选 API Key。",
+  "unknownVersion": "未知版本"
 }

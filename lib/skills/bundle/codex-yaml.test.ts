@@ -1,4 +1,4 @@
-import { parseCodexOpenaiYaml } from "./codex-yaml"
+import { parseCodexOpenaiYaml, parseCodexOpenaiYamlForEdit } from "./codex-yaml"
 
 describe("parseCodexOpenaiYaml", () => {
   it("returns empty result for empty / null / undefined inputs", () => {
@@ -136,5 +136,23 @@ interface:
 `)
     expect(result.interface?.displayName).toBeUndefined()
     expect(result.interface?.shortDescription).toBe("Cool")
+  })
+})
+
+describe("parseCodexOpenaiYamlForEdit", () => {
+  it("retains unknown mappings while exposing known policy fields", () => {
+    const result = parseCodexOpenaiYamlForEdit(`
+policy:
+  allow_implicit_invocation: false
+vendor:
+  nested: keep
+`)
+    expect(result.root).toMatchObject({ vendor: { nested: "keep" } })
+    expect(result.meta.policy).toEqual({ allowImplicitInvocation: false })
+  })
+
+  it("rejects malformed YAML and non-mapping roots", () => {
+    expect(() => parseCodexOpenaiYamlForEdit("policy: [broken")).toThrow(/failed to parse/)
+    expect(() => parseCodexOpenaiYamlForEdit("- item")).toThrow(/root must be a mapping/)
   })
 })

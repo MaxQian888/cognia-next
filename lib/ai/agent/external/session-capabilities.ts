@@ -43,7 +43,7 @@ export function isExplicitlyUnsupportedCapabilityError(error: unknown): boolean 
         ? record.message
         : ""
   const nonCapabilityFailure =
-    /\b(timeout|timed out|provider|model|auth(?:entication|orization)?|unauthorized|forbidden|overflow|context length)\b/i
+    /\b(abort(?:ed)?|cancel(?:led|ed)?|denied|timeout|timed out|provider|model|auth(?:entication|orization)?|unauthorized|forbidden|quota|rate.?limit|overflow|context length)\b/i
   if (
     nonCapabilityFailure.test(message) ||
     (typeof code === "string" && nonCapabilityFailure.test(code.replaceAll("_", " ")))
@@ -52,9 +52,16 @@ export function isExplicitlyUnsupportedCapabilityError(error: unknown): boolean 
   }
 
   if (status === 405 || status === 501) return true
-  if (code === -32601 || code === "METHOD_NOT_FOUND" || code === "NOT_IMPLEMENTED") return true
+  if (
+    code === -32601 ||
+    code === "METHOD_NOT_FOUND" ||
+    code === "NOT_IMPLEMENTED" ||
+    code === "UNSUPPORTED" ||
+    code === "CAPABILITY_UNAVAILABLE"
+  )
+    return true
 
-  return /\b(method not found|not implemented|unsupported (?:method|operation|endpoint))\b/i.test(
+  return /\b(method not found|not implemented|unsupported (?:method|operation|endpoint|capability)|capability[^\n]*unavailable)\b/i.test(
     message
   )
 }

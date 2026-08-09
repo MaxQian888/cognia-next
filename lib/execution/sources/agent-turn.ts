@@ -59,8 +59,8 @@ export class AgentRunEventProducer {
     this.append = append
   }
 
-  async start(ts: number = Date.now()): Promise<void> {
-    await this.append(this.runId, semanticRunEvent("run.started", {}, { ts }))
+  async start(ts: number = Date.now(), payload: Record<string, unknown> = {}): Promise<void> {
+    await this.append(this.runId, semanticRunEvent("run.started", payload, { ts }))
   }
 
   async onCaptureEvent(event: CaptureStreamEvent, ts: number = Date.now()): Promise<void> {

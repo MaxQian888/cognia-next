@@ -39,6 +39,7 @@ jest.mock("@/lib/db/skills", () => ({
   listSkills: jest.fn(),
   updateSkill: jest.fn(),
   getSkill: jest.fn(),
+  persistSkillBundle: jest.fn(),
 }))
 jest.mock("@/lib/db/skill-resources", () => ({
   listResourcesForSkill: jest.fn(),
@@ -53,7 +54,13 @@ jest.mock("@/lib/claude/skills-io", () => ({
 import { pushAllToNative, pullAllFromNative, pushOneToNative, suggestedFilename } from "./sync"
 import { isTauri } from "@/lib/tauri"
 import { skillsCatalogGet, skillsInstallMirrored, skillsScanNative } from "@/lib/claude/ipc"
-import { bulkImportSkills, getSkill, listSkills, updateSkill } from "@/lib/db/skills"
+import {
+  bulkImportSkills,
+  getSkill,
+  listSkills,
+  persistSkillBundle,
+  updateSkill,
+} from "@/lib/db/skills"
 import { listResourcesForSkill, replaceResourcesForSkill } from "@/lib/db/skill-resources"
 import { parseSkillMarkdown } from "@/lib/claude/skills-io"
 import type { Skill, SkillResource } from "@cognia/agent-config-types"
@@ -68,6 +75,7 @@ const mockedGetSkill = getSkill as unknown as jest.Mock
 const mockedListRes = listResourcesForSkill as unknown as jest.Mock
 const mockedReplaceRes = replaceResourcesForSkill as unknown as jest.Mock
 const mockedBulk = bulkImportSkills as unknown as jest.Mock
+const mockedPersistBundle = persistSkillBundle as unknown as jest.Mock
 const mockedParse = parseSkillMarkdown as unknown as jest.Mock
 
 beforeEach(() => {
@@ -219,7 +227,7 @@ describe("pushAllToNative", () => {
     )
   })
 
-  it("uses existing nativeDirectory's tail when present", async () => {
+  it("migrates an existing native directory to the stable slug on explicit push", async () => {
     mockedIsTauri.mockReturnValue(true)
     mockedListSkills.mockResolvedValue([
       {
@@ -236,7 +244,7 @@ describe("pushAllToNative", () => {
     })
     await pushAllToNative()
     expect(mockedInstall).toHaveBeenCalledWith(
-      expect.objectContaining({ dirName: "OldDir", clean: true })
+      expect.objectContaining({ dirName: "oldname", clean: true })
     )
   })
 
@@ -256,7 +264,7 @@ describe("pushAllToNative", () => {
       trashedFrom: null,
     })
     await pushAllToNative()
-    expect(mockedInstall).toHaveBeenCalledWith(expect.objectContaining({ dirName: "edge-case" }))
+    expect(mockedInstall).toHaveBeenCalledWith(expect.objectContaining({ dirName: "trailing" }))
   })
 
   it("captures and reports per-skill errors", async () => {
@@ -397,11 +405,10 @@ describe("pullAllFromNative", () => {
       draft: { name: "Alpha", description: "d", content: "BODY" },
     })
     mockedBulk.mockResolvedValue({ created: 1 })
-    mockedReplaceRes.mockResolvedValue(undefined)
     const r = await pullAllFromNative()
     expect(r.pulled).toBe(1)
     expect(mockedBulk).toHaveBeenCalled()
-    expect(mockedReplaceRes).toHaveBeenCalledWith("freshly", [])
+    expect(mockedBulk).toHaveBeenCalledWith([expect.objectContaining({ resources: [] })], "skip")
   })
 
   it("does not call replaceResourcesForSkill when bulk import created nothing", async () => {
@@ -455,15 +462,16 @@ describe("pullAllFromNative", () => {
     })
     const r = await pullAllFromNative()
     expect(r.pulled).toBe(1)
-    expect(mockedUpdateSkill).toHaveBeenCalledWith(
-      "abc",
+    expect(mockedPersistBundle).toHaveBeenCalledWith(
       expect.objectContaining({
-        name: "Alpha",
-        syncOrigin: "native",
-        nativeDirectory: "/native/alpha",
+        skill: expect.objectContaining({
+          id: "abc",
+          name: "Alpha",
+          syncOrigin: "native",
+          nativeDirectory: "/native/alpha",
+        }),
       })
     )
-    expect(mockedReplaceRes).toHaveBeenCalled()
   })
 
   it("skips update when local row is fresh", async () => {
@@ -513,7 +521,9 @@ describe("pullAllFromNative", () => {
     })
     const r = await pullAllFromNative()
     expect(r.pulled).toBe(1)
-    expect(mockedUpdateSkill).toHaveBeenCalledWith("byname", expect.any(Object))
+    expect(mockedPersistBundle).toHaveBeenCalledWith(
+      expect.objectContaining({ skill: expect.objectContaining({ id: "byname" }) })
+    )
   })
 
   it("captures parse errors per-skill", async () => {
@@ -689,7 +699,7 @@ describe("pushOneToNative", () => {
     expect(result.errors).toEqual([{ name: "missing", error: "Skill not found." }])
   })
 
-  it("preserves the existing nativeDirectory tail when present", async () => {
+  it("uses the stable slug instead of preserving a stale directory tail", async () => {
     mockedIsTauri.mockReturnValue(true)
     mockedGetSkill.mockResolvedValue({
       id: "x",
@@ -706,7 +716,7 @@ describe("pushOneToNative", () => {
     })
     await pushOneToNative("x")
     expect(mockedInstall).toHaveBeenCalledWith(
-      expect.objectContaining({ dirName: "OldDir", clean: true })
+      expect.objectContaining({ dirName: "oldname", clean: true })
     )
   })
 

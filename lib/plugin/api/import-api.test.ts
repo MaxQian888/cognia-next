@@ -1,4 +1,4 @@
-import { createImportAPI, clearCustomImporters } from "./import-api"
+import { createImportAPI, clearCustomImporters, getCustomImporterOwnersForFile } from "./import-api"
 import { getSessionSource } from "@/lib/session-import/registry"
 import type { AgentSessionSourceAdapter } from "@/lib/session-import/types"
 import {
@@ -60,7 +60,36 @@ describe("createImportAPI", () => {
     expect(api.getCustomImporters()).toHaveLength(0)
   })
 
-  it("importContent dispatches to the importer registered for the format", async () => {
+  it("finds and deduplicates importer owners by extension or MIME type", () => {
+    const api = createImportAPI("office")
+    api.registerImporter({
+      id: "xlsx-primary",
+      name: "Excel",
+      description: "xlsx",
+      format: "xlsx",
+      extensions: ["xlsx"],
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      import: () => ({ success: true }),
+    })
+    api.registerImporter({
+      id: "xlsx-secondary",
+      name: "Excel fallback",
+      description: "xlsx",
+      format: "xlsx-fallback",
+      extensions: [".xlsx"],
+      import: () => ({ success: true }),
+    })
+
+    expect(getCustomImporterOwnersForFile("REPORT.XLSX")).toEqual(["office"])
+    expect(
+      getCustomImporterOwnersForFile(
+        "attachment",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      )
+    ).toEqual(["office"])
+  })
+
+  it("importContent dispatches by the plugin-owned registration id", async () => {
     const api = createImportAPI("p1")
     api.registerImporter({
       id: "md",
@@ -70,7 +99,7 @@ describe("createImportAPI", () => {
       extensions: ["md"],
       import: (src) => ({ success: true, data: String(src.content).toUpperCase() }),
     })
-    const result = await api.importContent({ content: "hi" }, "markdown")
+    const result = await api.importContent({ content: "hi" }, "md")
     expect(result).toEqual({ success: true, data: "HI" })
   })
 
@@ -196,6 +225,6 @@ describe("createImportAPI", () => {
         .getCustomImporters()
         .map((i) => i.id)
         .sort()
-    ).toEqual(["a:same", "b:same"])
+    ).toEqual(["a:same"])
   })
 })

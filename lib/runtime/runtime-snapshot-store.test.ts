@@ -97,18 +97,17 @@ it("excludes operations whose feature version the client does not support", () =
     version: 2,
     operations: ["skills_catalog_get"],
   }
-  manifest.operations = [
-    {
+  manifest.operations = manifest.operations
+    .filter((operation) => operation.feature !== "skills.catalog")
+    .concat({
       name: "skills_catalog_get",
       feature: "skills.catalog",
       featureVersion: 2,
       healthy: true,
-    },
-  ]
+    })
 
-  expect(runtimeHostSnapshotFromManifest(manifest)).toEqual({
-    compatible: true,
-    operations: [],
-    grants: ["agent.run"],
-  })
+  const snapshot = runtimeHostSnapshotFromManifest(manifest)
+  expect(snapshot.compatible).toBe(true)
+  expect(snapshot.grants).toEqual(["agent.run"])
+  expect(snapshot.operations).not.toContain("skills_catalog_get")
 })

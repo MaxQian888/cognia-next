@@ -69,7 +69,10 @@
     "urlLabel": "URL",
     "urlPlaceholder": "https://example.com/hook",
     "urlRequired": "URL 不能为空。",
-    "webhookUnsupported": "桌面运行时暂不执行 webhook——该处理器会被保存,但不会触发。"
+    "webhookUnsupported": "桌面运行时暂不执行 webhook——该处理器会被保存,但不会触发。",
+    "httpCapability": "HTTP 请求需要网络能力。",
+    "typeHttp": "HTTP 请求",
+    "typeWebhookLegacy": "旧版 Webhook"
   },
   "loadError": "读取设置失败：{detail}",
   "loading": "正在加载 hooks…",
@@ -88,5 +91,6 @@
   },
   "summary": "{count} 个分组",
   "title": "生命周期钩子",
-  "unsaved": "有未保存的更改"
+  "unsaved": "有未保存的更改",
+  "runtimeSummary": "运行时 Hook 会通过已配置的宿主环境执行。"
 }

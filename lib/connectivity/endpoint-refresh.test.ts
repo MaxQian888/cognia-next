@@ -18,7 +18,8 @@ jest.mock("@/lib/tauri", () => ({
 function config(patch: Partial<CompanionConfig> = {}): CompanionConfig {
   return {
     baseUrl: "https://192.168.1.42:27890",
-    deviceJwt: "jwt",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+    deviceKeyThumbprint: "device-thumbprint",
     deviceId: "dev-1",
     serverVersion: "0.2.0",
     ...patch,

@@ -19,6 +19,7 @@ import {
   type TTSOrchestratorState,
 } from "@/lib/tts/tts-orchestrator"
 import { providerKeyMapToSettingsMap } from "@/lib/tts/keyring"
+import { isNativeMobile } from "@/lib/platform/detect"
 import {
   DEFAULT_SPEECH_SETTINGS,
   type SpeechSettings,
@@ -96,8 +97,11 @@ export function useTTS(options: UseTTSOptions = {}): UseTTSReturn {
     [voiceOverlay, baseSpeech]
   )
 
-  const currentProvider: TTSProvider =
+  const selectedProvider: TTSProvider =
     provider ?? (useSettings ? speechSettings.ttsProvider : (voiceOverlay?.ttsProvider ?? "system"))
+  // Mobile can edit the shared desktop-host selection, but playback is always
+  // device-local Web Speech so cloud credentials never travel to the handset.
+  const currentProvider: TTSProvider = isNativeMobile() ? "system" : selectedProvider
 
   const [orchState, setOrchState] = useState<TTSOrchestratorState>(ttsOrchestrator.getState())
 
@@ -107,7 +111,7 @@ export function useTTS(options: UseTTSOptions = {}): UseTTSReturn {
 
   const speak = useCallback(
     async (text: string, overrideProvider?: TTSProvider): Promise<void> => {
-      const active = overrideProvider ?? currentProvider
+      const active = isNativeMobile() ? "system" : (overrideProvider ?? currentProvider)
       // Lazily load TTS provider keys on first actual playback — they're no
       // longer fetched during app boot. Read the freshest keys straight from
       // the store after the (idempotent) load so even the very first `speak`

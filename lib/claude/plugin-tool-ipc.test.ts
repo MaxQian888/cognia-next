@@ -10,6 +10,7 @@ import {
   __setSlashToolDepsForTesting,
   __setVectorToolDepsForTesting,
   __setSpawnTaskToolDepsForTesting,
+  __setSessionPeerToolDepsForTesting,
   handlePluginToolExec,
   type PluginToolExecRequest,
   type PluginToolResolver,
@@ -23,6 +24,8 @@ import {
   clearTeamDispatchContext,
 } from "./agents/dispatch-context-registry"
 import { TEAM_TOOL_NAMES } from "./team-builtin-tools"
+import { createSkillLoadContext, releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
+import type { Skill } from "@cognia/agent-config-types"
 
 // Default `resolveWebToolDeps` reads the settings store and lazily imports the
 // utility-model client, the fetch-extractor and the search cache. Mock all four
@@ -86,6 +89,7 @@ describe("handlePluginToolExec", () => {
     __setPluginToolResolverForTesting(null)
     __setWebToolDepsForTesting(null)
     __setSpawnTaskToolDepsForTesting(null)
+    __setSessionPeerToolDepsForTesting(null)
   })
 
   it("resolves web_search before the plugin registry (supersedes the plugin)", async () => {
@@ -144,6 +148,31 @@ describe("handlePluginToolExec", () => {
 
     expect(response).toMatchObject({ result: { ok: true, taskSessionId: "task-1" } })
     expect(dispatch).toHaveBeenCalledWith("parent-1", expect.objectContaining({ mode: "aside" }))
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it("routes session messaging before the plugin registry with the calling session identity", async () => {
+    const send = jest.fn(async () => ({ id: "peer-1", status: "delivered" as const }))
+    const execute = jest.fn()
+    __setSessionPeerToolDepsForTesting(() => ({
+      gate: () => true,
+      listReachable: async () => [],
+      send,
+    }))
+    __setPluginToolResolverForTesting({
+      getTool: () => ({ pluginId: "duplicate", execute }),
+    })
+
+    const response = await handlePluginToolExec(
+      makeRequest({
+        name: "send_session_message",
+        sessionId: "sender-1",
+        args: { target_session_id: "receiver-1", message: "Review this" },
+      })
+    )
+
+    expect(response).toMatchObject({ result: { ok: true, id: "peer-1", status: "delivered" } })
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ senderSessionId: "sender-1" }))
     expect(execute).not.toHaveBeenCalled()
   })
 
@@ -615,6 +644,52 @@ describe("handlePluginToolExec — Skill / SlashCommand built-ins", () => {
     expect(response.error).toBeUndefined()
     expect(String(response.result)).toContain("Web research")
     __setPluginToolResolverForTesting(null)
+  })
+
+  it("threads sessionId into progressive skill loading scope", async () => {
+    const scopedSkill: Skill = {
+      id: "scoped-skill",
+      name: "Scoped",
+      slug: "scoped",
+      description: "Scoped skill",
+      content: "Only this session may load me.",
+      createdAt: 0,
+      updatedAt: 0,
+      source: "custom",
+    }
+    createSkillLoadContext({
+      sessionId: "scope-A",
+      allowedSkillIds: [scopedSkill.id],
+      getSkill: async (id) => (id === scopedSkill.id ? scopedSkill : undefined),
+      listResources: async () => [],
+      recordUsage: async () => undefined,
+    })
+    __setSkillToolDepsForTesting(() => ({
+      listSkillResources: async () => [],
+      recordSkillUsage: async () => undefined,
+    }))
+
+    try {
+      const allowed = await handlePluginToolExec(
+        makeRequest({
+          name: "load_skill",
+          args: { skill_id: scopedSkill.id },
+          sessionId: "scope-A",
+        })
+      )
+      expect(allowed.result).toMatchObject({ ok: true, skill: { id: scopedSkill.id } })
+
+      const denied = await handlePluginToolExec(
+        makeRequest({
+          name: "load_skill",
+          args: { skill_id: scopedSkill.id },
+          sessionId: "scope-B",
+        })
+      )
+      expect(denied.result).toMatchObject({ ok: false, code: "missing_context" })
+    } finally {
+      releaseSkillLoadContext("scope-A")
+    }
   })
 
   it("routes the SlashCommand tool to the slash dispatcher with the session id", async () => {

@@ -8,7 +8,7 @@ import { listSkills, upsertSkillByCanonicalId } from "@/lib/db/skills"
 import { fetchRegistrySkillContent } from "./marketplace-registry"
 import { fetchSkillsShDetail, fetchSkillsShSkillContent } from "./marketplace-skillssh"
 import { computeSkillsShFilesHash, filesToBundleResult } from "./skillssh-install"
-import { validateSkill } from "./validate"
+import { hasRuntimeSkillIssues, validateSkill } from "./validate"
 import type { FetchSkillContent, MarketplaceItem } from "./marketplace-types"
 import type { Skill, SkillStatus, SkillValidationError } from "@cognia/agent-config-types"
 
@@ -17,8 +17,8 @@ export interface MarketplaceInstallOptions {
   /**
    * When true, a clean install lands `disabled` instead of `enabled` — the
    * caller passes `!autoEnableNew` so the "auto-enable new skills" preference
-   * applies to marketplace/URL installs too. Rows with validation errors still
-   * go in as `error` regardless (they must stay out of the injection query).
+   * applies to marketplace/URL installs too. Only runtime-blocking validation
+   * issues force `error`; portability findings remain runnable but not exportable.
    */
   disabledByDefault?: boolean
 }
@@ -28,7 +28,7 @@ function resolveInstallStatus(
   validationErrors: SkillValidationError[],
   opts?: MarketplaceInstallOptions
 ): SkillStatus {
-  if (validationErrors.length > 0) return "error"
+  if (hasRuntimeSkillIssues(validationErrors)) return "error"
   return opts?.disabledByDefault ? "disabled" : "enabled"
 }
 
@@ -104,7 +104,10 @@ export async function installMarketplaceItem(
   })
   const validationErrors = validateSkill({
     name: draft.name,
+    slug: draft.slug,
     description: draft.description ?? item.description,
+    compatibility: draft.compatibility,
+    metadata: draft.metadata,
     content: draft.content,
   })
   // Promote unrecoverable validation errors to a thrown error so the
@@ -114,11 +117,10 @@ export async function installMarketplaceItem(
   if (fatal) {
     throw new Error(`Marketplace install refused: ${fatal.message}`)
   }
-  // Non-fatal errors (long name, format issues) are stored on the row so
-  // the editor flags them in-place. The row goes in with status "error"
-  // to keep it out of the send-time enabled-skills query until the user
-  // fixes it. When `disabledByDefault` is set (the "auto-enable new skills"
-  // preference is off) a clean install lands disabled instead of enabled.
+  // Non-fatal findings are stored on the row so the editor flags them in-place.
+  // Portability and warning findings do not disable a runnable legacy skill;
+  // only runtime findings force `error`. `disabledByDefault` still applies to
+  // every otherwise runnable install.
   const status: SkillStatus = resolveInstallStatus(validationErrors, opts)
   // Delegate the find-by-canonicalId + idempotent upsert to the shared
   // helper so the marketplace, the bundle dialog, and the plugin

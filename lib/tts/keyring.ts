@@ -22,6 +22,7 @@ export type KeyringProviderId =
   | "deepgram"
   | "xiaomi"
   | "mistral"
+  | "local-openai-compatible"
   /** Live voice only — xAI has no TTS provider, so `keyringProviderFor` never returns it. */
   | "xai"
 
@@ -35,8 +36,12 @@ export const KEYRING_PROVIDER_IDS: KeyringProviderId[] = [
   "deepgram",
   "xiaomi",
   "mistral",
+  "local-openai-compatible",
   "xai",
 ]
+
+/** Presence-only marker used in the renderer for desktop keyring entries. */
+export const HOST_KEY_PRESENT = "__cognia_host_key_present__"
 
 /** Map a TTSProvider → the keyring account it consumes. */
 export function keyringProviderFor(provider: TTSProvider): KeyringProviderId | null {
@@ -60,6 +65,8 @@ export function keyringProviderFor(provider: TTSProvider): KeyringProviderId | n
       return "xiaomi"
     case "mistral":
       return "mistral"
+    case "local-openai-compatible":
+      return "local-openai-compatible"
     default:
       return null
   }
@@ -110,12 +117,7 @@ export async function loadAllProviderKeys(): Promise<Partial<Record<KeyringProvi
     const { invoke } = await import("@tauri-apps/api/core")
     const ids = await invoke<KeyringProviderId[]>("tts_keyring_list_providers")
     const out: Partial<Record<KeyringProviderId, string>> = {}
-    await Promise.all(
-      ids.map(async (id) => {
-        const key = await getProviderKey(id)
-        if (key) out[id] = key
-      })
-    )
+    for (const id of ids) out[id] = HOST_KEY_PRESENT
     return out
   }
   const out: Partial<Record<KeyringProviderId, string>> = {}
@@ -135,7 +137,7 @@ export function providerKeyMapToSettingsMap(
 ): Record<string, { apiKey?: string }> {
   const out: Record<string, { apiKey?: string }> = {}
   for (const id of KEYRING_PROVIDER_IDS) {
-    if (keys[id]) out[id] = { apiKey: keys[id] }
+    if (keys[id]) out[id] = { apiKey: keys[id] === HOST_KEY_PRESENT ? "host-key" : keys[id] }
   }
   return out
 }

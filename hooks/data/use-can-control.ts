@@ -3,7 +3,7 @@
 /**
  * Remote-control capability probe (mobile).
  *
- * A paired phone receives every `/ws/v1/events` frame — including host
+ * A paired phone receives every `/ws/events` frame — including host
  * computer-use `automation:consent-request` prompts — regardless of whether it
  * holds the elevated remote-control capability. Acting on one (`
  * automation_consent_respond`) is gated server-side by `control_allow_list`

@@ -1,33 +1,38 @@
 /**
- * Langfuse Transport
+ * Langfuse log transport.
  *
- * Transport that sends logs to Langfuse for AI observability.
- * Particularly useful for tracking errors and important events in AI workflows.
+ * Web and Tauri share one ingestion serializer. Tauri injects credentials in
+ * Rust; Web resolves the secret just-in-time and posts the same batch shape.
  */
 
 import type { Transport, StructuredLogEntry, LogLevel } from "@cognia/logging/types"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
+
+export interface LangfuseIngestionEvent {
+  id: string
+  timestamp: string
+  type: "trace-create" | "event-create"
+  body: Record<string, unknown>
+}
+
+export interface LangfuseIngestionBatch {
+  batch: LangfuseIngestionEvent[]
+}
 
 export interface LangfuseTransportOptions {
-  /** Langfuse public key */
   publicKey?: string
-  /** Resolve a securely stored key just-in-time. Plaintext options are forbidden. */
   resolveSecretKey?: () => Promise<string | null>
-  /** Desktop native export path; keeps the secret and HTTP request out of WebView. */
-  nativeExport?: (entries: StructuredLogEntry[]) => Promise<void>
-  /** Langfuse host URL */
+  /** Native path: the caller owns credential injection and HTTP transport. */
+  exportBatch?: (batch: LangfuseIngestionBatch) => Promise<void>
   host?: string
-  /** Minimum log level to send to Langfuse */
   minLevel?: LogLevel
-  /** Include log data in event metadata */
   includeData?: boolean
-  /** Include stack traces in event metadata */
   includeStack?: boolean
-  /** Custom event name prefix */
   eventPrefix?: string
-  /** Batch size before flushing */
   batchSize?: number
-  /** Flush interval in milliseconds */
   flushInterval?: number
+  requestTimeoutMs?: number
+  fetchFn?: typeof fetch
 }
 
 const LEVEL_PRIORITY: Record<LogLevel, number> = {
@@ -39,202 +44,173 @@ const LEVEL_PRIORITY: Record<LogLevel, number> = {
   fatal: 5,
 }
 
-const DEFAULT_OPTIONS: LangfuseTransportOptions = {
-  minLevel: "warn",
+const DEFAULT_OPTIONS = {
+  minLevel: "warn" as LogLevel,
   includeData: true,
   includeStack: true,
   eventPrefix: "log",
   batchSize: 10,
   flushInterval: 5000,
+  requestTimeoutMs: 10_000,
 }
 
-/**
- * Langfuse Transport implementation
- */
+function langfuseLevel(level: LogLevel): "DEBUG" | "DEFAULT" | "WARNING" | "ERROR" {
+  switch (level) {
+    case "trace":
+    case "debug":
+      return "DEBUG"
+    case "info":
+      return "DEFAULT"
+    case "warn":
+      return "WARNING"
+    case "error":
+    case "fatal":
+      return "ERROR"
+  }
+}
+
+export function buildLangfuseIngestionBatch(
+  entries: readonly StructuredLogEntry[],
+  options: Pick<LangfuseTransportOptions, "includeData" | "includeStack" | "eventPrefix"> = {}
+): LangfuseIngestionBatch {
+  const includeData = options.includeData ?? DEFAULT_OPTIONS.includeData
+  const includeStack = options.includeStack ?? DEFAULT_OPTIONS.includeStack
+  const eventPrefix = options.eventPrefix ?? DEFAULT_OPTIONS.eventPrefix
+  const batch: LangfuseIngestionEvent[] = []
+  const traces = new Set<string>()
+
+  for (const entry of entries) {
+    const traceId = entry.traceId || entry.sessionId || "default"
+    if (!traces.has(traceId)) {
+      traces.add(traceId)
+      batch.push({
+        id: `trace:${traceId}`,
+        timestamp: entry.timestamp,
+        type: "trace-create",
+        body: {
+          id: traceId,
+          timestamp: entry.timestamp,
+          name: "cognia.logger",
+          ...(entry.sessionId ? { sessionId: entry.sessionId } : {}),
+          metadata: { source: "logger" },
+          tags: ["log"],
+        },
+      })
+    }
+
+    const metadata: Record<string, unknown> = {
+      module: entry.module,
+      level: entry.level,
+      timestamp: entry.timestamp,
+    }
+    if (includeData && entry.data) metadata.data = entry.data
+    if (includeStack && entry.stack) metadata.stack = entry.stack
+    if (entry.source) metadata.source = entry.source
+
+    const eventId = entry.id
+    batch.push({
+      id: eventId,
+      timestamp: entry.timestamp,
+      type: "event-create",
+      body: {
+        id: eventId,
+        traceId,
+        timestamp: entry.timestamp,
+        name: `${eventPrefix}.${entry.level}.${entry.module}`,
+        input: entry.message,
+        metadata,
+        level: langfuseLevel(entry.level),
+      },
+    })
+  }
+
+  return { batch }
+}
+
 export class LangfuseTransport implements Transport {
   name = "langfuse"
-  private options: LangfuseTransportOptions
+  private readonly options: LangfuseTransportOptions
   private buffer: StructuredLogEntry[] = []
   private flushTimer: ReturnType<typeof setInterval> | null = null
-  private langfuseModule: typeof import("@/lib/ai/observability/langfuse-client") | null = null
-  private initialized = false
 
   constructor(options: LangfuseTransportOptions = {}) {
     this.options = { ...DEFAULT_OPTIONS, ...options }
-    this.startFlushTimer()
-  }
-
-  private startFlushTimer(): void {
-    if (this.flushTimer) return
-
     this.flushTimer = setInterval(() => {
-      this.flush().catch(() => {
-        // Silently ignore flush errors
-      })
+      void this.flush()
     }, this.options.flushInterval)
   }
 
-  private async ensureInitialized(): Promise<boolean> {
-    if (this.initialized) return this.langfuseModule !== null
-
-    try {
-      this.langfuseModule = await import("@/lib/ai/observability/langfuse-client")
-      this.initialized = true
-      return true
-    } catch {
-      this.initialized = true
-      return false
+  log(entry: StructuredLogEntry): void {
+    const minLevel = this.options.minLevel ?? DEFAULT_OPTIONS.minLevel
+    if (LEVEL_PRIORITY[entry.level] < LEVEL_PRIORITY[minLevel]) return
+    this.buffer.push(entry)
+    if (this.buffer.length >= (this.options.batchSize ?? DEFAULT_OPTIONS.batchSize)) {
+      void this.flush()
     }
   }
 
-  log(entry: StructuredLogEntry): void {
-    // Check if we should log this level
-    const minLevel = this.options.minLevel || "warn"
-    if (LEVEL_PRIORITY[entry.level] < LEVEL_PRIORITY[minLevel]) {
-      return
-    }
+  private rebuffer(entries: StructuredLogEntry[]): void {
+    const capacity = Math.max(0, 100 - this.buffer.length)
+    if (capacity > 0) this.buffer.unshift(...entries.slice(0, capacity))
+  }
 
-    // Add to buffer
-    this.buffer.push(entry)
+  private async postWebBatch(batch: LangfuseIngestionBatch): Promise<"sent" | "unconfigured"> {
+    const publicKey = this.options.publicKey?.trim()
+    if (!publicKey) return "unconfigured"
+    const secretKey = (await this.options.resolveSecretKey?.())?.trim()
+    if (!secretKey) return "unconfigured"
 
-    // Flush if buffer is full
-    if (this.buffer.length >= (this.options.batchSize || 10)) {
-      this.flush().catch(() => {
-        // Silently ignore errors
+    const host = (this.options.host || "https://cloud.langfuse.com").replace(/\/$/, "")
+    const controller = new AbortController()
+    const timeout = setTimeout(
+      () => controller.abort(),
+      this.options.requestTimeoutMs ?? DEFAULT_OPTIONS.requestTimeoutMs
+    )
+    try {
+      const response = await (this.options.fetchFn ?? fetch)(`${host}/api/public/ingestion`, {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${btoa(`${publicKey}:${secretKey}`)}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(batch),
+        signal: controller.signal,
       })
+      if (!response.ok) throw new Error(`Langfuse ingestion failed with HTTP ${response.status}`)
+      return "sent"
+    } finally {
+      clearTimeout(timeout)
     }
   }
 
   async flush(): Promise<void> {
     if (this.buffer.length === 0) return
-
-    const entries = [...this.buffer]
+    const entries = this.buffer
     this.buffer = []
-
-    if (this.options.nativeExport) {
-      try {
-        await this.options.nativeExport(entries)
-      } catch {
-        if (this.buffer.length < 100) this.buffer.unshift(...entries)
-      }
-      return
-    }
-
-    const hasModule = await this.ensureInitialized()
-    if (!hasModule || !this.langfuseModule) return
+    if (!this.options.publicKey?.trim()) return
+    const batch = buildLangfuseIngestionBatch(entries, this.options)
+    if (!hasNoLeakingPiiDeep(batch)) return
 
     try {
-      const { getLangfuse, createChatTrace, createSpan } = this.langfuseModule
-      const secretKey = this.options.resolveSecretKey
-        ? await this.options.resolveSecretKey()
-        : undefined
-      const langfuse = await getLangfuse({
-        publicKey: this.options.publicKey,
-        secretKey: secretKey || undefined,
-        host: this.options.host,
-        enabled: true,
-        flushInterval: this.options.flushInterval,
-      })
-
-      if (!langfuse) return
-
-      // Group entries by trace ID for better organization
-      const entriesByTrace = new Map<string, StructuredLogEntry[]>()
-      for (const entry of entries) {
-        const traceKey = entry.traceId || entry.sessionId || "default"
-        const existing = entriesByTrace.get(traceKey) || []
-        existing.push(entry)
-        entriesByTrace.set(traceKey, existing)
+      if (this.options.exportBatch) {
+        await this.options.exportBatch(batch)
+      } else {
+        await this.postWebBatch(batch)
       }
-
-      // Create a trace for each group
-      for (const [traceKey, traceEntries] of entriesByTrace) {
-        const trace = await createChatTrace({
-          sessionId: traceKey,
-          metadata: {
-            source: "logger",
-            entryCount: traceEntries.length,
-          },
-          tags: ["log"],
-        })
-
-        // Create spans for each log entry
-        for (const entry of traceEntries) {
-          const metadata: Record<string, unknown> = {
-            module: entry.module,
-            level: entry.level,
-            timestamp: entry.timestamp,
-          }
-
-          if (this.options.includeData && entry.data) {
-            metadata.data = entry.data
-          }
-
-          if (this.options.includeStack && entry.stack) {
-            metadata.stack = entry.stack
-          }
-
-          if (entry.source) {
-            metadata.source = entry.source
-          }
-
-          const spanName = `${this.options.eventPrefix || "log"}.${entry.level}.${entry.module}`
-
-          const span = createSpan(trace, {
-            name: spanName,
-            input: entry.message,
-            metadata,
-            level: this.mapLogLevelToLangfuse(entry.level),
-          })
-
-          span.end()
-        }
-
-        trace.end()
-      }
-
-      // Flush Langfuse client
-      await langfuse.flush()
     } catch {
-      // Re-add entries to buffer on failure (with limit to prevent memory issues)
-      if (this.buffer.length < 100) {
-        this.buffer.unshift(...entries)
-      }
-    }
-  }
-
-  private mapLogLevelToLangfuse(level: LogLevel): "DEBUG" | "DEFAULT" | "WARNING" | "ERROR" {
-    switch (level) {
-      case "trace":
-      case "debug":
-        return "DEBUG"
-      case "info":
-        return "DEFAULT"
-      case "warn":
-        return "WARNING"
-      case "error":
-      case "fatal":
-        return "ERROR"
-      default:
-        return "DEFAULT"
+      this.rebuffer(entries)
     }
   }
 
   async close(): Promise<void> {
-    // Stop flush timer
     if (this.flushTimer) {
       clearInterval(this.flushTimer)
       this.flushTimer = null
     }
-
-    // Final flush
     await this.flush()
   }
 }
 
-/**
- * Create a Langfuse transport with default options
- */
 export function createLangfuseTransport(options?: LangfuseTransportOptions): LangfuseTransport {
   return new LangfuseTransport(options)
 }

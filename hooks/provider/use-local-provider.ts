@@ -30,6 +30,7 @@ import {
   type LocalProviderCapabilities,
 } from "@cognia/provider-core/providers/local-provider-service"
 import { LOCAL_PROVIDER_CONFIGS } from "@cognia/provider-core/providers/local-providers"
+import type { LocalProviderConfig } from "@cognia/provider-core/providers/local-providers"
 
 /**
  * Stable, translatable reasons an operation failed.
@@ -72,19 +73,22 @@ export interface LocalPullState {
 export interface UseLocalProviderArgs {
   providerId: LocalProviderName
   baseUrl?: string
+  apiKey?: string
+  customHeaders?: Record<string, string>
+  /** Called only after a model-list request succeeds, including a valid empty list. */
+  onModelsDiscovered?: (models: LocalModelInfo[]) => void
   autoRefresh?: boolean
   refreshInterval?: number
 }
 
 export interface UseLocalProviderResult {
-  config: (typeof LOCAL_PROVIDER_CONFIGS)[string] | undefined
+  config: LocalProviderConfig | undefined
   capabilities: LocalProviderCapabilities
   status: LocalServerStatus | null
   isConnected: boolean
   isLoading: boolean
   error: string | null
   models: LocalModelInfo[]
-  runningModels: LocalModelInfo[]
   pullStates: Map<string, LocalPullState>
   isPulling: boolean
   refresh: () => Promise<void>
@@ -106,17 +110,29 @@ function percentageOf(progress: LocalModelPullProgress): number | null {
 }
 
 export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderResult {
-  const { providerId, baseUrl, autoRefresh, refreshInterval = 30_000 } = args
+  const {
+    providerId,
+    baseUrl,
+    apiKey,
+    customHeaders,
+    onModelsDiscovered,
+    autoRefresh,
+    refreshInterval = 30_000,
+  } = args
 
   const config = LOCAL_PROVIDER_CONFIGS[providerId]
   const capabilities = getProviderCapabilities(providerId)
 
   const [status, setStatus] = useState<LocalServerStatus | null>(null)
   const [models, setModels] = useState<LocalModelInfo[]>([])
-  const [runningModels, _setRunningModels] = useState<LocalModelInfo[]>([])
   const [pullStates, setPullStates] = useState<Map<string, LocalPullState>>(() => new Map())
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const onModelsDiscoveredRef = useRef(onModelsDiscovered)
+
+  useEffect(() => {
+    onModelsDiscoveredRef.current = onModelsDiscovered
+  }, [onModelsDiscovered])
 
   /**
    * Detach handles for in-flight pulls, keyed by model. Held in a ref, not
@@ -141,16 +157,19 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
     setIsLoading(true)
     setError(null)
     try {
-      const service = createLocalProviderService(providerId, baseUrl)
-      const [s, m] = await Promise.all([service.getStatus(), service.listModels()])
+      const service = createLocalProviderService(providerId, { baseUrl, apiKey, customHeaders })
+      const s = await service.getStatus()
       setStatus(s)
+      const m = await service.listModels()
       setModels(m)
+      onModelsDiscoveredRef.current?.(m)
     } catch (err) {
+      setModels([])
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setIsLoading(false)
     }
-  }, [providerId, baseUrl])
+  }, [providerId, baseUrl, apiKey, customHeaders])
 
   useEffect(() => {
     const initial = setTimeout(() => void refresh(), 0)
@@ -169,7 +188,7 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
     setIsLoading(true)
     setError(null)
     try {
-      const service = createLocalProviderService(providerId, baseUrl)
+      const service = createLocalProviderService(providerId, { baseUrl, apiKey, customHeaders })
       const s = await service.getStatus()
       setStatus(s)
       return s
@@ -179,16 +198,17 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
     } finally {
       setIsLoading(false)
     }
-  }, [providerId, baseUrl])
+  }, [providerId, baseUrl, apiKey, customHeaders])
 
   const fetchModels = useCallback(async () => {
     if (!baseUrl) return []
     setIsLoading(true)
     setError(null)
     try {
-      const service = createLocalProviderService(providerId, baseUrl)
+      const service = createLocalProviderService(providerId, { baseUrl, apiKey, customHeaders })
       const m = await service.listModels()
       setModels(m)
+      onModelsDiscoveredRef.current?.(m)
       return m
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -196,7 +216,7 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
     } finally {
       setIsLoading(false)
     }
-  }, [providerId, baseUrl])
+  }, [providerId, baseUrl, apiKey, customHeaders])
 
   const pullModel = useCallback(
     async (modelName: string) => {
@@ -215,7 +235,7 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
       })
 
       try {
-        const service = createLocalProviderService(providerId, baseUrl)
+        const service = createLocalProviderService(providerId, { baseUrl, apiKey, customHeaders })
         const handle = await service.pullModel(modelName, {
           onProgress: (progress) => {
             const pct = percentageOf(progress)
@@ -275,7 +295,7 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
         pullHandles.current.delete(modelName)
       }
     },
-    [providerId, baseUrl, refresh]
+    [providerId, baseUrl, apiKey, customHeaders, refresh]
   )
 
   /**
@@ -308,7 +328,7 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
       if (!baseUrl) return
       setError(null)
       try {
-        const service = createLocalProviderService(providerId, baseUrl)
+        const service = createLocalProviderService(providerId, { baseUrl, apiKey, customHeaders })
         const ok = await service.deleteModel(modelName)
         if (!ok) {
           setError(DELETE_UNSUPPORTED)
@@ -319,7 +339,7 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
         setError(err instanceof Error ? err.message : String(err))
       }
     },
-    [providerId, baseUrl, refresh]
+    [providerId, baseUrl, apiKey, customHeaders, refresh]
   )
 
   const stopModel = useCallback(
@@ -327,7 +347,7 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
       if (!baseUrl) return
       setError(null)
       try {
-        const service = createLocalProviderService(providerId, baseUrl)
+        const service = createLocalProviderService(providerId, { baseUrl, apiKey, customHeaders })
         const ok = await service.stopModel(modelName)
         if (!ok) {
           setError(STOP_UNSUPPORTED)
@@ -338,7 +358,7 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
         setError(err instanceof Error ? err.message : String(err))
       }
     },
-    [providerId, baseUrl, refresh]
+    [providerId, baseUrl, apiKey, customHeaders, refresh]
   )
 
   return {
@@ -349,7 +369,6 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
     isLoading,
     error,
     models,
-    runningModels,
     pullStates,
     isPulling: Array.from(pullStates.values()).some((p) => p.isActive),
     refresh,

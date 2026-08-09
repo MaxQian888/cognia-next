@@ -89,6 +89,7 @@ import type { VsCodeExtensionBlock, VsCodeLanguage } from "./plugin-vscode"
 import type {
   Artifact,
   ArtifactLanguage,
+  ArtifactType,
   CanvasDocumentVersion,
   CanvasSuggestion,
 } from "../artifact/artifact"
@@ -607,6 +608,9 @@ export interface PluginManifest {
    * degraded mode and is expected to feature-gate internally.
    */
   optionalDependencies?: Record<string, string>
+
+  /** Built-in skill ids/families this plugin may invoke (for example `lark.sheets.*`). */
+  builtInSkills?: string[]
 
   /** Host application version requirements */
   engines?: {
@@ -1421,6 +1425,20 @@ export interface PluginConfigProperty {
   markdownDescription?: string
   default?: unknown
   enum?: unknown[]
+  /**
+   * When `true`, the field's value is stored in the OS keyring under the
+   * plugin's `plugin:<id>` namespace instead of the plaintext plugin-config
+   * store, and is exposed to the plugin only via
+   * `ctx.configuration.getSecret(path)` / `hasSecret(path)` (gated by the
+   * `secrets:read` permission). Constraints, enforced by
+   * `validateConfigSchema` / `validatePluginConfig`:
+   *   - Only valid on `type: "string"` fields (Phase 1).
+   *   - Incompatible with `default` — a secret must not travel with the
+   *     manifest.
+   *   - Only supported at the top level of `configSchema.properties`;
+   *     nested `object.properties[key].secret` is rejected in Phase 1.
+   */
+  secret?: boolean
   /** Per-enum-value plain-text descriptions, surfaced beside each option. */
   enumDescriptions?: string[]
   /** Per-enum-value markdown descriptions (takes precedence over enumDescriptions). */
@@ -2336,9 +2354,9 @@ export interface PluginA2UIAPI {
 }
 
 export interface PluginAgentAPI {
-  registerTool: (tool: PluginTool) => void
+  registerTool: (tool: PluginTool) => () => void
   unregisterTool: (name: string) => void
-  registerMode: (mode: AgentModeConfig) => void
+  registerMode: (mode: AgentModeConfig) => () => void
   unregisterMode: (id: string) => void
   /**
    * Run one agent turn and resolve with the typed result. The embeddable
@@ -2364,6 +2382,13 @@ export interface PluginAgentAPI {
     name: string,
     args: Record<string, unknown>,
     opts?: { signal?: AbortSignal }
+  ) => Promise<unknown>
+  /** Invoke a tool owned by a required dependency declared in the manifest. */
+  invokeDependencyTool: (
+    dependencyId: string,
+    name: string,
+    args: Record<string, unknown>,
+    opts?: { signal?: AbortSignal; sessionId?: string; messageId?: string }
   ) => Promise<unknown>
   /**
    * @deprecated Use {@link run} / {@link runStreamed}. Retained as a thin shim
@@ -4286,8 +4311,19 @@ export interface CreateArtifactOptions {
   language: ArtifactLanguage
   sessionId?: string
   messageId?: string
-  type?: "code" | "text" | "react" | "html" | "svg" | "mermaid"
+  type?: ArtifactType | "text"
   metadata?: Artifact["metadata"]
+  /** Namespaced plugin-owned payload descriptor, e.g. `cognia-office/workbook`. */
+  kind?: string
+  schemaVersion?: number
+}
+
+export interface UpdateArtifactOptions {
+  title?: string
+  content?: string
+  metadata?: Artifact["metadata"]
+  expectedVersion: number
+  changeDescription?: string
 }
 
 /**
@@ -4314,11 +4350,17 @@ export interface PluginArtifactAPI {
   /** Create a new artifact */
   createArtifact: (options: CreateArtifactOptions) => Promise<string>
 
-  /** Update an artifact */
-  updateArtifact: (id: string, updates: Partial<Artifact>) => void
+  /** Atomically update a plugin-owned artifact and snapshot its previous version. */
+  updateArtifact: (id: string, updates: UpdateArtifactOptions) => Artifact
 
   /** Delete an artifact */
   deleteArtifact: (id: string) => void
+
+  /** Version history for a plugin-owned artifact. */
+  listVersions: (id: string) => import("@/types/artifact").ArtifactVersion[]
+
+  /** Restore a plugin-owned artifact version. */
+  restoreVersion: (id: string, versionId: string, expectedVersion: number) => Artifact
 
   /** List artifacts */
   listArtifacts: (filter?: ArtifactFilter) => Artifact[]
@@ -4340,10 +4382,51 @@ export interface PluginArtifactAPI {
  * Artifact renderer definition
  */
 export interface ArtifactRenderer {
-  type: string
   name: string
-  canRender: (artifact: Artifact) => boolean
-  render: (artifact: Artifact, container: HTMLElement) => () => void
+  mount: (artifact: Artifact, container: HTMLElement) => ArtifactRendererHandle
+}
+
+export interface ArtifactRendererHandle {
+  update?: (artifact: Artifact) => void
+  dispose: () => void
+}
+
+export interface PluginFileHandle {
+  id: string
+  name: string
+  mimeType: string
+  size: number
+  bytes: Uint8Array
+}
+
+export interface PluginFilesAPI {
+  open: (options?: {
+    accept?: string[]
+    multiple?: boolean
+    maxBytes?: number
+  }) => Promise<PluginFileHandle[]>
+  save: (options: {
+    suggestedName: string
+    mimeType: string
+    bytes: Uint8Array
+  }) => Promise<{ saved: boolean }>
+  readAttachment: (handle: string) => Promise<PluginFileHandle>
+}
+
+export interface PluginBuiltInSkillSummary {
+  id: string
+  family: string
+  mutation: "read" | "write" | "destructive"
+  label: { en: string; "zh-CN": string }
+}
+
+export interface PluginSkillsAPI {
+  listBuiltIns: (family?: string) => PluginBuiltInSkillSummary[]
+  invokeBuiltIn: (
+    skillId: string,
+    args: Record<string, unknown>,
+    options: { sessionId: string; signal?: AbortSignal }
+  ) => Promise<import("@/lib/skills/built-in/types").BuiltInSkillResult>
 }
 
 // =============================================================================
@@ -4645,8 +4728,52 @@ export interface PluginExtensionAPI {
 /**
  * Plugin API permissions for extended features
  */
-/** @deprecated Use PluginPermission; retained as a zero-breaking alias. */
-export type PluginAPIPermission = PluginPermission
+export type PluginAPIPermission =
+  | "filesystem:read"
+  | "filesystem:write"
+  | "session:read"
+  | "session:write"
+  | "session:delete"
+  | "project:read"
+  | "project:write"
+  | "project:delete"
+  | "vector:read"
+  | "vector:write"
+  | "canvas:read"
+  | "canvas:write"
+  | "canvas:run"
+  | "canvas:collaborate"
+  | "artifact:read"
+  | "artifact:write"
+  | "workflow:read"
+  | "ai:chat"
+  | "ai:embed"
+  | "agent:control"
+  | "builtin-skills:invoke"
+  | "agent:dispatch-external"
+  | "agent:dispatch"
+  | "agent:shared-memory:read"
+  | "twin:read"
+  | "templates:read"
+  | "templates:contribute"
+  | "templates:instantiate"
+  | "templates:library:write"
+  | "export:session"
+  | "export:project"
+  | "theme:read"
+  | "theme:write"
+  | "media:image:read"
+  | "media:image:write"
+  | "media:video:read"
+  | "media:video:write"
+  | "media:video:export"
+  | "extension:ui"
+  | "extension:workflow"
+  | "notification:show"
+  | "ipc:call"
+  | "ipc:expose"
+  | "events:publish"
+  | "events:subscribe"
 
 /**
  * Permission API for plugins
@@ -4657,7 +4784,7 @@ export type PluginAPIPermission = PluginPermission
  * by the `PermissionGuard` (e.g. `git:write`, `terminal:execute`).
  * Introspection consults both stores so it agrees with enforcement.
  */
-export type IntrospectablePluginPermission = PluginPermission
+export type IntrospectablePluginPermission = PluginAPIPermission | PluginPermission
 
 export interface PluginPermissionAPI {
   /** Check if plugin has a permission (API or guard-enforced) */
@@ -4719,6 +4846,12 @@ export interface PluginContextAPI {
 
   /** Artifact management API */
   artifact: PluginArtifactAPI
+
+  /** Cross-platform user-selected and authorized attachment bytes. */
+  files: PluginFilesAPI
+
+  /** Controlled access to allowlisted first-party built-in skills. */
+  skills: PluginSkillsAPI
 
   /** Media processing API */
   media: PluginMediaAPI

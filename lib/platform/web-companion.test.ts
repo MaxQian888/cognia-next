@@ -42,12 +42,13 @@ describe("hasStoredWebPairing", () => {
     expect(hasStoredWebPairing()).toBe(false)
   })
 
-  it("true for a complete stored pairing", () => {
+  it("invalidates a complete legacy bearer pairing", () => {
     window.localStorage.setItem(
       WEB_COMPANION_CONFIG_KEY,
       JSON.stringify({ baseUrl: "https://s:7890", deviceJwt: "jwt" })
     )
-    expect(hasStoredWebPairing()).toBe(true)
+    expect(hasStoredWebPairing()).toBe(false)
+    expect(window.localStorage.getItem(WEB_COMPANION_CONFIG_KEY)).toBeNull()
   })
 
   it("uses the active account target when a v2 multi-target book exists", () => {
@@ -78,8 +79,16 @@ describe("hasWebCompanionTarget", () => {
     expect(hasWebCompanionTarget()).toBe(true)
     delete process.env[ENV_KEY]
     window.localStorage.setItem(
-      WEB_COMPANION_CONFIG_KEY,
-      JSON.stringify({ baseUrl: "https://s:7890", deviceJwt: "jwt" })
+      WEB_COMPANION_TARGET_BOOK_KEY,
+      JSON.stringify({
+        version: 2,
+        targets: {
+          "acct_web:companion-one": {
+            targetId: "companion-one",
+            baseUrl: "https://s:7890",
+          },
+        },
+      })
     )
     expect(hasWebCompanionTarget()).toBe(true)
   })

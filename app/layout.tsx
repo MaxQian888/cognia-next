@@ -55,7 +55,6 @@ import { DesktopAppShell } from "@/components/desktop/desktop-app-shell"
 import { CompanionEventBridgeProvider } from "@/components/providers/companion-event-bridge-provider"
 import { DesktopSyncSourceProvider } from "@/components/providers/desktop-sync-source-provider"
 import { DesktopMessageSourceProvider } from "@/components/providers/desktop-message-source-provider"
-import { RemoteControlReceiver } from "@/components/providers/remote-control-receiver"
 import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
 import { HookTrustSyncProvider } from "@/components/providers/hook-trust-sync-provider"
 import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
@@ -175,7 +174,7 @@ export default async function RootLayout({
             <LocaleGate>
               {process.env.NEXT_PUBLIC_E2E === "1" ? (
                 <>
-                  <PluginRuntimeInitializer />
+                  <PluginRuntimeInitializer onlyForPluginSurfaceE2E />
                   <PluginSurfaceReferenceHarness />
                 </>
               ) : null}
@@ -295,29 +294,24 @@ export default async function RootLayout({
                                                     <WebCompanionBootProvider>
                                                       <DesktopSyncSourceProvider>
                                                         <DesktopMessageSourceProvider>
-                                                          {/* Subscribes the renderer to the remote-control axum
-                                                    server's Tauri events so inbound HTTP triggers
-                                                    actually dispatch. No-op off Tauri. */}
-                                                          <RemoteControlReceiver>
-                                                            {/* id="app" is the scope root for user
+                                                          {/* id="app" is the scope root for user
                                                         custom CSS when `customCssScope` is
                                                         "app" (see lib/appearance/custom-css/apply).
                                                         display:contents keeps it box-less but
                                                         still a valid @scope (#app) root. */}
-                                                            <div
-                                                              id="app"
-                                                              data-bg-target="global"
-                                                              className="contents"
-                                                            >
-                                                              <MobileShellWrapper>
-                                                                <DesktopAppShell>
-                                                                  <SurfaceAvailabilityBoundary>
-                                                                    {children}
-                                                                  </SurfaceAvailabilityBoundary>
-                                                                </DesktopAppShell>
-                                                              </MobileShellWrapper>
-                                                            </div>
-                                                          </RemoteControlReceiver>
+                                                          <div
+                                                            id="app"
+                                                            data-bg-target="global"
+                                                            className="contents"
+                                                          >
+                                                            <MobileShellWrapper>
+                                                              <DesktopAppShell>
+                                                                <SurfaceAvailabilityBoundary>
+                                                                  {children}
+                                                                </SurfaceAvailabilityBoundary>
+                                                              </DesktopAppShell>
+                                                            </MobileShellWrapper>
+                                                          </div>
                                                         </DesktopMessageSourceProvider>
                                                       </DesktopSyncSourceProvider>
                                                     </WebCompanionBootProvider>

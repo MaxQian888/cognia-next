@@ -70,6 +70,7 @@ class FakeSignaling {
     peerLeft: new Set(),
   }
   closed = false
+  sendError: Error | null = null
 
   /**
    * Peers reported in the synthetic `subscribed` frame on connect(). Defaults
@@ -98,6 +99,7 @@ class FakeSignaling {
   }
   async send(kind: string, body: unknown): Promise<void> {
     this.sent.push({ kind, body })
+    if (this.sendError) throw this.sendError
   }
   close(): void {
     this.closed = true
@@ -290,6 +292,23 @@ describe("TransportRtc", () => {
     pcs[0].channels[0].open()
     await connect
     expect(rtc.getState()).toBe("open")
+  })
+
+  it("handles a rejected fire-and-forget ICE send without an unhandled rejection", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    const { rtc, sig, pcs } = makeRtc()
+    void rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    sig.sendError = new Error("queue full")
+
+    pcs[0].fireIceCandidate({ candidate: "candidate:1 1 udp 1 127.0.0.1 9 typ host" })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(warn).toHaveBeenCalledWith(
+      "TransportRtc: failed to queue local ICE candidate",
+      sig.sendError
+    )
+    warn.mockRestore()
   })
 
   it("negotiates a separate ordered terminal channel with the canonical label", async () => {

@@ -199,8 +199,14 @@ export interface PatchSet {
       header: string
       forwardPatchHash: string
       inversePatchHash: string
+      additions?: number
+      deletions?: number
     }>
   }>
+  /** Missing/false on patch rows written before durable selection tracking. */
+  appliedSelectionKnown?: boolean
+  /** Empty means the successful apply selected every file. */
+  appliedSelection?: PatchSelection[]
   createdAt: number
 }
 

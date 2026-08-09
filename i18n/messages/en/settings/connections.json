@@ -884,7 +884,12 @@
       "unsupportedNoProbe": "This adapter doesn't expose an active identity probe.",
       "wechatOaNoProbe": "WeChat Official Account adapters don't expose an active identity probe — the AppID below was entered when the adapter was configured.",
       "wechatPersonalNoProbe": "Personal WeChat adapters don't expose an active identity probe.",
-      "wecomNoProbe": "WeCom adapters don't expose an active identity probe — the credentials below were entered when the adapter was configured."
+      "wecomNoProbe": "WeCom adapters don't expose an active identity probe — the credentials below were entered when the adapter was configured.",
+      "avatarPublishHint": "Publish this avatar in the Lark developer console for consistent bot identity.",
+      "downloadAvatar": "Download avatar",
+      "openDeveloperConsole": "Open developer console",
+      "recommendedAvatarHint": "Use the generated avatar for this Lark app.",
+      "recommendedAvatarTitle": "Recommended avatar"
     }
   },
   "matrix": {

@@ -394,7 +394,8 @@ describe("<CompanionBootProvider /> — unpaired", () => {
 describe("<CompanionBootProvider /> — paired", () => {
   const pairedConfig = {
     baseUrl: "http://test:7890",
-    deviceJwt: "jwt",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+    deviceKeyThumbprint: "thumbprint",
     deviceId: "abc",
     serverVersion: "1.0",
   }

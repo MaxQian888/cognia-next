@@ -604,6 +604,12 @@
     "webLabel": "Web",
     "workflowRefs": {
       "removeAria": "移除对 {label} 的引用"
+    },
+    "smartSnapshot": {
+      "captureFailed": "智能快照失败",
+      "captureTooltip": "智能快照",
+      "captured": "已附加智能快照：{appName}",
+      "switchPrompt": "请切换到目标应用，Cognia 稍后会截取它。"
     }
   },
   "concurrent": {
@@ -721,7 +727,15 @@
       "active": "当前",
       "aria": "切换本会话使用的账号",
       "noOverride": "继承",
-      "toast": "下一条消息将使用账号 {label}"
+      "toast": "下一条消息将使用账号 {label}",
+      "effective": "当前生效账号",
+      "error": "无法切换账号。",
+      "inheritedToast": "正在使用继承账号 {label}",
+      "toastInherited": "正在使用继承的账号。",
+      "switchFailed": "无法切换账号：{error}",
+      "unavailable": "账号切换当前不可用。",
+      "unavailableWithId": "账号 {id} 当前不可用。",
+      "useInherited": "使用继承账号"
     },
     "ariaSettings": "会话设置",
     "bareMode": "极简模式",
@@ -848,6 +862,7 @@
       "summaryUtility": "辅助"
     },
     "save": "保存",
+    "sessionCommunication": "会话通信",
     "sheet": {
       "sections": {
         "account": "模型与账号",
@@ -880,7 +895,10 @@
     "unreadArtifacts": "有新产物 · 展开面板",
     "untitledSession": "（未命名）",
     "workingDirLabel": "工作目录",
-    "workingDirPlaceholder": "/path/to/project"
+    "workingDirPlaceholder": "/path/to/project",
+    "openInCodexApp": "在 Codex App 中打开",
+    "openInCodexAppFailed": "无法在 Codex App 中打开此任务。",
+    "openedInCodexApp": "已在 Codex App 中打开。"
   },
   "history": {
     "loadError": "无法加载此对话。",
@@ -1386,6 +1404,69 @@
   "selection": {
     "askError": "无法为这段内容开旁支。",
     "askInAside": "开旁支追问"
+  },
+  "sessionCommunication": {
+    "acceptHeld": "接受",
+    "agentOrigin": "来自 {name} 的智能体消息 · 不受信任",
+    "attachedCreateError": "无法创建附加会话。",
+    "attachedCreated": "已创建附加会话。",
+    "attachedPromptLabel": "初始提示词",
+    "attachedTab": "附加会话",
+    "attachedTitleLabel": "任务标题",
+    "attachedStatus": {
+      "closed": "已关闭",
+      "completed": "已完成",
+      "interrupted": "已中断",
+      "running": "运行中",
+      "staged": "待运行"
+    },
+    "closeAttached": "关闭",
+    "contextFull": "完整父会话上下文",
+    "contextLabel": "上下文分叉",
+    "contextLastN": "最近若干消息",
+    "contextNone": "不携带父会话上下文",
+    "createAttached": "创建附加会话",
+    "description": "管理由父会话持有的子会话，以及独立会话之间的实时纯文本交接。",
+    "from": "来自 {name}",
+    "inboxTitle": "收件箱",
+    "intentLabel": "投递意图",
+    "intentNote": "仅作为备注",
+    "intentTrigger": "触发新一轮对话",
+    "interruptAttached": "中断",
+    "messageLabel": "消息",
+    "messageStatus": {
+      "delivered": "已投递",
+      "expired": "已过期",
+      "held": "等待审批",
+      "queued": "排队中",
+      "refused": "已拒绝",
+      "targetUnavailable": "目标不可用"
+    },
+    "noAttached": "还没有附加会话。",
+    "noInbox": "没有收到消息。",
+    "noOutbox": "没有已发送消息。",
+    "noReachable": "当前工作区没有其他在线会话。",
+    "openAttached": "打开",
+    "outboxTitle": "投递回执",
+    "peerTab": "消息其他会话",
+    "policyAccept": "接受",
+    "policyHold": "等待审批",
+    "policyLabel": "接收策略",
+    "policyRefuse": "拒绝",
+    "policyUpdateError": "无法更新消息接收策略。",
+    "refuseHeld": "拒绝",
+    "resultLabel": "结果",
+    "send": "发送消息",
+    "sendError": "无法发送消息。",
+    "sent": "消息状态：{status}",
+    "targetLabel": "目标会话",
+    "targetPlaceholder": "选择在线会话",
+    "title": "会话通信",
+    "turnsLabel": "携带消息数",
+    "userOrigin": "来自 {name} 的消息 · 不受信任",
+    "workspaceIndependent": "独立工作区",
+    "workspaceLabel": "工作区",
+    "workspaceShared": "共享父会话工作区"
   },
   "sessionCost": {
     "byModelTitle": "按模型拆分",

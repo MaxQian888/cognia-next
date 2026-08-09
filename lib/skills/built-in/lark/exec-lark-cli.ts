@@ -29,15 +29,8 @@
  *      `lark-cli` npm package installs itself globally).
  */
 
-import { execFile } from "node:child_process"
-import { promisify } from "node:util"
-import fs from "node:fs"
-import path from "node:path"
-import os from "node:os"
-
 import { resolveLarkAuth, type LarkAuthBridgeResult } from "./auth-bridge"
-
-const execFileAsync = promisify(execFile)
+import { runLarkCliProcess, type LarkCliProcessResult } from "./process"
 
 const MAX_STDOUT_BYTES = 1024 * 1024 // 1 MB
 const DEFAULT_TIMEOUT_MS = 60_000
@@ -115,15 +108,6 @@ export async function execLarkCli(input: ExecLarkCliInput): Promise<LarkCliResul
   }
 
   const binary = locateLarkCliBinary()
-  if (!binary) {
-    return {
-      status: "error",
-      reason: "binary_not_found",
-      message:
-        "lark-cli binary not found on PATH. Install via `npm install -g lark-cli` or set LARK_CLI_BIN.",
-      adapterId: auth.adapterId,
-    }
-  }
 
   const argv: string[] = [...input.args]
   // lark-cli expects the identity flag up front. We bias to user-scope
@@ -138,25 +122,27 @@ export async function execLarkCli(input: ExecLarkCliInput): Promise<LarkCliResul
 
   const timeoutMs = Math.min(MAX_TIMEOUT_MS, Math.max(1000, input.timeoutMs ?? DEFAULT_TIMEOUT_MS))
   const start = Date.now()
-  try {
-    const result = await execFileAsync(binary, argv, {
-      env: { ...process.env, ...auth.env },
-      timeout: timeoutMs,
-      maxBuffer: MAX_STDOUT_BYTES,
-      windowsHide: true,
-    })
-    const data = tryParseJson(String(result.stdout))
+  const result = await runLarkCliProcess(binary, argv, {
+    env: auth.env,
+    timeoutMs,
+    maxOutputBytes: MAX_STDOUT_BYTES,
+  })
+  if (
+    !result.notFound &&
+    !result.timedOut &&
+    (result.exitCode === undefined || result.exitCode === 0)
+  ) {
+    const data = tryParseJson(result.stdout)
     return {
       status: "ok",
       adapterId: auth.adapterId,
       identity: auth.identity,
       data,
-      stderr: String(result.stderr ?? ""),
+      stderr: result.stderr,
       durationMs: Date.now() - start,
     }
-  } catch (err) {
-    return interpretError(err, auth.adapterId)
   }
+  return interpretError(result, auth.adapterId)
 }
 
 // ---------------------------------------------------------------------------
@@ -169,30 +155,14 @@ export function __setLarkCliBinaryForTests(path: string | null): void {
 }
 let testBinaryOverride: string | null = null
 
-function locateLarkCliBinary(): string | null {
+function locateLarkCliBinary(): string {
   if (testBinaryOverride) return testBinaryOverride
   const fromEnv = process.env.LARK_CLI_BIN?.trim()
-  if (fromEnv && fileExists(fromEnv)) return fromEnv
-  // PATH lookup — Node's execFile resolves binary names through PATH on
-  // POSIX without intervention. On Windows we need the `.cmd` shim.
+  if (fromEnv) return fromEnv
   if (process.platform === "win32") {
-    const candidate = path.join(
-      process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming"),
-      "npm",
-      "lark-cli.cmd"
-    )
-    if (fileExists(candidate)) return candidate
     return "lark-cli.cmd"
   }
   return "lark-cli"
-}
-
-function fileExists(p: string): boolean {
-  try {
-    return fs.statSync(p).isFile()
-  } catch {
-    return false
-  }
 }
 
 function tryParseJson(stdout: string): unknown {
@@ -208,19 +178,10 @@ function tryParseJson(stdout: string): unknown {
   return trimmed
 }
 
-interface ExecError extends Error {
-  code?: number | string
-  stdout?: string
-  stderr?: string
-  signal?: NodeJS.Signals
-  killed?: boolean
-}
-
-function interpretError(err: unknown, adapterId: string): LarkCliResult {
-  const e = err as ExecError
-  const stderr = String(e?.stderr ?? "")
-  const exitCode = typeof e?.code === "number" ? e.code : undefined
-  if (e?.killed || e?.signal === "SIGTERM") {
+function interpretError(result: LarkCliProcessResult, adapterId: string): LarkCliResult {
+  const stderr = result.stderr
+  const exitCode = result.exitCode
+  if (result.timedOut) {
     return {
       status: "error",
       reason: "timeout",
@@ -229,7 +190,7 @@ function interpretError(err: unknown, adapterId: string): LarkCliResult {
       adapterId,
     }
   }
-  if (typeof e?.code === "string" && e.code === "ENOENT") {
+  if (result.notFound) {
     return {
       status: "error",
       reason: "binary_not_found",
@@ -251,7 +212,7 @@ function interpretError(err: unknown, adapterId: string): LarkCliResult {
   return {
     status: "error",
     reason: "non_zero_exit",
-    message: e?.message ?? `lark-cli exited with code ${exitCode}.`,
+    message: stderr || `lark-cli exited with code ${exitCode}.`,
     exitCode,
     stderr,
     adapterId,

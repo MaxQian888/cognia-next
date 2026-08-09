@@ -51,6 +51,21 @@ describe("installFakeIndexedDb", () => {
     }
   })
 
+  it("replaces Node-style storage accessors without invoking their getters", async () => {
+    const g: Record<string, unknown> = {}
+    const getter = jest.fn(() => {
+      throw new Error("warning-producing accessor was read")
+    })
+    Object.defineProperty(g, "localStorage", {
+      configurable: true,
+      get: getter,
+    })
+
+    await expect(installFakeIndexedDb(g)).resolves.toBeUndefined()
+    expect(getter).not.toHaveBeenCalled()
+    expect(typeof (g.localStorage as Storage).getItem).toBe("function")
+  })
+
   it("opens a real Dexie database against the shim", async () => {
     const g: Record<string, unknown> = {}
     await installFakeIndexedDb(g)

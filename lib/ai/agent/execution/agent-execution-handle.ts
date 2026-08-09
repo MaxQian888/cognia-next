@@ -15,6 +15,7 @@ import type {
 } from "@cognia/agent-config-types/agent-execution"
 
 import * as ipc from "@/lib/claude/ipc"
+import { isCapabilityProtocolFailure } from "./capability-health"
 
 export class AgentCapabilityError extends Error {
   readonly capability: AgentCapabilityId
@@ -164,6 +165,11 @@ interface HandleDeps {
     ) => Promise<void>
   }
   closeSession: (sessionId: string) => Promise<void>
+  recordCapabilityOutcome: (
+    capability: AgentCapabilityId,
+    outcome: "success" | "failure",
+    error?: unknown
+  ) => Promise<void>
 }
 
 function requireCapability(
@@ -241,6 +247,33 @@ export function createAgentExecutionHandle(
         const { transport } = await import("@/lib/tauri")
         await transport.call("agent_close_session", { sessionId: sid, commandId: nextCommandId() })
       }),
+    recordCapabilityOutcome:
+      deps?.recordCapabilityOutcome ??
+      (async (capability, outcome) => {
+        const { recordCertifiedCapabilityOutcome } = await import("./certification-store")
+        await recordCertifiedCapabilityOutcome(spec.compatibility.recordRef, capability, outcome)
+      }),
+  }
+
+  const notifyCapabilityOutcome = async (
+    capability: AgentCapabilityId,
+    outcome: "success" | "failure",
+    error?: unknown
+  ) => {
+    await io.recordCapabilityOutcome(capability, outcome, error).catch(() => undefined)
+  }
+
+  const runCapabilityCommand = async <T>(capability: AgentCapabilityId, run: () => Promise<T>) => {
+    try {
+      const result = await run()
+      await notifyCapabilityOutcome(capability, "success")
+      return result
+    } catch (error) {
+      if (isCapabilityProtocolFailure(error)) {
+        await notifyCapabilityOutcome(capability, "failure", error)
+      }
+      throw error
+    }
   }
 
   const frozenModels = new Set(
@@ -266,17 +299,19 @@ export function createAgentExecutionHandle(
     },
     async compact(focus) {
       requireCapability(spec, "compaction", "compact")
-      await io.ipc.compactSession(sessionId, focus)
+      await runCapabilityCommand("compaction", () => io.ipc.compactSession(sessionId, focus))
     },
     async resolvePermission(requestId, decision, options) {
       requireCapability(spec, "permissions.interrupt-resume", "resolvePermission")
-      await io.ipc.resolvePermission(
-        sessionId,
-        requestId,
-        decision,
-        options?.message,
-        options?.updatedInput,
-        options?.interrupt
+      await runCapabilityCommand("permissions.interrupt-resume", () =>
+        io.ipc.resolvePermission(
+          sessionId,
+          requestId,
+          decision,
+          options?.message,
+          options?.updatedInput,
+          options?.interrupt
+        )
       )
     },
     async setModel(model) {
@@ -284,16 +319,21 @@ export function createAgentExecutionHandle(
       if (!frozenModels.has(model)) {
         throw new FrozenModelBindingError(model)
       }
-      await io.ipc.setSessionModel(sessionId, model)
+      await runCapabilityCommand("set-model", () => io.ipc.setSessionModel(sessionId, model))
     },
     async setPermissionMode(mode) {
       requireCapability(spec, "permissions.set-mode", "setPermissionMode")
-      await io.ipc.setSessionMode(sessionId, mode)
+      await runCapabilityCommand("permissions.set-mode", () =>
+        io.ipc.setSessionMode(sessionId, mode)
+      )
     },
 
     async control(method, params) {
       requireCapability(spec, SESSION_CONTROL_CAPABILITIES[method], method)
-      return io.ipc.sessionControl(sessionId, method, params)
+      const capability = SESSION_CONTROL_CAPABILITIES[method]
+      return runCapabilityCommand(capability, () =>
+        io.ipc.sessionControl(sessionId, method, params)
+      )
     },
 
     reloadPlugins() {

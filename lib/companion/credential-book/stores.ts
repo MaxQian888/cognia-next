@@ -9,7 +9,7 @@
  *   Plain storage is fine and *wanted*: Settings must be able to list every
  *   paired host while the Vault is locked, and a locked Vault must not look
  *   like "no hosts paired".
- * - {@link HostCredentialStore} holds device JWTs and signaling private keys.
+ * - {@link HostCredentialStore} holds device and signaling private keys.
  *   Browser: the PBKDF2/AES-GCM Vault, so a locked Vault genuinely cannot
  *   produce a token. Capacitor: the platform keystore.
  *
@@ -26,19 +26,21 @@ import {
   type CompanionHostRecord,
 } from "./types"
 
-export const HOST_BOOK_KEY = "cognia.companion.hosts.v1"
-export const ACTIVE_HOST_KEY = "cognia.companion.hosts.active.v1"
+export const HOST_BOOK_KEY = "cognia.companion.hosts.v2"
+export const ACTIVE_HOST_KEY = "cognia.companion.hosts.active.v2"
+const LEGACY_HOST_BOOK_KEY = "cognia.companion.hosts.v1"
+const LEGACY_ACTIVE_HOST_KEY = "cognia.companion.hosts.active.v1"
 
 /** Envelope format for the persisted record book. */
 export interface HostBookEnvelope {
-  version: 1
+  version: 2
   hosts: Record<string, CompanionHostRecord>
   /** Active host storage key, per account namespace. */
   active: Record<string, string>
 }
 
 export function emptyHostBook(): HostBookEnvelope {
-  return { version: 1, hosts: {}, active: {} }
+  return { version: 2, hosts: {}, active: {} }
 }
 
 export interface HostRecordStore {
@@ -71,7 +73,7 @@ export function parseHostBook(raw: string | null): HostBookEnvelope {
     throw new Error("Companion host book is not an object.")
   }
   const root = parsed as Record<string, unknown>
-  if (root.version !== 1) {
+  if (root.version !== 2) {
     throw new Error(`Companion host book version ${String(root.version)} is not supported.`)
   }
   if (!root.hosts || typeof root.hosts !== "object" || Array.isArray(root.hosts)) {
@@ -82,7 +84,7 @@ export function parseHostBook(raw: string | null): HostBookEnvelope {
       ? (root.active as Record<string, string>)
       : {}
   return {
-    version: 1,
+    version: 2,
     hosts: root.hosts as Record<string, CompanionHostRecord>,
     active,
   }
@@ -94,6 +96,8 @@ export function parseHostBook(raw: string | null): HostBookEnvelope {
 export class LocalStorageHostRecordStore implements HostRecordStore {
   async read(): Promise<HostBookEnvelope> {
     if (typeof window === "undefined") return emptyHostBook()
+    window.localStorage.removeItem(LEGACY_HOST_BOOK_KEY)
+    window.localStorage.removeItem(LEGACY_ACTIVE_HOST_KEY)
     return parseHostBook(window.localStorage.getItem(HOST_BOOK_KEY))
   }
 
@@ -118,7 +122,11 @@ interface VaultSecretAdapter {
   encryptSecret?(name: string, value: string): Promise<EncryptedVaultSecret>
 }
 
-function jwtSecretName(key: CompanionHostKey): string {
+function deviceKeySecretName(key: CompanionHostKey): string {
+  return `companion-host:${hostRecordKey(key)}:device-private-jwk`
+}
+
+function legacyJwtSecretName(key: CompanionHostKey): string {
   return `companion-host:${hostRecordKey(key)}:device-jwt`
 }
 
@@ -141,9 +149,11 @@ export class VaultHostCredentialStore implements HostCredentialStore {
 
   async load(key: CompanionHostKey): Promise<CompanionHostCredential | null> {
     const vault = this.requireVault(key)
-    const deviceJwt = await vault.loadSecret(jwtSecretName(key))
-    if (!deviceJwt) return null
-    const credential: CompanionHostCredential = { deviceJwt }
+    const serializedDeviceKey = await vault.loadSecret(deviceKeySecretName(key))
+    if (!serializedDeviceKey) return null
+    const credential: CompanionHostCredential = {
+      devicePrivateKeyJwk: JSON.parse(serializedDeviceKey) as JsonWebKey,
+    }
     const jwk = await vault.loadSecret(signingSecretName(key))
     if (jwk) credential.signalingPrivateKeyJwk = JSON.parse(jwk) as JsonWebKey
     return credential
@@ -151,7 +161,11 @@ export class VaultHostCredentialStore implements HostCredentialStore {
 
   async save(key: CompanionHostKey, credential: CompanionHostCredential): Promise<void> {
     const vault = this.requireVault(key)
-    await vault.storeSecret(jwtSecretName(key), credential.deviceJwt)
+    await vault.storeSecret(
+      deviceKeySecretName(key),
+      JSON.stringify(credential.devicePrivateKeyJwk)
+    )
+    await vault.deleteSecret(legacyJwtSecretName(key))
     if (credential.signalingPrivateKeyJwk) {
       await vault.storeSecret(
         signingSecretName(key),
@@ -165,7 +179,8 @@ export class VaultHostCredentialStore implements HostCredentialStore {
   async remove(key: CompanionHostKey): Promise<void> {
     const vault = this.requireVault(key)
     await Promise.all([
-      vault.deleteSecret(jwtSecretName(key)),
+      vault.deleteSecret(deviceKeySecretName(key)),
+      vault.deleteSecret(legacyJwtSecretName(key)),
       vault.deleteSecret(signingSecretName(key)),
     ])
   }
@@ -209,9 +224,11 @@ export class SecureStorageHostCredentialStore implements HostCredentialStore {
   async load(key: CompanionHostKey): Promise<CompanionHostCredential | null> {
     try {
       const plugin = await this.loader()
-      const { value } = await plugin.get({ key: jwtSecretName(key) })
+      const { value } = await plugin.get({ key: deviceKeySecretName(key) })
       if (!value) return null
-      const credential: CompanionHostCredential = { deviceJwt: value }
+      const credential: CompanionHostCredential = {
+        devicePrivateKeyJwk: JSON.parse(value) as JsonWebKey,
+      }
       try {
         const jwk = await plugin.get({ key: signingSecretName(key) })
         if (jwk.value) credential.signalingPrivateKeyJwk = JSON.parse(jwk.value) as JsonWebKey
@@ -227,7 +244,11 @@ export class SecureStorageHostCredentialStore implements HostCredentialStore {
 
   async save(key: CompanionHostKey, credential: CompanionHostCredential): Promise<void> {
     const plugin = await this.loader()
-    await plugin.set({ key: jwtSecretName(key), value: credential.deviceJwt })
+    await plugin.set({
+      key: deviceKeySecretName(key),
+      value: JSON.stringify(credential.devicePrivateKeyJwk),
+    })
+    await plugin.remove({ key: legacyJwtSecretName(key) }).catch(() => undefined)
     if (credential.signalingPrivateKeyJwk) {
       await plugin.set({
         key: signingSecretName(key),
@@ -241,7 +262,8 @@ export class SecureStorageHostCredentialStore implements HostCredentialStore {
   async remove(key: CompanionHostKey): Promise<void> {
     const plugin = await this.loader()
     await Promise.all([
-      plugin.remove({ key: jwtSecretName(key) }).catch(() => undefined),
+      plugin.remove({ key: deviceKeySecretName(key) }).catch(() => undefined),
+      plugin.remove({ key: legacyJwtSecretName(key) }).catch(() => undefined),
       plugin.remove({ key: signingSecretName(key) }).catch(() => undefined),
     ])
   }
@@ -260,6 +282,10 @@ export class SecureStorageHostRecordStore implements HostRecordStore {
   async read(): Promise<HostBookEnvelope> {
     try {
       const plugin = await this.loader()
+      await Promise.all([
+        plugin.remove({ key: LEGACY_HOST_BOOK_KEY }).catch(() => undefined),
+        plugin.remove({ key: LEGACY_ACTIVE_HOST_KEY }).catch(() => undefined),
+      ])
       const { value } = await plugin.get({ key: HOST_BOOK_KEY })
       return parseHostBook(value || null)
     } catch (error) {

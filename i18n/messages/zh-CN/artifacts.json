@@ -185,6 +185,14 @@
       "allStatuses": "全部改动",
       "allTime": "全部时间",
       "any": "文件系统变化",
+      "adoptionGenerationOnly": "生成了 {lines} 行 · 旧回退链路无法判断采用情况",
+      "adoptionPending": "建议变更 {lines} 行 · 等待审阅",
+      "adoptionRate": "采用率 {rate}% · 已采用 {accepted}/{proposed} 行变更",
+      "adoptionRejected": "未采用 · 建议变更 {lines} 行",
+      "adoptionReverted": "采用已撤销 · 建议变更 {lines} 行",
+      "adoptionTitle": "AI 代码采用率",
+      "adoptionTruncated": "跟踪覆盖不完整",
+      "adoptionUnavailable": "无法获得采用率覆盖数据",
       "applyAll": "全部应用",
       "applyFile": "应用文件",
       "applySelectedHunks": "应用 {count} 个区块",
@@ -256,5 +264,9 @@
       "description": "工作区编辑需要桌面应用或已配对的 Companion 文件系统。",
       "title": "工作区不可用"
     }
+  },
+  "pluginRenderer": {
+    "failed": "插件渲染器运行失败。",
+    "loading": "正在加载插件渲染器…"
   }
 }

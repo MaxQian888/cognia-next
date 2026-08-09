@@ -3,39 +3,16 @@
  */
 
 import type { StructuredLogEntry } from "@cognia/logging/types"
+import {
+  buildLangfuseIngestionBatch,
+  createLangfuseTransport,
+  LangfuseTransport,
+} from "./langfuse-transport"
 
-// We mock the langfuse-client module that the transport lazy-imports.
-const mockSpan = {
-  end: jest.fn(),
-}
-
-const mockTrace = {
-  end: jest.fn(),
-}
-
-const mockLangfuse = {
-  flush: jest.fn(async () => undefined),
-}
-
-const mockGetLangfuse = jest.fn(async (..._args: unknown[]) => mockLangfuse)
-const mockCreateChatTrace = jest.fn(async (..._args: unknown[]) => mockTrace)
-const mockCreateSpan = jest.fn((..._args: [unknown, Record<string, unknown>]) => mockSpan)
-
-let langfuseModuleAvailable = true
-
-jest.mock("@/lib/ai/observability/langfuse-client", () => ({
-  __esModule: true,
-  getLangfuse: (...args: unknown[]) => mockGetLangfuse(...args),
-  createChatTrace: (...args: unknown[]) => mockCreateChatTrace(...args),
-  createSpan: (...args: unknown[]) =>
-    mockCreateSpan(...(args as [unknown, Record<string, unknown>])),
+const mockHasNoLeakingPiiDeep = jest.fn((_value?: unknown) => true)
+jest.mock("@cognia/redact", () => ({
+  hasNoLeakingPiiDeep: (value: unknown) => mockHasNoLeakingPiiDeep(value),
 }))
-
-beforeEach(() => {
-  jest.clearAllMocks()
-  langfuseModuleAvailable = true
-  mockGetLangfuse.mockResolvedValue(mockLangfuse)
-})
 
 function makeEntry(overrides: Partial<StructuredLogEntry> = {}): StructuredLogEntry {
   return {
@@ -48,261 +25,205 @@ function makeEntry(overrides: Partial<StructuredLogEntry> = {}): StructuredLogEn
   }
 }
 
-describe("LangfuseTransport buffering + level filter", () => {
-  it("buffers entries below batch size", async () => {
-    const { LangfuseTransport } = await import("./langfuse-transport")
-    const t = new LangfuseTransport({ batchSize: 5, flushInterval: 60_000 })
-    t.log(makeEntry({ level: "warn" }))
-    t.log(makeEntry({ level: "error" }))
-    // No auto flush yet — count below batchSize.
-    expect(mockGetLangfuse).not.toHaveBeenCalled()
-    await t.close()
-  })
+describe("Langfuse ingestion serialization", () => {
+  it("groups entries into one trace and preserves configured metadata", () => {
+    const batch = buildLangfuseIngestionBatch(
+      [
+        makeEntry({
+          traceId: "trace-1",
+          data: { ok: true },
+          stack: "stack",
+          source: { file: "a.ts" },
+        }),
+        makeEntry({ id: "log-2", traceId: "trace-1", level: "error", message: "failed" }),
+      ],
+      { includeData: true, includeStack: true, eventPrefix: "cognia" }
+    )
 
-  it("filters out entries below minLevel", async () => {
-    const { LangfuseTransport } = await import("./langfuse-transport")
-    const t = new LangfuseTransport({ batchSize: 1, minLevel: "error" })
-    t.log(makeEntry({ level: "info" }))
-    t.log(makeEntry({ level: "warn" }))
-    // None should hit the buffer because both are below min level error.
-    await t.close()
-    expect(mockCreateChatTrace).not.toHaveBeenCalled()
-  })
-
-  it("auto-flushes when batch size is hit", async () => {
-    const { LangfuseTransport } = await import("./langfuse-transport")
-    const t = new LangfuseTransport({ batchSize: 1, flushInterval: 60_000, includeData: false })
-    t.log(makeEntry({ level: "warn", traceId: "trace-A" }))
-    // Drain the microtasks scheduled by the auto-flush.
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(mockGetLangfuse).toHaveBeenCalled()
-    await t.close()
+    expect(batch.batch.filter((item) => item.type === "trace-create")).toHaveLength(1)
+    const events = batch.batch.filter((item) => item.type === "event-create")
+    expect(events).toHaveLength(2)
+    expect(events[0].body).toMatchObject({
+      traceId: "trace-1",
+      name: "cognia.warn.test",
+      input: "hello",
+      level: "WARNING",
+      metadata: expect.objectContaining({ data: { ok: true }, stack: "stack" }),
+    })
+    expect(events[1].body).toMatchObject({ level: "ERROR", input: "failed" })
   })
 })
 
-describe("LangfuseTransport.flush behavior", () => {
-  it("uses the native batch exporter without resolving a secret in JavaScript", async () => {
-    const { LangfuseTransport } = await import("./langfuse-transport")
-    const nativeExport = jest.fn().mockResolvedValue(undefined)
-    const resolveSecretKey = jest.fn()
-    const t = new LangfuseTransport({
+describe("LangfuseTransport", () => {
+  beforeEach(() => {
+    mockHasNoLeakingPiiDeep.mockReturnValue(true)
+  })
+
+  it("uses the same serialized batch for the Tauri exporter without resolving a web secret", async () => {
+    const exportBatch = jest.fn(async () => undefined)
+    const resolveSecretKey = jest.fn(async () => "should-not-be-read")
+    const transport = new LangfuseTransport({
+      publicKey: "pk-native",
       batchSize: 99,
       flushInterval: 60_000,
-      nativeExport,
+      exportBatch,
       resolveSecretKey,
     })
-    t.log(makeEntry({ level: "error", traceId: "native-trace" }))
-    await t.flush()
-    expect(nativeExport).toHaveBeenCalledWith([
-      expect.objectContaining({ traceId: "native-trace" }),
-    ])
-    expect(resolveSecretKey).not.toHaveBeenCalled()
-    expect(mockGetLangfuse).not.toHaveBeenCalled()
-    await t.close()
-  })
+    transport.log(makeEntry({ traceId: "native-trace", level: "error" }))
 
-  it("resolves a secure secret immediately before client creation", async () => {
-    const { LangfuseTransport } = await import("./langfuse-transport")
-    const resolveSecretKey = jest.fn().mockResolvedValue("sk-secure")
-    const t = new LangfuseTransport({ batchSize: 99, flushInterval: 60_000, resolveSecretKey })
-    t.log(makeEntry({ level: "error" }))
-    await t.flush()
-    expect(resolveSecretKey).toHaveBeenCalledTimes(1)
-    expect(mockGetLangfuse).toHaveBeenCalledWith(
-      expect.objectContaining({ secretKey: "sk-secure" })
-    )
-    await t.close()
-  })
+    await transport.flush()
 
-  it("groups entries by traceId and creates one trace per group", async () => {
-    const { LangfuseTransport } = await import("./langfuse-transport")
-    const t = new LangfuseTransport({ batchSize: 99, flushInterval: 60_000 })
-    t.log(makeEntry({ level: "error", traceId: "t1", message: "m1" }))
-    t.log(makeEntry({ level: "warn", traceId: "t1", message: "m2" }))
-    t.log(makeEntry({ level: "error", traceId: "t2", message: "m3" }))
-    await t.flush()
-    expect(mockCreateChatTrace).toHaveBeenCalledTimes(2)
-    // 3 spans were created across 2 traces.
-    expect(mockCreateSpan).toHaveBeenCalledTimes(3)
-    expect(mockTrace.end).toHaveBeenCalledTimes(2)
-    expect(mockSpan.end).toHaveBeenCalledTimes(3)
-    expect(mockLangfuse.flush).toHaveBeenCalled()
-    await t.close()
-  })
-
-  it("uses sessionId as fallback when traceId is missing", async () => {
-    const { LangfuseTransport } = await import("./langfuse-transport")
-    const t = new LangfuseTransport({ batchSize: 99, flushInterval: 60_000 })
-    t.log(makeEntry({ level: "error", sessionId: "session-A" }))
-    await t.flush()
-    expect(mockCreateChatTrace).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "session-A" })
-    )
-    await t.close()
-  })
-
-  it("uses 'default' when both traceId and sessionId are missing", async () => {
-    const { LangfuseTransport } = await import("./langfuse-transport")
-    const t = new LangfuseTransport({ batchSize: 99, flushInterval: 60_000 })
-    t.log(makeEntry({ level: "error" }))
-    await t.flush()
-    expect(mockCreateChatTrace).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "default" })
-    )
-    await t.close()
-  })
-
-  it("includes data, stack, and source in metadata when present", async () => {
-    const { LangfuseTransport } = await import("./langfuse-transport")
-    const t = new LangfuseTransport({ batchSize: 99, flushInterval: 60_000 })
-    t.log(
-      makeEntry({
-        level: "error",
-        data: { hello: "world" },
-        stack: "Error: x",
-        source: { file: "a.ts", line: 1 },
-      })
-    )
-    await t.flush()
-    const metadata = mockCreateSpan.mock.calls[0][1].metadata
-    expect(metadata).toMatchObject({
-      module: "test",
-      level: "error",
-      data: { hello: "world" },
-      stack: "Error: x",
-      source: { file: "a.ts", line: 1 },
+    expect(exportBatch).toHaveBeenCalledWith({
+      batch: expect.arrayContaining([
+        expect.objectContaining({ type: "trace-create" }),
+        expect.objectContaining({ type: "event-create" }),
+      ]),
     })
-    await t.close()
+    expect(resolveSecretKey).not.toHaveBeenCalled()
+    await transport.close()
   })
 
-  it("omits data + stack from metadata when options disable them", async () => {
-    const { LangfuseTransport } = await import("./langfuse-transport")
-    const t = new LangfuseTransport({
+  it("posts a Basic-authenticated ingestion batch on Web", async () => {
+    const fetchFn = jest.fn(async () => ({ ok: true, status: 200 }) as Response)
+    const resolveSecretKey = jest.fn(async () => "sk-secret")
+    const transport = new LangfuseTransport({
+      publicKey: "pk-public",
+      resolveSecretKey,
+      host: "https://langfuse.example/",
       batchSize: 99,
       flushInterval: 60_000,
-      includeData: false,
-      includeStack: false,
+      fetchFn,
     })
-    t.log(makeEntry({ level: "error", data: { x: 1 }, stack: "boom" }))
-    await t.flush()
-    const metadata = mockCreateSpan.mock.calls[0][1].metadata
-    expect(metadata).not.toHaveProperty("data")
-    expect(metadata).not.toHaveProperty("stack")
-    await t.close()
+    transport.log(makeEntry({ sessionId: "session-1", level: "error" }))
+
+    await transport.flush()
+
+    expect(resolveSecretKey).toHaveBeenCalledTimes(1)
+    expect(fetchFn).toHaveBeenCalledWith(
+      "https://langfuse.example/api/public/ingestion",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Basic " + btoa("pk-public:sk-secret"),
+          "Content-Type": "application/json",
+        }),
+        body: expect.stringContaining('"event-create"'),
+      })
+    )
+    await transport.close()
   })
 
-  it("flush() is a no-op when buffer is empty", async () => {
-    const { LangfuseTransport } = await import("./langfuse-transport")
-    const t = new LangfuseTransport({ batchSize: 99, flushInterval: 60_000 })
-    await t.flush()
-    expect(mockGetLangfuse).not.toHaveBeenCalled()
-    await t.close()
-  })
-
-  it("returns silently when getLangfuse() returns null", async () => {
-    mockGetLangfuse.mockResolvedValueOnce(null as unknown as typeof mockLangfuse)
-    const { LangfuseTransport } = await import("./langfuse-transport")
-    const t = new LangfuseTransport({ batchSize: 99, flushInterval: 60_000 })
-    t.log(makeEntry({ level: "error" }))
-    await t.flush()
-    expect(mockCreateChatTrace).not.toHaveBeenCalled()
-    await t.close()
-  })
-
-  it("re-buffers entries when flush throws (under 100 buffer size)", async () => {
-    mockGetLangfuse.mockRejectedValueOnce(new Error("network down"))
-    const { LangfuseTransport } = await import("./langfuse-transport")
-    const t = new LangfuseTransport({ batchSize: 99, flushInterval: 60_000 })
-    t.log(makeEntry({ level: "error" }))
-    await t.flush()
-    // The next successful flush should still drain the re-queued entries.
-    mockGetLangfuse.mockResolvedValueOnce(mockLangfuse)
-    await t.flush()
-    expect(mockCreateChatTrace).toHaveBeenCalled()
-    await t.close()
-  })
-
-  it("level mapping covers all levels", async () => {
-    const { LangfuseTransport } = await import("./langfuse-transport")
-    const t = new LangfuseTransport({ batchSize: 99, flushInterval: 60_000, minLevel: "trace" })
-    t.log(makeEntry({ level: "trace" }))
-    t.log(makeEntry({ level: "debug" }))
-    t.log(makeEntry({ level: "info" }))
-    t.log(makeEntry({ level: "warn" }))
-    t.log(makeEntry({ level: "error" }))
-    t.log(makeEntry({ level: "fatal" }))
-    await t.flush()
-    const levels = mockCreateSpan.mock.calls.map((c) => c[1].level)
-    expect(levels).toEqual(expect.arrayContaining(["DEBUG", "DEFAULT", "WARNING", "ERROR"]))
-    await t.close()
-  })
-})
-
-describe("LangfuseTransport flush timer and close", () => {
-  it("close() clears the flush timer and runs a final flush", async () => {
-    const { LangfuseTransport } = await import("./langfuse-transport")
-    const t = new LangfuseTransport({ batchSize: 99, flushInterval: 1000 })
-    t.log(makeEntry({ level: "error" }))
-    await t.close()
-    expect(mockCreateChatTrace).toHaveBeenCalled()
-  })
-
-  it("flush timer auto-fires periodically", async () => {
-    jest.useFakeTimers()
-    try {
-      const { LangfuseTransport } = await import("./langfuse-transport")
-      const t = new LangfuseTransport({ batchSize: 99, flushInterval: 1000 })
-      t.log(makeEntry({ level: "error" }))
-      // Trigger the setInterval tick.
-      jest.advanceTimersByTime(1100)
-      jest.useRealTimers()
-      // Drain the promise chain triggered by setInterval.
-      await Promise.resolve()
-      await Promise.resolve()
-      await Promise.resolve()
-      expect(mockGetLangfuse).toHaveBeenCalled()
-      await t.close()
-    } finally {
-      jest.useRealTimers()
-    }
-  })
-})
-
-describe("LangfuseTransport when langfuse-client is unavailable", () => {
-  beforeEach(() => {
-    jest.resetModules()
-    jest.doMock("@/lib/ai/observability/langfuse-client", () => {
-      throw new Error("no langfuse")
+  it("re-buffers a failed batch within the existing bound", async () => {
+    const exportBatch = jest
+      .fn<Promise<void>, [unknown]>()
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValue(undefined)
+    const transport = new LangfuseTransport({
+      publicKey: "pk-native",
+      batchSize: 99,
+      flushInterval: 60_000,
+      exportBatch: exportBatch as never,
     })
+    transport.log(makeEntry({ level: "error" }))
+
+    await transport.flush()
+    await transport.flush()
+
+    expect(exportBatch).toHaveBeenCalledTimes(2)
+    expect(JSON.stringify(exportBatch.mock.calls[1][0])).toContain("hello")
+    await transport.close()
   })
 
-  it("flush silently no-ops when the client module fails to load", async () => {
-    const { LangfuseTransport } = await import("./langfuse-transport")
-    const t = new LangfuseTransport({ batchSize: 99, flushInterval: 60_000 })
-    t.log(makeEntry({ level: "error" }))
-    await t.flush()
-    // No exception thrown; second flush returns immediately without re-import.
-    await t.flush()
-    await t.close()
+  it("drops an empty-credential Web batch without retrying forever", async () => {
+    const fetchFn = jest.fn()
+    const resolveSecretKey = jest.fn(async () => null)
+    const transport = new LangfuseTransport({
+      publicKey: "pk-public",
+      resolveSecretKey,
+      batchSize: 99,
+      flushInterval: 60_000,
+      fetchFn: fetchFn as typeof fetch,
+    })
+    transport.log(makeEntry({ level: "error" }))
+
+    await transport.flush()
+    await transport.flush()
+
+    expect(resolveSecretKey).toHaveBeenCalledTimes(1)
+    expect(fetchFn).not.toHaveBeenCalled()
+    await transport.close()
+  })
+
+  it("fails closed before either exporter when the serialized batch leaks PII", async () => {
+    const exportBatch = jest.fn(async () => undefined)
+    mockHasNoLeakingPiiDeep.mockReturnValue(false)
+    const transport = new LangfuseTransport({
+      publicKey: "pk-native",
+      batchSize: 99,
+      flushInterval: 60_000,
+      exportBatch,
+    })
+    transport.log(makeEntry({ level: "error", message: "alice@example.com" }))
+
+    await transport.flush()
+
+    expect(mockHasNoLeakingPiiDeep).toHaveBeenCalledWith({
+      batch: expect.arrayContaining([expect.objectContaining({ type: "event-create" })]),
+    })
+    expect(exportBatch).not.toHaveBeenCalled()
+    await transport.close()
+  })
+
+  it("does not call the native exporter or retry when its public key is empty", async () => {
+    const exportBatch = jest.fn(async () => undefined)
+    const transport = new LangfuseTransport({
+      batchSize: 99,
+      flushInterval: 60_000,
+      exportBatch,
+    })
+    transport.log(makeEntry({ level: "error" }))
+
+    await transport.flush()
+    await transport.flush()
+
+    expect(exportBatch).not.toHaveBeenCalled()
+    await transport.close()
+  })
+
+  it("keeps ingestion ids stable when a failed batch is retried", async () => {
+    const exported: unknown[] = []
+    const exportBatch = jest.fn(async (batch: unknown) => {
+      exported.push(batch)
+      if (exported.length === 1) throw new Error("response lost")
+    })
+    const transport = new LangfuseTransport({
+      publicKey: "pk-native",
+      batchSize: 99,
+      flushInterval: 60_000,
+      exportBatch,
+    })
+    transport.log(makeEntry({ id: "stable-log", traceId: "stable-trace", level: "error" }))
+
+    await transport.flush()
+    await transport.flush()
+
+    expect(exported).toHaveLength(2)
+    expect(exported[1]).toEqual(exported[0])
+    await transport.close()
+  })
+
+  it("filters below minLevel and supports the existing factory", async () => {
+    const exportBatch = jest.fn(async () => undefined)
+    const transport = createLangfuseTransport({
+      publicKey: "pk-native",
+      minLevel: "error",
+      batchSize: 99,
+      flushInterval: 60_000,
+      exportBatch,
+    })
+    transport.log(makeEntry({ level: "warn" }))
+    await transport.close()
+    expect(transport.name).toBe("langfuse")
+    expect(exportBatch).not.toHaveBeenCalled()
   })
 })
-
-describe("createLangfuseTransport factory", () => {
-  it("returns an instance with the right name", async () => {
-    const { createLangfuseTransport } = await import("./langfuse-transport")
-    const t = createLangfuseTransport({ batchSize: 5 })
-    expect(t.name).toBe("langfuse")
-    await t.close()
-  })
-
-  it("supports default options", async () => {
-    const { createLangfuseTransport } = await import("./langfuse-transport")
-    const t = createLangfuseTransport()
-    expect(t.name).toBe("langfuse")
-    await t.close()
-  })
-})
-
-void langfuseModuleAvailable

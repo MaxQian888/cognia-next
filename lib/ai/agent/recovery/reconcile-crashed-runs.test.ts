@@ -13,8 +13,12 @@ jest.mock("@/lib/workflow/runtime/run-lease", () => ({
   releaseRunLease: (...a: unknown[]) => releaseLease(...a),
 }))
 const appendJournal = jest.fn()
+const replayJournal = jest.fn()
 jest.mock("@/lib/db/execution-runs", () => ({
-  runEventJournal: { append: (...a: unknown[]) => appendJournal(...a) },
+  runEventJournal: {
+    append: (...a: unknown[]) => appendJournal(...a),
+    replay: (...a: unknown[]) => replayJournal(...a),
+  },
   semanticRunEvent: (type: string, payload: unknown, opts: { ts?: number }) => ({
     type,
     payload,
@@ -22,7 +26,13 @@ jest.mock("@/lib/db/execution-runs", () => ({
   }),
 }))
 
-import { reconcileCrashedAgentRuns } from "./reconcile-crashed-runs"
+import {
+  parseAgentRunRecoveryAnchor,
+  reconcileCrashedAgentRuns,
+  resumeCrashedAgentRun,
+  validateRecoveryContinuation,
+  type AgentRunRecoveryAnchorV1,
+} from "./reconcile-crashed-runs"
 import { appendCanonicalEnvelopes, __resetCanonicalLogForTesting } from "./canonical-log"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 
@@ -71,6 +81,192 @@ beforeEach(async () => {
   claimLease.mockResolvedValue("claimed")
   releaseLease.mockResolvedValue(undefined)
   appendJournal.mockResolvedValue({})
+  replayJournal.mockResolvedValue([{ type: "run.started", payload: { recoveryAnchor: anchor } }])
+})
+
+const anchor: AgentRunRecoveryAnchorV1 = {
+  version: 1,
+  inboundJobId: "job-1",
+  sessionId: "s1",
+  sdkSessionId: "sdk-1",
+  attemptId: "attempt-1",
+  executionFingerprint: "fp-1",
+  routeKind: "direct",
+  runtimeAdapter: "claude-agent-sdk",
+  candidateDeploymentIds: ["deployment-1"],
+  modelBindings: { primary: "claude-sonnet-5" },
+}
+
+describe("explicit crashed-run resume", () => {
+  it("continues a text-interrupted run through the durable inbound job", async () => {
+    replayJournal.mockResolvedValueOnce([
+      { type: "run.started", payload: { recoveryAnchor: anchor } },
+    ])
+    await appendCanonicalEnvelopes("run-resume", [
+      envelope("run-resume", 0, { kind: "text-delta", delta: "partial answer" }),
+      envelope("run-resume", 1, {
+        kind: "permission-request",
+        requestId: "permission-1",
+        toolName: "Bash",
+      }),
+      envelope("run-resume", 2, {
+        kind: "permission-resolved",
+        requestId: "permission-1",
+        behavior: "allow",
+      }),
+    ])
+    const continueInboundJob = jest.fn(async () => true)
+
+    await expect(
+      resumeCrashedAgentRun("run-resume", {
+        findInboundJob: async () => ({ id: "job-1", status: "recovery_required" }) as never,
+        readSdkSessionId: async () => "sdk-1",
+        continueInboundJob,
+      })
+    ).resolves.toEqual({ resumed: true, inboundJobId: "job-1" })
+    expect(continueInboundJob).toHaveBeenCalledWith("job-1", {
+      recoveryAnchor: expect.objectContaining({ version: 1, sdkSessionId: "sdk-1" }),
+    })
+    expect(continueInboundJob).toHaveBeenCalledWith("job-1", {
+      recoveryAnchor: expect.objectContaining({
+        partialOutput: "partial answer",
+        restoredPermissions: [
+          expect.objectContaining({
+            requestId: "permission-1",
+            state: "pending",
+            downgradedFromAllow: true,
+          }),
+        ],
+      }),
+    })
+  })
+
+  it("uses the latest persisted SDK-session recovery checkpoint", async () => {
+    replayJournal.mockResolvedValueOnce([
+      {
+        type: "run.started",
+        payload: { recoveryAnchor: { ...anchor, sdkSessionId: undefined } },
+      },
+      {
+        type: "resource.changed",
+        payload: { recoveryAnchor: { ...anchor, sdkSessionId: "sdk-issued" } },
+      },
+    ])
+    await appendCanonicalEnvelopes("run-sdk-checkpoint", [
+      envelope("run-sdk-checkpoint", 0, { kind: "text-delta", delta: "partial" }),
+    ])
+    const continueInboundJob = jest.fn(async () => true)
+
+    await expect(
+      resumeCrashedAgentRun("run-sdk-checkpoint", {
+        findInboundJob: async () => ({ id: "job-1", status: "recovery_required" }) as never,
+        readSdkSessionId: async () => "sdk-issued",
+        continueInboundJob,
+      })
+    ).resolves.toEqual({ resumed: true, inboundJobId: "job-1" })
+    expect(continueInboundJob).toHaveBeenCalledWith("job-1", {
+      recoveryAnchor: expect.objectContaining({ sdkSessionId: "sdk-issued" }),
+    })
+  })
+
+  it("blocks unresolved tools and legacy runs without an anchor", async () => {
+    replayJournal.mockResolvedValueOnce([
+      { type: "run.started", payload: { recoveryAnchor: anchor } },
+    ])
+    await appendCanonicalEnvelopes("run-tool", [
+      envelope("run-tool", 0, { kind: "tool-call", toolName: "Bash", toolCallId: "c1" }),
+    ])
+    await expect(
+      resumeCrashedAgentRun("run-tool", {
+        findInboundJob: async () => ({ id: "job-1", status: "recovery_required" }) as never,
+        readSdkSessionId: async () => "sdk-1",
+        continueInboundJob: jest.fn(),
+      })
+    ).resolves.toMatchObject({ resumed: false, reason: "ambiguous-side-effects" })
+
+    replayJournal.mockResolvedValueOnce([])
+    await expect(resumeCrashedAgentRun("run-legacy")).resolves.toEqual({
+      resumed: false,
+      reason: "missing-recovery-anchor",
+    })
+
+    const { routeKind: _routeKind, ...anchorWithoutRoute } = anchor
+    replayJournal.mockResolvedValueOnce([
+      { type: "run.started", payload: { recoveryAnchor: anchorWithoutRoute } },
+    ])
+    await expect(resumeCrashedAgentRun("run-anchor-without-route")).resolves.toEqual({
+      resumed: false,
+      reason: "missing-recovery-anchor",
+    })
+  })
+
+  it("never resumes a run whose canonical persistence was marked corrupt", async () => {
+    replayJournal.mockResolvedValueOnce([
+      { type: "run.started", payload: { recoveryAnchor: anchor } },
+      {
+        type: "run.recovery_required",
+        payload: { reason: "canonical-log-write-failed" },
+      },
+    ])
+    await appendCanonicalEnvelopes("run-corrupt-marker", [
+      envelope("run-corrupt-marker", 1, {
+        kind: "tool-result",
+        toolName: "Write",
+        toolCallId: "call-1",
+        result: "ok",
+      }),
+    ])
+
+    await expect(resumeCrashedAgentRun("run-corrupt-marker")).resolves.toEqual({
+      resumed: false,
+      reason: "canonical-log-corrupt",
+    })
+  })
+
+  it("blocks fingerprint, route, model, and SDK-session drift", () => {
+    expect(
+      validateRecoveryContinuation(anchor, {
+        sdkSessionId: "sdk-other",
+        executionFingerprint: "fp-other",
+        candidateDeploymentIds: ["deployment-2"],
+        modelBindings: { primary: "claude-opus-4-8" },
+      })
+    ).toEqual({
+      action: "pause",
+      mismatches: expect.arrayContaining([
+        "sdkSessionId",
+        "executionFingerprint",
+        "candidateDeploymentIds",
+        "modelBindings.primary",
+      ]),
+    })
+  })
+
+  it("rejects malformed optional model bindings in a recovery anchor", () => {
+    expect(
+      parseAgentRunRecoveryAnchor({
+        ...anchor,
+        modelBindings: { ...anchor.modelBindings, fast: 42 },
+      })
+    ).toBeUndefined()
+  })
+
+  it("releases the recovery lease when durable continuation throws", async () => {
+    await appendCanonicalEnvelopes("run-error", [
+      envelope("run-error", 0, { kind: "text-delta", delta: "partial answer" }),
+    ])
+
+    await expect(
+      resumeCrashedAgentRun("run-error", {
+        findInboundJob: async () => ({ id: "job-1", status: "recovery_required" }) as never,
+        readSdkSessionId: async () => "sdk-1",
+        continueInboundJob: async () => {
+          throw new Error("durable queue unavailable")
+        },
+      })
+    ).rejects.toThrow("durable queue unavailable")
+    expect(releaseLease).toHaveBeenCalledWith("run-error")
+  })
 })
 
 describe("reconcileCrashedAgentRuns", () => {
@@ -134,6 +330,19 @@ describe("reconcileCrashedAgentRuns", () => {
     expect(outcomes.find((o) => o.runId === "run-empty")?.outcome).toMatchObject({
       status: "recovery_required",
       reason: "no-candidates",
+    })
+  })
+
+  it("marks legacy runs without a recovery anchor as recovery_required", async () => {
+    replayJournal.mockImplementation(async (runId: string) =>
+      runId === "run-legacy" ? [] : [{ type: "run.started", payload: { recoveryAnchor: anchor } }]
+    )
+    await getDb().executionRuns.put(run("run-legacy", "running"))
+
+    const outcomes = await reconcileCrashedAgentRuns()
+    expect(outcomes.find((item) => item.runId === "run-legacy")?.outcome).toMatchObject({
+      status: "recovery_required",
+      reason: "missing-recovery-anchor",
     })
   })
 

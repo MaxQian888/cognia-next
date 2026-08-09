@@ -27,6 +27,8 @@ const RAW = JSON.stringify({
   hostname: "host.example",
 })
 
+const encoded = (value: string) => Buffer.from(value, "utf8").toString("base64")
+
 beforeEach(() => {
   jest.clearAllMocks()
 })
@@ -35,12 +37,17 @@ describe("fetchIpInfo (Tauri path)", () => {
   beforeEach(() => isTauri.mockReturnValue(true))
 
   it("routes through proxy_http_request and normalizes the payload", async () => {
-    invoke.mockResolvedValue({ status: 200, body: RAW, headers: {} })
+    invoke.mockResolvedValue({ status: 200, bodyBase64: encoded(RAW), headers: {} })
     const res = await fetchIpInfo()
     expect(invoke).toHaveBeenCalledWith(
       "proxy_http_request",
       expect.objectContaining({
-        input: expect.objectContaining({ url: IP_INFO_URL, method: "GET" }),
+        input: expect.objectContaining({
+          url: IP_INFO_URL,
+          method: "GET",
+          timeoutMs: 15_000,
+          redirect: "follow",
+        }),
       })
     )
     expect(res).toEqual({
@@ -60,24 +67,28 @@ describe("fetchIpInfo (Tauri path)", () => {
   })
 
   it("reports an error for a non-2xx status", async () => {
-    invoke.mockResolvedValue({ status: 429, body: "", headers: {} })
+    invoke.mockResolvedValue({ status: 429, bodyBase64: "", headers: {} })
     expect(await fetchIpInfo()).toEqual({ ok: false, error: "HTTP 429" })
   })
 
   it("reports an error for invalid JSON", async () => {
-    invoke.mockResolvedValue({ status: 200, body: "not json", headers: {} })
+    invoke.mockResolvedValue({ status: 200, bodyBase64: encoded("not json"), headers: {} })
     expect(await fetchIpInfo()).toEqual({ ok: false, error: "invalid JSON response" })
   })
 
   it("reports an error when the payload has no ip", async () => {
-    invoke.mockResolvedValue({ status: 200, body: JSON.stringify({ city: "x" }), headers: {} })
+    invoke.mockResolvedValue({
+      status: 200,
+      bodyBase64: encoded(JSON.stringify({ city: "x" })),
+      headers: {},
+    })
     expect(await fetchIpInfo()).toEqual({ ok: false, error: "no IP in response" })
   })
 
   it("drops blank/non-string optional fields", async () => {
     invoke.mockResolvedValue({
       status: 200,
-      body: JSON.stringify({ ip: "1.1.1.1", city: "  ", region: 5, org: "AS13335" }),
+      bodyBase64: encoded(JSON.stringify({ ip: "1.1.1.1", city: "  ", region: 5, org: "AS13335" })),
       headers: {},
     })
     const res = await fetchIpInfo()
@@ -90,7 +101,7 @@ describe("fetchIpInfo (Tauri path)", () => {
   })
 
   it("returns an error when the response is not an object", async () => {
-    invoke.mockResolvedValue({ status: 200, body: "42", headers: {} })
+    invoke.mockResolvedValue({ status: 200, bodyBase64: encoded("42"), headers: {} })
     expect(await fetchIpInfo()).toEqual({ ok: false, error: "no IP in response" })
   })
 })

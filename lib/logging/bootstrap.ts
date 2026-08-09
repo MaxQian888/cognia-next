@@ -85,7 +85,7 @@ export const OBSERVABILITY_SPOOL_MAX_BYTES = 250 * 1024 * 1024
 // Remote / Langfuse / OpenTelemetry short-circuit silently when their
 // credentials/endpoints are blank — see `applyTransportSettings()` below
 // which gates remote attachment on a non-empty endpoint, the Langfuse
-// transport which lazy-loads + no-ops on missing keys, and the OTel
+// transport which sends direct ingestion batches and no-ops on missing keys, and the OTel
 // transport which guards POST against unreachable endpoints. Their
 // `enabled` flag stays true so the panel surfaces a `Degraded` health
 // badge until the user fills in the config in Settings → Observability.
@@ -706,56 +706,16 @@ function applyTransportSettings(
       createLangfuseTransport({
         publicKey: transports.langfuseConfig.publicKey || undefined,
         resolveSecretKey: () => getTelemetrySecretForWeb("langfuseSecretKey"),
-        nativeExport: isTauri()
-          ? async (entries) => {
-              const timestamp = new Date().toISOString()
-              const batch = entries.flatMap((entry) => {
-                const traceId = entry.traceId || entry.sessionId || crypto.randomUUID()
-                const eventId = crypto.randomUUID()
-                return [
-                  {
-                    id: crypto.randomUUID(),
-                    timestamp,
-                    type: "trace-create",
-                    body: {
-                      id: traceId,
-                      timestamp,
-                      name: "cognia.logger",
-                      sessionId: entry.sessionId,
-                      metadata: { source: "logger" },
-                      tags: ["log"],
-                    },
-                  },
-                  {
-                    id: eventId,
-                    timestamp,
-                    type: "event-create",
-                    body: {
-                      id: eventId,
-                      traceId,
-                      timestamp,
-                      name: `log.${entry.level}.${entry.module}`,
-                      input: entry.message,
-                      metadata: entry.data,
-                      level:
-                        entry.level === "error" || entry.level === "fatal"
-                          ? "ERROR"
-                          : entry.level === "warn"
-                            ? "WARNING"
-                            : entry.level === "trace" || entry.level === "debug"
-                              ? "DEBUG"
-                              : "DEFAULT",
-                    },
-                  },
-                ]
-              })
-              await postTauriTelemetryJson(
-                `${langfuseHost}/api/public/ingestion`,
-                JSON.stringify({ batch }),
-                { kind: "langfuse", publicKey: transports.langfuseConfig.publicKey }
-              )
-            }
-          : undefined,
+        exportBatch:
+          isTauri() && transports.langfuseConfig.secretKeyConfigured === true
+            ? async (batch) => {
+                await postTauriTelemetryJson(
+                  `${langfuseHost}/api/public/ingestion`,
+                  JSON.stringify(batch),
+                  { kind: "langfuse", publicKey: transports.langfuseConfig.publicKey }
+                )
+              }
+            : undefined,
         host: transports.langfuseConfig.host || undefined,
         minLevel: transports.langfuseConfig.minLevel,
       })
