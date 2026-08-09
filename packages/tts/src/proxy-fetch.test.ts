@@ -123,6 +123,14 @@ describe("browser path (no host hook installed)", () => {
     expect(r.ok).toBe(false)
     expect(r.status).toBe(500)
   })
+
+  it("forwards cancellation to browser fetch", async () => {
+    const controller = new AbortController()
+    const fetchMock = globalThis.fetch as unknown as jest.Mock
+    fetchMock.mockResolvedValueOnce(makeResponse())
+    await proxyFetch("https://example.com/api", { json: {}, signal: controller.signal })
+    expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal)
+  })
 })
 
 describe("host hook path", () => {

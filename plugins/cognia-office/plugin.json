@@ -1,0 +1,35 @@
+{
+  "id": "cognia-office",
+  "name": "Cognia Office",
+  "version": "0.1.0",
+  "description": "Plugin-owned native XLSX authoring, preview, validation, export, and Lark Sheets synchronization.",
+  "type": "frontend",
+  "capabilities": ["tools"],
+  "main": "src/index.ts",
+  "author": { "name": "cognia-next" },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": { "cognia": ">=0.1.0" },
+  "permissions": [
+    "artifact:read",
+    "artifact:write",
+    "filesystem:read",
+    "filesystem:write",
+    "builtin-skills:invoke"
+  ],
+  "builtInSkills": ["lark.sheets.*"],
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "headless": {
+      "availability": "blocked",
+      "reason": "Office file open/save requires an interactive browser or Tauri file port."
+    },
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Workbook creation, preview, and download are available; native file dialogs depend on the connected shell."
+    }
+  }
+}

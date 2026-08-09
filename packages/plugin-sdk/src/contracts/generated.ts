@@ -55,6 +55,7 @@ export const CANONICAL_PLUGIN_PERMISSION_IDS = [
   "media:video:write",
   "media:video:export",
   "agent:control",
+  "builtin-skills:invoke",
   "agent:dispatch-external",
   "agent:dispatch",
   "agent:shared-memory:read",

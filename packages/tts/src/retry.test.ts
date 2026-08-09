@@ -121,4 +121,18 @@ describe("withTtsRetry", () => {
     expect(res).toBe(ok)
     expect(fn).toHaveBeenCalledTimes(2)
   })
+
+  it("stops before another attempt when aborted during backoff", async () => {
+    const controller = new AbortController()
+    const fn = jest.fn(async () => networkFail)
+    const pending = withTtsRetry(fn, {
+      retries: 2,
+      backoffMs: [10_000],
+      signal: controller.signal,
+    })
+    await Promise.resolve()
+    controller.abort()
+    await expect(pending).resolves.toMatchObject({ success: false, errorType: "cancelled" })
+    expect(fn).toHaveBeenCalledTimes(1)
+  })
 })

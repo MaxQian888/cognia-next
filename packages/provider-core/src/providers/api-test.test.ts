@@ -2,11 +2,6 @@
  * @jest-environment jsdom
  */
 
-jest.mock("@tauri-apps/api/core", () => ({
-  invoke: jest.fn(),
-}))
-
-import { invoke } from "@tauri-apps/api/core"
 import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
 import {
   resetProviderCoreRuntimeAdaptersForTesting,
@@ -31,12 +26,6 @@ import {
 } from "./api-test"
 
 const proxyFetchMock = jest.fn()
-const invokeMock = invoke as unknown as jest.Mock
-
-// jsdom does not expose `fetch` on globalThis; install a single jest.fn() and
-// reset its state between tests (same pattern as local-provider-service.test.ts).
-const fetchMock = jest.fn()
-;(globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch
 
 function setTauri(enabled: boolean) {
   const w = window as unknown as Record<string, unknown>
@@ -59,8 +48,6 @@ function jsonResponse(body: unknown, init: { status?: number } = {}): Response {
 
 beforeEach(() => {
   proxyFetchMock.mockReset()
-  invokeMock.mockReset()
-  fetchMock.mockReset()
   setProviderCoreRuntimeAdapters({ proxyFetch: proxyFetchMock })
   setTauri(false)
 })
@@ -230,15 +217,17 @@ describe("testCustomProviderConnectionByProtocol", () => {
 })
 
 describe("testOpenAIConnection", () => {
-  it("delegates to Tauri when running inside Tauri", async () => {
+  it("keeps using the shared proxy transport in Tauri", async () => {
     setTauri(true)
-    invokeMock.mockResolvedValue({ success: true, message: "tauri ok" })
+    proxyFetchMock.mockResolvedValue(jsonResponse({ data: [{ id: "gpt-4o" }] }))
     const result = await testOpenAIConnection("sk-x")
-    expect(invokeMock).toHaveBeenCalledWith("test_openai_connection", {
-      apiKey: "sk-x",
-      baseUrl: undefined,
-    })
-    expect(result.message).toBe("tauri ok")
+    expect(proxyFetchMock).toHaveBeenCalledWith(
+      "https://api.openai.com/v1/models",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer sk-x" }),
+      })
+    )
+    expect(result.success).toBe(true)
   })
 
   it("(browser) succeeds and reports model count when /models returns 200", async () => {
@@ -280,13 +269,19 @@ describe("testOpenAIConnection", () => {
 })
 
 describe("testAnthropicConnection", () => {
-  it("delegates to Tauri when available", async () => {
+  it("uses the desktop-safe proxy probe in Tauri", async () => {
     setTauri(true)
-    invokeMock.mockResolvedValue({ success: true, message: "ok" })
+    proxyFetchMock.mockResolvedValue(jsonResponse({}, { status: 200 }))
     const result = await testAnthropicConnection("sk-ant-xxx-very-long-key-1234567890")
-    expect(invokeMock).toHaveBeenCalledWith("test_anthropic_connection", {
-      apiKey: expect.any(String),
-    })
+    expect(proxyFetchMock).toHaveBeenCalledWith(
+      "https://api.anthropic.com/v1/messages",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "x-api-key": "sk-ant-xxx-very-long-key-1234567890",
+        }),
+      })
+    )
     expect(result.success).toBe(true)
   })
 
@@ -315,11 +310,14 @@ describe("testGoogleConnection", () => {
     expect(proxyFetchMock.mock.calls[0][0]).toContain("key=gkey")
   })
 
-  it("delegates to Tauri when available", async () => {
+  it("keeps using the shared proxy transport in Tauri", async () => {
     setTauri(true)
-    invokeMock.mockResolvedValue({ success: true, message: "tauri-google" })
-    await testGoogleConnection("gkey")
-    expect(invokeMock).toHaveBeenCalledWith("test_google_connection", { apiKey: "gkey" })
+    proxyFetchMock.mockResolvedValue(jsonResponse({ models: [{ id: "gemini-2.5-pro" }] }))
+    const result = await testGoogleConnection("gkey")
+    expect(proxyFetchMock.mock.calls[0][0]).toBe(
+      "https://generativelanguage.googleapis.com/v1beta/models?key=gkey"
+    )
+    expect(result.success).toBe(true)
   })
 
   it("returns failure on 403", async () => {
@@ -373,15 +371,22 @@ describe("OpenAI-compatible browser fallbacks", () => {
     expect(result.model_info).toBe("0 models")
   })
 
-  it.each([testDeepSeekConnection, testGroqConnection, testMistralConnection])(
-    "delegates to Tauri when window.__TAURI_INTERNALS__ is set",
-    async (fn) => {
-      setTauri(true)
-      invokeMock.mockResolvedValue({ success: true, message: "ok" })
-      await fn("sk")
-      expect(invokeMock).toHaveBeenCalledTimes(1)
-    }
-  )
+  it.each([
+    ["testDeepSeekConnection", testDeepSeekConnection, "https://api.deepseek.com/models"],
+    ["testGroqConnection", testGroqConnection, "https://api.groq.com/openai/v1/models"],
+    ["testMistralConnection", testMistralConnection, "https://api.mistral.ai/v1/models"],
+  ] as const)("%s keeps using proxyFetch in Tauri", async (_label, fn, expectedUrl) => {
+    setTauri(true)
+    proxyFetchMock.mockResolvedValue(jsonResponse({ data: [{ id: "x" }] }))
+    const result = await fn("sk")
+    expect(proxyFetchMock).toHaveBeenCalledWith(
+      expectedUrl,
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer sk" }),
+      })
+    )
+    expect(result.success).toBe(true)
+  })
 
   it.each([testDeepSeekConnection, testGroqConnection, testMistralConnection])(
     "returns failure on 401",
@@ -417,13 +422,15 @@ describe("testOllamaConnection", () => {
     expect(proxyFetchMock.mock.calls[0][0]).toBe("http://localhost:11434/api/tags")
   })
 
-  it("delegates to Tauri when available", async () => {
+  it("keeps using the shared proxy transport in Tauri", async () => {
     setTauri(true)
-    invokeMock.mockResolvedValue({ success: true, message: "tauri-ollama" })
-    await testOllamaConnection("http://localhost:11434")
-    expect(invokeMock).toHaveBeenCalledWith("test_ollama_connection", {
-      baseUrl: "http://localhost:11434",
-    })
+    proxyFetchMock.mockResolvedValue(jsonResponse({ models: [{ name: "llama3" }] }))
+    const result = await testOllamaConnection("http://localhost:11434")
+    expect(proxyFetchMock).toHaveBeenCalledWith(
+      "http://localhost:11434/api/tags",
+      expect.objectContaining({ headers: {} })
+    )
+    expect(result.success).toBe(true)
   })
 
   it("returns failure with HTTP code on non-2xx", async () => {
@@ -487,17 +494,44 @@ describe("testLocalProviderConnectionByUrl", () => {
     const result = await testLocalProviderConnectionByUrl("http://localhost:1234", "vLLM")
     expect(result).toMatchObject({ success: false, message: "vLLM connection failed" })
   })
+
+  it("passes safe local auth headers and rejects custom auth overrides", async () => {
+    proxyFetchMock.mockResolvedValueOnce(jsonResponse({ data: [] }))
+    await testLocalProviderConnectionByUrl("http://localhost:1234", "LM Studio", {
+      apiKey: "secret",
+      customHeaders: { "x-tenant": "team-1" },
+    })
+    expect(proxyFetchMock).toHaveBeenLastCalledWith(
+      "http://localhost:1234/v1/models",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer secret",
+          "x-tenant": "team-1",
+        }),
+      })
+    )
+
+    await expect(
+      testLocalProviderConnectionByUrl("http://localhost:1234", "LM Studio", {
+        customHeaders: { authorization: "Bearer override" },
+      })
+    ).resolves.toMatchObject({ success: false })
+    expect(proxyFetchMock).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("testCustomProviderConnection", () => {
-  it("delegates to Tauri when available", async () => {
+  it("keeps using the shared proxy transport in Tauri", async () => {
     setTauri(true)
-    invokeMock.mockResolvedValue({ success: true, message: "ok" })
-    await testCustomProviderConnection("https://x.example", "k")
-    expect(invokeMock).toHaveBeenCalledWith("test_custom_provider_connection", {
-      baseUrl: "https://x.example",
-      apiKey: "k",
-    })
+    proxyFetchMock.mockResolvedValue(jsonResponse({ data: [] }))
+    const result = await testCustomProviderConnection("https://x.example", "k")
+    expect(proxyFetchMock).toHaveBeenCalledWith(
+      "https://x.example/models",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer k" }),
+      })
+    )
+    expect(result.success).toBe(true)
   })
 
   it("(browser) appends /models with a leading slash when baseUrl lacks trailing slash", async () => {
@@ -637,33 +671,33 @@ describe("detectLocalProvider (single)", () => {
   })
 
   it("(ollama format) reports isRunning=true and extracts model names", async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ models: [{ name: "llama3.2" }] }))
+    proxyFetchMock.mockResolvedValue(jsonResponse({ models: [{ name: "llama3.2" }] }))
     const result = await detectLocalProvider("ollama")
     expect(result?.isRunning).toBe(true)
     expect(result?.models).toEqual(["llama3.2"])
   })
 
   it("(OpenAI-compatible format) extracts model ids from data[]", async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: [{ id: "phi3" }, { id: "mistral" }] }))
+    proxyFetchMock.mockResolvedValue(jsonResponse({ data: [{ id: "phi3" }, { id: "mistral" }] }))
     const result = await detectLocalProvider("lmstudio")
     expect(result?.isRunning).toBe(true)
     expect(result?.models).toEqual(["phi3", "mistral"])
   })
 
   it("reports isRunning=false when fetch throws", async () => {
-    fetchMock.mockRejectedValue(new Error("ECONN"))
+    proxyFetchMock.mockRejectedValue(new Error("ECONN"))
     const result = await detectLocalProvider("ollama")
     expect(result?.isRunning).toBe(false)
   })
 
   it("respects a customUrl over the registered config", async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: [] }))
+    proxyFetchMock.mockResolvedValue(jsonResponse({ data: [] }))
     const result = await detectLocalProvider("ollama", "http://192.168.0.5:11434")
     expect(result?.baseUrl).toBe("http://192.168.0.5:11434")
   })
 
   it("supports customUrl-only detection with default health path and name", async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: [{ id: "custom-model" }] }))
+    proxyFetchMock.mockResolvedValue(jsonResponse({ data: [{ id: "custom-model" }] }))
     const result = await detectLocalProvider("custom", "http://127.0.0.1:9999")
     expect(result).toMatchObject({
       providerId: "custom",
@@ -672,11 +706,11 @@ describe("detectLocalProvider (single)", () => {
       isRunning: true,
       models: ["custom-model"],
     })
-    expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:9999/v1/models")
+    expect(proxyFetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:9999/v1/models")
   })
 
   it("keeps a provider running when model JSON parsing fails", async () => {
-    fetchMock.mockResolvedValue({
+    proxyFetchMock.mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => {
@@ -691,33 +725,33 @@ describe("detectLocalProvider (single)", () => {
 
 describe("detectLocalProviders (batch)", () => {
   it("checks every registered provider in parallel and returns one result per known id", async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: [] }))
+    proxyFetchMock.mockResolvedValue(jsonResponse({ data: [] }))
     const results = await detectLocalProviders()
     expect(results.length).toBe(Object.keys(LOCAL_PROVIDER_TEST_CONFIGS).length)
   })
 
   it("filters to the provided id list", async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: [] }))
+    proxyFetchMock.mockResolvedValue(jsonResponse({ data: [] }))
     const results = await detectLocalProviders(["ollama", "lmstudio"])
     expect(results).toHaveLength(2)
     expect(results.map((r) => r.providerId).sort()).toEqual(["lmstudio", "ollama"])
   })
 
   it("marks unreachable providers as isRunning=false rather than dropping them", async () => {
-    fetchMock.mockRejectedValue(new Error("ECONN"))
+    proxyFetchMock.mockRejectedValue(new Error("ECONN"))
     const results = await detectLocalProviders(["ollama"])
     expect(results[0].isRunning).toBe(false)
   })
 
   it("skips unknown provider ids silently", async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: [] }))
+    proxyFetchMock.mockResolvedValue(jsonResponse({ data: [] }))
     const results = await detectLocalProviders(["ollama", "not-a-real-provider"])
     expect(results.length).toBe(1)
     expect(results[0].providerId).toBe("ollama")
   })
 
   it("extracts models from array health responses and tolerates parse failures", async () => {
-    fetchMock
+    proxyFetchMock
       .mockResolvedValueOnce(jsonResponse([{ id: "model-a" }, { name: "model-b" }, {}]))
       .mockResolvedValueOnce({
         ok: true,

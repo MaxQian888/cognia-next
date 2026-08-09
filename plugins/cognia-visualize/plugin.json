@@ -1,0 +1,21 @@
+{
+  "id": "cognia-visualize",
+  "name": "Cognia Visualize",
+  "version": "0.1.0",
+  "description": "Plugin-owned accessible visualization routing, authoring, validation, responsive preview, and export.",
+  "type": "frontend",
+  "capabilities": ["tools", "exporters"],
+  "main": "src/index.ts",
+  "author": { "name": "cognia-next" },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": { "cognia": ">=0.1.0" },
+  "permissions": ["artifact:read", "artifact:write", "filesystem:write"],
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "headless": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
+  }
+}

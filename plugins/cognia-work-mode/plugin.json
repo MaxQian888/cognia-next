@@ -12,7 +12,8 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": ["artifact:read", "artifact:write", "agent:dispatch"],
+  "permissions": ["artifact:read", "artifact:write", "agent:dispatch", "agent:control"],
+  "dependencies": { "cognia-office": "^0.1.0" },
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {

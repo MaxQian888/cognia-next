@@ -8,35 +8,28 @@ import type { ProviderName } from "./provider"
 /**
  * Local provider IDs - all frameworks that run models locally
  */
-export type LocalProviderName =
-  | "ollama"
-  | "lmstudio"
-  | "llamacpp"
-  | "llamafile"
-  | "vllm"
-  | "localai"
-  | "jan"
-  | "textgenwebui"
-  | "koboldcpp"
-  | "tabbyapi"
+export const LOCAL_PROVIDER_NAMES = [
+  "ollama",
+  "lmstudio",
+  "llamacpp",
+  "llamafile",
+  "vllm",
+  "localai",
+  "jan",
+  "textgenwebui",
+  "koboldcpp",
+  "tabbyapi",
+] as const
+
+export type LocalProviderName = (typeof LOCAL_PROVIDER_NAMES)[number]
+
+const LOCAL_PROVIDER_NAME_SET = new Set<string>(LOCAL_PROVIDER_NAMES)
 
 /**
  * Check if a provider is a local provider
  */
 export function isLocalProviderName(name: ProviderName): name is LocalProviderName {
-  const localProviders: LocalProviderName[] = [
-    "ollama",
-    "lmstudio",
-    "llamacpp",
-    "llamafile",
-    "vllm",
-    "localai",
-    "jan",
-    "textgenwebui",
-    "koboldcpp",
-    "tabbyapi",
-  ]
-  return localProviders.includes(name as LocalProviderName)
+  return LOCAL_PROVIDER_NAME_SET.has(name)
 }
 
 /**
@@ -131,18 +124,12 @@ export const LOCAL_PROVIDER_PORTS: Record<LocalProviderName, number> = {
 /**
  * Default base URLs for local providers (without /v1 suffix)
  */
-export const LOCAL_PROVIDER_URLS: Record<LocalProviderName, string> = {
-  ollama: "http://localhost:11434",
-  lmstudio: "http://localhost:1234",
-  llamacpp: "http://localhost:8080",
-  llamafile: "http://localhost:8080",
-  vllm: "http://localhost:8000",
-  localai: "http://localhost:8080",
-  jan: "http://localhost:1337",
-  textgenwebui: "http://localhost:5000",
-  koboldcpp: "http://localhost:5001",
-  tabbyapi: "http://localhost:5000",
-}
+export const LOCAL_PROVIDER_URLS = Object.fromEntries(
+  LOCAL_PROVIDER_NAMES.map((providerId) => [
+    providerId,
+    `http://localhost:${LOCAL_PROVIDER_PORTS[providerId]}`,
+  ])
+) as Record<LocalProviderName, string>
 
 /**
  * Format model size in bytes to human-readable string

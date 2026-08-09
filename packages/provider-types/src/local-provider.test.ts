@@ -1,5 +1,6 @@
 import {
   LOCAL_PROVIDER_PORTS,
+  LOCAL_PROVIDER_NAMES,
   LOCAL_PROVIDER_URLS,
   formatLocalModelSize,
   getOpenAICompatibleURL,
@@ -11,6 +12,21 @@ describe("isLocalProviderName", () => {
     expect(isLocalProviderName("ollama")).toBe(true)
     expect(isLocalProviderName("lmstudio")).toBe(true)
     expect(isLocalProviderName("openai")).toBe(false)
+  })
+
+  it("exposes one canonical local-provider id list", () => {
+    expect(LOCAL_PROVIDER_NAMES).toEqual([
+      "ollama",
+      "lmstudio",
+      "llamacpp",
+      "llamafile",
+      "vllm",
+      "localai",
+      "jan",
+      "textgenwebui",
+      "koboldcpp",
+      "tabbyapi",
+    ])
   })
 })
 

@@ -75,12 +75,24 @@ describe("generateOpenAITTS", () => {
     ["aac", "audio/aac"],
     ["flac", "audio/flac"],
     ["wav", "audio/wav"],
-    ["pcm", "audio/pcm"],
   ] as const)("maps response_format %s to mime %s", async (fmt, mime) => {
-    mockProxy.mockResolvedValueOnce(ok())
+    mockProxy.mockResolvedValueOnce({ ...ok(), mime: "application/octet-stream" })
     const r = await generateOpenAITTS("hi", { apiKey: "k", responseFormat: fmt })
     expect(r.mimeType).toBe(mime)
     expect(mockProxy.mock.calls[0][1].json.response_format).toBe(fmt)
+  })
+
+  it("normalizes the response Content-Type and rejects raw PCM", async () => {
+    mockProxy.mockResolvedValueOnce(ok())
+    mockProxy.mockResolvedValueOnce({ ...ok(), mime: "audio/pcm; rate=24000" })
+    await expect(generateOpenAITTS("hi", { apiKey: "k" })).resolves.toMatchObject({
+      success: true,
+      mimeType: "audio/mpeg",
+    })
+    await expect(generateOpenAITTS("hi", { apiKey: "k" })).resolves.toMatchObject({
+      success: false,
+      errorType: "not-supported",
+    })
   })
 
   it("returns an api-error on a non-2xx response", async () => {

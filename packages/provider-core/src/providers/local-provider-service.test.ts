@@ -268,7 +268,7 @@ describe("LocalProviderService.listModels", () => {
     const models = await new LocalProviderService("lmstudio").listModels()
 
     expect(proxy.mock.calls[0][0]).toContain("/v1/models")
-    expect(models).toEqual([{ id: "phi3", object: "model", created: undefined }])
+    expect(models).toEqual([{ id: "phi3", object: "model" }])
   })
 
   it("(browser) decodes Ollama's models[] response shape", async () => {
@@ -278,14 +278,13 @@ describe("LocalProviderService.listModels", () => {
     expect(models).toEqual([{ id: "llama3.2", object: "model", size: 100 }])
   })
 
-  it("(browser) decodes Ollama model fallback ids", async () => {
-    fetchSpy.mockResolvedValue(jsonResponse({ models: [{ model: "fallback" }, {}] }))
+  it("(browser) drops blank and duplicate model ids", async () => {
+    fetchSpy.mockResolvedValue(
+      jsonResponse({ models: [{ model: "fallback" }, {}, { name: "fallback" }] })
+    )
     const svc = new LocalProviderService("ollama")
     const models = await svc.listModels()
-    expect(models).toEqual([
-      { id: "fallback", object: "model", size: undefined },
-      { id: "", object: "model", size: undefined },
-    ])
+    expect(models).toEqual([{ id: "fallback", object: "model", size: undefined }])
   })
 
   it("(browser) decodes OpenAI's data[] response shape", async () => {
@@ -302,11 +301,75 @@ describe("LocalProviderService.listModels", () => {
     expect(models).toEqual([{ id: "mistral", object: "model", created: 123 }])
   })
 
-  it("(browser) swallows HTTP errors and returns an empty list", async () => {
+  it("(browser) surfaces HTTP errors instead of pretending the provider has zero models", async () => {
     fetchSpy.mockResolvedValue(jsonResponse({}, { status: 500 }))
     const svc = new LocalProviderService("ollama")
-    const models = await svc.listModels()
-    expect(models).toEqual([])
+    await expect(svc.listModels()).rejects.toThrow("HTTP 500")
+  })
+
+  it("classifies authentication, response, and network discovery failures", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({}, { status: 401 }))
+      .mockResolvedValueOnce(jsonResponse({ unexpected: true }))
+      .mockRejectedValueOnce(new Error("offline"))
+
+    await expect(new LocalProviderService("ollama").listModels()).rejects.toMatchObject({
+      name: "LocalProviderRequestError",
+      code: "authentication_failed",
+      status: 401,
+    })
+    await expect(new LocalProviderService("ollama").listModels()).rejects.toMatchObject({
+      code: "invalid_response",
+    })
+    await expect(new LocalProviderService("ollama").listModels()).rejects.toMatchObject({
+      code: "network_error",
+    })
+  })
+
+  it("rejects custom authentication headers through the shared header policy", () => {
+    expect(
+      () =>
+        new LocalProviderService("ollama", {
+          apiKey: "authoritative-key",
+          customHeaders: { authorization: "Bearer override" },
+        })
+    ).toThrow("authorization: auth-header")
+  })
+
+  it("threads api keys and custom headers through health and model probes", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: "phi3" }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: "phi3" }] }))
+
+    const svc = createLocalProviderService("lmstudio", {
+      baseUrl: "http://localhost:1234",
+      apiKey: "secret",
+      customHeaders: { "X-Test": "1" },
+    })
+
+    await svc.getStatus()
+    await svc.listModels()
+
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:1234/v1/models",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer secret",
+          "X-Test": "1",
+        }),
+      })
+    )
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:1234/v1/models",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer secret",
+          "X-Test": "1",
+        }),
+      })
+    )
   })
 })
 
@@ -339,12 +402,20 @@ describe("LocalProviderService.pullModel", () => {
     invokeMock.mockResolvedValue(true)
     const onProgress = jest.fn()
 
-    const result = await new LocalProviderService("ollama").pullModel("llama3.2", { onProgress })
+    const result = await new LocalProviderService("ollama", {
+      apiKey: "secret",
+      customHeaders: { "X-Tenant": "local" },
+    }).pullModel("llama3.2", { onProgress })
 
     expect(listenMock).toHaveBeenCalledWith("ollama-pull-progress", expect.any(Function))
     const [command, payload] = invokeMock.mock.calls[0]
     expect(command).toBe("ollama_pull_model_stream")
-    expect(payload).toMatchObject({ modelName: "llama3.2", pullId: expect.any(String) })
+    expect(payload).toMatchObject({
+      modelName: "llama3.2",
+      pullId: expect.any(String),
+      apiKey: "secret",
+      customHeaders: { "X-Tenant": "local" },
+    })
     expect(result.success).toBe(true)
 
     // A second concurrent pull's events must not leak into this callback.
@@ -386,10 +457,11 @@ describe("LocalProviderService.pullModel", () => {
     setProviderCoreRuntimeAdapters({ isTauri: () => true, proxyFetch: proxy })
     const onProgress = jest.fn()
 
-    const result = await new LocalProviderService("localai", "http://127.0.0.1:9080").pullModel(
-      "local-models@phi-3",
-      { onProgress }
-    )
+    const result = await new LocalProviderService("localai", {
+      baseUrl: "http://127.0.0.1:9080",
+      apiKey: "secret",
+      customHeaders: { "X-Tenant": "local" },
+    }).pullModel("local-models@phi-3", { onProgress })
 
     expect(result.success).toBe(true)
     expect(proxy).toHaveBeenNthCalledWith(
@@ -397,10 +469,23 @@ describe("LocalProviderService.pullModel", () => {
       "http://127.0.0.1:9080/models/apply",
       expect.objectContaining({
         method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer secret",
+          "X-Tenant": "local",
+        }),
         body: JSON.stringify({ id: "local-models@phi-3" }),
       })
     )
-    expect(proxy.mock.calls[1][0]).toBe("http://127.0.0.1:9080/models/jobs/job-123")
+    expect(proxy).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:9080/models/jobs/job-123",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer secret",
+          "X-Tenant": "local",
+        }),
+      })
+    )
     expect(onProgress).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ model: "local-models@phi-3", status: "queued" })

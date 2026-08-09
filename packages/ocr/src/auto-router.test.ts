@@ -1,4 +1,9 @@
-import { DEFAULT_LOCAL_PREFERENCE, pickDefaultProvider, resolveProviderById } from "./auto-router"
+import {
+  DEFAULT_LOCAL_PREFERENCE,
+  listProviderCandidates,
+  pickDefaultProvider,
+  resolveProviderById,
+} from "./auto-router"
 import { createOcrRegistry } from "./registry"
 import { DEFAULT_OCR_SETTINGS, type OcrProvider, type UserOcrSettings } from "./types"
 import { OcrError } from "./errors"
@@ -37,8 +42,8 @@ describe("DEFAULT_LOCAL_PREFERENCE", () => {
     expect(DEFAULT_LOCAL_PREFERENCE.headless).toEqual([])
   })
 
-  it("seeds windows-media-ocr ahead of tesseract on Windows", () => {
-    expect(DEFAULT_LOCAL_PREFERENCE.windows[0]).toBe("windows-media-ocr")
+  it("seeds PaddleOCR on Windows instead of the unimplemented Windows placeholder", () => {
+    expect(DEFAULT_LOCAL_PREFERENCE.windows[0]).toBe("paddle-ocr")
   })
 
   it("seeds apple-vision on macOS and iOS", () => {
@@ -50,23 +55,21 @@ describe("DEFAULT_LOCAL_PREFERENCE", () => {
     expect(DEFAULT_LOCAL_PREFERENCE.android[0]).toBe("mlkit-android")
   })
 
-  it("places ocrs and paddle-ocr ahead of tesseract on every desktop OS", () => {
+  it("keeps ocrs advanced-only while putting PaddleOCR ahead of Tesseract", () => {
     for (const os of ["windows", "macos", "linux"] as const) {
       const order = DEFAULT_LOCAL_PREFERENCE[os]
-      const ocrsIdx = order.indexOf("ocrs")
       const paddleIdx = order.indexOf("paddle-ocr")
       const tessNativeIdx = order.indexOf("tesseract-native")
       const tessWasmIdx = order.indexOf("tesseract-wasm")
-      expect(ocrsIdx).toBeGreaterThanOrEqual(0)
       expect(paddleIdx).toBeGreaterThanOrEqual(0)
-      expect(ocrsIdx).toBeLessThan(tessNativeIdx)
       expect(paddleIdx).toBeLessThan(tessNativeIdx)
+      expect(order).not.toContain("ocrs")
       expect(tessNativeIdx).toBeLessThan(tessWasmIdx)
     }
   })
 
-  it("makes ocrs the head of the Linux preference list", () => {
-    expect(DEFAULT_LOCAL_PREFERENCE.linux[0]).toBe("ocrs")
+  it("makes PaddleOCR the head of the Linux preference list", () => {
+    expect(DEFAULT_LOCAL_PREFERENCE.linux[0]).toBe("paddle-ocr")
   })
 
   it("does not include local-http in any preference bucket — it is user-pinned", () => {
@@ -141,7 +144,7 @@ describe("pickDefaultProvider", () => {
   it("prefers the platform-local engine when defaultProviderId is auto", async () => {
     const reg = createOcrRegistry()
     reg.register(makeProvider({ id: "tesseract-wasm", category: "local" }))
-    reg.register(makeProvider({ id: "windows-media-ocr", category: "local" }))
+    reg.register(makeProvider({ id: "paddle-ocr", category: "local" }))
     reg.register(makeProvider({ id: "mistral-ocr", category: "document-cloud" }))
     const picked = await pickDefaultProvider({
       registry: reg,
@@ -149,7 +152,7 @@ describe("pickDefaultProvider", () => {
       platform: "tauri",
       osTag: "windows",
     })
-    expect(picked.id).toBe("windows-media-ocr")
+    expect(picked.id).toBe("paddle-ocr")
   })
 
   it("skips local engines that report not-ready", async () => {
@@ -219,6 +222,35 @@ describe("pickDefaultProvider", () => {
     ).rejects.toThrow(OcrError)
   })
 
+  it("never uses preview or placeholder locals as an automatic last resort", async () => {
+    const reg = createOcrRegistry()
+    reg.register(makeProvider({ id: "ocrs", category: "local" }))
+    reg.register(makeProvider({ id: "windows-media-ocr", category: "local" }))
+
+    await expect(
+      pickDefaultProvider({
+        registry: reg,
+        settings: settings({ cloudFallbackEnabled: false }),
+        platform: "tauri",
+        osTag: "windows",
+      })
+    ).rejects.toMatchObject({ code: "provider_failed", providerId: "auto-router" })
+  })
+
+  it("allows an explicitly saved advanced provider only when it is ready", async () => {
+    const reg = createOcrRegistry()
+    reg.register(makeProvider({ id: "ocrs", category: "local" }))
+
+    const picked = await pickDefaultProvider({
+      registry: reg,
+      settings: settings({ defaultProviderId: "ocrs", cloudFallbackEnabled: false }),
+      platform: "tauri",
+      osTag: "linux",
+      localReadiness: () => true,
+    })
+    expect(picked.id).toBe("ocrs")
+  })
+
   it("throws when the only registered provider doesn't support the shell", async () => {
     const reg = createOcrRegistry()
     reg.register(
@@ -244,6 +276,28 @@ describe("pickDefaultProvider", () => {
       localPreference: { linux: ["custom-local"] },
     })
     expect(picked.id).toBe("custom-local")
+  })
+})
+
+describe("listProviderCandidates", () => {
+  it("uses the shared runtime contract to exclude placeholders and uncredentialed cloud", async () => {
+    const reg = createOcrRegistry()
+    reg.register(makeProvider({ id: "paddle-ocr", category: "local" }))
+    reg.register(makeProvider({ id: "mistral-ocr", category: "document-cloud" }))
+    reg.register(makeProvider({ id: "google-vision", category: "document-cloud" }))
+    const candidates = await listProviderCandidates({
+      registry: reg,
+      settings: settings(),
+      platform: "tauri",
+      osTag: "linux",
+      runtimeStatus: (provider) => ({
+        providerId: provider.id,
+        shellSupported: true,
+        ready: provider.id === "google-vision",
+        reason: provider.id === "google-vision" ? undefined : "missing-credentials",
+      }),
+    })
+    expect(candidates.map((provider) => provider.id)).toEqual(["google-vision"])
   })
 })
 

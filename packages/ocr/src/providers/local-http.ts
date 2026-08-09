@@ -40,14 +40,48 @@ export interface LocalHttpConfig {
   apiKey?: string
   /** Defaults to 30s. */
   timeoutMs?: number
+  /** Explicit confirmation for private/LAN targets. Must match endpoint exactly. */
+  allowLan?: boolean
+  /** Endpoint captured when the user confirmed LAN access. */
+  confirmedLanEndpoint?: string
   /** Override fetch — tests inject a mock here. */
   fetchImpl?: typeof fetch
+}
+
+export interface LocalHttpTransportRequest {
+  requestId: string
+  url: string
+  method: "GET" | "POST"
+  headers: Record<string, string>
+  body?: string
+  timeoutMs: number
+  allowPrivateNetwork: boolean
+}
+
+export interface LocalHttpTransportResponse {
+  status: number
+  body: string
+  contentType?: string
+}
+
+export interface LocalHttpTransport {
+  request(request: LocalHttpTransportRequest): Promise<LocalHttpTransportResponse>
+  cancel(requestId: string): Promise<boolean>
+}
+
+let nativeTransport: LocalHttpTransport | null = null
+
+/** Install the packaged-desktop transport at the app composition root. */
+export function __setLocalHttpTransport(transport: LocalHttpTransport | null): void {
+  nativeTransport = transport
 }
 
 interface UmiOcrLineEntry {
   text: string
   score?: number
   box?: number[][]
+  /** Umi-OCR's layout parser separator for this line ("", space, or newline). */
+  end?: string
 }
 
 interface UmiOcrResponse {
@@ -74,6 +108,18 @@ interface PaddleServerResponse {
   status?: string
   msg?: string
   results?: PaddleServerEntry[][]
+  errorCode?: number
+  errorMsg?: string
+  result?: {
+    ocrResults?: Array<{
+      prunedResult?: {
+        rec_texts?: unknown[]
+        rec_scores?: unknown[]
+        rec_polys?: unknown[]
+        rec_boxes?: unknown[]
+      }
+    }>
+  }
 }
 
 export function buildLocalHttpProvider(): OcrProvider {
@@ -82,7 +128,7 @@ export function buildLocalHttpProvider(): OcrProvider {
     label: "Local HTTP (self-hosted)",
     category: "local",
     shells: { browser: true, tauri: true, capacitor: true },
-    credentialKeys: [],
+    credentialKeys: ["apiKey"],
     async extract(input, ctx) {
       return localHttpExtract(input, ctx)
     },
@@ -104,7 +150,8 @@ export async function localHttpExtract(
   }
   const dialect: LocalHttpDialect = config.dialect ?? "umi-ocr"
   const fetchFn = config.fetchImpl ?? globalThis.fetch
-  if (!fetchFn) {
+  const transport = ctx.platform === "tauri" && !config.fetchImpl ? nativeTransport : null
+  if (!transport && !fetchFn) {
     throw new OcrError("provider_failed", "local-http", "fetch is unavailable in this runtime.")
   }
   if (ctx.signal?.aborted) {
@@ -113,37 +160,41 @@ export async function localHttpExtract(
 
   const normalized = await normalizeImage(input.source)
   const languages = (input.languages ?? ["en"]).map((l) => l.toLowerCase())
+  const apiKey = ctx.credentials.secrets.apiKey ?? config.apiKey
+  let umiLanguage: string | undefined
+  if (dialect === "umi-ocr" && languages[0]) {
+    umiLanguage = await discoverUmiLanguage(
+      endpoint,
+      languages[0],
+      config,
+      ctx,
+      transport,
+      fetchFn,
+      apiKey
+    )
+  }
   const { body, headers } = serializeRequest(
     dialect,
     normalized.bytes,
     normalized.mimeType,
-    languages,
-    config.apiKey
+    umiLanguage ? [umiLanguage] : [],
+    apiKey
   )
 
-  const controller = new AbortController()
   const timeoutMs = config.timeoutMs ?? 30_000
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  // Chain caller's signal so external cancellation still works.
-  if (ctx.signal) {
-    if (ctx.signal.aborted) {
-      controller.abort()
-    } else {
-      ctx.signal.addEventListener("abort", () => controller.abort(), { once: true })
-    }
-  }
-
   const start = Date.now()
-  let response: Response
+  let response: LocalHttpTransportResponse
   try {
-    response = await fetchFn(endpoint, {
-      method: "POST",
-      headers,
-      body,
-      signal: controller.signal,
-    })
+    response = await requestLocalHttp(
+      endpoint,
+      { method: "POST", headers, body: String(body) },
+      config,
+      ctx,
+      transport,
+      fetchFn
+    )
   } catch (err) {
-    clearTimeout(timer)
+    if (err instanceof OcrError) throw err
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new OcrError(
         "aborted",
@@ -161,20 +212,17 @@ export async function localHttpExtract(
       err
     )
   }
-  clearTimeout(timer)
 
-  if (!response.ok) {
+  if (response.status < 200 || response.status >= 300) {
     const code =
       response.status === 401 || response.status === 403 ? "missing_credentials" : "provider_failed"
-    const message = await response.text().catch(() => "")
     throw new OcrError(
       code,
       "local-http",
-      `local-http HTTP ${response.status}: ${truncate(message, 240)}`
+      `local-http HTTP ${response.status}: ${truncate(response.body, 240)}`
     )
   }
-  const text = await response.text()
-  const { combinedText, blocks, width, height } = parseResponse(dialect, text)
+  const { combinedText, blocks, width, height } = parseResponse(dialect, response.body)
   return {
     providerId: "local-http",
     pages: [
@@ -193,6 +241,160 @@ export async function localHttpExtract(
     durationMs: Date.now() - start,
     cached: false,
   }
+}
+
+async function requestLocalHttp(
+  url: string,
+  init: { method: "GET" | "POST"; headers: Record<string, string>; body?: string },
+  config: LocalHttpConfig,
+  ctx: OcrProviderContext,
+  transport: LocalHttpTransport | null,
+  fetchFn: typeof fetch
+): Promise<LocalHttpTransportResponse> {
+  const timeoutMs = config.timeoutMs ?? 30_000
+  const requestId = createRequestId()
+  if (transport) {
+    const normalizedEndpoint = normalizeEndpoint(config.endpoint ?? "")
+    const allowPrivateNetwork =
+      config.allowLan === true &&
+      normalizeEndpoint(config.confirmedLanEndpoint ?? "") === normalizedEndpoint
+    const onAbort = () => void transport.cancel(requestId)
+    ctx.signal?.addEventListener("abort", onAbort, { once: true })
+    try {
+      if (ctx.signal?.aborted) {
+        throw new OcrError("aborted", "local-http", "OCR request was cancelled.")
+      }
+      return await transport.request({
+        requestId,
+        url,
+        method: init.method,
+        headers: init.headers,
+        body: init.body,
+        timeoutMs,
+        allowPrivateNetwork,
+      })
+    } catch (error) {
+      if (ctx.signal?.aborted || (error instanceof Error && /cancelled/i.test(error.message))) {
+        throw new OcrError("aborted", "local-http", "OCR request was cancelled.", error)
+      }
+      throw error
+    } finally {
+      ctx.signal?.removeEventListener("abort", onAbort)
+    }
+  }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const onAbort = () => controller.abort()
+  ctx.signal?.addEventListener("abort", onAbort, { once: true })
+  try {
+    const response = await fetchFn(url, {
+      method: init.method,
+      headers: init.headers,
+      body: init.body,
+      signal: controller.signal,
+      redirect: "error",
+    })
+    return {
+      status: response.status,
+      body: await response.text(),
+      contentType: response.headers.get("content-type") ?? undefined,
+    }
+  } finally {
+    clearTimeout(timer)
+    ctx.signal?.removeEventListener("abort", onAbort)
+  }
+}
+
+function createRequestId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `ocr-http-${Date.now()}-${Math.random()}`
+}
+
+function normalizeEndpoint(endpoint: string): string {
+  try {
+    const url = new URL(endpoint.trim())
+    url.hash = ""
+    return url.toString()
+  } catch {
+    return endpoint.trim()
+  }
+}
+
+function umiOptionsUrl(endpoint: string): string {
+  const url = new URL(endpoint)
+  url.pathname = "/api/ocr/get_options"
+  url.search = ""
+  url.hash = ""
+  return url.toString()
+}
+
+async function discoverUmiLanguage(
+  endpoint: string,
+  language: string,
+  config: LocalHttpConfig,
+  ctx: OcrProviderContext,
+  transport: LocalHttpTransport | null,
+  fetchFn: typeof fetch,
+  apiKey?: string
+): Promise<string | undefined> {
+  try {
+    const response = await requestLocalHttp(
+      umiOptionsUrl(endpoint),
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        },
+      },
+      config,
+      ctx,
+      transport,
+      fetchFn
+    )
+    if (response.status < 200 || response.status >= 300) return undefined
+    const payload = JSON.parse(response.body) as Record<string, unknown>
+    const languageDefinition = payload["ocr.language"] as
+      { optionsList?: Array<[unknown, unknown]> } | undefined
+    return mapUmiLanguageOption(language, languageDefinition?.optionsList ?? [])
+  } catch (error) {
+    if (ctx.signal?.aborted) throw error
+    return undefined
+  }
+}
+
+/** Map a BCP-47 hint to the exact model value advertised by Umi-OCR. */
+export function mapUmiLanguageOption(
+  language: string,
+  options: Array<[unknown, unknown]>
+): string | undefined {
+  const normalized = language.trim().toLowerCase().replaceAll("_", "-")
+  const candidates = options
+    .filter((entry) => Array.isArray(entry) && typeof entry[0] === "string")
+    .map(([value, label]) => ({
+      value: String(value),
+      haystack: `${String(value)} ${String(label ?? "")}`.toLowerCase(),
+    }))
+  const exact = candidates.find(
+    ({ value, haystack }) => value.toLowerCase() === normalized || haystack === normalized
+  )
+  if (exact) return exact.value
+  const patterns =
+    normalized.startsWith("zh-hant") || normalized.startsWith("zh-tw")
+      ? ["cht", "traditional", "繁體", "繁体"]
+      : normalized.startsWith("zh")
+        ? ["config_chinese.txt", "简体", "簡體"]
+        : normalized.startsWith("en")
+          ? ["config_en", "english"]
+          : normalized.startsWith("ja")
+            ? ["japan", "日本"]
+            : normalized.startsWith("ko")
+              ? ["korean", "한국"]
+              : normalized.startsWith("ru")
+                ? ["cyrillic", "рус"]
+                : [normalized]
+  return candidates.find(({ haystack }) => patterns.some((pattern) => haystack.includes(pattern)))
+    ?.value
 }
 
 interface RequestBundle {
@@ -226,16 +428,12 @@ export function serializeRequest(
       return { body, headers }
     }
     case "paddleocr-server": {
-      // PaddleOCR-Server accepts a JSON envelope with a base64 image when
-      // configured with the official deploy/serving recipe; multipart is
-      // not universally supported across forks. We use JSON for
-      // compatibility.
+      // PaddleOCR 3.x / PaddleX basic serving contract (`POST /ocr`).
       headers["Content-Type"] = "application/json"
       const body = JSON.stringify({
-        images: [bytesToBase64(bytes)],
-        // PaddleOCR-Server doesn't accept a `mime_type` field today; this
-        // is kept here for forks that look at it.
-        mime_type: mimeType,
+        file: bytesToBase64(bytes),
+        fileType: mimeType === "application/pdf" ? 0 : 1,
+        visualize: false,
       })
       return { body, headers }
     }
@@ -286,10 +484,11 @@ function parseUmiOcrResponse(body: string): ParseResult {
     return { combinedText: payload.data, blocks: [] }
   }
   const blocks: OcrBlock[] = []
-  const lines: string[] = []
+  let combinedText = ""
   for (const line of payload.data ?? []) {
     if (!line || typeof line.text !== "string") continue
-    lines.push(line.text)
+    combinedText += line.text
+    combinedText += typeof line.end === "string" ? line.end : "\n"
     const bbox = boxToBbox(line.box)
     blocks.push({
       text: line.text,
@@ -298,7 +497,7 @@ function parseUmiOcrResponse(body: string): ParseResult {
       kind: "line",
     })
   }
-  return { combinedText: lines.join("\n"), blocks }
+  return { combinedText: combinedText.replace(/\n$/, ""), blocks }
 }
 
 function parsePaddleServerResponse(body: string): ParseResult {
@@ -313,6 +512,15 @@ function parsePaddleServerResponse(body: string): ParseResult {
       err
     )
   }
+  if (typeof payload.errorCode === "number" && payload.errorCode !== 0) {
+    throw new OcrError(
+      "provider_failed",
+      "local-http",
+      `PaddleOCR-Server returned error ${payload.errorCode}: ${payload.errorMsg ?? "(no message)"}`
+    )
+  }
+  const v3 = parsePaddleV3Response(payload)
+  if (v3) return v3
   if (payload.status && payload.status !== "ok" && payload.status !== "000") {
     throw new OcrError(
       "provider_failed",
@@ -351,6 +559,60 @@ function parsePaddleServerResponse(body: string): ParseResult {
     )
   }
   return { combinedText: lines.join("\n"), blocks }
+}
+
+function parsePaddleV3Response(payload: PaddleServerResponse): ParseResult | undefined {
+  const pages = payload.result?.ocrResults
+  if (!Array.isArray(pages)) return undefined
+  const blocks: OcrBlock[] = []
+  const lines: string[] = []
+  for (const page of pages) {
+    const result = page?.prunedResult
+    const texts = result?.rec_texts ?? []
+    const scores = result?.rec_scores ?? []
+    const polygons = result?.rec_polys ?? []
+    const boxes = result?.rec_boxes ?? []
+    for (let index = 0; index < texts.length; index++) {
+      const text = texts[index]
+      if (typeof text !== "string" || text.length === 0) continue
+      const score = scores[index]
+      const polygon = toPolygon(polygons[index]) ?? rectToPolygon(boxes[index])
+      lines.push(text)
+      blocks.push({
+        text,
+        confidence: typeof score === "number" ? score : undefined,
+        bbox: boxToBbox(polygon),
+        kind: "line",
+      })
+    }
+  }
+  return { combinedText: lines.join("\n"), blocks }
+}
+
+function toPolygon(value: unknown): number[][] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const points = value.filter(
+    (point): point is number[] =>
+      Array.isArray(point) && point.length >= 2 && point.every((part) => typeof part === "number")
+  )
+  return points.length > 0 ? points : undefined
+}
+
+function rectToPolygon(value: unknown): number[][] | undefined {
+  if (
+    !Array.isArray(value) ||
+    value.length < 4 ||
+    !value.every((part) => typeof part === "number")
+  ) {
+    return undefined
+  }
+  const [xMin, yMin, xMax, yMax] = value as number[]
+  return [
+    [xMin!, yMin!],
+    [xMax!, yMin!],
+    [xMax!, yMax!],
+    [xMin!, yMax!],
+  ]
 }
 
 interface ParsedPaddleEntry {

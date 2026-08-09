@@ -1,5 +1,4 @@
 export interface ProviderCoreProxyFetchOptions extends RequestInit {
-  skipProxy?: boolean
   timeout?: number
 }
 
@@ -31,7 +30,7 @@ async function defaultProxyFetch(
   input: RequestInfo | URL,
   init?: ProviderCoreProxyFetchOptions
 ): Promise<Response> {
-  const { timeout, skipProxy: _skipProxy, ...fetchInit } = init || {}
+  const { timeout, ...fetchInit } = init || {}
   if (timeout) {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), timeout)

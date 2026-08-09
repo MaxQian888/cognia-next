@@ -66,6 +66,7 @@ VALID_PERMISSIONS = (
     "media:video:write",
     "media:video:export",
     "agent:control",
+    "builtin-skills:invoke",
     "agent:dispatch-external",
     "agent:dispatch",
     "agent:shared-memory:read",

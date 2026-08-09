@@ -121,6 +121,11 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
     "field_missing:subagent",
     "field_missing:agent-team-template",
   ],
+  "cognia-office": ["field_missing:tools"],
+  "cognia-pdf": ["field_missing:tools"],
+  "cognia-documents": ["field_missing:tools"],
+  "cognia-visualize": ["field_missing:tools"],
+  "cognia-presentations": ["field_missing:tools"],
   "computer-use": [
     "field_missing:tools",
     "field_missing:subagent",

@@ -12,13 +12,25 @@
  *   - pause / resume / stop
  */
 
-jest.mock("./tts-cache", () => ({
-  generateCacheKey: jest.fn(() => "cache-key"),
-  getCachedOrGenerate: jest.fn(),
-}))
+jest.mock("./tts-cache", () => {
+  const legacyCacheMock = jest.fn()
+  return {
+    generateCacheKey: jest.fn(() => "cache-key"),
+    getCachedOrGenerate: legacyCacheMock,
+    getCachedTtsResponseOrGenerate: async (...args: unknown[]) => {
+      const result = await legacyCacheMock(...args)
+      if (!result) return { success: false, error: "Failed to generate speech audio" }
+      if (typeof result.success === "boolean") return result
+      return { success: true, ...result }
+    },
+  }
+})
 
 jest.mock("./providers/openai", () => ({
   generateOpenAITTS: jest.fn(),
+}))
+jest.mock("./providers/local-openai-compatible", () => ({
+  generateLocalOpenAICompatibleTTS: jest.fn(),
 }))
 jest.mock("./providers/gemini", () => ({
   generateGeminiTTS: jest.fn(),
@@ -62,6 +74,7 @@ import { PcmPlayer } from "./streaming/pcm-player"
 import { DEFAULT_SPEECH_SETTINGS, type SpeechSettings } from "./types"
 import { getCachedOrGenerate } from "./tts-cache"
 import { generateOpenAITTS } from "./providers/openai"
+import { generateLocalOpenAICompatibleTTS } from "./providers/local-openai-compatible"
 import { generateGeminiTTS } from "./providers/gemini"
 import { generateEdgeTTS } from "./providers/edge"
 import { generateElevenLabsTTS } from "./providers/elevenlabs"
@@ -69,6 +82,7 @@ import { generateLMNTTTS } from "./providers/lmnt"
 import { generateHumeTTS } from "./providers/hume"
 import { generateCartesiaTTS } from "./providers/cartesia"
 import { generateDeepgramTTS } from "./providers/deepgram"
+import { setTtsHost } from "./host"
 
 const mockCache = getCachedOrGenerate as jest.Mock
 
@@ -185,6 +199,7 @@ function setupSpeechSynth() {
 }
 
 beforeEach(() => {
+  setTtsHost({ allowCloudText: () => true })
   lastAudio = null
   _lastSynth = null
   mockCache.mockReset()
@@ -252,6 +267,23 @@ describe("speak with ttsEnabled=false", () => {
 })
 
 describe("speak — cloud provider happy path", () => {
+  it("uses system playback on a mobile shell without changing the saved provider", async () => {
+    const synth = setupSpeechSynth()
+    setTtsHost({ isMobileShell: () => true })
+    const o = new TTSOrchestrator()
+    await o.speak("mobile", {
+      speechSettings: {
+        ...DEFAULT_SPEECH_SETTINGS,
+        ttsEnabled: true,
+        ttsProvider: "openai",
+      },
+      providerSettings: { openai: { apiKey: "sk" } },
+    })
+    expect(synth.utterance?.text).toBe("mobile")
+    expect(o.getState().currentProvider).toBe("system")
+    expect(mockCache).not.toHaveBeenCalled()
+  })
+
   it("invokes the openai provider, plays audio, and ends in stopped state", async () => {
     const settings: SpeechSettings = {
       ...DEFAULT_SPEECH_SETTINGS,
@@ -368,6 +400,13 @@ describe("direct provider routing", () => {
   it("openai", async () => {
     await drive("openai", generateOpenAITTS as jest.Mock, { openai: { apiKey: "k" } })
   })
+  it("local OpenAI-compatible (optional API key)", async () => {
+    await drive("local-openai-compatible", generateLocalOpenAICompatibleTTS as jest.Mock)
+    expect(generateLocalOpenAICompatibleTTS).toHaveBeenCalledWith(
+      "hi",
+      expect.objectContaining({ apiKey: "" })
+    )
+  })
   it("gemini (uses google api key)", async () => {
     await drive("gemini", generateGeminiTTS as jest.Mock, { google: { apiKey: "k" } })
   })
@@ -394,6 +433,66 @@ describe("direct provider routing", () => {
 })
 
 describe("api-key gating", () => {
+  it("fails closed when the embedding host omits the cloud PII gate", async () => {
+    setTtsHost({})
+    mockCache.mockImplementationOnce(async (_key, generate) => generate())
+    const o = new TTSOrchestrator()
+
+    await expect(
+      o.speak("release notes", {
+        speechSettings: {
+          ...DEFAULT_SPEECH_SETTINGS,
+          ttsEnabled: true,
+          ttsProvider: "openai",
+          ttsFallbackEnabled: false,
+        },
+        providerSettings: { openai: { apiKey: "k" } },
+      })
+    ).rejects.toThrow(/sensitive data/)
+    expect(generateOpenAITTS).not.toHaveBeenCalled()
+  })
+
+  it("blocks sensitive text before invoking a cloud provider", async () => {
+    setTtsHost({ allowCloudText: () => false })
+    mockCache.mockImplementationOnce(async (_key, generate) => generate())
+    const o = new TTSOrchestrator()
+
+    await expect(
+      o.speak("alice@example.com", {
+        speechSettings: {
+          ...DEFAULT_SPEECH_SETTINGS,
+          ttsEnabled: true,
+          ttsProvider: "openai",
+          ttsFallbackEnabled: false,
+        },
+        providerSettings: { openai: { apiKey: "k" } },
+      })
+    ).rejects.toThrow(/sensitive data/)
+    expect(generateOpenAITTS).not.toHaveBeenCalled()
+  })
+
+  it("does not apply the cloud PII gate to a loopback provider", async () => {
+    setTtsHost({ allowCloudText: () => false })
+    ;(generateLocalOpenAICompatibleTTS as jest.Mock).mockResolvedValueOnce({
+      success: true,
+      audioData: new ArrayBuffer(2),
+      mimeType: "audio/mpeg",
+    })
+    mockCache.mockImplementationOnce(async (_key, generate) => generate())
+    const o = new TTSOrchestrator()
+
+    await o.speak("alice@example.com", {
+      speechSettings: {
+        ...DEFAULT_SPEECH_SETTINGS,
+        ttsEnabled: true,
+        ttsProvider: "local-openai-compatible",
+        ttsFallbackEnabled: false,
+      },
+      providerSettings: {},
+    })
+    expect(generateLocalOpenAICompatibleTTS).toHaveBeenCalledTimes(1)
+  })
+
   it("bails out with a settings error when a paid provider is missing its key", async () => {
     mockCache.mockImplementationOnce(async (_key, gen) => {
       const r = await gen()
@@ -521,6 +620,19 @@ describe("streaming provider (Realtime)", () => {
     expect(mockCache).not.toHaveBeenCalled()
     expect(onEnd).toHaveBeenCalled()
     expect(o.getState().playbackState).toBe("stopped")
+  })
+
+  it("blocks sensitive text before invoking the streaming transport", async () => {
+    setTtsHost({ allowCloudText: () => false })
+    const o = new TTSOrchestrator()
+
+    await expect(
+      o.speak("alice@example.com", {
+        speechSettings: realtimeSettings,
+        providerSettings: { openai: { apiKey: "k" } },
+      })
+    ).rejects.toThrow(/sensitive data/)
+    expect(mockStream).not.toHaveBeenCalled()
   })
 
   it("surfaces a stream error as an error state", async () => {
@@ -706,6 +818,36 @@ describe("stop", () => {
     o.stop()
     expect(o.getState().playbackState).toBe("stopped")
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:abc")
+  })
+
+  it("aborts an in-flight buffered provider request", async () => {
+    let capturedSignal: AbortSignal | undefined
+    ;(generateOpenAITTS as jest.Mock).mockImplementationOnce(
+      (_text: string, options: { signal?: AbortSignal }) =>
+        new Promise((resolve) => {
+          capturedSignal = options.signal
+          options.signal?.addEventListener("abort", () =>
+            resolve({ success: false, errorType: "cancelled", error: "cancelled" })
+          )
+        })
+    )
+    mockCache.mockImplementationOnce(async (_key, generate) => generate())
+    const o = new TTSOrchestrator()
+    const pending = o.speak("hello", {
+      speechSettings: {
+        ...DEFAULT_SPEECH_SETTINGS,
+        ttsEnabled: true,
+        ttsProvider: "openai",
+        ttsFallbackEnabled: false,
+      },
+      providerSettings: { openai: { apiKey: "k" } },
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    o.stop()
+    await pending
+    expect(capturedSignal?.aborted).toBe(true)
+    expect(o.getState().playbackState).toBe("stopped")
   })
 })
 

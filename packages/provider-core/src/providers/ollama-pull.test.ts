@@ -82,6 +82,25 @@ describe("pullOllamaModelStreaming — Tauri host", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it("passes API-key auth and validated custom headers to the Rust stream command", async () => {
+    invokeMock.mockResolvedValue(true)
+
+    await pullOllamaModelStreaming({
+      baseUrl: "http://x",
+      modelName: "m",
+      apiKey: " secret ",
+      customHeaders: { "X-Tenant": "local" },
+    })
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      "ollama_pull_model_stream",
+      expect.objectContaining({
+        apiKey: "secret",
+        customHeaders: { "X-Tenant": "local" },
+      })
+    )
+  })
+
   it("only registers a listener when a progress callback was supplied", async () => {
     invokeMock.mockResolvedValue(true)
     await pullOllamaModelStreaming({ baseUrl: "http://x", modelName: "m" })
@@ -251,6 +270,40 @@ describe("pullOllamaModelStreaming — browser host", () => {
       total: 10,
       model: "m",
     })
+    expect(invokeMock).not.toHaveBeenCalled()
+  })
+
+  it("sends API-key auth and custom headers on browser pulls", async () => {
+    fetchMock.mockResolvedValue(streamResponse([]))
+
+    await pullOllamaModelStreaming({
+      baseUrl: "http://x",
+      modelName: "m",
+      apiKey: "secret",
+      customHeaders: { "X-Tenant": "local" },
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://x/api/pull",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer secret",
+          "Content-Type": "application/json",
+          "X-Tenant": "local",
+        }),
+      })
+    )
+  })
+
+  it("rejects custom auth overrides before selecting a host transport", async () => {
+    await expect(
+      pullOllamaModelStreaming({
+        baseUrl: "http://x",
+        modelName: "m",
+        customHeaders: { authorization: "Bearer override" },
+      })
+    ).rejects.toThrow("authorization: auth-header")
+    expect(fetchMock).not.toHaveBeenCalled()
     expect(invokeMock).not.toHaveBeenCalled()
   })
 

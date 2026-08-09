@@ -1,25 +1,26 @@
 /**
  * Local Provider Clients - OpenAI-compatible local inference engines
  *
- * All local providers use the OpenAI-compatible API, so they share common
- * patterns for connection testing, model listing, and server status checks.
+ * Shared descriptor + legacy helpers for local inference providers. The actual
+ * control plane lives in `local-provider-service.ts`; these helpers remain for
+ * older call sites/tests and must never bypass the injected `proxyFetch`.
  */
 
-import { invoke } from "@tauri-apps/api/core"
 import type { ProviderName } from "@cognia/provider-types"
+import { getBuiltInProviderCatalogEntry } from "@cognia/provider-types/built-in-provider-catalog"
 import {
   LOCAL_PROVIDER_PORTS,
   LOCAL_PROVIDER_URLS,
   isLocalProviderName,
   type LocalProviderName,
 } from "@cognia/provider-types/local-provider"
-import { isTauri } from "./runtime-adapters"
+import { proxyFetch } from "./runtime-adapters"
 
 /**
  * Local provider configuration
  */
 export interface LocalProviderConfig {
-  id: ProviderName
+  id: LocalProviderName
   name: string
   defaultPort: number
   defaultBaseURL: string
@@ -30,6 +31,31 @@ export interface LocalProviderConfig {
   description: string
   website: string
   icon?: string
+}
+
+type LocalProviderManagementDescriptor = Pick<
+  LocalProviderConfig,
+  "modelsEndpoint" | "healthEndpoint" | "supportsModelList" | "supportsEmbeddings" | "icon"
+>
+
+function createLocalProviderConfig(
+  providerId: LocalProviderName,
+  descriptor: LocalProviderManagementDescriptor
+): LocalProviderConfig {
+  const catalog = getBuiltInProviderCatalogEntry(providerId)
+  if (!catalog) {
+    throw new Error(`Missing built-in provider catalog entry: ${providerId}`)
+  }
+
+  return {
+    id: providerId,
+    name: catalog.name,
+    defaultPort: LOCAL_PROVIDER_PORTS[providerId],
+    defaultBaseURL: LOCAL_PROVIDER_URLS[providerId],
+    description: catalog.description ?? "",
+    website: catalog.website ?? catalog.docsUrl ?? "",
+    ...descriptor,
+  }
 }
 
 /**
@@ -53,132 +79,83 @@ export interface LocalModel {
 }
 
 /**
- * Configuration for all supported local providers
+ * Configuration for all supported local providers.
+ *
+ * This is the active descriptor for base URLs plus health/model endpoints.
+ * Keep transport helpers derived from here; do not duplicate the same facts in
+ * per-call tables.
  */
-export const LOCAL_PROVIDER_CONFIGS: Record<string, LocalProviderConfig> = {
-  ollama: {
-    id: "ollama",
-    name: "Ollama",
-    defaultPort: 11434,
-    defaultBaseURL: "http://localhost:11434",
+export const LOCAL_PROVIDER_CONFIGS: Record<LocalProviderName, LocalProviderConfig> = {
+  ollama: createLocalProviderConfig("ollama", {
     modelsEndpoint: "/api/tags",
     healthEndpoint: "/api/version",
     supportsModelList: true,
     supportsEmbeddings: true,
-    description: "Run models locally with easy model management",
-    website: "https://ollama.ai",
     icon: "/icons/providers/ollama.svg",
-  },
-  lmstudio: {
-    id: "lmstudio",
-    name: "LM Studio",
-    defaultPort: 1234,
-    defaultBaseURL: "http://localhost:1234",
+  }),
+  lmstudio: createLocalProviderConfig("lmstudio", {
     modelsEndpoint: "/v1/models",
     healthEndpoint: "/v1/models",
     supportsModelList: true,
     supportsEmbeddings: true,
-    description: "Desktop app for running local LLMs with OpenAI-compatible API",
-    website: "https://lmstudio.ai",
     icon: "/icons/providers/lmstudio.svg",
-  },
-  llamacpp: {
-    id: "llamacpp",
-    name: "llama.cpp Server",
-    defaultPort: 8080,
-    defaultBaseURL: "http://localhost:8080",
+  }),
+  llamacpp: createLocalProviderConfig("llamacpp", {
     modelsEndpoint: "/v1/models",
     healthEndpoint: "/health",
     supportsModelList: true,
     supportsEmbeddings: true,
-    description: "High-performance C++ inference server for GGUF models",
-    website: "https://github.com/ggerganov/llama.cpp",
-  },
-  llamafile: {
-    id: "llamafile",
-    name: "llamafile",
-    defaultPort: 8080,
-    defaultBaseURL: "http://localhost:8080",
+  }),
+  llamafile: createLocalProviderConfig("llamafile", {
     modelsEndpoint: "/v1/models",
     healthEndpoint: "/health",
     supportsModelList: true,
     supportsEmbeddings: false,
-    description: "Single-file executable LLM with built-in server",
-    website: "https://github.com/Mozilla-Ocho/llamafile",
-  },
-  vllm: {
-    id: "vllm",
-    name: "vLLM",
-    defaultPort: 8000,
-    defaultBaseURL: "http://localhost:8000",
+  }),
+  vllm: createLocalProviderConfig("vllm", {
     modelsEndpoint: "/v1/models",
     healthEndpoint: "/health",
     supportsModelList: true,
     supportsEmbeddings: true,
-    description: "High-throughput GPU inference engine with PagedAttention",
-    website: "https://vllm.ai",
     icon: "/icons/providers/vllm.svg",
-  },
-  localai: {
-    id: "localai",
-    name: "LocalAI",
-    defaultPort: 8080,
-    defaultBaseURL: "http://localhost:8080",
+  }),
+  localai: createLocalProviderConfig("localai", {
     modelsEndpoint: "/v1/models",
     healthEndpoint: "/readyz",
     supportsModelList: true,
     supportsEmbeddings: true,
-    description: "Self-hosted OpenAI alternative with multiple backends",
-    website: "https://localai.io",
-  },
-  jan: {
-    id: "jan",
-    name: "Jan",
-    defaultPort: 1337,
-    defaultBaseURL: "http://localhost:1337",
+  }),
+  jan: createLocalProviderConfig("jan", {
     modelsEndpoint: "/v1/models",
     healthEndpoint: "/v1/models",
     supportsModelList: true,
     supportsEmbeddings: true,
-    description: "Open-source ChatGPT alternative with local-first design",
-    website: "https://jan.ai",
-  },
-  textgenwebui: {
-    id: "textgenwebui",
-    name: "Text Generation WebUI",
-    defaultPort: 5000,
-    defaultBaseURL: "http://localhost:5000",
+  }),
+  textgenwebui: createLocalProviderConfig("textgenwebui", {
     modelsEndpoint: "/v1/models",
     healthEndpoint: "/v1/models",
     supportsModelList: true,
     supportsEmbeddings: false,
-    description: "Gradio web UI with OpenAI-compatible API extension",
-    website: "https://github.com/oobabooga/text-generation-webui",
-  },
-  koboldcpp: {
-    id: "koboldcpp",
-    name: "KoboldCpp",
-    defaultPort: 5001,
-    defaultBaseURL: "http://localhost:5001",
+  }),
+  koboldcpp: createLocalProviderConfig("koboldcpp", {
     modelsEndpoint: "/v1/models",
     healthEndpoint: "/api/v1/model",
     supportsModelList: true,
     supportsEmbeddings: false,
-    description: "Easy-to-use llama.cpp fork with web UI and API",
-    website: "https://github.com/LostRuins/koboldcpp",
-  },
-  tabbyapi: {
-    id: "tabbyapi",
-    name: "TabbyAPI",
-    defaultPort: 5000,
-    defaultBaseURL: "http://localhost:5000",
+  }),
+  tabbyapi: createLocalProviderConfig("tabbyapi", {
     modelsEndpoint: "/v1/models",
     healthEndpoint: "/health",
     supportsModelList: true,
     supportsEmbeddings: false,
-    description: "Exllamav2 API server with OpenAI-compatible endpoints",
-    website: "https://github.com/theroyallab/tabbyAPI",
-  },
+  }),
+}
+
+function formatHttpError(status: number): string {
+  if (status === 401 || status === 403) {
+    return `Authentication failed (HTTP ${status})`
+  }
+  return `HTTP ${status}`
 }
 
 /**
@@ -187,9 +164,9 @@ export const LOCAL_PROVIDER_CONFIGS: Record<string, LocalProviderConfig> = {
  */
 export function getDefaultLocalProviderUrl(providerId: ProviderName): string {
   if (isLocalProviderName(providerId)) {
-    return LOCAL_PROVIDER_URLS[providerId as LocalProviderName]
+    return LOCAL_PROVIDER_URLS[providerId]
   }
-  return LOCAL_PROVIDER_CONFIGS[providerId]?.defaultBaseURL || ""
+  return LOCAL_PROVIDER_CONFIGS[providerId as LocalProviderName]?.defaultBaseURL || ""
 }
 
 /**
@@ -197,17 +174,16 @@ export function getDefaultLocalProviderUrl(providerId: ProviderName): string {
  */
 export function getDefaultLocalProviderPort(providerId: ProviderName): number {
   if (isLocalProviderName(providerId)) {
-    return LOCAL_PROVIDER_PORTS[providerId as LocalProviderName]
+    return LOCAL_PROVIDER_PORTS[providerId]
   }
-  return LOCAL_PROVIDER_CONFIGS[providerId]?.defaultPort || 0
+  return LOCAL_PROVIDER_CONFIGS[providerId as LocalProviderName]?.defaultPort || 0
 }
 
 /**
- * Normalize base URL - remove trailing slashes
+ * Normalize base URL - remove trailing slashes and a compatibility `/v1` suffix.
  */
 export function normalizeBaseUrl(baseUrl: string): string {
   let url = baseUrl.trim().replace(/\/+$/, "")
-  // Remove /v1 suffix if present for health checks
   if (url.endsWith("/v1")) {
     url = url.slice(0, -3)
   }
@@ -215,46 +191,39 @@ export function normalizeBaseUrl(baseUrl: string): string {
 }
 
 /**
- * Get local provider status (generic for OpenAI-compatible APIs)
+ * Get local provider status using the shared descriptor + proxy transport.
  */
 export async function getLocalProviderStatus(
   providerId: string,
   baseUrl?: string
 ): Promise<LocalProviderStatus> {
-  const config = LOCAL_PROVIDER_CONFIGS[providerId]
+  const config = LOCAL_PROVIDER_CONFIGS[providerId as LocalProviderName]
   if (!config) {
     return { connected: false, error: `Unknown provider: ${providerId}` }
   }
 
   const url = normalizeBaseUrl(baseUrl || config.defaultBaseURL)
 
-  // For Ollama, use dedicated Tauri command if available
-  if (providerId === "ollama" && isTauri()) {
-    try {
-      return await invoke<LocalProviderStatus>("ollama_get_status", { baseUrl: url })
-    } catch {
-      // Fall through to HTTP check
-    }
-  }
-
-  // Generic HTTP health check
   try {
-    const healthUrl = `${url}${config.healthEndpoint}`
-    const response = await fetch(healthUrl, {
+    const response = await proxyFetch(`${url}${config.healthEndpoint}`, {
       method: "GET",
-      signal: AbortSignal.timeout(5000),
+      timeout: 5000,
     })
 
-    if (response.ok) {
-      const data = await response.json().catch(() => ({}))
-      return {
-        connected: true,
-        version: data.version || data.build?.version,
-        models_count: data.models?.length,
-      }
+    if (!response.ok) {
+      return { connected: false, error: formatHttpError(response.status) }
     }
 
-    return { connected: false, error: `HTTP ${response.status}` }
+    const data = await response.json().catch(() => ({}))
+    return {
+      connected: true,
+      version: data.version || data.build?.version,
+      models_count: Array.isArray(data.models)
+        ? data.models.length
+        : Array.isArray(data.data)
+          ? data.data.length
+          : undefined,
+    }
   } catch (error) {
     return {
       connected: false,
@@ -264,66 +233,57 @@ export async function getLocalProviderStatus(
 }
 
 /**
- * List models from a local provider (OpenAI-compatible /v1/models endpoint)
+ * List models from a local provider using the descriptor's canonical endpoint.
  */
 export async function listLocalProviderModels(
   providerId: string,
   baseUrl?: string
 ): Promise<LocalModel[]> {
-  const config = LOCAL_PROVIDER_CONFIGS[providerId]
+  const config = LOCAL_PROVIDER_CONFIGS[providerId as LocalProviderName]
   if (!config || !config.supportsModelList) {
     return []
   }
 
   const url = normalizeBaseUrl(baseUrl || config.defaultBaseURL)
 
-  // For Ollama, use dedicated Tauri command if available
-  if (providerId === "ollama" && isTauri()) {
-    try {
-      const models = await invoke<Array<{ name: string; model: string }>>("ollama_list_models", {
-        baseUrl: url,
-      })
-      return models.map((m) => ({ id: m.name || m.model, object: "model" }))
-    } catch {
-      // Fall through to HTTP check
-    }
-  }
-
   try {
-    const modelsUrl = providerId === "ollama" ? `${url}/api/tags` : `${url}/v1/models`
-
-    const response = await fetch(modelsUrl, {
+    const response = await proxyFetch(`${url}${config.modelsEndpoint}`, {
       method: "GET",
-      signal: AbortSignal.timeout(10000),
+      timeout: 10000,
     })
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      throw new Error(formatHttpError(response.status))
     }
 
     const data = await response.json()
 
-    // Handle Ollama format
-    if (data.models) {
-      return data.models.map((m: { name?: string; model?: string }) => ({
-        id: m.name || m.model,
+    if (Array.isArray(data.models)) {
+      return data.models.map((m: { name?: string; model?: string; owned_by?: string }) => ({
+        id: m.name || m.model || "",
         object: "model",
+        owned_by: m.owned_by,
       }))
     }
 
-    // Handle OpenAI format
-    if (data.data) {
-      return data.data
+    if (Array.isArray(data.data)) {
+      return data.data.map((m: LocalModel) => ({
+        id: m.id,
+        object: m.object || "model",
+        created: m.created,
+        owned_by: m.owned_by,
+      }))
     }
 
-    return []
-  } catch {
-    return []
+    throw new Error("Invalid model list response")
+  } catch (error) {
+    if (error instanceof Error) throw error
+    throw new Error("Failed to list models")
   }
 }
 
 /**
- * Test connection to a local provider
+ * Test connection to a local provider.
  */
 export async function testLocalProviderConnection(
   providerId: string,
@@ -360,22 +320,22 @@ export async function testLocalProviderConnection(
 }
 
 /**
- * Get the default base URL for a local provider
+ * Get the default base URL for a local provider.
  */
 export function getDefaultBaseURL(providerId: string): string {
-  const config = LOCAL_PROVIDER_CONFIGS[providerId]
+  const config = LOCAL_PROVIDER_CONFIGS[providerId as LocalProviderName]
   return config?.defaultBaseURL || "http://localhost:8080"
 }
 
 /**
- * Check if a provider is a local provider
+ * Check if a provider is a local provider.
  */
 export function isLocalProvider(providerId: string): boolean {
   return providerId in LOCAL_PROVIDER_CONFIGS
 }
 
 /**
- * Get all local provider IDs
+ * Get all local provider IDs.
  */
 export function getLocalProviderIds(): string[] {
   return Object.keys(LOCAL_PROVIDER_CONFIGS)

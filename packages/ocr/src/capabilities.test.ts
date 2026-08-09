@@ -68,7 +68,8 @@ describe("OCR_PROVIDER_CAPABILITIES", () => {
 
   it("pins known spot-checks", () => {
     expect(OCR_PROVIDER_CAPABILITIES.mathpix.math).toBe("yes")
-    expect(OCR_PROVIDER_CAPABILITIES["tesseract-wasm"].offline).toBe("yes")
+    expect(OCR_PROVIDER_CAPABILITIES["tesseract-wasm"].offline).toBe("partial")
+    expect(OCR_PROVIDER_CAPABILITIES.ocrs.cjk).toBe("no")
     expect(OCR_PROVIDER_CAPABILITIES["paddle-ocr"].cjk).toBe("yes")
     expect(OCR_PROVIDER_CAPABILITIES["aws-textract"].tables).toBe("yes")
     expect(OCR_PROVIDER_CAPABILITIES["mistral-ocr"].costTier).toBe("$")
@@ -106,7 +107,7 @@ describe("topSidebarCapabilities", () => {
   })
 
   it("returns offline for a local engine", () => {
-    expect(topSidebarCapabilities("tesseract-wasm")).toContain("offline")
+    expect(topSidebarCapabilities("tesseract-native")).toContain("offline")
   })
 
   it("returns empty list for unknown providers", () => {

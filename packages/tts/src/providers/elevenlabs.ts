@@ -21,6 +21,40 @@ export interface ElevenLabsTTSOptions {
   similarityBoost?: number
   style?: number
   useSpeakerBoost?: boolean
+  signal?: AbortSignal
+  requestId?: string
+}
+
+export interface ElevenLabsVoice {
+  id: string
+  name: string
+  description?: string
+}
+
+export async function listElevenLabsVoices(
+  apiKey: string,
+  signal?: AbortSignal
+): Promise<ElevenLabsVoice[]> {
+  if (!apiKey) return []
+  const response = await proxyFetch("https://api.elevenlabs.io/v2/voices?page_size=100", {
+    method: "GET",
+    provider: "elevenlabs",
+    signal,
+    headers: { "xi-api-key": apiKey },
+  })
+  if (!response.ok) return []
+  const payload = await response.json<{
+    voices?: Array<{ voice_id?: string; name?: string; description?: string; category?: string }>
+  }>()
+  return (payload.voices ?? [])
+    .filter((voice): voice is { voice_id: string; name: string; description?: string } =>
+      Boolean(voice.voice_id && voice.name)
+    )
+    .map((voice) => ({
+      id: voice.voice_id,
+      name: voice.name,
+      description: voice.description,
+    }))
 }
 
 export async function generateElevenLabsTTS(
@@ -46,6 +80,9 @@ export async function generateElevenLabsTTS(
   try {
     const response = await proxyFetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}`, {
       method: "POST",
+      provider: "elevenlabs",
+      signal: options.signal,
+      requestId: options.requestId,
       headers: {
         Accept: "audio/mpeg",
         "Content-Type": "application/json",

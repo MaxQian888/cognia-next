@@ -111,6 +111,22 @@ describe("shellAllows", () => {
   ] as const)("returns the matching shell flag (%s)", (platform, expected) => {
     expect(shellAllows(provider, platform)).toBe(expected)
   })
+
+  it("maps headless hosts to the native server-OCR capability", () => {
+    const native = makeProvider({ shells: { browser: false, tauri: true, capacitor: false } })
+    expect(shellAllows(native, "headless")).toBe(true)
+  })
+
+  it.each(["apple-vision", "windows-media-ocr"])(
+    "does not expose the platform-bound %s provider on headless hosts",
+    (id) => {
+      const native = makeProvider({
+        id,
+        shells: { browser: false, tauri: true, capacitor: false },
+      })
+      expect(shellAllows(native, "headless")).toBe(false)
+    }
+  )
 })
 
 describe("shared singleton registry", () => {

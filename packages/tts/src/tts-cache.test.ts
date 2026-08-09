@@ -6,7 +6,12 @@
  */
 
 import "fake-indexeddb/auto"
-import { generateCacheKey, getCachedOrGenerate, ttsCache } from "./tts-cache"
+import {
+  generateCacheKey,
+  getCachedOrGenerate,
+  getCachedTtsResponseOrGenerate,
+  ttsCache,
+} from "./tts-cache"
 import type { TTSSettings } from "./types"
 
 beforeEach(async () => {
@@ -242,5 +247,51 @@ describe("getCachedOrGenerate", () => {
     const r = await getCachedOrGenerate("setfail", gen, "openai", "x")
     expect(r).not.toBeNull()
     spy.mockRestore()
+  })
+})
+
+describe("getCachedTtsResponseOrGenerate", () => {
+  it("preserves the provider's structured failure and never caches it", async () => {
+    const setSpy = jest.spyOn(ttsCache, "set")
+    const failure = {
+      success: false,
+      error: "TTS API returned an error",
+      errorType: "api-error" as const,
+      status: 401,
+      providerMessage: "invalid key",
+    }
+    const result = await getCachedTtsResponseOrGenerate(
+      "structured-failure",
+      async () => failure,
+      "openai",
+      "hello"
+    )
+    expect(result).toEqual(failure)
+    expect(setSpy).not.toHaveBeenCalled()
+    setSpy.mockRestore()
+  })
+
+  it("discards a successful response cancelled before the cache write", async () => {
+    const controller = new AbortController()
+    const setSpy = jest.spyOn(ttsCache, "set")
+    const result = await getCachedTtsResponseOrGenerate(
+      "cancelled-success",
+      async () => {
+        controller.abort()
+        return {
+          success: true,
+          audioData: new ArrayBuffer(2),
+          mimeType: "audio/mpeg",
+        }
+      },
+      "openai",
+      "hello",
+      true,
+      controller.signal
+    )
+
+    expect(result).toMatchObject({ success: false, errorType: "cancelled" })
+    expect(setSpy).not.toHaveBeenCalled()
+    setSpy.mockRestore()
   })
 })

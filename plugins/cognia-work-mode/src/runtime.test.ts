@@ -48,6 +48,17 @@ function makeContext() {
       runId: `${id}-run`,
     })
   )
+  const invokeDependencyTool = jest.fn(
+    async (
+      _dependencyId: string,
+      _toolName: string,
+      _args: Record<string, unknown>,
+      _options?: { sessionId?: string; messageId?: string }
+    ): Promise<{ ok: boolean; artifactId?: string }> => ({
+      ok: true,
+      artifactId: "office-artifact-1",
+    })
+  )
   const ctx = {
     pluginId: "cognia-work-mode",
     artifact: {
@@ -55,17 +66,16 @@ function makeContext() {
       getArtifact: (id: string) => artifacts.get(id) ?? null,
       openArtifact,
     },
-    agent: { dispatchSubagent },
+    agent: { dispatchSubagent, invokeDependencyTool },
   } as unknown as WorkPluginContext
 
-  return { artifacts, createArtifact, ctx, dispatchSubagent, openArtifact }
+  return { artifacts, createArtifact, ctx, dispatchSubagent, invokeDependencyTool, openArtifact }
 }
 
 describe("WorkRuntime", () => {
   it.each([
     ["document", "text", "markdown"],
     ["report", "text", "markdown"],
-    ["spreadsheet", "code", "plaintext"],
     ["presentation", "html", "html"],
     ["site", "html", "html"],
   ] as const)("creates and reveals a %s deliverable", async (kind, type, language) => {
@@ -153,6 +163,7 @@ describe("WorkRuntime", () => {
     const updateArtifact = jest.fn((id: string, updates: Partial<Artifact>) => {
       const current = artifacts.get(id)
       if (current) artifacts.set(id, { ...current, ...updates })
+      return artifacts.get(id)!
     })
     ctx.artifact.updateArtifact = updateArtifact
     artifacts.set(
@@ -170,6 +181,8 @@ describe("WorkRuntime", () => {
     expect(updateArtifact).toHaveBeenCalledWith("source-1", {
       title: "Revised quarterly brief",
       content: "Revised evidence-backed draft.",
+      expectedVersion: 1,
+      changeDescription: "Updated by Work Mode",
     })
     expect(artifacts.get("source-1")?.metadata).toEqual({ sourceOrigin: "tool", wordCount: 3 })
     expect(openArtifact).toHaveBeenCalledWith("source-1")
@@ -254,6 +267,54 @@ describe("WorkRuntime", () => {
       "deliverable-reviewer",
     ])
     expect(reportProgress).toHaveBeenLastCalledWith(100, "3/3 specialist tasks complete")
+  })
+
+  it("delegates spreadsheet deliverables to the cognia-office dependency", async () => {
+    const { createArtifact, ctx, invokeDependencyTool } = makeContext()
+    const result = await createWorkRuntime(ctx).createDeliverable({
+      kind: "spreadsheet",
+      title: "Inventory",
+      content: "SKU,Qty\nA-1,4",
+      sessionId: "session-1",
+      messageId: "message-1",
+    })
+    expect(result).toEqual({ ok: true, artifactId: "office-artifact-1", kind: "spreadsheet" })
+    expect(invokeDependencyTool).toHaveBeenCalledWith(
+      "cognia-office",
+      "office_create_workbook",
+      { title: "Inventory", content: "SKU,Qty\nA-1,4" },
+      { sessionId: "session-1", messageId: "message-1" }
+    )
+    expect(createArtifact).not.toHaveBeenCalled()
+  })
+
+  it("fails closed when Office does not return an artifact and routes workbook edits to Office", async () => {
+    const { artifacts, ctx, invokeDependencyTool } = makeContext()
+    invokeDependencyTool.mockResolvedValueOnce({ ok: false })
+    await expect(
+      createWorkRuntime(ctx).createDeliverable({
+        kind: "spreadsheet",
+        title: "Inventory",
+        content: "SKU,Qty",
+      })
+    ).rejects.toThrow("did not return a workbook artifact")
+
+    artifacts.set(
+      "office-1",
+      makeArtifact({
+        id: "office-1",
+        metadata: {
+          plugin: {
+            kind: "cognia-office/workbook",
+            schemaVersion: 1,
+            ownerPluginId: "cognia-office",
+          },
+        },
+      })
+    )
+    expect(() =>
+      createWorkRuntime(ctx).updateDeliverable({ artifactId: "office-1", content: "plaintext" })
+    ).toThrow("must use cognia-office workbook operations")
   })
 
   it("bounds parallel fan-out and validates every task", async () => {

@@ -33,7 +33,9 @@ import {
   type UserOcrSettings,
 } from "./types"
 import type { OcrRegistry } from "./registry"
-import { pickDefaultProvider, resolveProviderById } from "./auto-router"
+import { listProviderCandidates, resolveProviderById } from "./auto-router"
+import type { HasCredentialsFn, LocalReadinessFn } from "./auto-router"
+import type { OcrRuntimeStatusResolver } from "./runtime-status"
 
 export interface ResolvedSource {
   blob: Blob
@@ -76,6 +78,11 @@ export interface ExtractDeps {
   filePathResolver?: FilePathResolver
   /** Hook for tests / observability — every extract result flows through here. */
   onResult?: (result: OcrResult) => void
+  /** Runtime truth used by auto-routing; production hosts should always provide it. */
+  runtimeStatus?: OcrRuntimeStatusResolver
+  /** Legacy split probes retained for embedders while they migrate to runtimeStatus. */
+  localReadiness?: LocalReadinessFn
+  hasCredentials?: HasCredentialsFn
 }
 
 async function resolveSource(
@@ -227,26 +234,27 @@ export async function extract(input: OcrInput, deps: ExtractDeps): Promise<OcrRe
   const fileSha = await computeFileSha(resolved)
   const languages = normalizeLanguages(input.languages, deps.settings.defaultLanguages)
 
-  // Provider selection.
-  const provider =
+  // An explicit request is strict. Auto/default selection gets an ordered,
+  // readiness-gated chain and may continue after retryable provider failures.
+  const candidates =
     input.providerId !== undefined
-      ? resolveProviderById(deps.registry, input.providerId, deps.platform)
-      : await pickDefaultProvider({
+      ? [resolveProviderById(deps.registry, input.providerId, deps.platform)]
+      : await listProviderCandidates({
           registry: deps.registry,
           settings: deps.settings,
           platform: deps.platform,
           osTag: deps.osTag,
           localPreference: deps.settings.platformOverrides,
+          runtimeStatus: deps.runtimeStatus,
+          localReadiness: deps.localReadiness,
+          hasCredentials: deps.hasCredentials,
         })
-
-  // Cache lookup.
-  const useCache = input.useCache !== false
-  if (useCache) {
-    const hit = await deps.cache.read({ fileSha, providerId: provider.id, languages })
-    if (hit) {
-      deps.onResult?.(hit)
-      return hit
-    }
+  if (candidates.length === 0) {
+    throw new OcrError(
+      "provider_failed",
+      "auto-router",
+      "No ready OCR provider is available for the current shell. Configure one in settings → OCR."
+    )
   }
 
   // Hand a blob-backed input down to the provider so file-path / attachment
@@ -257,34 +265,68 @@ export async function extract(input: OcrInput, deps: ExtractDeps): Promise<OcrRe
     source: { kind: "blob", blob: resolved.blob, mimeType: resolved.mimeType },
   }
 
-  const result = await callProvider(provider, providerInput, deps, input.signal)
+  const useCache = input.useCache !== false
+  let lastError: unknown
+  for (const [index, provider] of candidates.entries()) {
+    if (useCache) {
+      const hit = await deps.cache.read({ fileSha, providerId: provider.id, languages })
+      if (hit) {
+        deps.onResult?.(hit)
+        return hit
+      }
+    }
 
-  // Phase 2 / 2c — confidence-driven escalation. No-op unless the setting is on
-  // and the result's mean confidence is below the threshold (default off).
-  const finalResult = await maybeEscalateResult({
-    result,
-    settings: deps.settings,
-    reextract: (providerId) =>
-      callProvider(
-        resolveProviderById(deps.registry, providerId, deps.platform),
-        providerInput,
-        deps,
-        input.signal
-      ),
-  })
+    try {
+      const result = await callProvider(provider, providerInput, deps, input.signal)
+      const finalResult = await maybeEscalateResult({
+        result,
+        settings: deps.settings,
+        reextract: (providerId) =>
+          callProvider(
+            resolveProviderById(deps.registry, providerId, deps.platform),
+            providerInput,
+            deps,
+            input.signal
+          ),
+      })
 
-  if (useCache) {
-    await deps.cache.write({
-      fileSha,
-      providerId: finalResult.providerId,
-      languages,
-      result: finalResult,
-      bytesIn: resolved.blob.size,
-    })
+      if (useCache) {
+        await deps.cache.write({
+          fileSha,
+          providerId: finalResult.providerId,
+          languages,
+          result: finalResult,
+          bytesIn: resolved.blob.size,
+        })
+      }
+
+      deps.onResult?.(finalResult)
+      return finalResult
+    } catch (error) {
+      lastError = error
+      const explicit = input.providerId !== undefined
+      const isLast = index === candidates.length - 1
+      if (explicit || isLast || !isRetryableProviderError(error)) throw error
+    }
   }
 
-  deps.onResult?.(finalResult)
-  return finalResult
+  throw lastError
+}
+
+function isRetryableProviderError(error: unknown): boolean {
+  if (!(error instanceof OcrError)) return true
+  return (
+    error.code === "unsupported_shell" ||
+    error.code === "missing_credentials" ||
+    error.code === "rate_limited" ||
+    error.code === "provider_failed"
+  )
 }
 
 export { OcrError } from "./errors"
+export type {
+  OcrRuntimeStatus,
+  OcrRuntimeStatusResolver,
+  OcrModelRuntimeStatus,
+  OcrUnavailableReason,
+} from "./runtime-status"

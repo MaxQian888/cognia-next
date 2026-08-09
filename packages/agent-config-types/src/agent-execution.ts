@@ -825,7 +825,7 @@ export interface AgentEventEnvelope {
 // ---- Decision trace ---------------------------------------------------------
 
 export type AgentExecutionSurface =
-  "chat" | "agent-executor" | "workflow-agent-turn" | "team" | "plugin" | "cli"
+  "chat" | "connector" | "agent-executor" | "workflow-agent-turn" | "team" | "plugin" | "cli"
 
 /**
  * Secret-free record of one resolver decision. Only ids / enums / refs are

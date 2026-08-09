@@ -129,7 +129,6 @@ it("normalizes non-Error transport failures", async () => {
 it.each([
   ["mp3", "audio/mpeg"],
   ["wav", "audio/wav"],
-  ["pcm", "audio/pcm"],
   ["flac", "audio/flac"],
   ["opus", "audio/opus"],
 ] as const)("maps %s responses to %s", async (responseFormat, mimeType) => {
@@ -145,4 +144,15 @@ it.each([
       responseFormat,
     })
   ).resolves.toMatchObject({ success: true, mimeType })
+})
+
+it("rejects a legacy PCM format before making a request", async () => {
+  await expect(
+    generateMistralTTS("Hello", {
+      apiKey: "k",
+      voiceId: "v",
+      responseFormat: "pcm" as never,
+    })
+  ).resolves.toMatchObject({ success: false, errorType: "not-supported" })
+  expect(proxyFetchMock).not.toHaveBeenCalled()
 })

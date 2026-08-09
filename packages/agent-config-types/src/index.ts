@@ -1814,6 +1814,30 @@ export type SessionKind = "direct" | "team" | "workflow-editor" | "resource-work
 
 export type SessionVisibility = "standard" | "embedded"
 
+export type AttachedSessionContextMode =
+  { mode: "none" } | { mode: "last-n"; turns: number } | { mode: "full" }
+
+export type AttachedSessionStatus = "staged" | "running" | "completed" | "interrupted" | "closed"
+
+export type CrossSessionInboundPolicy = "accept" | "hold" | "refuse"
+
+/** Durable parent-owned lifecycle for a Codex-style attached child chat. */
+export interface AttachedChildSession {
+  parentSessionId: string
+  lifecycleOwnerSessionId: string
+  context: AttachedSessionContextMode
+  /** Conversation ancestry does not imply filesystem isolation. */
+  workspace: "shared" | "independent"
+  status: AttachedSessionStatus
+  createdAt: number
+  updatedAt?: number
+  result?: {
+    summary: string
+    messageId?: string
+    completedAt: number
+  }
+}
+
 export type SessionSurfaceBinding =
   | { kind: "canvas-document"; documentId: string }
   | { kind: "project-file"; projectId: string; rootId: string; relPath: string }
@@ -2012,6 +2036,10 @@ export interface ChatSession {
    * non-branch sessions.
    */
   parentSessionId?: string
+  /** Parent-owned attached-chat state; absent on ordinary conversation branches. */
+  attachedChild?: AttachedChildSession
+  /** Receiver-owned policy for independent-session messages. Defaults to hold. */
+  crossSessionInboundPolicy?: CrossSessionInboundPolicy
   /** The source message id (in the parent session) this branch was taken at. */
   branchedFromMessageId?: string
   /** How the branch was created: a verbatim copy or an LLM summary seed. */
@@ -2731,6 +2759,11 @@ export interface AppSettings {
      * mobile where the sidechat host is not mounted. Default false.
      */
     spawnTask?: boolean
+    /**
+     * Expose live independent-session discovery and plain-text messaging.
+     * Receiver policy and permission checks remain authoritative. Default false.
+     */
+    sessionMessaging?: boolean
   }
   /**
    * Desktop → cognia CLI storage sync (ADR: CLI ↔ APP storage unification).
@@ -3719,6 +3752,7 @@ export interface AppSettings {
     | "deepgram"
     | "xiaomi"
     | "mistral"
+    | "local-openai-compatible"
   /** Browser SpeechSynthesisVoice.voiceURI (system provider). */
   systemVoice?: string
 
@@ -3728,6 +3762,14 @@ export interface AppSettings {
   openaiSpeed?: number
   openaiInstructions?: string
   openaiResponseFormat?: string
+
+  /** Loopback-only OpenAI-compatible TTS endpoint settings. */
+  localOpenaiBaseUrl?: string
+  localOpenaiModel?: string
+  localOpenaiVoice?: string
+  localOpenaiSpeed?: number
+  localOpenaiResponseFormat?: string
+  localOpenaiTimeoutMs?: number
 
   /** Gemini TTS settings. */
   geminiVoice?: string
@@ -4302,7 +4344,7 @@ export interface AppSettings {
    * `mode === "off"`, every caller goes direct.
    *
    * The Rust side reads this via `proxy_config::current()`; the
-   * frontend mirrors writes into Rust by calling `proxy_set` after
+   * frontend mirrors writes into Rust by calling `proxy_apply` after
    * every save so the in-memory config stays coherent without a Dexie
    * round-trip on the hot path.
    */
@@ -5163,8 +5205,20 @@ export interface PackPristineSnapshot {
  */
 export interface Skill {
   id: string
+  /** Portable Agent Skills name and bundle directory (lowercase kebab-case). */
+  slug?: string
   name: string
   description?: string
+  /** Environment requirements declared by the Agent Skills specification. */
+  compatibility?: string
+  /** Standard string-to-string Agent Skills metadata. */
+  metadata?: Record<string, string>
+  /** Whether the skill may appear in an implicit discovery catalog. */
+  invocationPolicy?: "implicit" | "explicit"
+  /** Unknown SKILL.md frontmatter retained for lossless round-trips. */
+  frontmatterExtensions?: Record<string, unknown>
+  /** Original Codex agents/openai.yaml text, retained until explicitly edited. */
+  codexOpenAiYaml?: string
   /** Markdown body, appended verbatim to the system prompt under `## <name>`. */
   content: string
   /** Tools this skill expects to call; unioned with the character's whitelist. */
@@ -5281,13 +5335,22 @@ export interface SkillValidationError {
     | "missing-name"
     | "name-too-long"
     | "name-format"
+    | "missing-slug"
+    | "slug-too-long"
+    | "slug-format"
+    | "missing-description"
     | "missing-content"
     | "description-too-long"
+    | "compatibility-too-long"
+    | "metadata-format"
+    | "directory-name-mismatch"
     | "duplicate-resource-path"
     | "resource-path-traversal"
     | "frontmatter-parse"
     | "unknown"
   message: string
+  /** Runtime issues block loading; portability blocks standard export; warnings are advisory. */
+  severity?: "runtime" | "portability" | "warning"
   /** Frontmatter field or resource id this error applies to. */
   field?: string
 }

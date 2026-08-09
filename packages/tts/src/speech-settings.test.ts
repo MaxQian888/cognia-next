@@ -35,6 +35,24 @@ describe("selectSpeechSettings", () => {
     expect(out.openaiModel).toBe(DEFAULT_SPEECH_SETTINGS.openaiModel)
     expect(out.ttsRate).toBe(DEFAULT_SPEECH_SETTINGS.ttsRate)
   })
+
+  it("normalizes legacy raw PCM settings to a playable buffered format", () => {
+    const out = selectSpeechSettings({
+      openaiResponseFormat: "pcm",
+      localOpenaiResponseFormat: "pcm",
+      mistralResponseFormat: "pcm",
+    })
+    expect(out.openaiResponseFormat).toBe("mp3")
+    expect(out.localOpenaiResponseFormat).toBe("mp3")
+    expect(out.mistralResponseFormat).toBe("mp3")
+  })
+
+  it.each(["unknown-provider", "edge", "openai-realtime"])(
+    "normalizes unavailable persisted provider %s to system",
+    (ttsProvider) => {
+      expect(selectSpeechSettings({ ttsProvider }).ttsProvider).toBe("system")
+    }
+  )
 })
 
 describe("toTTSSettings", () => {

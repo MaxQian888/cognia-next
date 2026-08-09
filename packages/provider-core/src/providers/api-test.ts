@@ -2,13 +2,14 @@
  * API Connection Testing - Test provider API connections
  */
 
-import { invoke } from "@tauri-apps/api/core"
 import type { ApiProtocol } from "@cognia/provider-types"
+import { validateStaticHeaders } from "@cognia/provider-types/transport-header-policy"
 import {
   getBuiltInProviderDefaultBaseURL,
   getBuiltInProviderDefaultModel,
   getBuiltInProviderProtocol,
 } from "@cognia/provider-types/built-in-provider-catalog"
+import { LOCAL_PROVIDER_CONFIGS, normalizeBaseUrl } from "./local-providers"
 import { isTauri, proxyFetch } from "./runtime-adapters"
 
 export interface ApiTestResult {
@@ -25,6 +26,7 @@ export interface ProviderConnectionProbeInput {
   apiKey?: string
   baseURL?: string
   protocol?: ApiProtocol
+  customHeaders?: Record<string, string>
   /** Model to probe with; defaults to the built-in catalog's default model. */
   model?: string
 }
@@ -48,18 +50,16 @@ export interface LocalProviderDetectionResult {
 export const LOCAL_PROVIDER_TEST_CONFIGS: Record<
   string,
   { url: string; name: string; healthPath: string }
-> = {
-  ollama: { url: "http://localhost:11434", name: "Ollama", healthPath: "/api/tags" },
-  lmstudio: { url: "http://localhost:1234", name: "LM Studio", healthPath: "/v1/models" },
-  llamacpp: { url: "http://localhost:8080", name: "llama.cpp", healthPath: "/health" },
-  llamafile: { url: "http://localhost:8080", name: "llamafile", healthPath: "/health" },
-  vllm: { url: "http://localhost:8000", name: "vLLM", healthPath: "/v1/models" },
-  localai: { url: "http://localhost:8080", name: "LocalAI", healthPath: "/v1/models" },
-  jan: { url: "http://localhost:1337", name: "Jan", healthPath: "/v1/models" },
-  textgenwebui: { url: "http://localhost:5000", name: "Text Gen WebUI", healthPath: "/v1/models" },
-  koboldcpp: { url: "http://localhost:5001", name: "KoboldCpp", healthPath: "/api/v1/model" },
-  tabbyapi: { url: "http://localhost:5000", name: "TabbyAPI", healthPath: "/v1/models" },
-}
+> = Object.fromEntries(
+  Object.entries(LOCAL_PROVIDER_CONFIGS).map(([providerId, config]) => [
+    providerId,
+    {
+      url: config.defaultBaseURL,
+      name: config.name,
+      healthPath: config.healthEndpoint,
+    },
+  ])
+)
 
 /**
  * Probe model for an Anthropic-wire host when the caller names none. Only
@@ -67,6 +67,22 @@ export const LOCAL_PROVIDER_TEST_CONFIGS: Record<
  * rejects it, so callers should pass the model they actually intend to use.
  */
 const ANTHROPIC_PROBE_FALLBACK_MODEL = getBuiltInProviderDefaultModel("anthropic")
+
+function buildLocalProbeHeaders(
+  apiKey?: string,
+  customHeaders?: Record<string, string>
+): Record<string, string> {
+  const violations = validateStaticHeaders(customHeaders)
+  if (violations.length > 0) {
+    const details = violations.map(({ name, reason }) => `${name}: ${reason}`).join(", ")
+    throw new Error(`Invalid custom headers (${details})`)
+  }
+  return {
+    ...(customHeaders ?? {}),
+    ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+  }
+}
+const ANTHROPIC_PUBLIC_BASE_URL = "https://api.anthropic.com"
 
 /**
  * The Anthropic Messages API is served at `<base>/v1/messages`. Hosts publish
@@ -86,8 +102,17 @@ export async function testCustomProviderConnectionByProtocol(
   apiProtocol: ApiProtocol = "openai",
   model?: string
 ): Promise<ApiTestResult> {
-  const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "")
+  const normalizedBaseUrl = baseUrl?.trim().replace(/\/+$/, "")
   const start = Date.now()
+
+  if (!normalizedBaseUrl) {
+    return {
+      success: false,
+      message: "Missing base URL",
+      outcome: "failed",
+      authoritative: true,
+    }
+  }
 
   try {
     let response: Response
@@ -160,14 +185,6 @@ export async function testOpenAIConnection(
   apiKey: string,
   baseUrl?: string
 ): Promise<ApiTestResult> {
-  if (isTauri()) {
-    return invoke<ApiTestResult>("test_openai_connection", {
-      apiKey,
-      baseUrl,
-    })
-  }
-
-  // Browser fallback - make direct API call
   try {
     const url = baseUrl || "https://api.openai.com/v1"
     const start = Date.now()
@@ -207,7 +224,12 @@ export async function testOpenAIConnection(
  */
 export async function testAnthropicConnection(apiKey: string): Promise<ApiTestResult> {
   if (isTauri()) {
-    return invoke<ApiTestResult>("test_anthropic_connection", { apiKey })
+    return testCustomProviderConnectionByProtocol(
+      getBuiltInProviderDefaultBaseURL("anthropic") || ANTHROPIC_PUBLIC_BASE_URL,
+      apiKey,
+      "anthropic",
+      getBuiltInProviderDefaultModel("anthropic")
+    )
   }
 
   // Browser fallback - Anthropic requires server-side due to CORS
@@ -227,10 +249,6 @@ export async function testAnthropicConnection(apiKey: string): Promise<ApiTestRe
  * Test Google AI API connection
  */
 export async function testGoogleConnection(apiKey: string): Promise<ApiTestResult> {
-  if (isTauri()) {
-    return invoke<ApiTestResult>("test_google_connection", { apiKey })
-  }
-
   try {
     const start = Date.now()
     const response = await proxyFetch(
@@ -266,10 +284,6 @@ export async function testGoogleConnection(apiKey: string): Promise<ApiTestResul
  * Test DeepSeek API connection
  */
 export async function testDeepSeekConnection(apiKey: string): Promise<ApiTestResult> {
-  if (isTauri()) {
-    return invoke<ApiTestResult>("test_deepseek_connection", { apiKey })
-  }
-
   // DeepSeek uses OpenAI-compatible API
   try {
     const start = Date.now()
@@ -307,10 +321,6 @@ export async function testDeepSeekConnection(apiKey: string): Promise<ApiTestRes
  * Test Groq API connection
  */
 export async function testGroqConnection(apiKey: string): Promise<ApiTestResult> {
-  if (isTauri()) {
-    return invoke<ApiTestResult>("test_groq_connection", { apiKey })
-  }
-
   // Groq uses OpenAI-compatible API
   try {
     const start = Date.now()
@@ -348,10 +358,6 @@ export async function testGroqConnection(apiKey: string): Promise<ApiTestResult>
  * Test Mistral API connection
  */
 export async function testMistralConnection(apiKey: string): Promise<ApiTestResult> {
-  if (isTauri()) {
-    return invoke<ApiTestResult>("test_mistral_connection", { apiKey })
-  }
-
   // Mistral uses OpenAI-compatible API
   try {
     const start = Date.now()
@@ -388,15 +394,17 @@ export async function testMistralConnection(apiKey: string): Promise<ApiTestResu
 /**
  * Test Ollama connection
  */
-export async function testOllamaConnection(baseUrl: string): Promise<ApiTestResult> {
-  if (isTauri()) {
-    return invoke<ApiTestResult>("test_ollama_connection", { baseUrl })
-  }
-
+export async function testOllamaConnection(
+  baseUrl: string,
+  apiKey?: string,
+  customHeaders?: Record<string, string>
+): Promise<ApiTestResult> {
   try {
     const url = baseUrl.endsWith("/v1") ? baseUrl.slice(0, -3) : baseUrl
     const start = Date.now()
-    const response = await proxyFetch(`${url}/api/tags`)
+    const response = await proxyFetch(`${url}/api/tags`, {
+      headers: buildLocalProbeHeaders(apiKey, customHeaders),
+    })
     const latency = Date.now() - start
 
     if (response.ok) {
@@ -429,18 +437,16 @@ export async function testOllamaConnection(baseUrl: string): Promise<ApiTestResu
  */
 export async function testLocalProviderConnectionByUrl(
   baseUrl: string,
-  providerName: string = "Local"
+  providerName: string = "Local",
+  options?: { apiKey?: string; customHeaders?: Record<string, string> }
 ): Promise<ApiTestResult> {
   try {
-    // Normalize the URL
-    let url = baseUrl.trim().replace(/\/+$/, "")
-    if (!url.endsWith("/v1")) {
-      url = `${url}/v1`
-    }
+    const url = normalizeBaseUrl(baseUrl)
 
     const start = Date.now()
-    const response = await proxyFetch(`${url}/models`, {
+    const response = await proxyFetch(`${url}/v1/models`, {
       headers: {
+        ...buildLocalProbeHeaders(options?.apiKey, options?.customHeaders),
         "Content-Type": "application/json",
       },
     })
@@ -481,13 +487,6 @@ export async function testCustomProviderConnection(
   baseUrl: string,
   apiKey: string
 ): Promise<ApiTestResult> {
-  if (isTauri()) {
-    return invoke<ApiTestResult>("test_custom_provider_connection", {
-      baseUrl,
-      apiKey,
-    })
-  }
-
   try {
     const url = baseUrl.endsWith("/") ? `${baseUrl}models` : `${baseUrl}/models`
     const start = Date.now()
@@ -526,12 +525,14 @@ export async function testCustomProviderConnection(
 export async function testProviderConnection(
   providerId: string,
   apiKey: string,
-  baseUrl?: string
+  baseUrl?: string,
+  customHeaders?: Record<string, string>
 ): Promise<ApiTestResult> {
   const probeResult = await probeProviderConnection({
     providerId,
     apiKey,
     baseURL: baseUrl,
+    customHeaders,
   })
 
   return probeResult
@@ -556,7 +557,7 @@ function toAuthoritativeResult(result: ApiTestResult): ProviderConnectionProbeRe
 export async function probeProviderConnection(
   input: ProviderConnectionProbeInput
 ): Promise<ProviderConnectionProbeResult> {
-  const { providerId, apiKey = "", baseURL } = input
+  const { providerId, apiKey = "", baseURL, customHeaders } = input
   const protocol = input.protocol || getBuiltInProviderProtocol(providerId) || "openai"
 
   // Use centralized local provider configs
@@ -577,7 +578,11 @@ export async function probeProviderConnection(
       return toAuthoritativeResult(await testMistralConnection(apiKey))
     case "ollama":
       return toAuthoritativeResult(
-        await testOllamaConnection(baseURL || localProviderDefaults.ollama.url)
+        await testOllamaConnection(
+          baseURL || localProviderDefaults.ollama.url,
+          apiKey,
+          customHeaders
+        )
       )
     // Local inference providers (OpenAI-compatible)
     case "lmstudio":
@@ -591,7 +596,10 @@ export async function probeProviderConnection(
     case "tabbyapi": {
       const config = localProviderDefaults[providerId]
       return toAuthoritativeResult(
-        await testLocalProviderConnectionByUrl(baseURL || config.url, config.name)
+        await testLocalProviderConnectionByUrl(baseURL || config.url, config.name, {
+          apiKey,
+          customHeaders,
+        })
       )
     }
     default: {
@@ -645,9 +653,10 @@ export async function detectLocalProviders(
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 2000) // 2 second timeout
 
-      const response = await fetch(`${config.url}${config.healthPath}`, {
+      const response = await proxyFetch(`${config.url}${config.healthPath}`, {
         method: "GET",
         signal: controller.signal,
+        timeout: 2000,
       })
 
       clearTimeout(timeoutId)
@@ -716,9 +725,10 @@ export async function detectLocalProvider(
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 3000)
 
-    const response = await fetch(`${baseUrl}${healthPath}`, {
+    const response = await proxyFetch(`${baseUrl}${healthPath}`, {
       method: "GET",
       signal: controller.signal,
+      timeout: 3000,
     })
 
     clearTimeout(timeoutId)

@@ -34,6 +34,7 @@ import {
   normalizeBaseUrl,
   type LocalProviderConfig,
 } from "./local-providers"
+import { validateStaticHeaders } from "@cognia/provider-types/transport-header-policy"
 import { pullOllamaModelStreaming } from "./ollama-pull"
 import { proxyFetch } from "./runtime-adapters"
 
@@ -90,6 +91,29 @@ export interface ModelPullOptions {
   signal?: AbortSignal
 }
 
+export interface LocalProviderRequestOptions {
+  baseUrl?: string
+  apiKey?: string
+  customHeaders?: Record<string, string>
+}
+
+export type LocalProviderRequestErrorCode =
+  "authentication_failed" | "http_error" | "invalid_headers" | "invalid_response" | "network_error"
+
+export class LocalProviderRequestError extends Error {
+  constructor(
+    readonly code: LocalProviderRequestErrorCode,
+    message: string,
+    readonly status?: number,
+    options?: ErrorOptions
+  ) {
+    super(message, options)
+    this.name = "LocalProviderRequestError"
+  }
+}
+
+type LocalProviderConstructorInput = string | LocalProviderRequestOptions | undefined
+
 function waitForDelay(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) {
     return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"))
@@ -106,6 +130,16 @@ function waitForDelay(ms: number, signal: AbortSignal): Promise<void> {
     }, ms)
     signal.addEventListener("abort", onAbort, { once: true })
   })
+}
+
+function normalizeModels(models: LocalModelInfo[]): LocalModelInfo[] {
+  const byId = new Map<string, LocalModelInfo>()
+  for (const model of models) {
+    const id = model.id.trim()
+    if (!id || byId.has(id)) continue
+    byId.set(id, { ...model, id })
+  }
+  return [...byId.values()]
 }
 
 /**
@@ -236,13 +270,50 @@ export class LocalProviderService {
   private providerId: LocalProviderName
   private config: LocalProviderConfig
   private baseUrl: string
+  private apiKey?: string
+  private customHeaders?: Record<string, string>
   private capabilities: LocalProviderCapabilities
 
-  constructor(providerId: LocalProviderName, baseUrl?: string) {
+  constructor(providerId: LocalProviderName, input?: LocalProviderConstructorInput) {
     this.providerId = providerId
     this.config = LOCAL_PROVIDER_CONFIGS[providerId]
-    this.baseUrl = normalizeBaseUrl(baseUrl || this.config.defaultBaseURL)
+    const options =
+      typeof input === "string"
+        ? ({ baseUrl: input } satisfies LocalProviderRequestOptions)
+        : (input ?? {})
+    this.baseUrl = normalizeBaseUrl(options.baseUrl || this.config.defaultBaseURL)
+    this.apiKey = options.apiKey?.trim() || undefined
+    const headerViolations = validateStaticHeaders(options.customHeaders)
+    if (headerViolations.length > 0) {
+      const details = headerViolations.map(({ name, reason }) => `${name}: ${reason}`).join(", ")
+      throw new LocalProviderRequestError("invalid_headers", `Invalid custom headers (${details})`)
+    }
+    this.customHeaders = options.customHeaders
     this.capabilities = getProviderCapabilities(providerId)
+  }
+
+  private buildHeaders(extra?: Record<string, string>): Record<string, string> {
+    const headers: Record<string, string> = {
+      ...(this.customHeaders ?? {}),
+      ...(extra ?? {}),
+    }
+
+    if (this.apiKey) {
+      headers.Authorization = `Bearer ${this.apiKey}`
+    }
+
+    return headers
+  }
+
+  private createHttpError(status: number): LocalProviderRequestError {
+    if (status === 401 || status === 403) {
+      return new LocalProviderRequestError(
+        "authentication_failed",
+        `Authentication failed (HTTP ${status})`,
+        status
+      )
+    }
+    return new LocalProviderRequestError("http_error", `HTTP ${status}`, status)
   }
 
   /**
@@ -277,6 +348,7 @@ export class LocalProviderService {
       const healthUrl = `${this.baseUrl}${this.config.healthEndpoint}`
       const response = await proxyFetch(healthUrl, {
         method: "GET",
+        headers: this.buildHeaders(),
         timeout: 5000,
       })
 
@@ -285,14 +357,18 @@ export class LocalProviderService {
         return {
           connected: true,
           version: data.version || data.build?.version,
-          models_count: data.models?.length,
+          models_count: Array.isArray(data.models)
+            ? data.models.length
+            : Array.isArray(data.data)
+              ? data.data.length
+              : undefined,
           latency_ms: Date.now() - startTime,
         }
       }
 
       return {
         connected: false,
-        error: `HTTP ${response.status}`,
+        error: this.createHttpError(response.status).message,
         latency_ms: Date.now() - startTime,
       }
     } catch (error) {
@@ -314,41 +390,71 @@ export class LocalProviderService {
 
     // Generic HTTP model listing
     try {
-      const modelsUrl =
-        this.providerId === "ollama" ? `${this.baseUrl}/api/tags` : `${this.baseUrl}/v1/models`
+      const modelsUrl = `${this.baseUrl}${this.config.modelsEndpoint}`
 
       const response = await proxyFetch(modelsUrl, {
         method: "GET",
+        headers: this.buildHeaders(),
         timeout: 10000,
       })
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
+        throw this.createHttpError(response.status)
       }
 
-      const data = await response.json()
+      let data: unknown
+      try {
+        data = await response.json()
+      } catch (error) {
+        throw new LocalProviderRequestError(
+          "invalid_response",
+          "Invalid model list response",
+          undefined,
+          { cause: error }
+        )
+      }
+
+      if (!data || typeof data !== "object") {
+        throw new LocalProviderRequestError("invalid_response", "Invalid model list response")
+      }
+
+      const payload = data as {
+        models?: Array<{ name?: string; model?: string; size?: number }>
+        data?: Array<{ id?: string; object?: string; created?: number; owned_by?: string }>
+      }
 
       // Handle Ollama format
-      if (data.models) {
-        return data.models.map((m: { name?: string; model?: string; size?: number }) => ({
-          id: m.name || m.model || "",
-          object: "model",
-          size: m.size,
-        }))
+      if (Array.isArray(payload.models)) {
+        return normalizeModels(
+          payload.models.map((model) => ({
+            id: model.name || model.model || "",
+            object: "model",
+            size: model.size,
+          }))
+        )
       }
 
       // Handle OpenAI format
-      if (data.data) {
-        return data.data.map((m: { id: string; object?: string; created?: number }) => ({
-          id: m.id,
-          object: m.object || "model",
-          created: m.created,
-        }))
+      if (Array.isArray(payload.data)) {
+        return normalizeModels(
+          payload.data.map((model) => ({
+            id: model.id || "",
+            object: model.object || "model",
+            ...(model.created === undefined ? {} : { created: model.created }),
+            ...(model.owned_by === undefined ? {} : { owned_by: model.owned_by }),
+          }))
+        )
       }
 
-      return []
-    } catch {
-      return []
+      throw new LocalProviderRequestError("invalid_response", "Invalid model list response")
+    } catch (error) {
+      if (error instanceof LocalProviderRequestError) throw error
+      throw new LocalProviderRequestError(
+        "network_error",
+        error instanceof Error ? error.message : "Failed to list models",
+        undefined,
+        error instanceof Error ? { cause: error } : undefined
+      )
     }
   }
 
@@ -372,6 +478,8 @@ export class LocalProviderService {
     return pullOllamaModelStreaming({
       baseUrl: this.baseUrl,
       modelName,
+      apiKey: this.apiKey,
+      customHeaders: this.customHeaders,
       onProgress: options?.onProgress,
       signal: options?.signal,
     })
@@ -389,7 +497,7 @@ export class LocalProviderService {
       if (options?.signal?.aborted) controller.abort()
       const applyResponse = await proxyFetch(`${this.baseUrl}/models/apply`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: this.buildHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ id: modelName }),
         signal: controller.signal,
       })
@@ -408,6 +516,7 @@ export class LocalProviderService {
       while (true) {
         const jobResponse = await proxyFetch(jobUrl, {
           method: "GET",
+          headers: this.buildHeaders(),
           signal: controller.signal,
         })
         if (!jobResponse.ok) {
@@ -446,7 +555,7 @@ export class LocalProviderService {
     if (this.providerId === "ollama") {
       const response = await proxyFetch(`${this.baseUrl}/api/delete`, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
+        headers: this.buildHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ name: modelName }),
       })
 
@@ -472,7 +581,7 @@ export class LocalProviderService {
     if (this.providerId === "ollama") {
       const response = await proxyFetch(`${this.baseUrl}/api/generate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: this.buildHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ model: modelName, keep_alive: 0 }),
       })
 
@@ -482,7 +591,7 @@ export class LocalProviderService {
     if (this.providerId === "localai") {
       const response = await proxyFetch(`${this.baseUrl}/backend/shutdown`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: this.buildHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ model: modelName }),
       })
       return response.ok
@@ -502,7 +611,7 @@ export class LocalProviderService {
     // OpenAI-compatible embedding endpoint
     const response = await proxyFetch(`${this.baseUrl}/v1/embeddings`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: this.buildHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ model, input }),
     })
 
@@ -721,9 +830,9 @@ export function getInstallInstructions(providerId: LocalProviderName): {
  */
 export function createLocalProviderService(
   providerId: LocalProviderName,
-  baseUrl?: string
+  input?: LocalProviderConstructorInput
 ): LocalProviderService {
-  return new LocalProviderService(providerId, baseUrl)
+  return new LocalProviderService(providerId, input)
 }
 
 export default LocalProviderService

@@ -14,6 +14,8 @@ export interface GeminiTTSOptions {
   apiKey: string
   voice?: GeminiTTSVoice
   model?: string
+  signal?: AbortSignal
+  requestId?: string
 }
 
 export async function generateGeminiTTS(
@@ -34,6 +36,9 @@ export async function generateGeminiTTS(
     const url = `${GEMINI_API_BASE}/${model}:generateContent?key=${apiKey}`
     const response = await proxyFetch(url, {
       method: "POST",
+      provider: "google",
+      signal: options.signal,
+      requestId: options.requestId,
       headers: { "Content-Type": "application/json" },
       json: {
         contents: [{ parts: [{ text }] }],

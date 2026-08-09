@@ -14,7 +14,7 @@ import { runChunkPipeline } from "./chunk-pipeline"
 import { withTtsRetry } from "./retry"
 import { PcmPlayer } from "./streaming/pcm-player"
 import type { TTSStreamEvent } from "./providers/adapter"
-import { generateCacheKey, getCachedOrGenerate } from "./tts-cache"
+import { generateCacheKey, getCachedTtsResponseOrGenerate } from "./tts-cache"
 import { getProviderRuntimeOptions, toTTSSettings } from "./speech-settings"
 import {
   applyPronunciationDictionary,
@@ -31,9 +31,15 @@ import {
   type TTSPlaybackState,
   type TTSProvider,
   type TTSResponse,
+  ttsFailure,
 } from "./types"
 
 import { getAdapter } from "./providers/registry"
+
+function allowsOutboundText(provider: TTSProvider, text: string): boolean {
+  if (provider === "system" || provider === "local-openai-compatible") return true
+  return getTtsHost().allowCloudText?.(text, provider) === true
+}
 
 export type TTSActiveSource = "chat" | "chat-widget" | "selection" | "settings" | "pet" | "unknown"
 
@@ -93,6 +99,7 @@ export class TTSOrchestrator {
   /** Live PCM player for streaming providers (OpenAI Realtime). */
   private streamPlayer: PcmPlayer | null = null
   private streamAbort: AbortController | null = null
+  private bufferedAbort: AbortController | null = null
 
   subscribe(subscriber: Subscriber): () => void {
     this.subscribers.add(subscriber)
@@ -109,7 +116,8 @@ export class TTSOrchestrator {
   async speak(text: string, options: TTSOrchestratorSpeakOptions = {}): Promise<void> {
     const speechSettings = options.speechSettings ?? DEFAULT_SPEECH_SETTINGS
     const providerSettings = options.providerSettings
-    const provider = options.provider ?? speechSettings.ttsProvider
+    const requestedProvider = options.provider ?? speechSettings.ttsProvider
+    const provider = getTtsHost().isMobileShell?.() ? "system" : requestedProvider
     const source = options.source ?? "unknown"
     const sourceId = options.sourceId
 
@@ -161,6 +169,8 @@ export class TTSOrchestrator {
       })
       return
     }
+    const bufferedAbort = new AbortController()
+    this.bufferedAbort = bufferedAbort
 
     const skipSplit =
       provider === "edge" && speechSettings.ttsCustomSSMLEnabled && !!speechSettings.ttsCustomSSML
@@ -196,6 +206,8 @@ export class TTSOrchestrator {
                 chunk: chunks[index],
                 speechSettings,
                 providerSettings,
+                signal: bufferedAbort.signal,
+                requestId,
               }),
             consume: async (response, index) => {
               if (!response.success || !response.audioData) {
@@ -261,6 +273,7 @@ export class TTSOrchestrator {
       getTtsHost().notify?.error(message)
       throw error
     } finally {
+      if (this.bufferedAbort === bufferedAbort) this.bufferedAbort = null
       if (this.isCurrentRequest(requestId)) {
         this.activeRequestId = null
       }
@@ -285,7 +298,8 @@ export class TTSOrchestrator {
   ): Promise<void> {
     const speechSettings = options.speechSettings ?? DEFAULT_SPEECH_SETTINGS
     const providerSettings = options.providerSettings
-    const provider = options.provider ?? speechSettings.ttsProvider
+    const requestedProvider = options.provider ?? speechSettings.ttsProvider
+    const provider = getTtsHost().isMobileShell?.() ? "system" : requestedProvider
     const source = options.source ?? "unknown"
     const sourceId = options.sourceId
 
@@ -314,6 +328,8 @@ export class TTSOrchestrator {
       activeSource: source,
       activeSourceId: sourceId,
     })
+    const bufferedAbort = new AbortController()
+    this.bufferedAbort = bufferedAbort
 
     const dict = speechSettings.ttsPronunciationDictionary
     const prep = (fragment: string): string => {
@@ -348,6 +364,8 @@ export class TTSOrchestrator {
               chunk: piece,
               speechSettings,
               providerSettings,
+              signal: bufferedAbort.signal,
+              requestId,
             })
             if (!resp.success || !resp.audioData) {
               if (speechSettings.ttsFallbackEnabled && this.isCurrentRequest(requestId)) {
@@ -394,6 +412,7 @@ export class TTSOrchestrator {
       getTtsHost().notify?.error(message)
       throw error
     } finally {
+      if (this.bufferedAbort === bufferedAbort) this.bufferedAbort = null
       if (this.isCurrentRequest(requestId)) {
         this.activeRequestId = null
       }
@@ -420,6 +439,10 @@ export class TTSOrchestrator {
     if (this.streamAbort) {
       this.streamAbort.abort()
       this.streamAbort = null
+    }
+    if (this.bufferedAbort) {
+      this.bufferedAbort.abort()
+      this.bufferedAbort = null
     }
     this.setState({
       playbackState: "stopped",
@@ -498,6 +521,9 @@ export class TTSOrchestrator {
       }
       if (info.requiresApiKey && !apiKey) {
         throw new Error(`Configure an API key for ${info.name} in Settings → Speech.`)
+      }
+      if (!allowsOutboundText(provider, text)) {
+        throw new Error(ttsFailure("pii-blocked").error)
       }
 
       await new Promise<void>((resolve, reject) => {
@@ -605,46 +631,38 @@ export class TTSOrchestrator {
     chunk: string
     speechSettings: SpeechSettings
     providerSettings: ProviderSettingsMap
+    signal: AbortSignal
+    requestId: string
   }): Promise<TTSResponse> {
-    const { provider, chunk, speechSettings, providerSettings } = params
+    const { provider, chunk, speechSettings, providerSettings, signal, requestId } = params
     const apiKey = this.getApiKey(provider, providerSettings)
     const ttsSettings = toTTSSettings(speechSettings)
     const runtimeOptions = getProviderRuntimeOptions(speechSettings, provider)
 
     const cacheKey = await generateCacheKey(chunk, provider, ttsSettings)
-    const cached = await getCachedOrGenerate(
+    return getCachedTtsResponseOrGenerate(
       cacheKey,
       async () => {
         // Retry transient network/api failures before giving up on this chunk.
-        const generated = await withTtsRetry(() =>
-          this.generateUncached(provider, chunk, runtimeOptions, apiKey)
+        return withTtsRetry(
+          () => this.generateUncached(provider, chunk, runtimeOptions, apiKey, signal, requestId),
+          { signal }
         )
-        if (!generated.success || !generated.audioData) return null
-        return {
-          audioData: generated.audioData,
-          mimeType: generated.mimeType ?? "audio/mpeg",
-        }
       },
       provider,
       chunk,
-      speechSettings.ttsCacheEnabled
+      speechSettings.ttsCacheEnabled,
+      signal
     )
-
-    if (!cached) {
-      return { success: false, error: "Failed to generate speech audio" }
-    }
-    return {
-      success: true,
-      audioData: cached.audioData,
-      mimeType: cached.mimeType,
-    }
   }
 
   private async generateUncached(
     provider: TTSProvider,
     text: string,
     runtimeOptions: Record<string, unknown>,
-    apiKey: string
+    apiKey: string,
+    signal: AbortSignal,
+    requestId: string
   ): Promise<TTSResponse> {
     const info = TTS_PROVIDERS[provider]
     if (info.requiresApiKey && !apiKey) {
@@ -653,21 +671,26 @@ export class TTSOrchestrator {
         error: `Configure an API key for ${info.name} in Settings → Speech.`,
       }
     }
-    return this.directGenerate(provider, text, runtimeOptions, apiKey)
+    return this.directGenerate(provider, text, runtimeOptions, apiKey, signal, requestId)
   }
 
   private async directGenerate(
     provider: TTSProvider,
     text: string,
     options: Record<string, unknown>,
-    apiKey: string
+    apiKey: string,
+    signal: AbortSignal,
+    requestId: string
   ): Promise<TTSResponse> {
     const adapter = getAdapter(provider)
     if (!adapter.generate) {
       return { success: false, error: `Provider ${provider} not supported` }
     }
+    if (!allowsOutboundText(provider, text)) {
+      return ttsFailure("pii-blocked")
+    }
     try {
-      return await adapter.generate(text, { ...options, apiKey })
+      return await adapter.generate(text, { ...options, apiKey, signal, requestId })
     } catch (error) {
       return {
         success: false,
@@ -795,7 +818,7 @@ export class TTSOrchestrator {
 
   private getApiKey(provider: TTSProvider, providerSettings: ProviderSettingsMap): string {
     const info = TTS_PROVIDERS[provider]
-    if (!info.requiresApiKey) return ""
+    if (!info.requiresApiKey && !info.supportsOptionalApiKey) return ""
     const keyProvider = info.apiKeyProvider ?? provider
     return providerSettings?.[keyProvider]?.apiKey ?? ""
   }

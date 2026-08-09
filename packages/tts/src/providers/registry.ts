@@ -10,6 +10,7 @@
 import { TTS_PROVIDERS, type TTSProvider } from "../types"
 
 import { generateOpenAITTS } from "./openai"
+import { generateLocalOpenAICompatibleTTS } from "./local-openai-compatible"
 import { generateGeminiTTS } from "./gemini"
 import { generateEdgeTTS } from "./edge"
 import { generateElevenLabsTTS } from "./elevenlabs"
@@ -54,6 +55,30 @@ export const TTS_ADAPTERS: Record<TTSProvider, TTSProviderAdapter> = {
     }),
     generate: (text, options) =>
       generateOpenAITTS(text, options as Parameters<typeof generateOpenAITTS>[1]),
+  },
+  "local-openai-compatible": {
+    info: TTS_PROVIDERS["local-openai-compatible"],
+    kind: "http",
+    runtimeOptions: (s) => ({
+      baseUrl: s.localOpenaiBaseUrl,
+      model: s.localOpenaiModel,
+      voice: s.localOpenaiVoice,
+      speed: s.localOpenaiSpeed,
+      responseFormat: s.localOpenaiResponseFormat,
+      timeoutMs: s.localOpenaiTimeoutMs,
+    }),
+    cacheKeyFields: (s) => ({
+      baseUrl: s.localOpenaiBaseUrl?.trim().replace(/\/+$/, ""),
+      model: s.localOpenaiModel,
+      voice: s.localOpenaiVoice,
+      speed: s.localOpenaiSpeed,
+      responseFormat: s.localOpenaiResponseFormat,
+    }),
+    generate: (text, options) =>
+      generateLocalOpenAICompatibleTTS(
+        text,
+        options as unknown as Parameters<typeof generateLocalOpenAICompatibleTTS>[1]
+      ),
   },
   gemini: {
     info: TTS_PROVIDERS.gemini,

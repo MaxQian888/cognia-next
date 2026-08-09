@@ -7,6 +7,7 @@
  */
 
 import { proxyFetch } from "../proxy-fetch"
+import { mimeForBufferedFormat } from "../audio-response"
 import {
   TTS_PROVIDERS,
   ttsFailure,
@@ -22,6 +23,8 @@ export interface MistralTTSOptions {
   voiceId?: string
   model?: MistralTTSModel
   responseFormat?: MistralTTSResponseFormat
+  signal?: AbortSignal
+  requestId?: string
 }
 
 export async function generateMistralTTS(
@@ -31,6 +34,11 @@ export async function generateMistralTTS(
   const { apiKey, voiceId = "", model = "voxtral-mini-tts-2603", responseFormat = "mp3" } = options
 
   if (!apiKey) return ttsFailure("api-key-missing")
+  if ((responseFormat as string) === "pcm") {
+    return ttsFailure("not-supported", {
+      providerMessage: "Headerless PCM is not supported by buffered TTS playback",
+    })
+  }
   if (!voiceId.trim()) {
     return ttsFailure("voice-not-found", {
       providerMessage: "Create or select a Mistral reusable voice ID first",
@@ -45,6 +53,9 @@ export async function generateMistralTTS(
   try {
     const response = await proxyFetch(MISTRAL_TTS_URL, {
       method: "POST",
+      provider: "mistral",
+      signal: options.signal,
+      requestId: options.requestId,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
@@ -74,7 +85,7 @@ export async function generateMistralTTS(
       return ttsFailure("api-error", { providerMessage: "No audio data in response" })
     }
     const bytes = base64ToArrayBuffer(payload.audio_data)
-    return { success: true, audioData: bytes, mimeType: mimeTypeFor(responseFormat) }
+    return { success: true, audioData: bytes, mimeType: mimeForBufferedFormat(responseFormat) }
   } catch (error) {
     return ttsFailure("network-error", {
       providerMessage: error instanceof Error ? error.message : "Unknown error",
@@ -87,19 +98,4 @@ function base64ToArrayBuffer(value: string): ArrayBuffer {
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
   return bytes.buffer
-}
-
-function mimeTypeFor(format: MistralTTSResponseFormat): string {
-  switch (format) {
-    case "mp3":
-      return "audio/mpeg"
-    case "wav":
-      return "audio/wav"
-    case "pcm":
-      return "audio/pcm"
-    case "flac":
-      return "audio/flac"
-    case "opus":
-      return "audio/opus"
-  }
 }

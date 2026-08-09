@@ -1,8 +1,11 @@
 import {
+  __setLocalHttpTransport,
   buildLocalHttpProvider,
+  mapUmiLanguageOption,
   localHttpExtract,
   parseResponse,
   serializeRequest,
+  type LocalHttpTransportRequest,
 } from "./local-http"
 import type { OcrInput, OcrProviderContext } from "../types"
 
@@ -24,11 +27,75 @@ describe("buildLocalHttpProvider", () => {
     expect(p.id).toBe("local-http")
     expect(p.category).toBe("local")
     expect(p.shells).toEqual({ browser: true, tauri: true, capacitor: true })
-    expect(p.credentialKeys).toEqual([])
+    expect(p.credentialKeys).toEqual(["apiKey"])
   })
 })
 
 describe("localHttpExtract", () => {
+  afterEach(() => {
+    __setLocalHttpTransport(null)
+  })
+
+  it("uses the native transport on Tauri and confirms only the saved LAN endpoint", async () => {
+    const transport = {
+      request: jest.fn(async (_request: LocalHttpTransportRequest) => ({
+        status: 200,
+        body: JSON.stringify({ code: 100, data: "native" }),
+        contentType: "application/json",
+      })),
+      cancel: jest.fn(async () => true),
+    }
+    __setLocalHttpTransport(transport)
+
+    const endpoint = "http://192.168.1.20:1224/api/ocr"
+    const result = await localHttpExtract(baseInput, {
+      credentials: { secrets: {} },
+      config: {
+        endpoint,
+        dialect: "umi-ocr",
+        allowLan: true,
+        confirmedLanEndpoint: endpoint,
+      },
+      platform: "tauri",
+    })
+
+    expect(result.pages[0]!.text).toBe("native")
+    const calls = transport.request.mock.calls.map(([request]) => request)
+    expect(calls).toHaveLength(2)
+    expect(calls[0]).toMatchObject({
+      url: "http://192.168.1.20:1224/api/ocr/get_options",
+      method: "GET",
+      allowPrivateNetwork: true,
+    })
+    expect(calls[1]).toMatchObject({ url: endpoint, method: "POST", allowPrivateNetwork: true })
+  })
+
+  it("does not carry LAN confirmation across endpoint changes", async () => {
+    const transport = {
+      request: jest.fn(async (request: { method: string }) => ({
+        status: 200,
+        body: JSON.stringify(request.method === "GET" ? {} : { code: 100, data: "native" }),
+        contentType: "application/json",
+      })),
+      cancel: jest.fn(async () => false),
+    }
+    __setLocalHttpTransport(transport)
+
+    await localHttpExtract(baseInput, {
+      credentials: { secrets: {} },
+      config: {
+        endpoint: "http://192.168.1.21:1224/api/ocr",
+        allowLan: true,
+        confirmedLanEndpoint: "http://192.168.1.20:1224/api/ocr",
+      },
+      platform: "tauri",
+    })
+
+    expect(transport.request).toHaveBeenCalledWith(
+      expect.objectContaining({ allowPrivateNetwork: false })
+    )
+  })
+
   it("rejects with invalid_input when endpoint is missing", async () => {
     const ctx: OcrProviderContext = {
       credentials: { secrets: {} },
@@ -56,14 +123,31 @@ describe("localHttpExtract", () => {
       platform: "tauri",
     }
     const result = await localHttpExtract(baseInput, ctx)
-    expect(fetchImpl).toHaveBeenCalledTimes(1)
-    const [url, init] = (fetchImpl as jest.Mock).mock.calls[0]!
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    const [url, init] = (fetchImpl as jest.Mock).mock.calls[1]!
     expect(url).toBe("http://localhost:1224/api/ocr")
     expect((init as RequestInit).method).toBe("POST")
     const headers = (init as RequestInit).headers as Record<string, string>
     expect(headers["Authorization"]).toBe("Bearer test-key")
     expect(headers["Content-Type"]).toBe("application/json")
     expect(result.pages[0]!.text).toBe("hello")
+  })
+
+  it("prefers the keyring credential over a legacy plaintext config key", async () => {
+    const fetchImpl = jest.fn(async () =>
+      jsonResponse({ code: 100, data: "hello" })
+    ) as unknown as typeof fetch
+    await localHttpExtract(baseInput, {
+      credentials: { secrets: { apiKey: "keyring-key" } },
+      config: {
+        endpoint: "http://localhost:1224/api/ocr",
+        apiKey: "legacy-key",
+        fetchImpl,
+      },
+      platform: "tauri",
+    })
+    const headers = (fetchImpl as jest.Mock).mock.calls[0]![1].headers as Record<string, string>
+    expect(headers.Authorization).toBe("Bearer keyring-key")
   })
 
   it("parses Umi-OCR line list with bounding boxes", async () => {
@@ -113,6 +197,58 @@ describe("localHttpExtract", () => {
       height: 5,
     })
     expect(result.pages[0]!.blocks?.[0]?.confidence).toBeCloseTo(0.9)
+  })
+
+  it("preserves Umi-OCR line end markers when rebuilding layout text", async () => {
+    const fetchImpl = jest.fn(async () =>
+      jsonResponse({
+        code: 100,
+        data: [
+          { text: "first", end: " " },
+          { text: "paragraph", end: "\n" },
+          { text: "second", end: "" },
+        ],
+      })
+    ) as unknown as typeof fetch
+    const result = await localHttpExtract(baseInput, {
+      credentials: { secrets: {} },
+      config: { endpoint: "http://localhost:1224/api/ocr", dialect: "umi-ocr", fetchImpl },
+      platform: "tauri",
+    })
+    expect(result.pages[0]!.text).toBe("first paragraph\nsecond")
+  })
+
+  it("discovers Umi-OCR language model values before recognition", async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          "ocr.language": {
+            type: "enum",
+            default: "models/config_chinese.txt",
+            optionsList: [
+              ["models/config_chinese.txt", "简体中文"],
+              ["models/config_en.txt", "English"],
+            ],
+          },
+        })
+      )
+      .mockResolvedValueOnce(jsonResponse({ code: 100, data: "hello" }))
+    const fetchImpl = fetchMock as unknown as typeof fetch
+
+    await localHttpExtract(baseInput, {
+      credentials: { secrets: {} },
+      config: { endpoint: "http://localhost:1224/api/ocr", dialect: "umi-ocr", fetchImpl },
+      platform: "web",
+    })
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:1224/api/ocr/get_options",
+      expect.objectContaining({ method: "GET" })
+    )
+    const recognitionBody = JSON.parse(String(fetchMock.mock.calls[1]![1]!.body))
+    expect(recognitionBody.options).toEqual({ "ocr.language": "models/config_en.txt" })
   })
 
   it("returns empty result when Umi-OCR reports code=101 (no text)", async () => {
@@ -226,6 +362,59 @@ describe("localHttpExtract", () => {
     expect(result.pages[0]!.blocks?.[1]?.bbox).toBeUndefined()
   })
 
+  it("uses and parses the PaddleOCR 3.x serving contract", async () => {
+    const fetchImpl = jest.fn(async () =>
+      jsonResponse({
+        logId: "request-1",
+        errorCode: 0,
+        errorMsg: "Success",
+        result: {
+          ocrResults: [
+            {
+              prunedResult: {
+                rec_texts: ["hello", "world"],
+                rec_scores: [0.96, 0.88],
+                rec_polys: [
+                  [
+                    [10, 5],
+                    [50, 5],
+                    [50, 15],
+                    [10, 15],
+                  ],
+                  [
+                    [2, 20],
+                    [42, 20],
+                    [42, 30],
+                    [2, 30],
+                  ],
+                ],
+              },
+            },
+          ],
+        },
+      })
+    ) as unknown as typeof fetch
+
+    const result = await localHttpExtract(baseInput, {
+      credentials: { secrets: {} },
+      config: {
+        endpoint: "http://localhost:8080/ocr",
+        dialect: "paddleocr-server",
+        fetchImpl,
+      },
+      platform: "web",
+    })
+
+    const requestBody = JSON.parse(String((fetchImpl as jest.Mock).mock.calls[0]![1].body))
+    expect(requestBody).toMatchObject({ file: expect.any(String), fileType: 1, visualize: false })
+    expect(requestBody.images).toBeUndefined()
+    expect(result.pages[0]!.text).toBe("hello\nworld")
+    expect(result.pages[0]!.blocks?.[0]).toMatchObject({
+      confidence: 0.96,
+      bbox: { x: 10, y: 5, width: 40, height: 10 },
+    })
+  })
+
   it("raises provider_failed when all PaddleOCR-Server entries are unparseable", async () => {
     const fetchImpl = jest.fn(async () =>
       jsonResponse({
@@ -329,7 +518,7 @@ describe("serializeRequest", () => {
     expect(parsed.options).toBeUndefined()
   })
 
-  it("encodes PaddleOCR-Server payload with images array", () => {
+  it("encodes PaddleOCR 3.x serving payload", () => {
     const bundle = serializeRequest(
       "paddleocr-server",
       new Uint8Array([1, 2, 3]),
@@ -339,7 +528,26 @@ describe("serializeRequest", () => {
     )
     expect(bundle.headers["Authorization"]).toBe("Bearer key-x")
     const parsed = JSON.parse(String(bundle.body))
-    expect(parsed.images).toHaveLength(1)
+    expect(parsed).toMatchObject({ file: expect.any(String), fileType: 1, visualize: false })
+    expect(parsed.images).toBeUndefined()
+  })
+})
+
+describe("mapUmiLanguageOption", () => {
+  const options = [
+    ["models/config_chinese.txt", "简体中文"],
+    ["models/config_en.txt", "English"],
+    ["models/config_chinese_cht(v2).txt", "繁體中文"],
+    ["models/config_japan.txt", "日本語"],
+  ] as Array<[unknown, unknown]>
+
+  it.each([
+    ["en-US", "models/config_en.txt"],
+    ["zh-CN", "models/config_chinese.txt"],
+    ["zh-Hant", "models/config_chinese_cht(v2).txt"],
+    ["ja-JP", "models/config_japan.txt"],
+  ])("maps %s to the server-advertised model value", (language, expected) => {
+    expect(mapUmiLanguageOption(language, options)).toBe(expected)
   })
 })
 

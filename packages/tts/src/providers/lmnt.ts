@@ -13,6 +13,8 @@ export interface LMNTTTSOptions {
   format?: "mp3" | "wav"
   language?: string
   sampleRate?: number
+  signal?: AbortSignal
+  requestId?: string
 }
 
 export async function generateLMNTTTS(text: string, options: LMNTTTSOptions): Promise<TTSResponse> {
@@ -36,6 +38,9 @@ export async function generateLMNTTTS(text: string, options: LMNTTTSOptions): Pr
   try {
     const response = await proxyFetch("https://api.lmnt.com/v1/ai/speech/bytes", {
       method: "POST",
+      provider: "lmnt",
+      signal: options.signal,
+      requestId: options.requestId,
       headers: {
         "Content-Type": "application/json",
         "X-API-Key": apiKey,

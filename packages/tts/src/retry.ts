@@ -41,6 +41,7 @@ export interface TtsRetryOptions {
   delay?: (ms: number) => Promise<void>
   /** Decide whether a failing response should be retried. */
   isRetryable?: (response: TTSResponse) => boolean
+  signal?: AbortSignal
 }
 
 const defaultDelay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -58,13 +59,39 @@ export async function withTtsRetry(
     backoffMs = [250, 750],
     delay = defaultDelay,
     isRetryable = isRetryableTtsFailure,
+    signal,
   } = options
 
+  if (signal?.aborted) {
+    return { success: false, error: getTTSError("cancelled").message, errorType: "cancelled" }
+  }
   let response = await fn()
   let attempt = 0
   while (!response.success && isRetryable(response) && attempt < retries) {
+    if (signal?.aborted) {
+      return { success: false, error: getTTSError("cancelled").message, errorType: "cancelled" }
+    }
     const wait = backoffMs[attempt] ?? backoffMs[backoffMs.length - 1] ?? 0
-    if (wait > 0) await delay(wait)
+    if (wait > 0) {
+      if (delay !== defaultDelay || !signal) {
+        await delay(wait)
+      } else {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, wait)
+          signal.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer)
+              resolve()
+            },
+            { once: true }
+          )
+        })
+      }
+    }
+    if (signal?.aborted) {
+      return { success: false, error: getTTSError("cancelled").message, errorType: "cancelled" }
+    }
     response = await fn()
     attempt++
   }
