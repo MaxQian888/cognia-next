@@ -53,7 +53,7 @@ jobs:
       # node: builtins, so the manifest is available in seconds rather than
       # after a full dependency install.
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26.x
 
@@ -91,7 +91,7 @@ jobs:
         uses: pnpm/action-setup@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26.x
           cache: "pnpm"
