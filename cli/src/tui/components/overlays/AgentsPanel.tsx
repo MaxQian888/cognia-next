@@ -7,7 +7,8 @@
  * rows + the view/cancel callbacks.
  */
 import React, { useEffect, useRef, useState } from "react"
-import { Box, Text, useInput, type DOMElement } from "ink"
+import { Box, Text, type DOMElement } from "ink"
+import { useModalInput } from "../../input/input-router"
 
 import { useTheme } from "../../theme/context"
 import { windowList } from "../list-window"
@@ -102,7 +103,7 @@ export function AgentsPanel({
       ),
   })
 
-  useInput(
+  useModalInput(
     (input, key) => {
       if (handleMouse(input)) return
       if (key.escape) return onCancel()

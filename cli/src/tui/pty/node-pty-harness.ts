@@ -8,7 +8,8 @@ export interface PtyGeometry {
   rows: number
 }
 
-const FAKE_AGENT_FIXTURE = path.join(__dirname, "fake-agent-fixture.cjs")
+const TUI_APP_FIXTURE = path.join(__dirname, "tui-app-fixture.tsx")
+const FIXTURE_ARGS = ["--import", "tsx", TUI_APP_FIXTURE]
 
 function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   return Object.fromEntries(
@@ -31,7 +32,7 @@ export function nodePtyAvailable(): boolean {
 }
 
 export async function runPtyScenario(initial: PtyGeometry, resized: PtyGeometry): Promise<string> {
-  const terminal = pty.spawn(process.execPath, [FAKE_AGENT_FIXTURE], {
+  const terminal = pty.spawn(process.execPath, FIXTURE_ARGS, {
     name: "xterm-256color",
     cols: initial.columns,
     rows: initial.rows,
@@ -49,6 +50,7 @@ export async function runPtyScenario(initial: PtyGeometry, resized: PtyGeometry)
       output += chunk
       if (!driven && output.includes("READY")) {
         driven = true
+        terminal.write("hello\r")
         terminal.write("\x1b[<64;1;1M")
         terminal.resize(resized.columns, resized.rows)
         setTimeout(() => terminal.kill("SIGINT"), 20)
@@ -63,7 +65,7 @@ export async function runPtyScenario(initial: PtyGeometry, resized: PtyGeometry)
 
 export async function runNonTtyScenario(term = "dumb"): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
-    const child = spawnProcess(process.execPath, [FAKE_AGENT_FIXTURE], {
+    const child = spawnProcess(process.execPath, FIXTURE_ARGS, {
       env: { ...process.env, TERM: term },
       stdio: ["ignore", "pipe", "pipe"],
     })

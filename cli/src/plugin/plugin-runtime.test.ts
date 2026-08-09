@@ -62,6 +62,21 @@ describe("installPluginRuntimeShims", () => {
       signatureRequired: true,
     })
   })
+
+  it("replaces Node-style storage accessors without invoking their getters", () => {
+    const g: Record<string, unknown> = {}
+    const getter = jest.fn(() => {
+      throw new Error("warning-producing accessor was read")
+    })
+    Object.defineProperty(g, "localStorage", {
+      configurable: true,
+      get: getter,
+    })
+
+    expect(() => installPluginRuntimeShims(g)).not.toThrow()
+    expect(getter).not.toHaveBeenCalled()
+    expect((g.localStorage as Storage).getItem("cognia.plugins.policy")).not.toBeNull()
+  })
 })
 
 describe("pluginDiscoveryRoots", () => {

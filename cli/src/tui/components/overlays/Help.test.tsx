@@ -8,7 +8,7 @@ describe("Help", () => {
   beforeEach(() => __resetInk())
 
   it("renders the command catalog and key hints", () => {
-    const { container } = render(<Help onClose={() => {}} maxRows={10} />)
+    const { container } = render(<Help onClose={() => {}} viewportRows={16} />)
     const text = container.textContent ?? ""
     expect(text).toContain("Commands")
     expect(text).toContain("/model")

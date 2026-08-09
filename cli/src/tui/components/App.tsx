@@ -10,10 +10,9 @@ import fs from "node:fs"
 import os from "node:os"
 import nodePath from "node:path"
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
-import { Box, useApp, useStdout, type DOMElement } from "ink"
+import { useApp, useBoxMetrics, useStdout, type DOMElement } from "ink"
 
 import { Banner } from "./Banner"
-import { overlayListRows } from "./overlay-layout"
 import { useScroll } from "../hooks/useScroll"
 import { useTranscriptCursor } from "../hooks/useTranscriptCursor"
 import { resolveLayoutMode, readLayoutCapability, type LayoutCapability } from "../layout-mode"
@@ -181,6 +180,7 @@ import type { FrameBuffer } from "../selection/frame-buffer"
 import { TranscriptRegion } from "./app/TranscriptRegion"
 import { AppOverlays } from "./app/AppOverlays"
 import { BottomRegion } from "./app/BottomRegion"
+import { TuiViewportFrame } from "./app/TuiViewportFrame"
 import type { AgentTreeHit } from "./BottomStatus"
 import { useGlobalKeys } from "./app/use-global-keys"
 import { useApplyEffect } from "./app/use-apply-effect"
@@ -740,8 +740,7 @@ export function App({
   const { columns, rows } = useTerminalSize()
   const layoutBudget = terminalLayout(columns, rows)
   // Row budget for inline popups, which sit above the composer so they stay
-  // compact. (`overlayRows`, which depends on the resolved `fullscreen` flag, is
-  // computed once that's known — see below.)
+  // compact while the composer consumes its separate density-tier row budget.
   const popupRows = Math.max(3, Math.min(10, rows - 6))
 
   // One shared MCP probe cache for the whole App session: the startup warm seeds
@@ -782,15 +781,14 @@ export function App({
   // under jsdom with no TTY, keeps the historic layout untouched).
   const capability = layoutCapability ?? readLayoutCapability()
   const fullscreen = resolveLayoutMode(state.config.layout, capability) === "fullscreen"
-  // Row budget for the modal overlay list (e.g. `/model`). Reserves the list's
-  // own chrome (border/title/footer AND the two "↑/↓ N more" scroll-hint rows),
-  // the bottom status/mascot/footer, and — in fullscreen — the fixed top banner.
-  // Under-reserving lets a long list build a box taller than the terminal, which
-  // squeezes the list and clips the highlighted row (the cursor "disappears" as
-  // you scroll down). See overlay-layout.ts for the per-region breakdown.
-  const overlayRows = layoutBudget.overlayFullscreen
-    ? Math.max(1, rows - 2)
-    : overlayListRows(rows, fullscreen && !overlayOpen)
+  const overlayRegionRef = useRef<DOMElement | null>(null)
+  const overlayMetrics = useBoxMetrics(overlayRegionRef)
+  // The region is measured after Yoga allocates the fixed bottom chrome. Until
+  // that first pass, use a conservative fallback; overflow clipping still makes
+  // the actual region authoritative.
+  const overlayViewportRows = overlayMetrics.hasMeasured
+    ? overlayMetrics.height
+    : Math.max(1, rows - (layoutBudget.tier === "tiny" ? 1 : 3))
   // Fullscreen mouse model (default = native click-drag selection). Drives the
   // alt-screen mouse escapes below and whether the wheel scrolls the transcript.
   const mouseMode = state.config.mouse ?? DEFAULT_MOUSE_MODE
@@ -2310,7 +2308,7 @@ export function App({
       dispatch={dispatch}
       agent={agent}
       columns={columns}
-      overlayRows={overlayRows}
+      viewportRows={overlayViewportRows}
       activeModel={activeModel}
       home={home}
       resolvePermission={resolvePermission}
@@ -2337,64 +2335,62 @@ export function App({
   return (
     <ThemeProvider palette={themePalette}>
       <RenderPrefsProvider prefs={renderPrefs}>
-        <Box flexDirection="column" width={columns} {...(fullscreen ? { height: rows } : {})}>
-          {!(fullscreen && overlayOpen) ? (
+        <TuiViewportFrame
+          columns={columns}
+          rows={rows}
+          fullscreen={fullscreen}
+          overlayOpen={overlayOpen}
+          overlayRegionRef={overlayRegionRef}
+          transcript={
             <TranscriptRegion
               state={state}
               fullscreen={fullscreen}
               banner={banner}
               identity={identity}
               activeModel={activeModel}
+              columns={columns}
               scroll={scroll}
               scrollContentRef={scrollContentRef}
               cursor={cursor}
               mutedColor={themePalette.muted}
               layout={layoutBudget}
             />
-          ) : null}
-          {fullscreen && overlayOpen ? (
-            <Box
-              data-testid="fullscreen-overlay-region"
-              flexDirection="column"
-              flexGrow={1}
-              overflow="hidden"
-            >
-              {overlays}
-            </Box>
-          ) : (
-            overlays
-          )}
-          <BottomRegion
-            state={state}
-            dispatch={dispatch}
-            cursor={cursor}
-            overlayOpen={overlayOpen}
-            columns={columns}
-            popupRows={popupRows}
-            layout={layoutBudget}
-            warningColor={themePalette.warning}
-            streamStartedAt={streamStartedAt}
-            lastActivityAt={lastActivityAt}
-            footerSubagentRunning={footerSubagentRunning}
-            footerBackgroundSubagents={footerBackgroundSubagents}
-            interruptedBackgroundSubagents={interruptedBackgroundSubagents}
-            footerCopilot={footerCopilot}
-            backtrackArmed={backtrackArmed}
-            subagentChipRef={subagentChipRef}
-            agentTreeRef={agentTreeRef}
-            handleSubmit={handleSubmit}
-            handleHistoryPush={handleHistoryPush}
-            listDir={listDir}
-            mentionProviders={mentionProviders}
-            keybindings={keybindings}
-            enabledSkillIds={enabledSkillIds}
-            toggleSkillEnabled={toggleSkillEnabled}
-            handlePopupOpenChange={handlePopupOpenChange}
-            footerPlanTitle={footerPlanTitle}
-            footerRowRef={footerRowRef}
-            footerSegmentsRef={footerSegmentsRef}
-          />
-        </Box>
+          }
+          overlays={overlays}
+          bottom={
+            <BottomRegion
+              state={state}
+              dispatch={dispatch}
+              cursor={cursor}
+              overlayOpen={overlayOpen}
+              columns={columns}
+              popupRows={popupRows}
+              composerRows={layoutBudget.composerRows}
+              layout={layoutBudget}
+              warningColor={themePalette.warning}
+              streamStartedAt={streamStartedAt}
+              lastActivityAt={lastActivityAt}
+              footerSubagentRunning={footerSubagentRunning}
+              footerBackgroundSubagents={footerBackgroundSubagents}
+              interruptedBackgroundSubagents={interruptedBackgroundSubagents}
+              footerCopilot={footerCopilot}
+              backtrackArmed={backtrackArmed}
+              subagentChipRef={subagentChipRef}
+              agentTreeRef={agentTreeRef}
+              handleSubmit={handleSubmit}
+              handleHistoryPush={handleHistoryPush}
+              listDir={listDir}
+              mentionProviders={mentionProviders}
+              keybindings={keybindings}
+              enabledSkillIds={enabledSkillIds}
+              toggleSkillEnabled={toggleSkillEnabled}
+              handlePopupOpenChange={handlePopupOpenChange}
+              footerPlanTitle={footerPlanTitle}
+              footerRowRef={footerRowRef}
+              footerSegmentsRef={footerSegmentsRef}
+            />
+          }
+        />
       </RenderPrefsProvider>
     </ThemeProvider>
   )

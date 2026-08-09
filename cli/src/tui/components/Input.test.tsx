@@ -394,7 +394,7 @@ describe("Input (rich composer)", () => {
     // The palette lists all commands; /mode was used most recently, so it sorts
     // before /model even though /model is registered first.
     const text = container.textContent ?? ""
-    const modeIdx = text.indexOf("/mode —")
+    const modeIdx = text.indexOf("/mode ")
     const modelIdx = text.indexOf("/model —")
     expect(modeIdx).toBeGreaterThan(-1)
     expect(modelIdx).toBeGreaterThan(-1)

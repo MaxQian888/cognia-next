@@ -37,7 +37,7 @@ function propsFor(
     dispatch,
     agent,
     columns: 80,
-    overlayRows: 12,
+    viewportRows: 18,
     activeModel: "claude-x",
     home: "/home",
     resolvePermission: jest.fn(),

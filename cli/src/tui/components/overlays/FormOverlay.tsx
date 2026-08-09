@@ -5,24 +5,34 @@
  * space. Tab/↑/↓ move between fields, Enter submits, Esc cancels.
  */
 import React from "react"
-import { Box, Text, useInput } from "ink"
+import { Box, Text } from "ink"
+import { useModalInput } from "../../input/input-router"
 
 import { formNextField, formPrevField, formSetValue, type FormOverlayState } from "../../state/form"
 import { isMouseSequence } from "../../input/mouse"
 import { useTheme } from "../../theme/context"
+import { windowListWithinRows } from "../list-window"
+import { contentRows } from "../../layout/terminal-layout"
 
 export interface FormOverlayProps {
   form: FormOverlayState
   onUpdate: (form: FormOverlayState) => void
   onSubmit: () => void
   onCancel: () => void
+  maxRows?: number
 }
 
-export function FormOverlay({ form, onUpdate, onSubmit, onCancel }: FormOverlayProps) {
+export function FormOverlay({ form, onUpdate, onSubmit, onCancel, maxRows = 8 }: FormOverlayProps) {
   const theme = useTheme()
   const field = form.fields[form.activeField]
+  const chromeRows = 4 + (form.error ? 1 : 0)
+  const window = windowListWithinRows(
+    form.fields.length,
+    form.activeField,
+    Math.max(1, contentRows(maxRows, chromeRows))
+  )
 
-  useInput((input, key) => {
+  useModalInput((input, key) => {
     if (key.escape) return onCancel()
     if (key.return) return onSubmit()
     if (key.tab || key.downArrow) return onUpdate(formNextField(form))
@@ -55,7 +65,9 @@ export function FormOverlay({ form, onUpdate, onSubmit, onCancel }: FormOverlayP
       <Text bold color={theme.accent}>
         {form.title}
       </Text>
-      {form.fields.map((f, i) => {
+      {window.above > 0 ? <Text color={theme.muted}>{`↑ ${window.above} more`}</Text> : null}
+      {form.fields.slice(window.start, window.end).map((f, offset) => {
+        const i = window.start + offset
         const active = i === form.activeField
         const display =
           f.spec.type === "enum"
@@ -73,6 +85,7 @@ export function FormOverlay({ form, onUpdate, onSubmit, onCancel }: FormOverlayP
           </Text>
         )
       })}
+      {window.below > 0 ? <Text color={theme.muted}>{`↓ ${window.below} more`}</Text> : null}
       {form.error && <Text color={theme.danger}>{form.error}</Text>}
       <Text color={theme.muted} dimColor>
         Tab/↑↓ field · ←→ choose · Enter submit · Esc cancel

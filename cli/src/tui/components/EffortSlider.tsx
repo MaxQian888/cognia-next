@@ -24,7 +24,8 @@
  * user isn't surprised by a no-op.
  */
 import React, { useRef, useState } from "react"
-import { Box, Text, useInput, type DOMElement } from "ink"
+import { Box, Text, type DOMElement } from "ink"
+import { useModalInput } from "../input/input-router"
 
 import { useTheme } from "../theme/context"
 import { EFFORT_SLIDER_LEVELS } from "../../config/schema"
@@ -91,7 +92,7 @@ export function EffortSlider({
 
   const gaugeWidth = effortGaugeWidth(typeof width === "number" ? width : undefined)
 
-  useInput(
+  useModalInput(
     (input, key) => {
       // Mouse (fullscreen `scroll` only): wheel nudges the tier; a click on the
       // off-checkbox row toggles it, a click on the gauge track jumps to a tier.

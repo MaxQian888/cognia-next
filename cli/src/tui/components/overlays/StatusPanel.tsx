@@ -4,7 +4,8 @@
  * {@link StatusReport} the status controller assembled.
  */
 import React from "react"
-import { Box, Text, useInput } from "ink"
+import { Box, Text } from "ink"
+import { useModalInput } from "../../input/input-router"
 
 import { contextGauge } from "../../format/status-bar"
 import { useTheme } from "../../theme/context"
@@ -15,7 +16,7 @@ const ok = (b: boolean): string => (b ? "✓" : "✗")
 
 export function StatusPanel({ report, onClose }: { report: StatusReport; onClose: () => void }) {
   const theme = useTheme()
-  useInput((_input, key) => {
+  useModalInput((_input, key) => {
     if (key.escape || key.return) onClose()
   })
 

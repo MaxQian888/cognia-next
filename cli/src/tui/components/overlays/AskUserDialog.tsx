@@ -7,19 +7,22 @@
  * this overlay the tool call blocks forever (the historical hang).
  *
  * Self-contained, like the MCP/skill panels: it owns its keyboard handling and
- * local draft state (selection + free text + a row cursor) via `useInput`, and
+ * local draft state (selection + free text + a row cursor) via the modal input route, and
  * calls `onResolve` exactly once on submit (Enter) or cancel (Esc). The
  * navigation/answer logic is factored into the pure helpers below so it unit-
  * tests without Ink.
  */
 import React, { useRef, useState } from "react"
-import { Box, Text, useInput } from "ink"
+import { Box, Text } from "ink"
+import { useModalInput } from "../../input/input-router"
 import type { DOMElement } from "ink"
 
 import { useTheme } from "../../theme/context"
 import { isMouseSequence } from "../../input/mouse"
 import { usePanelClick } from "../../input/use-panel-click"
 import { OverlayFooter } from "../OverlayFooter"
+import { windowListWithinRows } from "../list-window"
+import { contentRows } from "../../layout/terminal-layout"
 import type { AskUserAnswer, AskUserRequest } from "@/lib/claude/ask-user-tool"
 
 /** The dialog's local draft: which options are checked, the free-text answer,
@@ -82,14 +85,28 @@ export function buildAnswer(draft: AskUserDraft): AskUserAnswer {
 
 export function AskUserDialog({
   request,
+  maxRows = 8,
   onResolve,
 }: {
   request: AskUserRequest
+  maxRows?: number
   onResolve: (answer: AskUserAnswer) => void
 }) {
   const theme = useTheme()
   const [draft, setDraft] = useState<AskUserDraft>({ selected: [], text: "", cursor: 0 })
   const boxRef = useRef<DOMElement | null>(null)
+  const rowCount = askUserRowCount(request)
+  const chromeRows =
+    4 + (request.multiSelect ? 1 : 0) + (request.allowText && request.options.length > 0 ? 1 : 0)
+  const window = windowListWithinRows(
+    rowCount,
+    draft.cursor,
+    Math.max(1, contentRows(maxRows, chromeRows))
+  )
+  const visibleOptions = request.options.slice(
+    window.start,
+    Math.min(window.end, request.options.length)
+  )
 
   const submit = () => {
     if (canSubmitAsk(request, draft)) onResolve(buildAnswer(draft))
@@ -103,12 +120,13 @@ export function AskUserDialog({
   const handleMouse = usePanelClick({
     boxRef,
     headerRows: 1 + (request.multiSelect ? 1 : 0),
-    hasAboveMore: false,
-    visibleCount: request.options.length,
+    hasAboveMore: window.above > 0,
+    visibleCount: visibleOptions.length,
     onPick: (offset) => {
-      const opt = request.options[offset]
+      const optionIndex = window.start + offset
+      const opt = request.options[optionIndex]
       if (!opt) return
-      const picked = toggleOption(request, { ...draft, cursor: offset }, opt.value)
+      const picked = toggleOption(request, { ...draft, cursor: optionIndex }, opt.value)
       if (!request.multiSelect && canSubmitAsk(request, picked)) {
         onResolve(buildAnswer(picked))
         return
@@ -117,7 +135,7 @@ export function AskUserDialog({
     },
   })
 
-  useInput((input, key) => {
+  useModalInput((input, key) => {
     if (handleMouse(input)) return
     if (key.escape) {
       cancel()
@@ -184,7 +202,9 @@ export function AskUserDialog({
           Select one or more
         </Text>
       ) : null}
-      {request.options.map((o, i) => {
+      {window.above > 0 ? <Text color={theme.muted}>{`↑ ${window.above} more`}</Text> : null}
+      {visibleOptions.map((o, offset) => {
+        const i = window.start + offset
         const focused = !isTextRow(request, draft.cursor) && draft.cursor === i
         const checked = draft.selected.includes(o.value)
         const mark = request.multiSelect ? (checked ? "[x]" : "[ ]") : checked ? "(•)" : "( )"
@@ -195,7 +215,7 @@ export function AskUserDialog({
           </Text>
         )
       })}
-      {request.allowText ? (
+      {request.allowText && window.end > request.options.length ? (
         <Box marginTop={request.options.length > 0 ? 1 : 0}>
           <Text color={isTextRow(request, draft.cursor) ? theme.accent : theme.muted}>
             {isTextRow(request, draft.cursor) ? "❯ " : "  "}
@@ -211,6 +231,7 @@ export function AskUserDialog({
           </Text>
         </Box>
       ) : null}
+      {window.below > 0 ? <Text color={theme.muted}>{`↓ ${window.below} more`}</Text> : null}
       <OverlayFooter hint={hint} />
     </Box>
   )

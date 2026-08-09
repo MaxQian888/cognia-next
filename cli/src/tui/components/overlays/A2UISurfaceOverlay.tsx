@@ -1,9 +1,12 @@
 import React from "react"
-import { Box, Text, useInput } from "ink"
+import { Box, Text } from "ink"
+import { useModalInput } from "../../input/input-router"
 
 import { buildA2UIRows, type A2UIRow } from "../../a2ui/surface-model"
 import type { TuiA2UISurface } from "../../a2ui/surface"
 import { useTheme } from "../../theme/context"
+import { windowListWithinRows } from "../list-window"
+import { contentRows } from "../../layout/terminal-layout"
 
 export interface TuiA2UIAction {
   action: string
@@ -50,11 +53,13 @@ function nextControlValue(row: A2UIRow): unknown {
 
 export function A2UISurfaceOverlay({
   surface,
+  maxRows = 8,
   onSubmit,
   onRaw,
   onClose,
 }: {
   surface: TuiA2UISurface
+  maxRows?: number
   onSubmit: (action: TuiA2UIAction) => void
   onRaw: (body: string) => void
   onClose: () => void
@@ -65,8 +70,9 @@ export function A2UISurfaceOverlay({
   const [confirming, setConfirming] = React.useState<string | null>(null)
   const rows = React.useMemo(() => buildA2UIRows(surface, values), [surface, values])
   const selected = rows[Math.max(0, Math.min(index, rows.length - 1))]
+  const window = windowListWithinRows(rows.length, index, Math.max(1, contentRows(maxRows, 4)))
 
-  useInput((input, key) => {
+  useModalInput((input, key) => {
     if (key.escape || input === "q") {
       if (confirming) return setConfirming(null)
       return onClose()
@@ -106,18 +112,27 @@ export function A2UISurfaceOverlay({
       <Text color={theme.accent} bold>
         A2UI · {surface.surfaceId}
       </Text>
-      {rows.map((row, rowIndex) => (
-        <Text
-          key={row.id}
-          color={
-            row.kind === "fallback" ? theme.warning : rowIndex === index ? theme.accent : undefined
-          }
-          bold={rowIndex === index && row.kind === "control"}
-        >
-          {rowIndex === index ? "› " : "  "}
-          {row.text}
-        </Text>
-      ))}
+      {window.above > 0 ? <Text color={theme.muted}>{`↑ ${window.above} more`}</Text> : null}
+      {rows.slice(window.start, window.end).map((row, offset) => {
+        const rowIndex = window.start + offset
+        return (
+          <Text
+            key={row.id}
+            color={
+              row.kind === "fallback"
+                ? theme.warning
+                : rowIndex === index
+                  ? theme.accent
+                  : undefined
+            }
+            bold={rowIndex === index && row.kind === "control"}
+          >
+            {rowIndex === index ? "› " : "  "}
+            {row.text}
+          </Text>
+        )
+      })}
+      {window.below > 0 ? <Text color={theme.muted}>{`↓ ${window.below} more`}</Text> : null}
       {confirming ? (
         <Text color={theme.danger} bold>
           Confirm destructive action · Enter confirm · Esc cancel

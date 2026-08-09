@@ -90,6 +90,8 @@ import type { ThinkingLevel, SubagentModelOverride } from "../../../config/schem
 import type { ConfigMenuRow } from "../../commands/config-menu"
 import type { TuiState, TuiAction } from "../../state/types"
 import { permissionModeMeta, permissionRiskMarker } from "../../state/permission-mode-meta"
+import { contentRows } from "../../layout/terminal-layout"
+import { OVERLAY_CHROME_ROWS } from "../overlay-layout"
 import type { AgentSessionApi } from "../../hooks/useAgentSession"
 import type { AskUserOverlayApi } from "../../hooks/use-ask-user-overlay"
 import type { PlanDecision } from "../../runtime/plan"
@@ -100,7 +102,7 @@ export interface AppOverlaysProps {
   dispatch: Dispatch<TuiAction>
   agent: AgentSessionApi
   columns: number
-  overlayRows: number
+  viewportRows: number
   activeModel: string | undefined
   home: string
   resolvePermission: (decision: CapturePermissionDecision) => void
@@ -133,7 +135,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
     dispatch,
     agent,
     columns,
-    overlayRows,
+    viewportRows,
     activeModel,
     home,
     resolvePermission,
@@ -156,6 +158,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
     clearLogs,
   } = props
   const theme = useTheme()
+  const itemRows = Math.max(1, contentRows(viewportRows, OVERLAY_CHROME_ROWS))
 
   // MCP rows are projected into the unified view at READ time rather than being
   // mirrored into `state.logs` at ingest, so nothing is stored twice and the
@@ -192,6 +195,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           index={state.overlay.index}
           onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
           onResolve={resolvePermission}
+          maxRows={viewportRows}
         />
       )}
       {state.overlay.kind === "model" &&
@@ -210,7 +214,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
               }))}
               index={state.overlay.index}
               width={columns}
-              maxRows={overlayRows}
+              maxRows={itemRows}
               query={state.overlay.query}
               searchPlaceholder="type to filter models"
               emptyHint="no models match"
@@ -253,7 +257,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           })}
           index={state.overlay.index}
           width={columns}
-          maxRows={overlayRows}
+          maxRows={itemRows}
           onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
           onSelect={(i) => {
             const m = (state.overlay as { options: (typeof PERMISSION_MODES)[number][] }).options[i]
@@ -340,7 +344,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
               }))}
               index={providerOverlay.index}
               width={columns}
-              maxRows={overlayRows}
+              maxRows={itemRows}
               query={query}
               searchRowVisible={searchable}
               searchPlaceholder="type to filter providers"
@@ -440,7 +444,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           items={state.overlay.rows.map((r) => ({ label: r.label, hint: r.value }))}
           index={state.overlay.index}
           width={columns}
-          maxRows={overlayRows}
+          maxRows={itemRows}
           onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
           onSelect={(i) => {
             const row = (state.overlay as { rows: ConfigMenuRow[] }).rows[i]
@@ -494,7 +498,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           section={state.overlay.section}
           index={state.overlay.index}
           width={columns}
-          maxRows={overlayRows}
+          maxRows={itemRows}
           onMoveRow={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
           onSwitchSection={(delta) => {
             if (state.overlay.kind !== "settings") return
@@ -547,7 +551,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
               items={filtered.map((s) => ({ label: s.title, hint: `${s.turns} turns` }))}
               index={state.overlay.index}
               width={columns}
-              maxRows={overlayRows}
+              maxRows={itemRows}
               query={query}
               searchRowVisible={searchable}
               searchPlaceholder="type to filter sessions"
@@ -577,7 +581,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
               items={filtered.map((it) => ({ label: it.label, hint: it.hint }))}
               index={o.index}
               width={columns}
-              maxRows={overlayRows}
+              maxRows={itemRows}
               query={query}
               searchRowVisible={searchable}
               searchPlaceholder="type to filter"
@@ -606,7 +610,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
               items={filtered}
               index={state.overlay.index}
               width={columns}
-              maxRows={overlayRows}
+              maxRows={itemRows}
               query={searchable ? query : undefined}
               onQueryChange={
                 searchable ? (q) => dispatch({ type: "OVERLAY_QUERY", query: q }) : undefined
@@ -647,7 +651,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
         <MarketplaceBrowser
           entries={state.overlay.entries}
           width={columns}
-          maxRows={overlayRows}
+          maxRows={itemRows}
           onAction={(entry, action) => {
             // enable/disable keep the browser open: patch the badge for instant
             // feedback, then run the command (which persists + flips the live
@@ -681,7 +685,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           servers={state.overlay.servers}
           probing={state.overlay.probing}
           width={columns}
-          maxRows={overlayRows}
+          maxRows={itemRows}
           onTools={(name) => void openMcpToolsPanel(name, mcpPanelDeps())}
           onAuth={(name) => {
             dispatch({ type: "OVERLAY_CLOSE" })
@@ -716,7 +720,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           server={state.overlay.server}
           tools={state.overlay.tools}
           width={columns}
-          maxRows={overlayRows}
+          maxRows={itemRows}
           onToggle={(tool, enabled) => {
             if (state.overlay.kind !== "mcpTools") return
             mcpToggleTool(state.overlay.server, tool, enabled, mcpPanelDeps())
@@ -730,7 +734,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           logs={state.mcpLogs}
           statusSummary={state.overlay.statusSummary}
           width={columns}
-          maxRows={overlayRows}
+          maxRows={itemRows}
           onClear={() => dispatch({ type: "MCP_LOG_CLEAR" })}
           onCopy={(text) => {
             if (!text) return
@@ -750,7 +754,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
         <LogPanel
           entries={mergedLogs}
           width={columns}
-          maxRows={overlayRows}
+          maxRows={itemRows}
           onClear={clearLogs}
           onCopy={(text) => {
             if (!text) return
@@ -787,7 +791,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
         <SkillPanel
           rows={state.overlay.rows}
           width={columns}
-          maxRows={overlayRows}
+          maxRows={itemRows}
           loadMode={state.config.skillLoadMode ?? "name"}
           onToggleLoadMode={() => {
             const next = (state.config.skillLoadMode ?? "name") === "name" ? "full" : "name"
@@ -843,7 +847,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           rows={state.overlay.rows}
           refresh={refreshAgents}
           width={columns}
-          maxRows={overlayRows}
+          maxRows={itemRows}
           onView={(row) => {
             // A row backed by the live-output store opens the live run page —
             // watch its streamed text/thinking/tools (running OR recently
@@ -887,7 +891,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           overview={state.overlay.overview}
           rows={state.overlay.rows}
           width={columns}
-          maxRows={overlayRows}
+          maxRows={itemRows}
           onView={(row) => {
             if (state.overlay.kind !== "agentStats") return
             const item = state.overlay.items.find((it) => it.conv.session.id === row.id)
@@ -909,6 +913,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
         <AgentStatsDetailPanel
           report={state.overlay.report}
           title={state.overlay.title}
+          viewportRows={viewportRows}
           onClose={() => {
             if (state.overlay.kind !== "agentStatsDetail") return
             dispatch({ type: "OVERLAY_OPEN", overlay: state.overlay.back })
@@ -925,7 +930,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
               items={filtered.map((r) => ({ label: r.label, hint: r.hint }))}
               index={state.overlay.index}
               width={columns}
-              maxRows={overlayRows}
+              maxRows={itemRows}
               query={query}
               searchPlaceholder="type to filter commands"
               emptyHint="no commands match"
@@ -951,6 +956,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           name={state.overlay.name}
           task={state.overlay.task}
           width={columns}
+          viewportRows={viewportRows}
           getEntry={(id) => getLiveSubagent(id, state.sessionId)}
           onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
@@ -960,7 +966,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           rows={state.overlay.rows}
           index={state.overlay.index}
           width={columns}
-          maxRows={overlayRows}
+          maxRows={itemRows}
           onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
           onCycleModel={(row, delta) =>
             applySubagentModelEdit(row.id, cycleSubagentModel(row, delta))
@@ -973,11 +979,16 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
         />
       )}
       {state.overlay.kind === "askUser" && (
-        <AskUserDialog request={state.overlay.request} onResolve={askUser.resolve} />
+        <AskUserDialog
+          request={state.overlay.request}
+          maxRows={viewportRows}
+          onResolve={askUser.resolve}
+        />
       )}
       {state.overlay.kind === "form" && (
         <FormOverlay
           form={state.overlay.form}
+          maxRows={viewportRows}
           onUpdate={(f) => dispatch({ type: "FORM_UPDATE", form: f })}
           onSubmit={submitForm}
           onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
@@ -994,6 +1005,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           costHistory={state.costHistory}
           toolStats={state.toolStats}
           modelTotals={state.modelTotals}
+          viewportRows={viewportRows}
           onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
       )}
@@ -1005,11 +1017,12 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           now={state.overlay.now}
           rateLimits={state.overlay.rateLimits}
           activeProvider={state.overlay.activeProvider}
+          viewportRows={viewportRows}
           onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
       )}
       {state.overlay.kind === "help" && (
-        <Help maxRows={overlayRows} onClose={() => dispatch({ type: "OVERLAY_CLOSE" })} />
+        <Help viewportRows={viewportRows} onClose={() => dispatch({ type: "OVERLAY_CLOSE" })} />
       )}
       {state.overlay.kind === "historySearch" && (
         <HistorySearch
@@ -1085,6 +1098,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           body={state.overlay.body}
           format={state.overlay.format}
           lang={state.overlay.lang}
+          viewportRows={viewportRows}
           onCopy={(text) => {
             void copyToClipboard(text).then((result) =>
               dispatch({
@@ -1101,6 +1115,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
       {state.overlay.kind === "a2ui" && (
         <A2UISurfaceOverlay
           surface={state.overlay.surface}
+          maxRows={viewportRows}
           onSubmit={(submitted) => {
             const action = createUserAction(
               state.overlay.kind === "a2ui" ? state.overlay.surface.surfaceId : "unknown",
@@ -1131,6 +1146,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           savedTo={state.overlay.savedTo}
           raw={state.overlay.raw}
           prevPlan={state.overlay.prevPlan}
+          viewportRows={viewportRows}
           onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
           onSelect={onPlanDecision}
           onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
@@ -1141,6 +1157,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           title={state.overlay.title}
           body={state.overlay.body}
           format={state.overlay.format}
+          viewportRows={viewportRows}
           onConfirm={() => {
             const cmd = (state.overlay as { onConfirmCommand: string }).onConfirmCommand
             dispatch({ type: "OVERLAY_CLOSE" })

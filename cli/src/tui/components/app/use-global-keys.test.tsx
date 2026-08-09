@@ -19,6 +19,7 @@ import type { TranscriptCursor } from "../../hooks/useTranscriptCursor"
 import type { AgentSessionApi } from "../../hooks/useAgentSession"
 import type { AskUserOverlayApi } from "../../hooks/use-ask-user-overlay"
 import type { SelectionController } from "../../selection/selection-controller"
+import { TuiInputProvider, useModalInput } from "../../input/input-router"
 
 jest.mock("../../input/element-position", () => ({ absoluteTopLeft: jest.fn(() => null) }))
 const mockPos = absoluteTopLeft as jest.Mock
@@ -75,6 +76,11 @@ function buildDeps(over: Partial<GlobalKeysDeps> = {}): GlobalKeysDeps {
 
 function Harness({ deps }: { deps: GlobalKeysDeps }) {
   useGlobalKeys(deps)
+  return null
+}
+
+function ModalHarness({ onInput }: { onInput: () => void }) {
+  useModalInput(onInput)
   return null
 }
 
@@ -166,6 +172,23 @@ describe("useGlobalKeys", () => {
     act(() => __fireInput("c", { ctrl: true }))
     expect(deps.agent.abort).toHaveBeenCalled()
     expect(deps.dispatch).not.toHaveBeenCalledWith({ type: "INPUT_CLEAR" })
+  })
+
+  it("routes Ctrl+C through the critical path before a modal exactly once", () => {
+    const deps = buildDeps({ busy: true, overlayOpen: true })
+    const onModalInput = jest.fn()
+    render(
+      <TuiInputProvider>
+        <Harness deps={deps} />
+        <ModalHarness onInput={onModalInput} />
+      </TuiInputProvider>
+    )
+
+    act(() => __fireInput("c", { ctrl: true }))
+
+    expect(deps.agent.abort).toHaveBeenCalledTimes(1)
+    expect(deps.abortRuntime).toHaveBeenCalledTimes(1)
+    expect(onModalInput).not.toHaveBeenCalled()
   })
 
   it("interrupts a live turn on Esc while a permission overlay is open", () => {

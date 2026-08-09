@@ -105,7 +105,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   let currentToken = serviceToken
   const configProvider = (): CompanionConfig => ({
     baseUrl: serverUrl,
-    deviceJwt: currentToken,
+    serviceToken: currentToken,
     deviceId: `brain-${accountId}`,
     serverVersion: "headless",
   })

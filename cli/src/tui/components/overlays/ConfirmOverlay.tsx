@@ -7,7 +7,8 @@
  * delegated to the parent via callbacks so the App stays a thin interpreter.
  */
 import React from "react"
-import { Box, Text, useInput, useStdout } from "ink"
+import { Box, Text } from "ink"
+import { useModalInput } from "../../input/input-router"
 
 import { MarkdownLine } from "../Markdown"
 import { parseMouseEvent } from "../../input/mouse"
@@ -20,6 +21,7 @@ import {
   prepareDocumentLines,
 } from "../document-view"
 import type { DocumentFormat } from "../../state/types"
+import { contentRows } from "../../layout/terminal-layout"
 
 export interface ConfirmOverlayProps {
   title: string
@@ -43,20 +45,18 @@ export function ConfirmOverlay({
   viewportRows,
 }: ConfirmOverlayProps) {
   const theme = useTheme()
-  const { stdout } = useStdout()
   const [scroll, setScroll] = React.useState(0)
 
   const prepared = React.useMemo(() => prepareDocumentLines(body, format), [body, format])
   const total = lineCount(prepared)
-  const viewport =
-    viewportRows ?? Math.max(4, ((stdout?.rows as number | undefined) ?? 24) - CHROME_ROWS)
+  const viewport = Math.max(1, contentRows(viewportRows ?? 24, CHROME_ROWS))
 
   const move = React.useCallback(
     (delta: number) => setScroll((s) => clampScroll(s + delta, total, viewport)),
     [total, viewport]
   )
 
-  useInput((input, key) => {
+  useModalInput((input, key) => {
     // Mouse (fullscreen `scroll` only): the wheel scrolls the preview; other
     // mouse reports are swallowed so the SGR sequence isn't matched as a key.
     const mouse = parseMouseEvent(input)

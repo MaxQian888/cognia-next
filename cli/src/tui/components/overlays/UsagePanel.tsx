@@ -7,7 +7,8 @@
  * breakdown of the session's tool usage (`format/tool-stats`).
  */
 import React from "react"
-import { Box, Text, useInput, useStdout } from "ink"
+import { Box, Text } from "ink"
+import { useModalInput } from "../../input/input-router"
 
 import {
   PANEL_CHROME_ROWS,
@@ -22,6 +23,7 @@ import {
   modelUsageRows,
   usagePanelRows,
 } from "../../format/usage"
+import { contentRows } from "../../layout/terminal-layout"
 import { sparkline, stackedBar } from "../../format/charts"
 import { progressBar } from "../../format/status-bar"
 import { formatToolStatRow, topToolStats } from "../../format/tool-stats"
@@ -199,11 +201,9 @@ export function UsagePanel({
   onClose: () => void
 }) {
   const theme = useTheme()
-  const { stdout } = useStdout()
-  const viewport =
-    viewportRows ?? Math.max(4, ((stdout?.rows as number | undefined) ?? 24) - PANEL_CHROME_ROWS)
+  const viewport = Math.max(1, contentRows(viewportRows ?? 24, PANEL_CHROME_ROWS))
   const scroll = usePanelScroll(viewport)
-  useInput((input, key) => {
+  useModalInput((input, key) => {
     if (key.escape || key.return) return onClose()
     scroll.onKey(input, key)
   })

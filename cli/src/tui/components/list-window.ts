@@ -37,3 +37,22 @@ export function windowList(length: number, selected: number, maxRows: number): L
   const end = start + maxRows
   return { start, end, above: start, below: length - end }
 }
+
+/**
+ * Window a list when the row budget must include the optional "more" rows.
+ * Every hidden side costs one row, so items plus indicators never exceed the
+ * supplied budget.
+ */
+export function windowListWithinRows(
+  length: number,
+  selected: number,
+  rowBudget: number
+): ListWindow {
+  if (length <= 0 || rowBudget <= 0) return windowList(length, selected, 0)
+  for (let visibleRows = Math.min(length, rowBudget); visibleRows >= 1; visibleRows -= 1) {
+    const window = windowList(length, selected, visibleRows)
+    const indicatorRows = Number(window.above > 0) + Number(window.below > 0)
+    if (visibleRows + indicatorRows <= rowBudget) return window
+  }
+  return windowList(length, selected, 1)
+}

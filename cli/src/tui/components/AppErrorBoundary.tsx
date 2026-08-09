@@ -16,7 +16,8 @@
  * `process.on('uncaughtException'|'unhandledRejection')` guards in `mount.tsx`.
  */
 import React from "react"
-import { Box, Text, useApp, useInput } from "ink"
+import { Box, Text, useApp } from "ink"
+import { useCriticalInput } from "../input/input-router"
 
 export interface AppErrorBoundaryProps {
   children: React.ReactNode
@@ -76,10 +77,15 @@ function CrashFallback({
   onReset: () => void
 }): React.ReactElement {
   const { exit } = useApp()
-  useInput((input, key) => {
-    if (input === "r") onReset()
-    else if (input === "q" || key.escape) exit()
-  })
+  useCriticalInput(
+    (input, key) => {
+      if (input === "r") onReset()
+      else if (input === "q" || key.escape) exit()
+    },
+    {
+      shouldHandle: (input, key) => input === "r" || input === "q" || key.escape,
+    }
+  )
   // First few stack frames — enough to locate the fault without flooding the pane.
   const stackTail = (error.stack ?? "")
     .split("\n")

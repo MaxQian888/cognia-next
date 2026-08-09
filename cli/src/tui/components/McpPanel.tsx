@@ -11,7 +11,8 @@
  * one · Esc clears the filter, then closes.
  */
 import React, { useRef, useState } from "react"
-import { Box, Text, useInput, type DOMElement } from "ink"
+import { Box, Text, type DOMElement } from "ink"
+import { useModalInput } from "../input/input-router"
 import Spinner from "ink-spinner"
 
 import { useTheme } from "../theme/context"
@@ -114,7 +115,7 @@ export function McpPanel({
       ),
   })
 
-  useInput(
+  useModalInput(
     (input, key) => {
       if (handleMouse(input)) return
       if (key.escape) {

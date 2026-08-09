@@ -21,7 +21,7 @@ describe("DocumentViewer", () => {
         body={longBody}
         format="text"
         onClose={() => {}}
-        viewportRows={10}
+        viewportRows={16}
       />
     )
     const text = container.textContent ?? ""
@@ -40,7 +40,7 @@ describe("DocumentViewer", () => {
         body={longBody}
         format="text"
         onClose={() => {}}
-        viewportRows={10}
+        viewportRows={16}
       />
     )
     fire("", { downArrow: true })
@@ -56,7 +56,7 @@ describe("DocumentViewer", () => {
         body={longBody}
         format="text"
         onClose={() => {}}
-        viewportRows={10}
+        viewportRows={16}
       />
     )
     // SGR wheel-down → scroll forward by WHEEL_SCROLL_LINES (3).
@@ -76,7 +76,7 @@ describe("DocumentViewer", () => {
         body={longBody}
         format="text"
         onClose={() => {}}
-        viewportRows={10}
+        viewportRows={16}
       />
     )
     fire("", { pageDown: true })
@@ -93,7 +93,7 @@ describe("DocumentViewer", () => {
         body={longBody}
         format="text"
         onClose={() => {}}
-        viewportRows={10}
+        viewportRows={16}
       />
     )
     fire("", { upArrow: true }) // already at top
@@ -110,7 +110,7 @@ describe("DocumentViewer", () => {
         body={longBody}
         format="text"
         onClose={() => {}}
-        viewportRows={10}
+        viewportRows={16}
       />
     )
     fire(" ") // space → page down
@@ -153,7 +153,7 @@ describe("DocumentViewer", () => {
         body={longBody}
         format="text"
         onClose={onClose}
-        viewportRows={10}
+        viewportRows={16}
       />
     )
     fire("", { escape: true })
@@ -169,7 +169,7 @@ describe("DocumentViewer", () => {
         body={"a\nb\nc"}
         format="text"
         onClose={() => {}}
-        viewportRows={10}
+        viewportRows={16}
       />
     )
     expect(container.textContent).toContain("all")
@@ -184,7 +184,7 @@ describe("DocumentViewer", () => {
         format="text"
         onClose={() => {}}
         onCopy={onCopy}
-        viewportRows={10}
+        viewportRows={16}
       />
     )
     fire("/")

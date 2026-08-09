@@ -93,6 +93,7 @@ function TranscriptImpl({
   focusedCellId = null,
   onCellHeight,
   replayMaxRows = 10000,
+  columns = 80,
 }: {
   cells: Cell[]
   header?: React.ReactNode
@@ -117,11 +118,13 @@ function TranscriptImpl({
   onCellHeight?: (id: string, height: number) => void
   /** Native-scrollback repaint cap. Zero replays the complete transcript. */
   replayMaxRows?: number
+  /** Root terminal width used for deterministic resize replay accounting. */
+  columns?: number
 }) {
   const theme = useTheme()
   const renderCell = (cell: Cell) => {
     const focused = cell.id === focusedCellId
-    const body = <CellView cell={applyVerbose(cell, verbose)} />
+    const body = <CellView cell={applyVerbose(cell, verbose)} columns={columns} />
     const inner = focused ? (
       <Box
         borderStyle="single"
@@ -169,10 +172,7 @@ function TranscriptImpl({
     )
   }
 
-  const replayCells =
-    epoch > 0
-      ? limitReplayCells(cells, replayMaxRows, process.stdout.columns ?? 80, verbose)
-      : cells
+  const replayCells = epoch > 0 ? limitReplayCells(cells, replayMaxRows, columns, verbose) : cells
   const rows: Row[] = header
     ? [{ id: HEADER_ID }, ...replayCells.map((cell) => ({ id: cell.id, cell }))]
     : replayCells.map((cell) => ({ id: cell.id, cell }))

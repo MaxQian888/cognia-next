@@ -82,4 +82,33 @@ describe("A2UISurfaceOverlay", () => {
     fire("r")
     expect(onRaw).toHaveBeenCalled()
   })
+
+  it("keeps the selected row visible in a bounded window", () => {
+    const value = surface({
+      component: "Column",
+      children: Array.from({ length: 8 }, (_, index) => `button-${index}`),
+    })
+    for (let index = 0; index < 8; index += 1) {
+      value.components[`button-${index}`] = {
+        id: `button-${index}`,
+        component: "Button",
+        text: `Action ${index}`,
+      }
+    }
+    const { container } = render(
+      <A2UISurfaceOverlay
+        surface={value}
+        maxRows={8}
+        onSubmit={() => {}}
+        onRaw={() => {}}
+        onClose={() => {}}
+      />
+    )
+
+    for (let index = 0; index < 7; index += 1) fire("", { downArrow: true })
+
+    expect(container.textContent).toContain("Action 6")
+    expect(container.textContent).not.toContain("Action 0")
+    expect(container.textContent).toContain("more")
+  })
 })

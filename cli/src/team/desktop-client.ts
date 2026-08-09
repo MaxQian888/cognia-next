@@ -1,6 +1,6 @@
 /**
  * CLI-side client for the desktop agent-team bridge routes
- * (`POST /api/v1/dev/teams/{list,run,run-status}`).
+ * (`POST /api/dev/teams/{list,run,run-status}`).
  *
  * AgentTeam definitions live in the desktop renderer's Zustand store and
  * run history in the GUI's Dexie — the CLI can reach neither, so `/team
@@ -13,9 +13,9 @@
 import { detectDesktop, DEV_TOKEN_HEADER, type HandoffClientDeps } from "../handoff/client"
 import type { BridgeEndpoint } from "../handoff/endpoint"
 
-export const TEAMS_LIST_PATH = "/api/v1/dev/teams/list"
-export const TEAMS_RUN_PATH = "/api/v1/dev/teams/run"
-export const TEAMS_RUN_STATUS_PATH = "/api/v1/dev/teams/run-status"
+export const TEAMS_LIST_PATH = "/api/dev/teams/list"
+export const TEAMS_RUN_PATH = "/api/dev/teams/run"
+export const TEAMS_RUN_STATUS_PATH = "/api/dev/teams/run-status"
 const REQUEST_TIMEOUT_MS = 10_000
 
 export interface DesktopTeamRow {

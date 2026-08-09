@@ -45,6 +45,7 @@ function baseProps(over: Partial<BottomRegionProps> = {}): BottomRegionProps {
     overlayOpen: false,
     columns: 80,
     popupRows: 6,
+    composerRows: 3,
     layout: terminalLayout(80, 24),
     warningColor: "yellow",
     streamStartedAt: null,
@@ -81,6 +82,7 @@ const wrap = (el: React.ReactElement) =>
 describe("BottomRegion", () => {
   it("renders the composer when no overlay/find is active", () => {
     const { container } = wrap(<BottomRegion {...baseProps()} />)
+    expect(container.firstElementChild).toHaveAttribute("data-flex-shrink", "0")
     // The Input composer renders its prompt prefix; the footer renders the cwd.
     expect(container.textContent).toContain("/work")
     expect(container.textContent).toContain("zzz")

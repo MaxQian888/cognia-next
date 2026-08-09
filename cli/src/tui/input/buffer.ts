@@ -5,6 +5,30 @@
  * is exhaustively unit-tested.
  */
 import type { InputBuffer } from "../state/types"
+import { stringWidth } from "../markdown/width"
+import {
+  graphemeSegments,
+  nextGraphemeBoundary,
+  previousGraphemeBoundary,
+  snapToGraphemeBoundary,
+} from "../text/graphemes"
+
+function displayColumnToBufferColumn(line: string, displayColumn: number): number {
+  const target = Math.max(0, displayColumn)
+  let width = 0
+  for (const grapheme of graphemeSegments(line)) {
+    const nextWidth = width + stringWidth(grapheme.segment)
+    if (nextWidth > target) {
+      return (target - width) * 2 >= nextWidth - width ? grapheme.end : grapheme.index
+    }
+    width = nextWidth
+  }
+  return line.length
+}
+
+function cursorDisplayColumn(b: InputBuffer): number {
+  return stringWidth(b.lines[b.cursorRow].slice(0, b.cursorCol))
+}
 
 export function emptyBuffer(): InputBuffer {
   return { lines: [""], cursorRow: 0, cursorCol: 0 }
@@ -33,7 +57,12 @@ export function insertText(b: InputBuffer, text: string): InputBuffer {
   if (segments.length === 1) {
     const lines = [...b.lines]
     lines[b.cursorRow] = before + text + after
-    return { lines, cursorRow: b.cursorRow, cursorCol: b.cursorCol + text.length }
+    const insertedEnd = b.cursorCol + text.length
+    return {
+      lines,
+      cursorRow: b.cursorRow,
+      cursorCol: nextGraphemeBoundary(lines[b.cursorRow], Math.max(0, insertedEnd - 1)),
+    }
   }
   const first = before + segments[0]
   const middle = segments.slice(1, -1)
@@ -46,7 +75,12 @@ export function insertText(b: InputBuffer, text: string): InputBuffer {
     ...b.lines.slice(b.cursorRow + 1),
   ]
   const cursorRow = b.cursorRow + segments.length - 1
-  return { lines, cursorRow, cursorCol: last.length }
+  return {
+    lines,
+    cursorRow,
+    cursorCol:
+      last.length === 0 ? 0 : nextGraphemeBoundary(lines[cursorRow], Math.max(0, last.length - 1)),
+  }
 }
 
 export function insertNewline(b: InputBuffer): InputBuffer {
@@ -56,9 +90,10 @@ export function insertNewline(b: InputBuffer): InputBuffer {
 export function backspace(b: InputBuffer): InputBuffer {
   if (b.cursorCol > 0) {
     const line = b.lines[b.cursorRow]
+    const previous = previousGraphemeBoundary(line, b.cursorCol)
     const lines = [...b.lines]
-    lines[b.cursorRow] = line.slice(0, b.cursorCol - 1) + line.slice(b.cursorCol)
-    return { lines, cursorRow: b.cursorRow, cursorCol: b.cursorCol - 1 }
+    lines[b.cursorRow] = line.slice(0, previous) + line.slice(b.cursorCol)
+    return { lines, cursorRow: b.cursorRow, cursorCol: previous }
   }
   if (b.cursorRow > 0) {
     // Merge with the previous line.
@@ -81,7 +116,7 @@ export function deleteWordLeft(b: InputBuffer): InputBuffer {
   // Drop trailing spaces then the word.
   const trimmed = upto.replace(/\s+$/, "")
   const lastBreak = trimmed.search(/[^\s]+$/)
-  const newCol = lastBreak < 0 ? 0 : lastBreak
+  const newCol = snapToGraphemeBoundary(line, lastBreak < 0 ? 0 : lastBreak)
   const lines = [...b.lines]
   lines[b.cursorRow] = line.slice(0, newCol) + line.slice(b.cursorCol)
   return { lines, cursorRow: b.cursorRow, cursorCol: newCol }
@@ -103,7 +138,10 @@ export function moveWordLeft(b: InputBuffer): InputBuffer {
   const upto = b.lines[b.cursorRow].slice(0, b.cursorCol)
   const trimmed = upto.replace(/\s+$/, "")
   const lastBreak = trimmed.search(/\S+$/)
-  return { ...b, cursorCol: lastBreak < 0 ? 0 : lastBreak }
+  return {
+    ...b,
+    cursorCol: snapToGraphemeBoundary(b.lines[b.cursorRow], lastBreak < 0 ? 0 : lastBreak),
+  }
 }
 
 /**
@@ -120,7 +158,11 @@ export function moveWordRight(b: InputBuffer): InputBuffer {
   const after = line.slice(b.cursorCol)
   const m = after.match(/^\s*\S+/)
   const advance = m ? m[0].length : after.length
-  return { ...b, cursorCol: b.cursorCol + advance }
+  const candidate = b.cursorCol + advance
+  return {
+    ...b,
+    cursorCol: candidate === 0 ? 0 : nextGraphemeBoundary(line, Math.max(0, candidate - 1)),
+  }
 }
 
 /** Kill from the cursor to the start of the line (Ctrl+U). No-op at column 0. */
@@ -142,7 +184,9 @@ export function deleteToLineEnd(b: InputBuffer): InputBuffer {
 }
 
 export function moveLeft(b: InputBuffer): InputBuffer {
-  if (b.cursorCol > 0) return { ...b, cursorCol: b.cursorCol - 1 }
+  if (b.cursorCol > 0) {
+    return { ...b, cursorCol: previousGraphemeBoundary(b.lines[b.cursorRow], b.cursorCol) }
+  }
   if (b.cursorRow > 0) {
     const row = b.cursorRow - 1
     return { ...b, cursorRow: row, cursorCol: b.lines[row].length }
@@ -151,7 +195,9 @@ export function moveLeft(b: InputBuffer): InputBuffer {
 }
 
 export function moveRight(b: InputBuffer): InputBuffer {
-  if (b.cursorCol < b.lines[b.cursorRow].length) return { ...b, cursorCol: b.cursorCol + 1 }
+  if (b.cursorCol < b.lines[b.cursorRow].length) {
+    return { ...b, cursorCol: nextGraphemeBoundary(b.lines[b.cursorRow], b.cursorCol) }
+  }
   if (b.cursorRow < b.lines.length - 1) return { ...b, cursorRow: b.cursorRow + 1, cursorCol: 0 }
   return b
 }
@@ -159,20 +205,28 @@ export function moveRight(b: InputBuffer): InputBuffer {
 export function moveUp(b: InputBuffer): InputBuffer {
   if (b.cursorRow === 0) return { ...b, cursorCol: 0 }
   const row = b.cursorRow - 1
-  return { ...b, cursorRow: row, cursorCol: Math.min(b.cursorCol, b.lines[row].length) }
+  return {
+    ...b,
+    cursorRow: row,
+    cursorCol: displayColumnToBufferColumn(b.lines[row], cursorDisplayColumn(b)),
+  }
 }
 
 export function moveDown(b: InputBuffer): InputBuffer {
   if (b.cursorRow === b.lines.length - 1) return { ...b, cursorCol: b.lines[b.cursorRow].length }
   const row = b.cursorRow + 1
-  return { ...b, cursorRow: row, cursorCol: Math.min(b.cursorCol, b.lines[row].length) }
+  return {
+    ...b,
+    cursorRow: row,
+    cursorCol: displayColumnToBufferColumn(b.lines[row], cursorDisplayColumn(b)),
+  }
 }
 
 /** Place the cursor at an explicit (row, col), clamped into the buffer — used by
  * click-to-position. Out-of-range row/col snap to the nearest valid spot. */
 export function moveTo(b: InputBuffer, row: number, col: number): InputBuffer {
   const cursorRow = Math.max(0, Math.min(row, b.lines.length - 1))
-  const cursorCol = Math.max(0, Math.min(col, b.lines[cursorRow].length))
+  const cursorCol = snapToGraphemeBoundary(b.lines[cursorRow], col)
   return { ...b, cursorRow, cursorCol }
 }
 

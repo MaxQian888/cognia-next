@@ -7,9 +7,14 @@ export interface TerminalLayoutBudget {
   showBanner: boolean
   showMascot: boolean
   showFooterHint: boolean
-  overlayFullscreen: boolean
   composerRows: number
-  pathColumns: number
+}
+
+/** Rows available to a panel body after its measured viewport chrome. */
+export function contentRows(viewportRows: number, chromeRows: number): number {
+  const viewport = Math.max(0, Math.floor(viewportRows))
+  const chrome = Math.max(0, Math.floor(chromeRows))
+  return Math.max(0, viewport - chrome)
 }
 
 export function terminalLayout(columns: number, rows: number): TerminalLayoutBudget {
@@ -22,9 +27,7 @@ export function terminalLayout(columns: number, rows: number): TerminalLayoutBud
       showBanner: false,
       showMascot: false,
       showFooterHint: false,
-      overlayFullscreen: true,
       composerRows: 2,
-      pathColumns: Math.max(8, width - 8),
     }
   }
   if (width < 60) {
@@ -34,9 +37,7 @@ export function terminalLayout(columns: number, rows: number): TerminalLayoutBud
       showBanner: true,
       showMascot: true,
       showFooterHint: false,
-      overlayFullscreen: false,
       composerRows: 2,
-      pathColumns: 20,
     }
   }
   if (width < 100) {
@@ -46,9 +47,7 @@ export function terminalLayout(columns: number, rows: number): TerminalLayoutBud
       showBanner: true,
       showMascot: true,
       showFooterHint: false,
-      overlayFullscreen: false,
       composerRows: 3,
-      pathColumns: 40,
     }
   }
   return {
@@ -57,8 +56,6 @@ export function terminalLayout(columns: number, rows: number): TerminalLayoutBud
     showBanner: true,
     showMascot: true,
     showFooterHint: true,
-    overlayFullscreen: false,
     composerRows: 3,
-    pathColumns: 80,
   }
 }

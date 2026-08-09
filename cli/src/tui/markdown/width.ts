@@ -11,6 +11,11 @@
  * emits in a table cell.
  */
 
+import { graphemeSegments } from "../text/graphemes"
+
+const ANSI_SEQUENCE =
+  /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][\s\S]*?(?:\x07|\x1b\\)|\x1b[()#][\s\S]|\x1b[0-~]/g
+
 /** True for code points rendered two columns wide in a monospace terminal. */
 function isWide(cp: number): boolean {
   return (
@@ -46,14 +51,27 @@ function isZeroWidth(cp: number): boolean {
   )
 }
 
+function isEmoji(cp: number): boolean {
+  return (
+    (cp >= 0x1f1e6 && cp <= 0x1f1ff) ||
+    (cp >= 0x1f300 && cp <= 0x1faff) ||
+    (cp >= 0x2600 && cp <= 0x27bf)
+  )
+}
+
 /** Display width of `text` in terminal columns. */
 export function stringWidth(text: string): number {
   let width = 0
-  for (const ch of text) {
-    const cp = ch.codePointAt(0)
-    if (cp === undefined) continue
-    if (isZeroWidth(cp)) continue
-    width += isWide(cp) ? 2 : 1
+  for (const { segment } of graphemeSegments(text.replace(ANSI_SEQUENCE, ""))) {
+    // Keycap sequences use an ASCII base plus U+20E3, but terminals paint the
+    // completed emoji as a two-cell glyph.
+    let clusterWidth = segment.includes("\u20e3") ? 2 : 0
+    for (const ch of segment) {
+      const cp = ch.codePointAt(0)
+      if (cp === undefined || isZeroWidth(cp)) continue
+      clusterWidth = Math.max(clusterWidth, isWide(cp) || isEmoji(cp) ? 2 : 1)
+    }
+    width += clusterWidth
   }
   return width
 }
@@ -70,10 +88,10 @@ export function truncateToWidth(text: string, max: number): string {
   if (max <= 1) return "…"
   let out = ""
   let w = 0
-  for (const ch of text) {
-    const cw = stringWidth(ch)
+  for (const { segment } of graphemeSegments(text)) {
+    const cw = stringWidth(segment)
     if (w + cw > max - 1) break
-    out += ch
+    out += segment
     w += cw
   }
   return out + "…"

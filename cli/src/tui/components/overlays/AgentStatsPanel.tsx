@@ -10,7 +10,8 @@
  * windowed-list pattern of {@link AgentsPanel}.
  */
 import React, { useState } from "react"
-import { Box, Text, useInput } from "ink"
+import { Box, Text } from "ink"
+import { useModalInput } from "../../input/input-router"
 
 import { useTheme } from "../../theme/context"
 import { windowList } from "../list-window"
@@ -66,7 +67,7 @@ export function AgentStatsPanel({
   const win = windowList(rows.length, safeIndex, listMax)
   const visible = rows.slice(win.start, win.end)
 
-  useInput(
+  useModalInput(
     (_input, key) => {
       if (key.escape) return onCancel()
       if (key.upArrow) {

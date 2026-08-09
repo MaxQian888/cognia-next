@@ -15,6 +15,7 @@ import { langFromPath } from "../../markdown/highlight"
 import { listBuiltinTools, type BuiltinToolRiskLevel } from "@/lib/settings/builtin-tools"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import type { PermissionChoice, PermissionRequestEvent } from "../../state/types"
+import { contentRows } from "../../layout/terminal-layout"
 
 export function choiceToDecision(
   choice: PermissionChoice,
@@ -55,12 +56,14 @@ export function PermissionOverlay({
   index,
   onMove,
   onResolve,
+  maxRows = 18,
 }: {
   req: PermissionRequestEvent
   choices: PermissionChoice[]
   index: number
   onMove: (delta: number) => void
   onResolve: (decision: CapturePermissionDecision) => void
+  maxRows?: number
 }) {
   const theme = useTheme()
   const input = (req.input as Record<string, unknown>) ?? {}
@@ -72,8 +75,21 @@ export function PermissionOverlay({
   const bareName = prettyToolName(req.toolName)
   const diff = isDiffTool(bareName) ? formatEditDiff(bareName, input) : []
   const diffLang = diff.length > 0 ? langFromPath(diffFilePath(input) ?? "") : undefined
+  const showFrame = maxRows >= 9
+  const choiceRows = Math.max(
+    1,
+    Math.min(choices.length, contentRows(maxRows, (showFrame ? 2 : 0) + 4))
+  )
+  const metadataRows = (summary ? 1 : 0) + (req.description ? 1 : 0)
+  const fixedRows = (showFrame ? 2 : 0) + 4 + metadataRows + choiceRows + (diff.length > 0 ? 1 : 0)
+  const diffRows = Math.min(12, contentRows(maxRows, fixedRows))
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={theme.borderWarning} paddingX={1}>
+    <Box
+      flexDirection="column"
+      borderStyle={showFrame ? "round" : undefined}
+      borderColor={theme.borderWarning}
+      paddingX={1}
+    >
       <Text bold color={theme.warning}>
         Allow {name}?
         {risk ? (
@@ -83,20 +99,21 @@ export function PermissionOverlay({
           </Text>
         ) : null}
       </Text>
-      {summary ? <Text color={theme.muted}>{summary}</Text> : null}
-      {req.description ? <Text color={theme.muted}>{req.description}</Text> : null}
-      {diff.length > 0 ? (
-        <Box marginTop={1} flexDirection="column">
-          <DiffView diff={diff} lang={diffLang} maxLines={12} />
-        </Box>
-      ) : null}
       <SelectList
         items={choices.map((c) => ({ label: c.label }))}
         index={index}
+        maxRows={choiceRows}
         onMove={onMove}
         onSelect={(i) => onResolve(choiceToDecision(choices[i], req.toolName))}
         onCancel={() => onResolve(choiceToDecision({ label: "Deny", value: "deny" }, req.toolName))}
       />
+      {summary ? <Text color={theme.muted}>{summary}</Text> : null}
+      {req.description ? <Text color={theme.muted}>{req.description}</Text> : null}
+      {diff.length > 0 && diffRows > 0 ? (
+        <Box marginTop={1} flexDirection="column">
+          <DiffView diff={diff} lang={diffLang} maxLines={diffRows} />
+        </Box>
+      ) : null}
     </Box>
   )
 }

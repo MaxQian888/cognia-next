@@ -30,6 +30,7 @@ export interface TranscriptRegionProps {
   /** Active model id (catalog-resolved). Only used to price the built-in
    * context gauge; the displayed model comes from {@link identity}. */
   activeModel: string | undefined
+  columns?: number
   /** Fullscreen scroll controller (no-op in scrollback mode). */
   scroll: ScrollController
   /** Content box of the scroll viewport, for click-to-expand row mapping. */
@@ -54,6 +55,7 @@ export function TranscriptRegion({
   banner,
   identity,
   activeModel,
+  columns = 80,
   scroll,
   scrollContentRef,
   cursor,
@@ -64,9 +66,7 @@ export function TranscriptRegion({
     showBanner: true,
     showMascot: true,
     showFooterHint: true,
-    overlayFullscreen: false,
     composerRows: 3,
-    pathColumns: 80,
   },
 }: TranscriptRegionProps): React.ReactElement {
   if (fullscreen) {
@@ -110,7 +110,7 @@ export function TranscriptRegion({
           {virtualized && !cursor.measuring && !state.backtrack ? (
             <VirtualizedTranscript
               cells={state.cells}
-              width={process.stdout.columns ?? 80}
+              width={columns}
               top={scroll.offset}
               viewportRows={scroll.viewportRows}
               verbose={state.verbose}
@@ -127,9 +127,15 @@ export function TranscriptRegion({
                 cursor.state.focusedCellId
               }
               onCellHeight={cursor.reportCellHeight}
+              columns={columns}
             />
           )}
-          <Inflight inflight={state.inflight} verbose={state.verbose} epoch={state.streamEpoch} />
+          <Inflight
+            inflight={state.inflight}
+            verbose={state.verbose}
+            epoch={state.streamEpoch}
+            columns={columns}
+          />
           <WorkflowRunPanel run={state.workflowRun} />
         </ScrollView>
         {/* "Scrolled up" hint — only while the view isn't pinned to the bottom,
@@ -154,8 +160,14 @@ export function TranscriptRegion({
         epoch={state.renderEpoch}
         replayMaxRows={state.config.render?.terminalResizeReplayMaxRows ?? 10_000}
         focusedCellId={state.backtrack ? (state.cells[state.backtrack.index]?.id ?? null) : null}
+        columns={columns}
       />
-      <Inflight inflight={state.inflight} verbose={state.verbose} epoch={state.streamEpoch} />
+      <Inflight
+        inflight={state.inflight}
+        verbose={state.verbose}
+        epoch={state.streamEpoch}
+        columns={columns}
+      />
       <WorkflowRunPanel run={state.workflowRun} />
     </>
   )

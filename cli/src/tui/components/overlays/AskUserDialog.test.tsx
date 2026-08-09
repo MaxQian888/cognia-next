@@ -155,4 +155,22 @@ describe("AskUserDialog component", () => {
     __fireInput("", { return: true })
     expect(onResolve).not.toHaveBeenCalled() // text stayed empty
   })
+
+  it("keeps the focused choice visible in a bounded window", () => {
+    const request = choice({
+      options: Array.from({ length: 8 }, (_, index) => ({
+        value: String(index),
+        label: `Option ${index}`,
+      })),
+    })
+    const { container } = render(
+      <AskUserDialog request={request} maxRows={8} onResolve={() => {}} />
+    )
+
+    for (let index = 0; index < 6; index += 1) __fireInput("", { downArrow: true })
+
+    expect(container.textContent).toContain("Option 6")
+    expect(container.textContent).not.toContain("Option 0")
+    expect(container.textContent).toContain("more")
+  })
 })

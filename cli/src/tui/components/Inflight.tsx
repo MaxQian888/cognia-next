@@ -22,6 +22,7 @@ export function Inflight({
   inflight,
   verbose = false,
   epoch,
+  columns = 80,
 }: {
   inflight: InflightState
   /** Detail mode (Ctrl+O): when on, the live reasoning text is shown in full. */
@@ -29,6 +30,7 @@ export function Inflight({
   /** Turn identity — restarts the paced reveal so a SHORT turn after a long one
    * animates from zero instead of inheriting the previous character count. */
   epoch?: number
+  columns?: number
 }) {
   const theme = useTheme()
   // Paced "typing" reveal of the live answer — only on an interactive TTY, and
@@ -70,11 +72,11 @@ export function Inflight({
       {hasTools && (
         <Box flexDirection="column" marginBottom={1}>
           {inflight.tools.map((tool) => (
-            <CellView key={tool.id} cell={tool} />
+            <CellView key={tool.id} cell={tool} columns={columns} />
           ))}
         </Box>
       )}
-      {hasText && <Markdown raw={revealedText} streaming />}
+      {hasText && <Markdown raw={revealedText} streaming columns={columns} />}
     </Box>
   )
 }

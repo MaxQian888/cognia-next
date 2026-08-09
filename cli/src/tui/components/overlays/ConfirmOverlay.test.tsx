@@ -21,7 +21,7 @@ describe("ConfirmOverlay", () => {
         format="text"
         onConfirm={() => {}}
         onCancel={() => {}}
-        viewportRows={10}
+        viewportRows={16}
       />
     )
     const text = container.textContent ?? ""
@@ -43,7 +43,7 @@ describe("ConfirmOverlay", () => {
         format="text"
         onConfirm={onConfirm}
         onCancel={onCancel}
-        viewportRows={10}
+        viewportRows={16}
       />
     )
     fire("", { return: true })
@@ -60,7 +60,7 @@ describe("ConfirmOverlay", () => {
         format="text"
         onConfirm={() => {}}
         onCancel={onCancel}
-        viewportRows={10}
+        viewportRows={16}
       />
     )
     fire("", { escape: true })
@@ -77,7 +77,7 @@ describe("ConfirmOverlay", () => {
         format="text"
         onConfirm={onConfirm}
         onCancel={() => {}}
-        viewportRows={10}
+        viewportRows={16}
       />
     )
     fire("", { downArrow: true })

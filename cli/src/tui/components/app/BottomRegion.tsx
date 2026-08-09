@@ -34,6 +34,7 @@ export interface BottomRegionProps {
   overlayOpen: boolean
   columns: number
   popupRows: number
+  composerRows: number
   layout: TerminalLayoutBudget
   /** `themePalette.warning` — colour of the backtrack/edit status notices. */
   warningColor: string
@@ -71,6 +72,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
     overlayOpen,
     columns,
     popupRows,
+    composerRows,
     layout,
     warningColor,
     streamStartedAt,
@@ -100,7 +102,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
   useToastExpiry(state.toasts, dispatch)
 
   return (
-    <>
+    <Box flexDirection="column" flexShrink={0}>
       {/* Modal overlays own the available terminal rows. Keep transient status
           queued (and expiring) while one is open, but never let it push a
           Doctor/MCP/document panel upward or occupy its lower-left corner. */}
@@ -187,6 +189,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
             mentionProviders={mentionProviders}
             width={columns}
             popupRows={popupRows}
+            composerRows={composerRows}
             keybindings={keybindings}
             mode={state.config.permissionMode}
             vimEnabled={state.config.vim === true}
@@ -212,6 +215,6 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
           showHint={layout.showFooterHint}
         />
       ) : null}
-    </>
+    </Box>
   )
 }

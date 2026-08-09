@@ -5,7 +5,7 @@
  * resulting lines to `<Text>`.
  */
 import React from "react"
-import { Box, Text, useStdout } from "ink"
+import { Box, Text } from "ink"
 
 import { paletteCodeTheme } from "../markdown/highlight"
 import {
@@ -406,7 +406,15 @@ export function MarkdownLine({
   }
 }
 
-export function Markdown({ raw, streaming = false }: { raw: string; streaming?: boolean }) {
+export function Markdown({
+  raw,
+  streaming = false,
+  columns = 80,
+}: {
+  raw: string
+  streaming?: boolean
+  columns?: number
+}) {
   const safeRaw = React.useMemo(() => sanitizeTerminalText(raw), [raw])
   // The in-flight streaming body grows every paced-reveal tick; route it through
   // a dedicated single-entry cache so its throwaway prefixes never evict the
@@ -415,13 +423,8 @@ export function Markdown({ raw, streaming = false }: { raw: string; streaming?: 
     () => (streaming ? tokenizeTransient(safeRaw) : tokenizeCached(safeRaw)),
     [safeRaw, streaming]
   )
-  // Fit the fenced-code frame to the live terminal width (minus the 2-col
-  // gutter) so its rules don't wrap on a narrow terminal. `useStdout` does not
-  // subscribe to resize, so this is a snapshot read with no extra re-renders;
-  // non-TTY (tests) has no `columns`, so the default 80-col cap applies.
-  const { stdout } = useStdout()
-  const columns = stdout?.columns
-  const maxWidth = typeof columns === "number" && columns > 0 ? columns - 2 : undefined
+  // Root-owned reactive columns keep fenced-code rules from wrapping on resize.
+  const maxWidth = columns > 0 ? columns - 2 : undefined
   // Detected once here (env is stable for the session) and shared via context.
   const hyperlinks = React.useMemo(() => supportsHyperlinks(), [])
   return (

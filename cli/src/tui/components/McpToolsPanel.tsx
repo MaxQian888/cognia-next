@@ -7,7 +7,8 @@
  * flips instantly; the parent callback only persists.
  */
 import React, { useRef, useState } from "react"
-import { Box, Text, useInput, type DOMElement } from "ink"
+import { Box, Text, type DOMElement } from "ink"
+import { useModalInput } from "../input/input-router"
 
 import { useTheme } from "../theme/context"
 import { isMouseSequence } from "../input/mouse"
@@ -80,7 +81,7 @@ export function McpToolsPanel({
       ),
   })
 
-  useInput(
+  useModalInput(
     (input, key) => {
       if (handleMouse(input)) return
       if (key.escape) {

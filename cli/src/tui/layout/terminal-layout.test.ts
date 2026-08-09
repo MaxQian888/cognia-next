@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import { terminalLayout } from "./terminal-layout"
+import { contentRows, terminalLayout } from "./terminal-layout"
 
 describe("terminalLayout", () => {
   it("uses the documented width breakpoints", () => {
@@ -16,7 +16,6 @@ describe("terminalLayout", () => {
       tier: "tiny",
       showBanner: false,
       showMascot: false,
-      overlayFullscreen: true,
     })
   })
 
@@ -25,5 +24,23 @@ describe("terminalLayout", () => {
     expect(terminalLayout(80, 24)).toMatchObject({ bannerDensity: "medium", composerRows: 3 })
     expect(terminalLayout(50, 12)).toMatchObject({ bannerDensity: "compact", composerRows: 2 })
     expect(terminalLayout(20, 8).composerRows).toBeGreaterThanOrEqual(2)
+  })
+
+  it.each([
+    [8, 6, 2],
+    [12, 6, 6],
+    [24, 6, 18],
+    [50, 9, 41],
+  ])(
+    "fits content inside a %i-row viewport with %i rows of chrome",
+    (viewport, chrome, expected) => {
+      expect(contentRows(viewport, chrome)).toBe(expected)
+      expect(contentRows(viewport, chrome) + chrome).toBeLessThanOrEqual(viewport)
+    }
+  )
+
+  it("never invents rows when the viewport is smaller than its chrome", () => {
+    expect(contentRows(3, 6)).toBe(0)
+    expect(contentRows(0, 6)).toBe(0)
   })
 })

@@ -12,7 +12,8 @@
  * Rows are clickable (fullscreen `scroll` mode): a click runs the primary action.
  */
 import React, { useRef, useState } from "react"
-import { Box, Text, useInput } from "ink"
+import { Box, Text } from "ink"
+import { useModalInput } from "../input/input-router"
 import type { DOMElement } from "ink"
 
 import { useTheme } from "../theme/context"
@@ -99,7 +100,7 @@ export function MarketplaceBrowser({
       ),
   })
 
-  useInput(
+  useModalInput(
     (input, key) => {
       if (handleMouse(input)) return
       if (key.escape) {

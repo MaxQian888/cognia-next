@@ -69,11 +69,11 @@ function UserView({ cell }: { cell: UserCell }) {
   )
 }
 
-function AssistantView({ cell }: { cell: AssistantCell }) {
-  return <Markdown raw={cell.raw} />
+function AssistantView({ cell, columns }: { cell: AssistantCell; columns: number }) {
+  return <Markdown raw={cell.raw} columns={columns} />
 }
 
-function ThinkingView({ cell }: { cell: ThinkingCell }) {
+function ThinkingView({ cell, columns }: { cell: ThinkingCell; columns: number }) {
   // `∴` (therefore) marks reasoning the way Claude Code / OpenCode do; the body
   // is rendered as markdown (reusing {@link Markdown}) so a model's structured
   // reasoning — lists, code, emphasis — reads properly when expanded.
@@ -85,7 +85,7 @@ function ThinkingView({ cell }: { cell: ThinkingCell }) {
       </Text>
       {!cell.collapsed && (
         <Box flexDirection="column" paddingLeft={2}>
-          <Markdown raw={cell.text} />
+          <Markdown raw={cell.text} columns={columns} />
         </Box>
       )}
     </Box>
@@ -487,7 +487,7 @@ function NoticeView({ cell }: { cell: NoticeCell }) {
   )
 }
 
-function CommentaryView({ cell }: { cell: CommentaryCell }) {
+function CommentaryView({ cell, columns }: { cell: CommentaryCell; columns: number }) {
   const theme = useTheme()
   return (
     <Box flexDirection="column">
@@ -495,7 +495,7 @@ function CommentaryView({ cell }: { cell: CommentaryCell }) {
         {cell.done ? "◆" : "◇"} commentary
       </Text>
       <Box paddingLeft={2}>
-        <Markdown raw={cell.text} streaming={!cell.done} />
+        <Markdown raw={cell.text} streaming={!cell.done} columns={columns} />
       </Box>
     </Box>
   )
@@ -623,15 +623,15 @@ function BashView({ cell }: { cell: BashCell }) {
   )
 }
 
-export function CellView({ cell }: { cell: Cell }) {
+export function CellView({ cell, columns = 80 }: { cell: Cell; columns?: number }) {
   cell = sanitizeCell(cell)
   switch (cell.kind) {
     case "user":
       return <UserView cell={cell} />
     case "assistant":
-      return <AssistantView cell={cell} />
+      return <AssistantView cell={cell} columns={columns} />
     case "thinking":
-      return <ThinkingView cell={cell} />
+      return <ThinkingView cell={cell} columns={columns} />
     case "tool":
       return isSubagentTool(cell.toolName) ? <SubagentView cell={cell} /> : <ToolView cell={cell} />
     case "todo":
@@ -643,7 +643,7 @@ export function CellView({ cell }: { cell: Cell }) {
     case "notice":
       return <NoticeView cell={cell} />
     case "commentary":
-      return <CommentaryView cell={cell} />
+      return <CommentaryView cell={cell} columns={columns} />
     case "content-part":
       return <ContentPartView cell={cell} />
     case "canonical-event":

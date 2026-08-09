@@ -8,7 +8,8 @@
  * Keys: ↑/↓ line · PgUp/PgDn or Space/b page · g/G top/bottom · Esc/q/Enter close.
  */
 import React from "react"
-import { Box, Text, useInput, useStdout } from "ink"
+import { Box, Text } from "ink"
+import { useModalInput } from "../../input/input-router"
 
 import { MarkdownLine } from "../Markdown"
 import { parseMouseEvent } from "../../input/mouse"
@@ -21,6 +22,7 @@ import {
   prepareDocumentLines,
 } from "../document-view"
 import type { DocumentFormat } from "../../state/types"
+import { contentRows } from "../../layout/terminal-layout"
 
 export interface DocumentViewerProps {
   title: string
@@ -50,7 +52,6 @@ export function DocumentViewer({
   viewportRows,
 }: DocumentViewerProps) {
   const theme = useTheme()
-  const { stdout } = useStdout()
   const [scroll, setScroll] = React.useState(0)
   const [searchDraft, setSearchDraft] = React.useState<string | null>(null)
   const [search, setSearch] = React.useState({ query: "", matches: [] as number[], index: 0 })
@@ -60,8 +61,7 @@ export function DocumentViewer({
     [body, format, lang]
   )
   const total = lineCount(prepared)
-  const viewport =
-    viewportRows ?? Math.max(4, ((stdout?.rows as number | undefined) ?? 24) - CHROME_ROWS)
+  const viewport = Math.max(1, contentRows(viewportRows ?? 24, CHROME_ROWS))
 
   const move = React.useCallback(
     (delta: number) => setScroll((s) => clampScroll(s + delta, total, viewport)),
@@ -112,7 +112,7 @@ export function DocumentViewer({
     [search, total, viewport]
   )
 
-  useInput((input, key) => {
+  useModalInput((input, key) => {
     if (searchDraft !== null) {
       if (key.escape) return setSearchDraft(null)
       if (key.return) return commitSearch(searchDraft)

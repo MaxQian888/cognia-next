@@ -33,7 +33,7 @@ function fetchScript(terminal: unknown) {
   let polls = 0
   const doFetch = jest.fn(async (url: string | URL | Request, init?: RequestInit) => {
     calls.push({ url: String(url), init })
-    if (String(url).endsWith("/api/v1/lark/admin")) {
+    if (String(url).endsWith("/operator/lark/admin")) {
       return jsonResponse(202, { status: "pending", requestId: "req-1" })
     }
     polls += 1
@@ -93,7 +93,7 @@ describe("larkCommand", () => {
 
     expect(code).toBe(0)
     const submit = calls[0]
-    expect(submit.url).toBe("http://127.0.0.1:9000/api/v1/lark/admin")
+    expect(submit.url).toBe("http://127.0.0.1:9000/operator/lark/admin")
     expect((submit.init?.headers as Record<string, string>).authorization).toBe("Bearer svc-token")
     expect(JSON.parse(String(submit.init?.body))).toEqual({ op: "list", adapterId: "lark-1" })
 
@@ -218,7 +218,7 @@ describe("larkCommand", () => {
     const { out, stderr } = sink()
     let clock = 0
     const doFetch = jest.fn(async (url: string | URL | Request) =>
-      String(url).endsWith("/api/v1/lark/admin")
+      String(url).endsWith("/operator/lark/admin")
         ? jsonResponse(202, { status: "pending", requestId: "req-1" })
         : jsonResponse(200, { status: "pending" })
     )
@@ -238,7 +238,7 @@ describe("larkCommand", () => {
   it("reports an expired intent distinctly from a timeout", async () => {
     const { out, stderr } = sink()
     const doFetch = jest.fn(async (url: string | URL | Request) =>
-      String(url).endsWith("/api/v1/lark/admin")
+      String(url).endsWith("/operator/lark/admin")
         ? jsonResponse(202, { status: "pending", requestId: "req-1" })
         : jsonResponse(404, { error: "intent_unknown" })
     )

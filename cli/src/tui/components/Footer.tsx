@@ -12,7 +12,7 @@
  * composer, so this line stays a steady identity readout.
  */
 import React from "react"
-import { Box, Text, useStdout, type DOMElement } from "ink"
+import { Box, Text, type DOMElement } from "ink"
 
 import {
   buildStatusBar,
@@ -96,8 +96,7 @@ function FooterImpl({
   showHint?: boolean
 }) {
   const theme = useTheme()
-  const { stdout } = useStdout()
-  const cols = columns ?? stdout?.columns ?? 80
+  const cols = columns ?? 80
   const busy = turnStatus !== "idle"
   const segmentsConfig = React.useMemo(() => resolveSegments(config), [config])
   const wantsGit = segmentsConfig.includes("git")

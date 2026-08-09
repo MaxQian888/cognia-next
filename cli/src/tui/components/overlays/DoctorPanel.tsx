@@ -5,7 +5,8 @@
  * detail.
  */
 import React, { useState } from "react"
-import { Box, Text, useInput } from "ink"
+import { Box, Text } from "ink"
+import { useModalInput } from "../../input/input-router"
 
 import { useTheme } from "../../theme/context"
 import { windowList } from "../list-window"
@@ -54,7 +55,7 @@ export function DoctorPanel({
   const [index, setIndex] = useState(0)
   const reports = report.latestCrash ? [report.latestCrash] : []
 
-  useInput((input, key) => {
+  useModalInput((input, key) => {
     if (key.escape || input === "q") {
       onClose()
       return
