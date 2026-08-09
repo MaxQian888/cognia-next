@@ -18,6 +18,7 @@ const ROUTE_CONTRACT_PATH = "protocol/companion-api-routes.json"
 const COMMAND_MANIFEST_PATH = "protocol/companion-commands.json"
 const REQUEST_SCHEMA_CATALOG_PATH = "protocol/companion-request-schemas.json"
 const RESPONSE_SCHEMA_CATALOG_PATH = "protocol/companion-response-schemas.json"
+const HEADLESS_DISPOSITIONS_PATH = "protocol/headless-command-dispositions.json"
 const ZOD_REQUEST_SCHEMA_PATH = "scripts/build/companion-request-schema-contracts.mjs"
 const RPC_SOURCE_PATH = "src-tauri/src/companion_api/rpc.rs"
 const RUNTIME_ROUTE_SOURCES = [
@@ -47,6 +48,54 @@ const responseSchemaCatalogSchema = z.object({
   $defs: z.record(z.string(), z.record(z.string(), z.unknown())),
   commands: z.record(z.string(), z.record(z.string(), z.unknown())),
 })
+
+const headlessDispositionsSchema = z.object({
+  schemaVersion: z.literal(1),
+  groups: z.array(
+    z.object({
+      disposition: z.enum([
+        "local-only",
+        "covered-by-headless",
+        "runtime-internal",
+        "separate-design-required",
+        "in-progress",
+      ]),
+      reason: z.string().min(1),
+      commands: z.array(z.string().min(1)),
+    })
+  ),
+})
+
+function flattenHeadlessDispositions(catalog, manifest) {
+  const dispositions = new Map()
+  const errors = []
+  for (const group of catalog.groups) {
+    for (const name of group.commands) {
+      if (dispositions.has(name)) {
+        errors.push(`duplicate Headless disposition: ${name}`)
+        continue
+      }
+      dispositions.set(name, {
+        disposition: group.disposition,
+        reason: group.reason,
+      })
+    }
+  }
+  const byName = new Map(manifest.commands.map((command) => [command.name, command]))
+  for (const command of manifest.commands) {
+    if (command.target === "client" && !dispositions.has(command.name)) {
+      errors.push(`client command has no Headless disposition: ${command.name}`)
+    }
+  }
+  for (const name of dispositions.keys()) {
+    const command = byName.get(name)
+    if (!command) errors.push(`Headless disposition has no command descriptor: ${name}`)
+    else if (command.target !== "client") {
+      errors.push(`remote command must not have a Headless exclusion disposition: ${name}`)
+    }
+  }
+  return { dispositions, errors }
+}
 
 function isPublicHttpCommand(command) {
   return (
@@ -2224,6 +2273,7 @@ function buildHeadlessSpec(
         ROUTE_CONTRACT_PATH,
         REQUEST_SCHEMA_CATALOG_PATH,
         RESPONSE_SCHEMA_CATALOG_PATH,
+        HEADLESS_DISPOSITIONS_PATH,
         RPC_SOURCE_PATH,
         ZOD_REQUEST_SCHEMA_PATH,
       ],
@@ -2286,6 +2336,13 @@ export function inspectCommittedContract() {
   )
   const responseSchemaCatalog = responseSchemaCatalogSchema.parse(
     JSON.parse(readRepo(RESPONSE_SCHEMA_CATALOG_PATH))
+  )
+  const headlessDispositionsCatalog = headlessDispositionsSchema.parse(
+    JSON.parse(readRepo(HEADLESS_DISPOSITIONS_PATH))
+  )
+  const headlessDispositionResult = flattenHeadlessDispositions(
+    headlessDispositionsCatalog,
+    manifest,
   )
   const publicSource = readRepo(PUBLIC_SPEC_PATH)
   let headlessSource = ""
@@ -2352,6 +2409,7 @@ export function inspectCommittedContract() {
   })
   errors.push(...runtime.errors)
   errors.push(...commandCoverageErrors)
+  errors.push(...headlessDispositionResult.errors)
   const versionedReference = JSON.stringify(desiredPublicSpec).match(/\/(?:api|ws)\/v\d+\//)
   if (versionedReference) {
     errors.push(`versioned public path reference is forbidden: ${versionedReference[0]}`)
@@ -2401,6 +2459,7 @@ export function inspectCommittedContract() {
     desiredHeadlessSource,
     desiredHostCommandCatalog,
     desiredHostCommandCatalogSource,
+    headlessDispositions: headlessDispositionResult.dispositions,
     publicDrift: publicSource !== desiredPublicSource,
     headlessDrift: headlessSource !== desiredHeadlessSource,
     hostCommandCatalogDrift: hostCommandCatalogSource !== desiredHostCommandCatalogSource,

@@ -380,6 +380,30 @@ test("command coverage rejects missing dispatch, descriptors, and non-durable mu
   assert(errors.includes("dispatch arm has no command descriptor: unknown_dispatch"))
 })
 
+test("classifies every client-only command outside the Headless surface", () => {
+  const { manifest, headlessDispositions } = inspectCommittedContract()
+  const clientNames = manifest.commands
+    .filter((command) => command.target === "client")
+    .map((command) => command.name)
+    .sort()
+
+  assert.deepEqual([...headlessDispositions.keys()].sort(), clientNames)
+  assert.equal(
+    [...headlessDispositions.values()].every((entry) =>
+      [
+        "local-only",
+        "covered-by-headless",
+        "runtime-internal",
+        "separate-design-required",
+        "in-progress",
+      ].includes(entry.disposition),
+    ),
+    true,
+  )
+  assert.equal(headlessDispositions.get("mcp_oauth_authenticate").disposition, "separate-design-required")
+  assert.equal(headlessDispositions.get("scheduler_create_task").disposition, "covered-by-headless")
+})
+
 test("rejects versioned committed RPC paths instead of silently migrating them", () => {
   const publicPaths = {
     "/api/v1/_rpc/{name}": { post: { operationId: "rpcDispatch" } },
