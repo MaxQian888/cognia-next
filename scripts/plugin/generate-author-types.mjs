@@ -23,32 +23,27 @@
  *   Verify:   pnpm author-types:bundle -- --check   (exits 1 on drift)
  */
 
-import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync } from "node:fs"
+import { existsSync, readFileSync, rmSync, mkdirSync } from "node:fs"
 import { dirname, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
+import { Command, CommanderError } from "commander"
+import { execaSync } from "execa"
+import { globSync } from "glob"
+import writeFileAtomic from "write-file-atomic"
+import { z } from "zod"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const packagesRoot = join(repoRoot, "packages")
 const outputPath = join(repoRoot, "crates/cognia-cli/assets/author-types.json")
-const checkOnly = process.argv.includes("--check")
 
 function run(args, cwd, env = {}) {
-  execFileSync("pnpm", args, { cwd, stdio: "inherit", env: { ...process.env, ...env } })
+  execaSync("pnpm", args, { cwd, stdio: "inherit", env: { ...process.env, ...env } })
 }
 
 /** Every `.d.ts` under `dir`, recursively. `.d.cts` is skipped — the scaffold is ESM. */
-function collectDeclarations(dir) {
-  const found = []
-  const walk = (current) => {
-    for (const entry of readdirSync(current, { withFileTypes: true })) {
-      const full = join(current, entry.name)
-      if (entry.isDirectory()) walk(full)
-      else if (entry.name.endsWith(".d.ts")) found.push(full)
-    }
-  }
-  if (existsSync(dir)) walk(dir)
-  return found.sort()
+export function collectDeclarations(dir) {
+  if (!existsSync(dir)) return []
+  return globSync("**/*.d.ts", { absolute: true, cwd: dir, nodir: true }).sort()
 }
 
 /** POSIX-style relative path, so the generated map is identical on Windows. */
@@ -129,7 +124,7 @@ function assemble() {
  * Both are order-only: adding, removing or changing a declaration still moves
  * the key, which is the drift this gate is actually for.
  */
-function driftKey(content) {
+export function driftKey(content) {
   return (
     content
       .split("\n")
@@ -150,42 +145,83 @@ function driftKey(content) {
   )
 }
 
-if (checkOnly) {
-  if (!existsSync(outputPath)) {
-    console.error(
-      `author-types bundle missing at ${posixRelative(repoRoot, outputPath)} — run: pnpm author-types:bundle`
-    )
-    process.exit(1)
-  }
-  build()
-  const committed = JSON.parse(readFileSync(outputPath, "utf8")).files ?? {}
-  const fresh = assemble().files
+const cliSchema = z.object({ check: z.boolean().default(false) })
 
-  const stale = []
-  for (const name of new Set([...Object.keys(committed), ...Object.keys(fresh)])) {
-    if (!(name in committed)) stale.push(`added:   ${name}`)
-    else if (!(name in fresh)) stale.push(`removed: ${name}`)
-    else if (driftKey(committed[name]) !== driftKey(fresh[name])) stale.push(`changed: ${name}`)
-  }
-
-  if (stale.length > 0) {
-    console.error("author-types bundle is stale — run: pnpm author-types:bundle")
-    for (const entry of stale) console.error(`  ${entry}`)
-    process.exit(1)
-  }
-  console.log(`author-types bundle is up to date (${Object.keys(fresh).length} declarations)`)
-} else {
-  build()
-  const payload = assemble()
-  mkdirSync(dirname(outputPath), { recursive: true })
-  writeFileSync(outputPath, `${JSON.stringify(payload, null, 2)}\n`)
-  const count = Object.keys(payload.files).length
-  const bytes = Object.values(payload.files).reduce((sum, content) => sum + content.length, 0)
-  console.log(`author-types bundle: ${count} declarations, ${(bytes / 1024).toFixed(0)} KB`)
+function createProgram() {
+  return new Command()
+    .name("pnpm author-types:bundle")
+    .description("Bundle or verify author-facing plugin TypeScript declarations.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--check", "Verify the checked-in declaration bundle without rewriting it.")
 }
 
-// The per-package scratch dirs are build output, not artifacts anyone should
-// commit; the tsup configs write them under a dot-prefixed name for that reason.
-for (const pkg of ["plugin-sdk", "plugin-ui"]) {
-  rmSync(join(packagesRoot, pkg, ".tsup-author-types"), { recursive: true, force: true })
+export function parseArgs(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  return cliSchema.parse(program.opts())
+}
+
+function cleanupScratchDirs() {
+  for (const pkg of ["plugin-sdk", "plugin-ui"]) {
+    rmSync(join(packagesRoot, pkg, ".tsup-author-types"), { recursive: true, force: true })
+  }
+}
+
+function main({ check = false } = {}) {
+  try {
+    if (check && !existsSync(outputPath)) {
+      console.error(
+        `author-types bundle missing at ${posixRelative(repoRoot, outputPath)} — run: pnpm author-types:bundle`
+      )
+      return 1
+    }
+
+    build()
+    if (check) {
+      const committed = JSON.parse(readFileSync(outputPath, "utf8")).files ?? {}
+      const fresh = assemble().files
+      const stale = []
+      for (const name of new Set([...Object.keys(committed), ...Object.keys(fresh)])) {
+        if (!(name in committed)) stale.push(`added:   ${name}`)
+        else if (!(name in fresh)) stale.push(`removed: ${name}`)
+        else if (driftKey(committed[name]) !== driftKey(fresh[name])) stale.push(`changed: ${name}`)
+      }
+
+      if (stale.length > 0) {
+        console.error("author-types bundle is stale — run: pnpm author-types:bundle")
+        for (const entry of stale) console.error(`  ${entry}`)
+        return 1
+      }
+      console.log(`author-types bundle is up to date (${Object.keys(fresh).length} declarations)`)
+      return 0
+    }
+
+    const payload = assemble()
+    mkdirSync(dirname(outputPath), { recursive: true })
+    writeFileAtomic.sync(outputPath, `${JSON.stringify(payload, null, 2)}\n`)
+    const count = Object.keys(payload.files).length
+    const bytes = Object.values(payload.files).reduce((sum, content) => sum + content.length, 0)
+    console.log(`author-types bundle: ${count} declarations, ${(bytes / 1024).toFixed(0)} KB`)
+    return 0
+  } finally {
+    // The per-package scratch dirs are build output, not committed artifacts.
+    cleanupScratchDirs()
+  }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    const options = parseArgs(process.argv.slice(2))
+    if (options) process.exitCode = main(options)
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exitCode = 1
+  }
 }

@@ -25,8 +25,11 @@
  *   node scripts/build/gen-settings-sync.mjs --check  # fail if they drifted
  */
 
-import { readFileSync, writeFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
+import { Command, CommanderError } from "commander"
 import { transform } from "esbuild"
+import writeFileAtomic from "write-file-atomic"
+import { z } from "zod"
 
 const TABLE_SOURCE = "packages/agent-config-types/src/settings-sync.ts"
 const RUST_TARGET = "src-tauri/src/companion_api/settings_sync_generated.rs"
@@ -209,7 +212,7 @@ export function renderOpenApi(spec, shared) {
  */
 export async function genSettingsSync(deps = {}) {
   const read = deps.read ?? ((p) => readFileSync(p, "utf8"))
-  const write = deps.write ?? ((p, c) => writeFileSync(p, c))
+  const write = deps.write ?? ((p, c) => writeFileAtomic.sync(p, c))
   const check = deps.check ?? false
 
   const buckets = bucketize(await loadTable(read(TABLE_SOURCE)))
@@ -242,8 +245,33 @@ export async function genSettingsSync(deps = {}) {
 }
 
 const isEntry = process.argv[1]?.endsWith("gen-settings-sync.mjs")
+
+const cliSchema = z.object({ check: z.boolean().default(false) })
+
+function createProgram() {
+  return new Command()
+    .name("pnpm settings-sync:gen")
+    .description("Generate or verify settings synchronization contracts.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--check", "Verify generated contracts without writing them.")
+}
+
+export function parseArgs(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  return cliSchema.parse(program.opts())
+}
+
 if (isEntry) {
-  const errors = await genSettingsSync({ check: process.argv.includes("--check") })
+  const options = parseArgs(process.argv.slice(2))
+  const errors = options ? await genSettingsSync(options) : []
   if (errors.length > 0) {
     console.error("[gen-settings-sync] generated artifacts drifted from the source table:")
     for (const error of errors) console.error(`  ${error}`)

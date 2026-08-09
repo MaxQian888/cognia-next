@@ -30,10 +30,13 @@
  *   node scripts/test/coverage-ratchet.mjs --coverage … --write
  */
 
-import { readFileSync, writeFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import path from "node:path"
 
+import { Command, CommanderError } from "commander"
 import libCoverage from "istanbul-lib-coverage"
+import writeFileAtomic from "write-file-atomic"
+import { z } from "zod"
 
 import { classifyFiles } from "./merge-coverage.mjs"
 
@@ -52,22 +55,37 @@ export const DEFAULT_SLACK = 5
 export const TARGET = 90
 
 /** Pure. */
+const cliSchema = z.object({
+  coverage: z
+    .string()
+    .trim()
+    .min(1, "--coverage requires a path")
+    .default("coverage/coverage-final.json"),
+  slack: z.coerce.number({ error: "--slack requires a number" }).finite().default(DEFAULT_SLACK),
+  write: z.boolean().default(false),
+})
+
+function createProgram() {
+  return new Command()
+    .name("pnpm coverage:ratchet")
+    .description("Recommend or write safe increases to layered coverage thresholds.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--coverage <path>", "Merged Istanbul coverage map.", "coverage/coverage-final.json")
+    .option("--slack <points>", "Required percentage-point headroom.", String(DEFAULT_SLACK))
+    .option("--write", "Write recommended threshold increases.")
+}
+
 export function parseArgs(argv) {
-  const args = { coverage: "coverage/coverage-final.json", write: false, slack: DEFAULT_SLACK }
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i]
-    if (arg === "--coverage") {
-      const value = argv[++i]
-      if (!value) throw new Error("--coverage requires a path")
-      args.coverage = value
-    } else if (arg === "--slack") {
-      const value = Number(argv[++i])
-      if (!Number.isFinite(value)) throw new Error("--slack requires a number")
-      args.slack = value
-    } else if (arg === "--write") args.write = true
-    else throw new Error(`Unknown argument: ${arg}`)
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
   }
-  return args
+  return cliSchema.parse(program.opts())
 }
 
 /**
@@ -152,6 +170,7 @@ export function measureGroups(rawMap, thresholds, { cwd = process.cwd() } = {}) 
 
 export function main(argv = []) {
   const args = parseArgs(argv)
+  if (!args) return 0
   const thresholds = JSON.parse(readFileSync(THRESHOLDS_FILE, "utf8"))
 
   let rawMap
@@ -179,7 +198,7 @@ export function main(argv = []) {
 
   if (args.write) {
     const next = applyRecommendations(thresholds, recommendations)
-    writeFileSync(THRESHOLDS_FILE, `${JSON.stringify(next, null, 2)}\n`)
+    writeFileAtomic.sync(THRESHOLDS_FILE, `${JSON.stringify(next, null, 2)}\n`)
     console.log("[coverage-ratchet] scripts/test/coverage-thresholds.json updated.")
   } else {
     console.log("\n  Run `pnpm coverage:ratchet -- --write` to lock these in.")

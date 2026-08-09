@@ -28,6 +28,9 @@
 
 import fs from "node:fs"
 import path from "node:path"
+import { Command, CommanderError } from "commander"
+import writeFileAtomic from "write-file-atomic"
+import { z } from "zod"
 import { fileURLToPath } from "node:url"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -226,9 +229,7 @@ export async function downloadShareWallpapers(opts = {}) {
 
     const moduleSource = renderModule(entries, manifest)
     fs.mkdirSync(path.dirname(dest), { recursive: true })
-    const tmp = `${dest}.tmp-${process.pid}`
-    fs.writeFileSync(tmp, moduleSource)
-    fs.renameSync(tmp, dest)
+    writeFileAtomic.sync(dest, moduleSource)
     log(`[wallpapers] done: ${dest} (${entries.length}/${Object.keys(manifest).length} themes)`)
     return { status: "generated", themes: entries.map(([t]) => t) }
   } catch (err) {
@@ -238,13 +239,38 @@ export async function downloadShareWallpapers(opts = {}) {
   }
 }
 
+const cliSchema = z.object({ force: z.boolean().default(false) })
+
+function createProgram() {
+  return new Command()
+    .name("pnpm share:wallpapers")
+    .description("Download and atomically bundle the share-view wallpaper set.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--force", "Download again even when the generated module is complete.")
+}
+
+export function parseArgs(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  return cliSchema.parse(program.opts())
+}
+
 // Run when invoked directly (not when imported by the test). The argv[1] clause
 // is what makes it fire under Windows where the `file://` comparison fails.
 if (
   import.meta.url === `file://${process.argv[1]}` ||
   process.argv[1]?.endsWith("download-share-wallpapers.mjs")
 ) {
-  downloadShareWallpapers({ force: process.argv.includes("--force") })
+  const options = parseArgs(process.argv.slice(2))
+  const run = options ? downloadShareWallpapers(options) : Promise.resolve()
+  run
     .catch((err) => {
       console.log(
         `[wallpapers] skip: generation failed (${err instanceof Error ? err.message : String(err)})`

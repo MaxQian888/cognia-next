@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
-import { access, chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { test } from "node:test"
@@ -167,6 +167,39 @@ process.stdout.write(JSON.stringify({
   assert.equal(capture.env.COGNIA_VSCODE_EXT_HOST_SCRIPT, env.COGNIA_VSCODE_EXT_HOST_SCRIPT)
   assert.equal(capture.env.COGNIA_CODE_SERVER_AGENT_VSIX, env.COGNIA_CODE_SERVER_AGENT_VSIX)
   assert.match((await readFile(path.join(dataDir, "master.key"), "utf8")).trim(), /^[a-f0-9]{64}$/)
+})
+
+test("refuses to create a new key beside an existing encrypted secret store", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-orphaned-store-"))
+  const dataDir = path.join(root, "data")
+  const storePath = path.join(dataDir, "cognia", "secret-store.enc")
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await mkdir(path.dirname(storePath), { recursive: true })
+  await writeFile(storePath, "encrypted-fixture")
+
+  const artifact = async (name, executable = false) => {
+    const target = path.join(root, name)
+    await writeFile(target, executable ? "#!/bin/sh\nexit 0\n" : "fixture\n")
+    if (executable) await chmod(target, 0o755)
+    return target
+  }
+  const env = {
+    COGNIA_MASTER_KEY: "",
+    COGNIA_MASTER_KEY_FILE: "",
+    COGNIA_HEADLESS_SERVER_BIN: await artifact("cognia-server", true),
+    COGNIA_BRAIN_ENTRY: await artifact("brain.mjs"),
+    COGNIA_SIDECAR_SCRIPT: await artifact("sidecar.mjs"),
+    COGNIA_MCP_SIDECAR_PATH: await artifact("mcp.mjs"),
+    COGNIA_VSCODE_EXT_HOST_SCRIPT: await artifact("vscode-host.js"),
+    COGNIA_CODE_SERVER_AGENT_VSIX: await artifact("agent.vsix"),
+  }
+
+  const result = await run(["--skip-build", "--data-dir", dataDir], env)
+
+  assert.equal(result.code, 3)
+  assert.match(result.stderr, /refusing to create a new master key/i)
+  assert.match(result.stderr, /secret-store\.enc/)
+  await assert.rejects(access(path.join(dataDir, "master.key")), { code: "ENOENT" })
 })
 
 test("local debug launches loopback-only with an ephemeral Apifox environment", async (t) => {
@@ -356,6 +389,7 @@ fs.appendFileSync(process.env.COGNIA_BUILD_LOG, JSON.stringify(process.argv.slic
       .map((line) => JSON.parse(line))
     assert.deepEqual(commands, [
       ["cli:external-host:build"],
+      ["support:docs:build"],
       ["exec", "node", "scripts/build/build-cli.mjs"],
       ["exec", "node", "scripts/build/build-mcp-sidecar.mjs"],
       ["exec", "node", "scripts/build/build-vscode-ext-host-sidecar.mjs"],

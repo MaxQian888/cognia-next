@@ -1,7 +1,15 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { analyzeDbTestSource, auditResultPasses } from "./audit-db-fixtures.mjs"
+import { analyzeDbTestSource, auditResultPasses, parseArgs } from "./audit-db-fixtures.mjs"
+
+test("parseArgs validates audit modes", () => {
+  assert.deepEqual(parseArgs([]), { listCandidates: false, strict: false })
+  assert.deepEqual(parseArgs(["--strict"]), { listCandidates: false, strict: true })
+  assert.deepEqual(parseArgs(["--list-candidates"]), { listCandidates: true, strict: false })
+  assert.throws(() => parseArgs(["--list-candidates", "--strict"]), /cannot be combined/)
+  assert.throws(() => parseArgs(["--unknown"]), /unknown option/i)
+})
 
 test("recognizes the legacy per-test database recreation hook", () => {
   const result = analyzeDbTestSource(`

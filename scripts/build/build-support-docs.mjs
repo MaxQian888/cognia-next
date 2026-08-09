@@ -3,10 +3,14 @@
 // export, so runtime filesystem reads are unavailable; the generated JSON is
 // loaded only when a Support session needs documentation.
 
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { Command, CommanderError } from "commander"
+import { globSync } from "glob"
 import matter from "gray-matter"
+import writeFileAtomic from "write-file-atomic"
+import { z } from "zod"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(HERE, "..", "..")
@@ -19,17 +23,8 @@ const OUT_FILE = path.join(
 )
 const MAX_DOCUMENT_CHARS = 2_400
 
-function markdownFiles(root, relative = "") {
-  const directory = path.join(root, relative)
-  if (!existsSync(directory)) return []
-  const files = []
-  for (const name of readdirSync(directory).sort()) {
-    const nextRelative = path.posix.join(relative.split(path.sep).join(path.posix.sep), name)
-    const absolute = path.join(root, nextRelative)
-    if (statSync(absolute).isDirectory()) files.push(...markdownFiles(root, nextRelative))
-    else if (/\.mdx?$/i.test(name)) files.push(nextRelative)
-  }
-  return files
+function markdownFiles(root) {
+  return globSync("**/*.{md,mdx}", { cwd: root, nodir: true }).sort()
 }
 
 function cleanMarkdown(markdown) {
@@ -77,17 +72,44 @@ export function renderCorpusModule(corpus) {
   return `${JSON.stringify({ schemaVersion: 1, locales: corpus })}\n`
 }
 
-function main() {
+const cliSchema = z.object({ check: z.boolean().default(false) })
+
+function createProgram() {
+  return new Command()
+    .name("pnpm support:docs:build")
+    .description("Build or verify the bundled Support Agent documentation corpus.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--check", "Verify the generated corpus without writing it.")
+}
+
+export function parseArgs(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  return cliSchema.parse(program.opts())
+}
+
+function main(argv) {
+  const options = parseArgs(argv)
+  if (!options) return
   const rendered = renderCorpusModule(buildCorpus())
-  if (process.argv.includes("--check")) {
+  if (options.check) {
     if (!existsSync(OUT_FILE) || readFileSync(OUT_FILE, "utf8") !== rendered) {
       console.error("Support documentation corpus is stale; run pnpm support:docs:build")
       process.exitCode = 1
     }
     return
   }
-  writeFileSync(OUT_FILE, rendered)
+  writeFileAtomic.sync(OUT_FILE, rendered)
   console.log(`Generated ${path.relative(REPO_ROOT, OUT_FILE)}`)
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main()
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main(process.argv.slice(2))
+}

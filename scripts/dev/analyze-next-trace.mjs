@@ -3,6 +3,8 @@
 import fs from "node:fs"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
+import { Command, CommanderError } from "commander"
+import { z } from "zod"
 
 import { dirSizeBytes } from "../build/clean-stale-turbopack-cache.mjs"
 
@@ -92,20 +94,40 @@ function gibibytes(value) {
   return value === null ? "—" : (value / 1024 ** 3).toFixed(2)
 }
 
-function main() {
-  const json = process.argv.includes("--json")
-  const browserFlagIndex = process.argv.indexOf("--browser-snapshot")
-  const browserSnapshotPath =
-    browserFlagIndex >= 0 && process.argv[browserFlagIndex + 1]
-      ? path.resolve(process.argv[browserFlagIndex + 1])
-      : null
-  const positional = process.argv
-    .slice(2)
-    .filter(
-      (argument, index, all) =>
-        !argument.startsWith("--") && all[index - 1] !== "--browser-snapshot"
-    )
-  const tracePath = path.resolve(positional[0] ?? ".next/dev/trace")
+const cliSchema = z.object({
+  browserSnapshot: z.string().trim().min(1).optional(),
+  json: z.boolean().default(false),
+  trace: z.string().trim().min(1).default(".next/dev/trace"),
+})
+
+function createProgram() {
+  return new Command()
+    .name("pnpm dev:analyze")
+    .description("Analyze Next.js development trace, cache, and optional browser metrics.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .argument("[trace]", "Next.js development trace path.", ".next/dev/trace")
+    .option("--browser-snapshot <path>", "Browser metrics snapshot JSON.")
+    .option("--json", "Print the analysis as JSON.")
+}
+
+export function parseArgs(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  return cliSchema.parse({ ...program.opts(), trace: program.args[0] })
+}
+
+function main(argv) {
+  const options = parseArgs(argv)
+  if (!options) return
+  const tracePath = path.resolve(options.trace)
+  const browserSnapshotPath = options.browserSnapshot ? path.resolve(options.browserSnapshot) : null
 
   if (!fs.existsSync(tracePath)) {
     console.error(`Next dev trace not found: ${tracePath}`)
@@ -130,7 +152,7 @@ function main() {
     persistentCacheEnabled: process.env.COGNIA_TURBOPACK_CACHE === "1",
     browserSnapshot,
   })
-  if (json) {
+  if (options.json) {
     console.log(JSON.stringify(report, null, 2))
     return
   }
@@ -161,4 +183,11 @@ function main() {
   }
 }
 
-if (import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) main()
+if (import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  try {
+    main(process.argv.slice(2))
+  } catch (error) {
+    console.error(`[dev-analyze] ${error instanceof Error ? error.message : String(error)}`)
+    process.exitCode = 1
+  }
+}

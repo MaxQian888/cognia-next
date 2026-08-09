@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto"
-import { execFileSync, spawnSync } from "node:child_process"
 import {
   chmodSync,
   copyFileSync,
@@ -13,6 +12,9 @@ import {
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { Command, CommanderError } from "commander"
+import { execaSync } from "execa"
+import { z } from "zod"
 
 export const PLUGIN_NODE_VERSION = "26.3.1"
 
@@ -59,7 +61,7 @@ export function verifyArchive(bytes, expectedSha256) {
 }
 
 function runtimeVersion(binary) {
-  return execFileSync(binary, ["--version"], { encoding: "utf8" }).trim()
+  return execaSync(binary, ["--version"]).stdout.trim()
 }
 
 export async function preparePluginNode({ check = false } = {}) {
@@ -85,11 +87,12 @@ export async function preparePluginNode({ check = false } = {}) {
     verifyArchive(bytes, archive.sha256)
     const archivePath = join(work, archive.file)
     writeFileSync(archivePath, bytes)
-    const extracted = spawnSync("tar", ["-xf", archivePath, "-C", work], {
-      encoding: "utf8",
+    const extracted = execaSync("tar", ["-xf", archivePath, "-C", work], {
+      all: true,
+      reject: false,
     })
-    if (extracted.status !== 0) {
-      throw new Error(`Plugin Node extraction failed: ${extracted.stderr || extracted.stdout}`)
+    if (extracted.exitCode !== 0 || extracted.signal) {
+      throw new Error(`Plugin Node extraction failed: ${extracted.all}`)
     }
 
     const sourceRoot = join(work, basename(archive.file).replace(/\.(?:tar\.xz|zip)$/, ""))
@@ -113,6 +116,30 @@ export async function preparePluginNode({ check = false } = {}) {
   }
 }
 
+const cliSchema = z.object({ check: z.boolean().default(false) })
+
+function createProgram() {
+  return new Command()
+    .name("pnpm plugin-node:prepare")
+    .description("Prepare or verify Cognia's pinned plugin Node.js runtime.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--check", "Verify the pinned runtime without downloading it.")
+}
+
+export function parseArgs(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  return cliSchema.parse(program.opts())
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  await preparePluginNode({ check: process.argv.includes("--check") })
+  const options = parseArgs(process.argv.slice(2))
+  if (options) await preparePluginNode(options)
 }

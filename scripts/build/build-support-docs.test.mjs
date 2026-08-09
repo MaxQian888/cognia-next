@@ -4,7 +4,18 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
-import { buildCorpus, extractDocument, renderCorpusModule } from "./build-support-docs.mjs"
+import {
+  buildCorpus,
+  extractDocument,
+  parseArgs,
+  renderCorpusModule,
+} from "./build-support-docs.mjs"
+
+test("parseArgs supports check mode and rejects unknown options", () => {
+  assert.deepEqual(parseArgs([]), { check: false })
+  assert.deepEqual(parseArgs(["--check"]), { check: true })
+  assert.throws(() => parseArgs(["--unknown"]), /unknown option/i)
+})
 
 test("extractDocument strips executable MDX and code while retaining user-facing prose", () => {
   const document = extractDocument(

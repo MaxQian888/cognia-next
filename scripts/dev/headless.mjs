@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { constants as fsConstants, rmSync } from "node:fs"
-import { access, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { access, chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { randomBytes } from "node:crypto"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -146,6 +146,7 @@ function secretConfig(dataDir, env) {
 function buildSteps(pnpmBin) {
   return [
     { command: pnpmBin, args: ["cli:external-host:build"] },
+    { command: pnpmBin, args: ["support:docs:build"] },
     { command: pnpmBin, args: ["exec", "node", "scripts/build/build-cli.mjs"] },
     { command: pnpmBin, args: ["exec", "node", "scripts/build/build-mcp-sidecar.mjs"] },
     {
@@ -379,6 +380,33 @@ async function prepareSecret(secret, dataDir) {
   await mkdir(dataDir, { recursive: true, mode: 0o700 })
   if (secret.kind === "inline") return
   await mkdir(path.dirname(secret.path), { recursive: true, mode: 0o700 })
+  try {
+    await access(secret.path, fsConstants.R_OK)
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw new PreflightError(
+        `master key file is not readable at ${secret.path}: ${error.message}`
+      )
+    }
+    const storePath = path.join(dataDir, "cognia", "secret-store.enc")
+    try {
+      const store = await stat(storePath)
+      if (store.size > 0) {
+        throw new PreflightError(
+          `refusing to create a new master key at ${secret.path} because the existing encrypted ` +
+            `secret store at ${storePath} requires its original key; restore the original key or ` +
+            `choose a new --data-dir`
+        )
+      }
+    } catch (storeError) {
+      if (storeError instanceof PreflightError) throw storeError
+      if (storeError.code !== "ENOENT") {
+        throw new PreflightError(
+          `cannot inspect encrypted secret store at ${storePath}: ${storeError.message}`
+        )
+      }
+    }
+  }
   let created = false
   try {
     await writeFile(secret.path, `${randomBytes(32).toString("hex")}\n`, {

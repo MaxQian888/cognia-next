@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 
-import { spawnSync } from "node:child_process"
-import { readFileSync, writeFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { dirname, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import { Command, CommanderError } from "commander"
+import { execaSync } from "execa"
+import writeFileAtomic from "write-file-atomic"
+import { z } from "zod"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const catalogPath = resolve(repoRoot, "packages/plugin-sdk/contract/catalog.json")
@@ -116,12 +119,12 @@ export function validatePluginPointCatalog(pointCatalog, permissions) {
 }
 
 export function readPluginPointCatalog(permissions) {
-  const result = spawnSync(process.execPath, [tsxCliPath, pluginPointExporterPath], {
+  const result = execaSync(process.execPath, [tsxCliPath, pluginPointExporterPath], {
     cwd: repoRoot,
-    encoding: "utf8",
+    reject: false,
   })
-  if (result.status !== 0) {
-    throw new Error(`plugin point export failed: ${result.stderr.trim()}`)
+  if (result.exitCode !== 0 || result.signal) {
+    throw new Error(`plugin point export failed: ${result.stderr?.trim() ?? "unknown error"}`)
   }
   const pointCatalog = JSON.parse(result.stdout)
   const pointSchema = JSON.parse(readFileSync(pluginPointSchemaPath, "utf8"))
@@ -214,24 +217,26 @@ function rustRawString(value) {
 }
 
 function formatRust(source) {
-  const result = spawnSync("rustfmt", ["--emit", "stdout", "--edition", "2021"], {
+  const result = execaSync("rustfmt", ["--emit", "stdout", "--edition", "2021"], {
     input: source,
-    encoding: "utf8",
+    reject: false,
   })
-  if (result.status !== 0) {
-    throw new Error(`rustfmt failed while generating the Rust contract: ${result.stderr.trim()}`)
+  if (result.exitCode !== 0 || result.signal) {
+    throw new Error(
+      `rustfmt failed while generating the Rust contract: ${result.stderr?.trim() ?? "unknown error"}`
+    )
   }
   return result.stdout
 }
 
 function formatPrettier(source, parser) {
-  const result = spawnSync(process.execPath, [prettierCliPath, "--parser", parser], {
+  const result = execaSync(process.execPath, [prettierCliPath, "--parser", parser], {
     input: source,
-    encoding: "utf8",
+    reject: false,
   })
-  if (result.status !== 0) {
+  if (result.exitCode !== 0 || result.signal) {
     throw new Error(
-      `prettier failed while generating the Plugin API contract: ${result.stderr.trim()}`
+      `prettier failed while generating the Plugin API contract: ${result.stderr?.trim() ?? "unknown error"}`
     )
   }
   return result.stdout
@@ -428,7 +433,7 @@ function writeOrCheck(path, content, check) {
     }
     return
   }
-  writeFileSync(path, content)
+  writeFileAtomic.sync(path, content)
 }
 
 export function generate({ check = false } = {}) {
@@ -454,9 +459,33 @@ export function generate({ check = false } = {}) {
   writeOrCheck(apiDocsPath, renderApiReference(catalog), check)
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+const cliSchema = z.object({ check: z.boolean().default(false) })
+
+function createProgram() {
+  return new Command()
+    .name("pnpm plugin:contract:generate")
+    .description("Generate or verify the canonical Plugin API contract mirrors.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--check", "Verify generated mirrors without rewriting them.")
+}
+
+export function parseArgs(argv) {
+  const program = createProgram()
   try {
-    generate({ check: process.argv.includes("--check") })
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  return cliSchema.parse(program.opts())
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    const options = parseArgs(process.argv.slice(2))
+    if (options) generate(options)
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error))
     process.exitCode = 1

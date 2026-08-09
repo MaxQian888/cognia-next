@@ -11,13 +11,24 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { appStorageTargets, cleanAppDatabases, readTauriIdentity } from "./clean-app-databases.mjs"
+import {
+  appStorageTargets,
+  cleanAppDatabases,
+  parseArgs,
+  readTauriIdentity,
+} from "./clean-app-databases.mjs"
 
 const IDENTITY = {
   identifier: "com.cognia.desktop",
   productName: "Cognia",
   binName: "cognia-next",
 }
+
+test("parseArgs supports dry-run and rejects unknown options", () => {
+  assert.deepEqual(parseArgs([]), { dryRun: false })
+  assert.deepEqual(parseArgs(["--dry-run"]), { dryRun: true })
+  assert.throws(() => parseArgs(["--unknown"]), /unknown option/i)
+})
 
 test("macOS targets cover every WebKit origin, Caches, and the app-support dir", () => {
   const targets = appStorageTargets({

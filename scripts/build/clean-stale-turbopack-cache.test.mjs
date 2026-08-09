@@ -20,7 +20,14 @@ import {
   dirSizeBytes,
   cleanStaleTurbopackCache,
   cleanTurbopackCacheForMode,
+  parseArgs,
 } from "./clean-stale-turbopack-cache.mjs"
+
+test("parseArgs supports full cleanup and rejects unknown options", () => {
+  assert.deepEqual(parseArgs([]), { all: false })
+  assert.deepEqual(parseArgs(["--all"]), { all: true })
+  assert.throws(() => parseArgs(["--unknown"]), /unknown option/i)
+})
 
 function tmpRoot() {
   return mkdtempSync(join(tmpdir(), "turbo-cache-"))

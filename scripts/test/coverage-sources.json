@@ -6,6 +6,8 @@
     "lib/**/*.{js,jsx,ts,tsx}",
     "plugins/cognia-work-mode/src/**/*.{ts,tsx}",
     "!plugins/cognia-work-mode/src/**/*.test.{ts,tsx}",
+    "plugins/cognia-office/src/**/*.{ts,tsx}",
+    "!plugins/cognia-office/src/**/*.test.{ts,tsx}",
     "!lib/browser/overlay.injected.js",
     "stores/**/*.{js,jsx,ts,tsx}",
     "web/components/**/*.{ts,tsx}",

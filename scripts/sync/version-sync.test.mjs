@@ -7,7 +7,19 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { TARGETS, isValidVersion, extractVersion, replaceVersion } from "./version-sync.mjs"
+import {
+  TARGETS,
+  isValidVersion,
+  extractVersion,
+  replaceVersion,
+  parseArgs,
+} from "./version-sync.mjs"
+
+test("parseArgs supports check mode and rejects unknown options", () => {
+  assert.deepEqual(parseArgs([]), { check: false })
+  assert.deepEqual(parseArgs(["--check"]), { check: true })
+  assert.throws(() => parseArgs(["--unknown"]), /unknown option/i)
+})
 
 test("isValidVersion accepts semver and semver with pre/build tails", () => {
   assert.ok(isValidVersion("0.1.0"))

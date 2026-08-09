@@ -10,7 +10,14 @@ import {
   buildCatalog,
   renderCatalogModule,
   collectResources,
+  parseArgs,
 } from "./build-builtin-skills.mjs"
+
+test("parseArgs supports check mode and rejects unknown options", () => {
+  assert.deepEqual(parseArgs([]), { check: false })
+  assert.deepEqual(parseArgs(["--check"]), { check: true })
+  assert.throws(() => parseArgs(["--unknown"]), /unknown option/i)
+})
 
 const SAMPLE = `---
 name: Sample skill

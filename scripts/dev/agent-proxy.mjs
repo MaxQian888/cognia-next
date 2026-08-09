@@ -7,6 +7,8 @@ import net from "node:net"
 import path from "node:path"
 import tls from "node:tls"
 import { fileURLToPath } from "node:url"
+import { Command, CommanderError } from "commander"
+import { z } from "zod"
 
 const EXIT_USAGE = 2
 const EXIT_PREFLIGHT = 3
@@ -19,49 +21,56 @@ const repoRoot = path.resolve(path.dirname(scriptPath), "../..")
 class UsageError extends Error {}
 class PreflightError extends Error {}
 
-function help() {
-  return `Usage:
-  AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy -- <command> [arguments]
-  AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy --check
+const cliSchema = z
+  .object({
+    check: z.boolean().default(false),
+    command: z.string().trim().min(1).optional(),
+    commandArgs: z.array(z.string()),
+    dryRun: z.boolean().default(false),
+  })
+  .refine(({ check, dryRun }) => !(check && dryRun), {
+    message: "--check and --dry-run cannot be combined",
+  })
+  .refine(({ check, command }) => check || Boolean(command), {
+    message: "Missing agent command after `--`",
+  })
 
-Options:
-  --check     Verify the proxy and the macOS direct-connect block, then exit.
-  --dry-run   Print the redacted launch configuration without connecting.
-  --help      Show this help.
-
-The proxy must be a loopback HTTP or HTTPS proxy. Credentials belong in
-AGENT_PROXY_URL, not command-line arguments, so they do not appear in the process
-list. Agents must honor standard HTTP proxy variables; agents that do not are
-blocked instead of falling back to a direct connection. Set
-AGENT_PROXY_CHECK_TARGET=host:port to change the TLS-capable CONNECT preflight target.`
+function createProgram() {
+  return new Command()
+    .name("pnpm agent:proxy")
+    .description("Launch an agent through a fail-closed loopback HTTP proxy.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .enablePositionalOptions()
+    .passThroughOptions()
+    .option("--check", "Verify the proxy and macOS direct-connect block, then exit.")
+    .option("--dry-run", "Print the redacted launch configuration without connecting.")
+    .argument("[command]", "Agent executable.")
+    .argument("[commandArgs...]", "Arguments passed to the agent executable.")
+    .addHelpText(
+      "after",
+      "\nCredentials belong in AGENT_PROXY_URL, not command-line arguments. " +
+        "Set AGENT_PROXY_CHECK_TARGET=host:port to change the CONNECT preflight target.\n"
+    )
 }
 
 function parseCli(argv) {
-  let check = false
-  let dryRun = false
-  const target = []
-  let forwarding = false
-  for (const arg of argv) {
-    if (forwarding) {
-      target.push(arg)
-    } else if (arg === "--") {
-      forwarding = true
-    } else if (arg === "--check") {
-      check = true
-    } else if (arg === "--dry-run") {
-      dryRun = true
-    } else if (arg === "--help" || arg === "-h") {
-      return { help: true, check: false, dryRun: false, command: undefined, commandArgs: [] }
-    } else {
-      target.push(arg)
-    }
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    if (error instanceof CommanderError) throw new UsageError(error.message)
+    throw error
   }
-  if (check && dryRun) throw new UsageError("--check and --dry-run cannot be combined")
-  const [command, ...commandArgs] = target
-  if (!check && !command) {
-    throw new UsageError("Missing agent command after `--`")
-  }
-  return { help: false, check, dryRun, command, commandArgs }
+  const result = cliSchema.safeParse({
+    ...program.opts(),
+    command: program.args[0],
+    commandArgs: program.args.slice(1),
+  })
+  if (!result.success) throw new UsageError(result.error.issues[0].message)
+  return result.data
 }
 
 function configuredProxy(env) {
@@ -341,10 +350,7 @@ async function main() {
   }
 
   const cli = parseCli(process.argv.slice(2))
-  if (cli.help) {
-    process.stdout.write(`${help()}\n`)
-    return
-  }
+  if (!cli) return
   if (process.platform !== "darwin") {
     throw new UsageError(
       "Fail-closed proxy launching currently requires macOS Seatbelt; this command will not fall back to environment variables alone"

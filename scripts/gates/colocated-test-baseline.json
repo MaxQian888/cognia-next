@@ -208,7 +208,6 @@
     "lib/export/index.ts",
     "lib/headless/runtimes/a2ui-dispatch.ts",
     "lib/headless/runtimes/backup-scheduler.ts",
-    "lib/headless/runtimes/connector-runtime.ts",
     "lib/headless/runtimes/desktop-message-source.ts",
     "lib/headless/runtimes/desktop-sync-source.ts",
     "lib/headless/runtimes/initializers.ts",

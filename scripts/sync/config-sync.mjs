@@ -24,9 +24,12 @@
  *   node scripts/sync/config-sync.mjs --check   # verify only (CI)
  */
 
-import { readFileSync, writeFileSync, realpathSync } from "node:fs"
+import { readFileSync, realpathSync } from "node:fs"
 import { resolve, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
+import { Command, CommanderError } from "commander"
+import writeFileAtomic from "write-file-atomic"
+import { z } from "zod"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, "../..")
@@ -112,8 +115,30 @@ export function checkConfigs(readFn) {
   return { drifted, missing }
 }
 
-function main() {
-  const checkMode = process.argv.includes("--check")
+const cliSchema = z.object({ check: z.boolean().default(false) })
+
+function createProgram() {
+  return new Command()
+    .name("pnpm config:sync")
+    .description("Synchronize cross-language configuration constants.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--check", "Report drift without rewriting mirrors.")
+}
+
+export function parseArgs(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  return cliSchema.parse(program.opts())
+}
+
+function main({ check: checkMode = false } = {}) {
   const readFn = (rel) => readFileSync(resolve(REPO_ROOT, rel), "utf8")
   const { drifted, missing } = checkConfigs(readFn)
 
@@ -157,7 +182,7 @@ function main() {
         )
         continue
       }
-      writeFileSync(abs, replaceValue(content, mirror.re, canonical))
+      writeFileAtomic.sync(abs, replaceValue(content, mirror.re, canonical))
       console.log(`[config-sync] rewrote ${mirror.path}: ${value} → ${canonical}`)
       rewritten += 1
     }
@@ -177,5 +202,6 @@ const isDirectRun = (() => {
   }
 })()
 if (isDirectRun) {
-  process.exit(main())
+  const options = parseArgs(process.argv.slice(2))
+  if (options) process.exit(main(options))
 }

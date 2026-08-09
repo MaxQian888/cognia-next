@@ -20,8 +20,8 @@ test("parseArgs defaults, overrides, and rejects unknown flags", () => {
   // trunk, so defaulting to it made "changed files" mean "most of the repo".
   assert.deepEqual(parseArgs([]), { base: "origin/dev", strict: false })
   assert.deepEqual(parseArgs(["--base", "dev", "--strict"]), { base: "dev", strict: true })
-  assert.throws(() => parseArgs(["--nope"]), /Unknown argument/)
-  assert.throws(() => parseArgs(["--base"]), /--base requires a ref/)
+  assert.throws(() => parseArgs(["--nope"]), /unknown option/i)
+  assert.throws(() => parseArgs(["--base"]), /argument missing/i)
 })
 
 test("filterCoverageTargets keeps collected sources only", () => {

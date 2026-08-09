@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync, realpathSync, writeFileSync } from "node:fs"
+import { createHash } from "node:crypto"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Command, CommanderError } from "commander"
@@ -12,6 +13,7 @@ import { buildCompanionRequestSchemaContracts } from "./companion-request-schema
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const PUBLIC_SPEC_PATH = "docs/api/mobile-companion-api.openapi.yaml"
 const HEADLESS_SPEC_PATH = "docs/api/headless-service-api.openapi.yaml"
+const HOST_COMMAND_CATALOG_PATH = "crates/cognia-cli/assets/host-command-catalog.json"
 const ROUTE_CONTRACT_PATH = "protocol/companion-api-routes.json"
 const COMMAND_MANIFEST_PATH = "protocol/companion-commands.json"
 const REQUEST_SCHEMA_CATALOG_PATH = "protocol/companion-request-schemas.json"
@@ -53,16 +55,109 @@ export function classifyCommands(manifest, remoteNames) {
   return { byName, publicNames, internalNames }
 }
 
+export function validateCommandCoverage(manifest, dispatchNames) {
+  const errors = []
+  const descriptors = new Map()
+  for (const command of manifest.commands) {
+    if (descriptors.has(command.name)) {
+      errors.push(`duplicate command descriptor: ${command.name}`)
+      continue
+    }
+    descriptors.set(command.name, command)
+    if (command.operation !== "read" && command.idempotency !== "required") {
+      errors.push(`mutation must use durable idempotency: ${command.name}`)
+    }
+    if (
+      command.target === "service" &&
+      (command.transports.length !== 1 || command.transports[0] !== "internal")
+    ) {
+      errors.push(`service command must be internal-only: ${command.name}`)
+    }
+    if (command.target !== "client" && !dispatchNames.has(command.name)) {
+      errors.push(`remote command has no canonical dispatch arm: ${command.name}`)
+    }
+  }
+  for (const name of dispatchNames) {
+    if (!descriptors.has(name)) errors.push(`dispatch arm has no command descriptor: ${name}`)
+  }
+  return errors
+}
+
 function clone(value) {
   return structuredClone(value)
+}
+
+function rewriteLegacyComponentReferences(value) {
+  if (typeof value === "string") {
+    return value.replace(
+      "#/components/responses/JwtRejected",
+      "#/components/responses/AuthenticationRejected",
+    )
+  }
+  if (Array.isArray(value)) return value.map(rewriteLegacyComponentReferences)
+  if (!value || typeof value !== "object") return value
+  return Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [key, rewriteLegacyComponentReferences(child)])
+  )
+}
+
+function mergeClosedObjectAllOf(schema) {
+  if (!Array.isArray(schema.allOf) || schema.allOf.length === 0) return schema
+  const branches = schema.allOf
+  const closedObjectBranches = branches.filter(
+    (branch) =>
+      branch?.type === "object" &&
+      branch.additionalProperties === false &&
+      branch.properties &&
+      typeof branch.properties === "object" &&
+      !Array.isArray(branch.properties),
+  )
+  if (closedObjectBranches.length === 0) return schema
+  if (closedObjectBranches.length !== branches.length) {
+    throw new Error("cannot safely merge mixed closed-object allOf request schema")
+  }
+
+  const properties = {}
+  const required = []
+  for (const branch of branches) {
+    const unsupported = Object.keys(branch).filter(
+      (key) => !["type", "required", "properties", "additionalProperties"].includes(key),
+    )
+    if (unsupported.length > 0) {
+      throw new Error(
+        `cannot safely merge closed-object allOf keywords: ${unsupported.sort().join(", ")}`,
+      )
+    }
+    for (const [name, propertySchema] of Object.entries(branch.properties)) {
+      if (
+        Object.hasOwn(properties, name) &&
+        JSON.stringify(properties[name]) !== JSON.stringify(propertySchema)
+      ) {
+        throw new Error(`conflicting closed-object allOf property: ${name}`)
+      }
+      properties[name] = propertySchema
+    }
+    for (const name of branch.required ?? []) {
+      if (!required.includes(name)) required.push(name)
+    }
+  }
+  const { allOf: _allOf, ...siblings } = schema
+  return {
+    ...siblings,
+    type: "object",
+    ...(required.length > 0 ? { required } : {}),
+    properties,
+    additionalProperties: false,
+  }
 }
 
 function prepareRequestSchema(value) {
   if (Array.isArray(value)) return value.map(prepareRequestSchema)
   if (!value || typeof value !== "object") return value
-  const next = Object.fromEntries(
+  let next = Object.fromEntries(
     Object.entries(value).map(([key, child]) => [key, prepareRequestSchema(child)])
   )
+  next = mergeClosedObjectAllOf(next)
   if (next.type !== "object" && !(Array.isArray(next.type) && next.type.includes("object"))) {
     return next
   }
@@ -87,6 +182,197 @@ function prepareRequestSchema(value) {
     next.example ??= {}
   }
   return next
+}
+
+const HOST_CATEGORIES = [
+  {
+    id: "sessions",
+    title: "Sessions and messages",
+    description: "Chat sessions, messages, conversations, characters, and transcripts.",
+    skill: "cognia-host-sessions",
+    pattern: /^(session_|message_|conversation_|character_|transcript_)/,
+  },
+  {
+    id: "agents",
+    title: "Agents and teams",
+    description: "Agent runtimes, Claude sessions, teams, fleet controls, and goals.",
+    skill: "cognia-host-agents",
+    pattern:
+      /^(agent_|claude_|external_agent_|spawn_external_agent$|send_to_external_agent$|kill_external_agent$|get_external_agent_status$|fleet_|team_|goal_)/,
+  },
+  {
+    id: "tasks",
+    title: "Tasks and workspaces",
+    description: "Task lifecycle, resources, patches, runs, and workspace settlement.",
+    skill: "cognia-host-tasks",
+    pattern: /^task_/,
+  },
+  {
+    id: "automation",
+    title: "Workflows and automation",
+    description: "Workflows, schedules, background jobs, monitors, and consent decisions.",
+    skill: "cognia-host-automation",
+    pattern: /^(workflow_|scheduled_task_|automation_|background_)/,
+  },
+  {
+    id: "connectors",
+    title: "Connectors and integrations",
+    description: "Connector transports, integration ingress, Lark, notifications, and adapters.",
+    skill: "cognia-host-connectors",
+    pattern:
+      /^(adapter_|connector_|connectors_|integration_|lark_|remote_notification_publish$|register_push_token$|revoke_push_token$)/,
+  },
+  {
+    id: "extensions",
+    title: "Extensions and providers",
+    description: "Plugins, skills, MCP servers, provider catalogs, and diagnostics.",
+    skill: "cognia-host-extensions",
+    pattern: /^(plugin_|skill_|skills_|mcp_|provider_)/,
+  },
+  {
+    id: "knowledge",
+    title: "Knowledge and intelligence",
+    description: "Memory, digital twins, ingestion jobs, and OCR models.",
+    skill: "cognia-host-knowledge",
+    pattern: /^(memory_|twin_|ocr_)/,
+  },
+  {
+    id: "development",
+    title: "Development tools",
+    description: "Git, files, terminals, browsers, code-server, and language servers.",
+    skill: "cognia-host-development",
+    pattern:
+      /^(browser_|codeserver_|fs_|git_|github_workspace_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
+  },
+  {
+    id: "system",
+    title: "System and security",
+    description: "Host capabilities, service secrets, backups, sync, logs, and bridge administration.",
+    skill: "cognia-host-system",
+    pattern: /^(app_|backup_|companion_|device_|external_bridge_|host_|keyring_|logs_|secret_|sync_)/,
+  },
+]
+
+export function classifyHostCommand(name) {
+  const matches = HOST_CATEGORIES.filter((category) => category.pattern.test(name))
+  if (matches.length !== 1) {
+    throw new Error(
+      `Headless command must match exactly one host category: ${name} (${matches
+        .map((category) => category.id)
+        .join(", ")})`,
+    )
+  }
+  return matches[0].id
+}
+
+const HOST_RESOURCE_ALIASES = [
+  [/^(?:agent_task_|team_task_)/, "agent-tasks"],
+  [/^app_settings_/, "settings"],
+  [/^automation_consent_/, "automation-consent"],
+  [/^background_job_/, "background-jobs"],
+  [/^background_monitor_/, "background-monitors"],
+  [/^external_agent_|^(?:spawn|send_to|kill)_external_agent$|^get_external_agent_status$/, "external-agents"],
+  [/^external_bridge_/, "external-bridge"],
+  [/^host_admin_lease_/, "admin-leases"],
+  [/^integration_ingress_/, "integration-ingress"],
+  [/^github_workspace_/, "github-workspaces"],
+  [/^(?:keyring_secret_|secret_store_)/, "secrets"],
+  [/^plugin_python_/, "plugin-python"],
+  [/^plugin_wasm_/, "plugin-wasm"],
+  [/^plugin_.*vscode|^plugin_vscode_/, "plugin-vscode"],
+  [/^plugin_(?:permission|set_(?:network|shell)_allowlist)/, "plugin-permissions"],
+  [/^plugin_(?:backup|stage|commit_staged|discard_staged|finalize_staged)/, "plugin-updates"],
+  [/^provider_catalog_/, "provider-catalog"],
+  [/^provider_diagnostics_/, "provider-diagnostics"],
+  [/^provider_profiles_/, "provider-profiles"],
+  [/^scheduled_task_/, "scheduled-tasks"],
+  [/^(?:skill_|skills_)/, "skills"],
+  [/^task_resource_/, "task-resources"],
+  [/^task_workspace_/, "task-workspaces"],
+  [/^(?:connector_|connectors_|adapter_)/, "connectors"],
+  [/^(?:register_push_token|revoke_push_token|remote_notification_publish)$/, "notifications"],
+  [/^(?:ensure_dir|ensure_dir_confined|default_export_dir|read_text_file|write_text_file|write_text_file_confined)$/, "files"],
+  [/^fs_/, "workspace-files"],
+  [/^(?:read_agent_config|write_agent_config)$/, "agent-config"],
+  [/^(?:ensure_system_lsp_host|lsp_host_)/, "language-servers"],
+]
+
+const HOST_RESOURCE_TITLES = new Map([
+  ["agent-config", "Agent Configuration"],
+  ["codeserver", "Code Server"],
+  ["mcp", "MCP"],
+  ["ocr", "OCR"],
+  ["plugin-vscode", "Plugin VS Code"],
+])
+
+export function hostResourceForCommand(name) {
+  const aliases = HOST_RESOURCE_ALIASES.filter(([pattern]) => pattern.test(name))
+  if (aliases.length > 1) {
+    throw new Error(
+      `Headless command matches multiple host resources: ${name} (${aliases
+        .map(([, resource]) => resource)
+        .join(", ")})`,
+    )
+  }
+  return aliases[0]?.[1] ?? name.split("_", 1)[0]
+}
+
+function hostResourceTitle(resource) {
+  const title = HOST_RESOURCE_TITLES.get(resource)
+  if (title) return title
+  return resource
+    .split("-")
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(" ")
+}
+
+export function buildHostCommandCatalog(manifest, remoteNames, headlessSpec) {
+  const { byName, internalNames } = classifyCommands(manifest, remoteNames)
+  const commands = internalNames.map((name) => {
+    const descriptor = byName.get(name)
+    const operation = headlessSpec.paths[`/internal/_rpc/${name}`]?.post
+    if (!operation) throw new Error(`cannot catalog missing Headless command: ${name}`)
+    return {
+      name,
+      category: classifyHostCommand(name),
+      resource: hostResourceForCommand(name),
+      target: descriptor.target,
+      operation: descriptor.operation,
+      capability: descriptor.capability,
+      risk: descriptor.risk,
+      approval: descriptor.approval,
+      idempotency: descriptor.idempotency,
+      summary: operation.summary ?? "",
+      description: operation.description ?? "",
+      inputSchemaSource: operation["x-cognia-request-schema-source"],
+      inputSchema: operation.requestBody?.content?.["application/json"]?.schema,
+      outputSchema: null,
+      outputTyped: false,
+    }
+  })
+  const categories = HOST_CATEGORIES.map(({ pattern: _pattern, ...category }) => category)
+  const resources = [...new Set(commands.map((command) => command.resource))]
+    .sort()
+    .map((id) => {
+      const categories = [
+        ...new Set(
+          commands.filter((command) => command.resource === id).map((command) => command.category),
+        ),
+      ]
+      if (categories.length !== 1) {
+        throw new Error(`host resource spans multiple categories: ${id} (${categories.join(", ")})`)
+      }
+      return { id, title: hostResourceTitle(id), category: categories[0] }
+    })
+  const payload = { schemaVersion: 1, categories, resources, commands }
+  return {
+    ...payload,
+    catalogHash: createHash("sha256").update(JSON.stringify(payload)).digest("hex"),
+  }
+}
+
+function renderHostCommandCatalog(catalog) {
+  return `${JSON.stringify(catalog, null, 2)}\n`
 }
 
 function unwrapRustType(type, wrapper) {
@@ -233,6 +519,19 @@ export function extractCommandArgumentSchemas(source) {
   return schemas
 }
 
+function completedRpcSchema(resultSchema = {}) {
+  return {
+    type: "object",
+    required: ["requestId", "result"],
+    additionalProperties: false,
+    properties: {
+      requestId: { type: "string", format: "uuid" },
+      operationId: { type: "string", format: "uuid" },
+      result: resultSchema,
+    },
+  }
+}
+
 function genericRpcPath(command, audience, argumentSchemas = new Map()) {
   const requiresIdempotency = command.idempotency === "required"
   const usesGenericFallback = command.inputSchema === "#/components/schemas/RpcArgs"
@@ -274,7 +573,25 @@ function genericRpcPath(command, audience, argumentSchemas = new Map()) {
         200: {
           description: "Command completed.",
           content: {
-            "application/json": { schema: { $ref: command.outputSchema } },
+            "application/json": {
+              schema:
+                audience === "public"
+                  ? completedRpcSchema({ $ref: command.outputSchema })
+                  : { $ref: command.outputSchema },
+            },
+          },
+        },
+        202: {
+          description: "Command is still running under the durable operation ledger.",
+          content: {
+            "application/json": {
+              schema: {
+                $ref:
+                  audience === "public"
+                    ? "#/components/schemas/RpcRunningResponse"
+                    : "#/components/schemas/InternalRpcRunningResponse",
+              },
+            },
           },
         },
         400: {
@@ -289,13 +606,45 @@ function genericRpcPath(command, audience, argumentSchemas = new Map()) {
             "application/json": { schema: { $ref: "#/components/schemas/RpcError" } },
           },
         },
+        403: {
+          description: "Capability, transport, or policy authorization failed.",
+          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
+        },
+        404: {
+          description: "The command is not registered.",
+          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
+        },
+        409: {
+          description: "The idempotency key conflicts with an existing operation.",
+          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
+        },
+        415: {
+          description: "The request body is not JSON.",
+          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
+        },
+        422: {
+          description: "The JSON request body does not match the endpoint shape.",
+          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
+        },
+        428: {
+          description: "A valid signed policy is required.",
+          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
+        },
+        429: {
+          description: "The principal exceeded its command rate limit.",
+          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
+        },
+        500: {
+          description: "The canonical dispatch failed.",
+          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
+        },
+        503: {
+          description: "The durable security store is unavailable.",
+          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
+        },
       },
     },
   }
-}
-
-function normalizeRpcPath(path) {
-  return path.replace(/^\/api\/v1\/_rpc\//, "/api/_rpc/")
 }
 
 export function reconcileRpcPaths({
@@ -306,6 +655,12 @@ export function reconcileRpcPaths({
   argumentSchemas = new Map(),
   preserveExisting = true,
 }) {
+  const versionedPaths = Object.keys(publicPaths).filter((path) =>
+    /^\/(?:api|ws)\/v\d+\//.test(path)
+  )
+  if (versionedPaths.length > 0) {
+    throw new Error(`versioned public paths are forbidden: ${versionedPaths.sort().join(", ")}`)
+  }
   const { byName, publicNames, internalNames } = classifyCommands(manifest, remoteNames)
   const publicSet = new Set(publicNames)
   const internalSet = new Set(internalNames)
@@ -313,15 +668,14 @@ export function reconcileRpcPaths({
   const existingByName = new Map()
 
   for (const [path, item] of Object.entries(publicPaths)) {
-    const normalized = normalizeRpcPath(path)
-    const match = normalized.match(/^\/api\/_rpc\/([a-z0-9_]+)$/)
+    const match = path.match(/^\/api\/_rpc\/([a-z0-9_]+)$/)
     if (!match) {
-      if (normalized !== "/api/_rpc/{name}") publicResult[normalized] = clone(item)
+      if (path !== "/api/_rpc/{name}") publicResult[path] = clone(item)
       continue
     }
     existingByName.set(match[1], clone(item))
     if (publicSet.has(match[1])) {
-      publicResult[normalized] = preserveExisting
+      publicResult[path] = preserveExisting
         ? clone(item)
         : genericRpcPath(byName.get(match[1]), "public", argumentSchemas)
     }
@@ -329,8 +683,7 @@ export function reconcileRpcPaths({
 
   publicResult["/api/_rpc/{name}"] = preserveExisting
     ? clone(
-        publicPaths["/api/_rpc/{name}"] ??
-          publicPaths["/api/v1/_rpc/{name}"] ?? {
+        publicPaths["/api/_rpc/{name}"] ?? {
             post: {
               operationId: "rpcDispatch",
               responses: { 200: { description: "Command result." } },
@@ -351,23 +704,35 @@ export function reconcileRpcPaths({
           },
           responses: {
             200: {
-              description: "Command completed or was durably accepted.",
+              description: "Command completed.",
               content: {
-                "application/json": { schema: { $ref: "#/components/schemas/RpcResult" } },
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/RpcCompletedResponse" },
+                },
               },
             },
-            400: { $ref: "#/components/responses/AuthenticationRejected" },
+            202: {
+              description: "Command is still running under the durable operation ledger.",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/RpcRunningResponse" },
+                },
+              },
+            },
+            400: { $ref: "#/components/responses/PublicApiError" },
             401: { $ref: "#/components/responses/AuthenticationRejected" },
+            403: { $ref: "#/components/responses/AuthenticationRejected" },
+            404: { $ref: "#/components/responses/PublicApiError" },
+            409: { $ref: "#/components/responses/PublicApiError" },
+            415: { $ref: "#/components/responses/PublicApiError" },
+            422: { $ref: "#/components/responses/PublicApiError" },
+            428: { $ref: "#/components/responses/PublicApiError" },
+            429: { $ref: "#/components/responses/PublicApiError" },
+            500: { $ref: "#/components/responses/PublicApiError" },
+            503: { $ref: "#/components/responses/PublicApiError" },
           },
         },
       }
-  publicResult["/api/v1/_rpc/{name}"] = clone(publicResult["/api/_rpc/{name}"])
-  publicResult["/api/v1/_rpc/{name}"].post = {
-    ...publicResult["/api/v1/_rpc/{name}"].post,
-    operationId: "legacyRpcDispatch",
-    deprecated: true,
-    summary: "Deprecated device-JWT compatibility RPC dispatcher.",
-  }
   for (const name of publicNames) {
     publicResult[`/api/_rpc/${name}`] ??= genericRpcPath(
       byName.get(name),
@@ -399,24 +764,138 @@ export function reconcileRpcPaths({
   return { publicPaths: publicResult, internalPaths: internalResult }
 }
 
-export function extractRuntimeRoutePaths(source) {
-  return new Set([...source.matchAll(/\.route\(\s*"([^"]+)"\s*,/g)].map((match) => match[1]))
+const AXUM_ROUTE_METHODS = ["get", "post", "put", "patch", "delete", "any"]
+const AXUM_ROUTE_METHOD_PATTERN = new RegExp(`^\\s*(${AXUM_ROUTE_METHODS.join("|")})\\s*\\(`)
+
+function readRouteExpression(source, start) {
+  let depth = 1
+  let quote = null
+  let escaped = false
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index]
+    if (quote) {
+      if (escaped) {
+        escaped = false
+      } else if (character === "\\") {
+        escaped = true
+      } else if (character === quote) {
+        quote = null
+      }
+      continue
+    }
+    if (character === '"' || character === "'") {
+      quote = character
+    } else if (character === "(") {
+      depth += 1
+    } else if (character === ")") {
+      depth -= 1
+      if (depth === 0) return source.slice(start, index)
+    }
+  }
+  return source.slice(start)
 }
 
-export function validateRouteContract({ contract, runtimePaths, publicPaths, internalPaths }) {
+function extractRouteMethods(expression) {
+  const initial = expression.match(AXUM_ROUTE_METHOD_PATTERN)
+  if (!initial) return []
+  const methods = [initial[1]]
+  let depth = 0
+  let quote = null
+  let escaped = false
+  for (let index = 0; index < expression.length; index += 1) {
+    const character = expression[index]
+    if (quote) {
+      if (escaped) {
+        escaped = false
+      } else if (character === "\\") {
+        escaped = true
+      } else if (character === quote) {
+        quote = null
+      }
+      continue
+    }
+    if (character === '"' || character === "'") {
+      quote = character
+      continue
+    }
+    if (character === "(") {
+      depth += 1
+      continue
+    }
+    if (character === ")") {
+      depth -= 1
+      continue
+    }
+    if (depth !== 0 || character !== ".") continue
+    const chained = expression
+      .slice(index + 1)
+      .match(new RegExp(`^(${AXUM_ROUTE_METHODS.join("|")})\\s*\\(`))
+    if (chained) methods.push(chained[1])
+  }
+  return methods
+}
+
+export function extractRuntimeRoutes(source) {
+  const testModule = source.search(/^\s*#\[cfg\(test\)\]\s*\n\s*mod tests\s*\{/m)
+  const runtimeSource = testModule === -1 ? source : source.slice(0, testModule)
+  const routes = new Set()
+  const routePattern = /\.route\(\s*"([^"]+)"\s*,/g
+  for (const match of runtimeSource.matchAll(routePattern)) {
+    const expression = readRouteExpression(runtimeSource, match.index + match[0].length)
+    for (const method of extractRouteMethods(expression)) {
+      routes.add(`${method === "any" ? "*" : method.toUpperCase()} ${match[1]}`)
+    }
+  }
+  return routes
+}
+
+export function collectRuntimeRoutes(sources) {
+  const routes = new Set()
+  const errors = []
+  for (const [sourcePath, source] of sources) {
+    for (const route of extractRuntimeRoutes(source)) {
+      if (routes.has(route)) errors.push(`duplicate runtime route registration: ${route} (${sourcePath})`)
+      routes.add(route)
+    }
+  }
+  return { routes, errors }
+}
+
+export function validateRouteContract({ contract, runtimeRoutes, publicPaths, internalPaths }) {
   const parsed = routeContractSchema.safeParse(contract)
   if (!parsed.success) return parsed.error.issues.map((issue) => `route contract: ${issue.message}`)
   const errors = []
   const seen = new Set()
+  const declaredRuntimeRoutes = new Set()
   for (const route of parsed.data.routes) {
     const identity = `${route.method.toUpperCase()} ${route.path}`
     if (seen.has(identity)) errors.push(`duplicate route contract entry: ${identity}`)
     seen.add(identity)
     const runtimePath = route.runtimePath ?? route.path
-    if (!runtimePaths.has(runtimePath)) errors.push(`not mounted: ${runtimePath}`)
+    const runtimeIdentity = `${route.method.toUpperCase()} ${runtimePath}`
+    declaredRuntimeRoutes.add(runtimeIdentity)
+    if (!runtimeRoutes.has(runtimeIdentity) && !runtimeRoutes.has(`* ${runtimePath}`)) {
+      errors.push(`not mounted: ${runtimeIdentity}`)
+    }
     const paths = route.document === "public" ? publicPaths : internalPaths
     if (route.document !== "none" && !paths[route.path]?.[route.method]) {
       errors.push(`missing from ${route.document} spec: ${identity}`)
+    }
+  }
+  const declaredRuntimePaths = new Set(
+    parsed.data.routes.map((route) => route.runtimePath ?? route.path)
+  )
+  for (const runtimeIdentity of [...runtimeRoutes].sort()) {
+    const separator = runtimeIdentity.indexOf(" ")
+    const method = runtimeIdentity.slice(0, separator)
+    const runtimePath = runtimeIdentity.slice(separator + 1)
+    const declared =
+      method === "*"
+        ? declaredRuntimePaths.has(runtimePath)
+        : declaredRuntimeRoutes.has(runtimeIdentity)
+    if (!declared) errors.push(`not declared: ${runtimeIdentity}`)
+    if (/^\/(?:api|ws)\/v\d+(?:\/|$)/.test(runtimePath)) {
+      errors.push(`versioned runtime path is forbidden: ${runtimePath}`)
     }
   }
   return errors
@@ -462,16 +941,18 @@ function operationIdFor(method, path) {
 function authForPath(path) {
   if (
     ["/healthz", "/livez", "/readyz", "/.well-known/agent-card.json"].includes(path) ||
-    path.startsWith("/api/auth/device/") ||
-    path.startsWith("/api/v1/auth/pair")
+    path.startsWith("/api/auth/device/")
   ) {
     return []
   }
-  if (path === "/ws/events" || path.startsWith("/ws/terminal") || path.startsWith("/ws/browser")) {
+  if (
+    path === "/ws/events" ||
+    path === "/ws/acp" ||
+    path.startsWith("/ws/terminal") ||
+    path.startsWith("/ws/browser")
+  ) {
     return []
   }
-  if (path.startsWith("/ws/v1/")) return [{ legacyQueryToken: [] }]
-  if (path.startsWith("/api/v1/")) return [{ legacyBearer: [] }]
   if (path.startsWith("/internal/") || path.startsWith("/ide/content")) {
     return [{ serviceBearer: [] }]
   }
@@ -516,11 +997,8 @@ function genericRoutePath(route) {
   return {
     [route.method]: {
       operationId: operationIdFor(route.method, route.path),
-      tags: [route.path.startsWith("/api/v1/") || route.path.startsWith("/ws/v1/") ? "legacy" : "api"],
+      tags: ["api"],
       summary: `${route.method.toUpperCase()} ${route.path}`,
-      ...(route.path.startsWith("/api/v1/") || route.path.startsWith("/ws/v1/")
-        ? { deprecated: true }
-        : {}),
       security: authForPath(route.path),
       ...(pathParameters.length > 0 ? { parameters: pathParameters } : {}),
       responses: {
@@ -540,27 +1018,8 @@ function mergePathOperation(paths, route, pathItem = genericRoutePath(route)) {
   paths[route.path] = { ...(paths[route.path] ?? {}), ...pathItem }
 }
 
-function renamePath(paths, from, to, { retain = false } = {}) {
-  if (!paths[from]) return
-  paths[to] ??= clone(paths[from])
-  if (!retain) delete paths[from]
-}
-
 function normalizePublicPaths(paths, contract) {
   const next = clone(paths)
-  for (const [from, to] of [
-    [
-      "/api/v1/workflow-deployments/{deploymentId}/runs",
-      "/api/workflow-deployments/{deployment_id}/runs",
-    ],
-    ["/api/v1/workflow-runs/{runId}", "/api/workflow-runs/{run_id}"],
-    ["/api/v1/workflow-runs/{runId}/events", "/api/workflow-runs/{run_id}/events"],
-    ["/api/v1/workflow-runs/{runId}/cancel", "/api/workflow-runs/{run_id}/cancel"],
-    ["/api/v1/whoami", "/api/whoami"],
-  ]) {
-    renamePath(next, from, to)
-  }
-  renamePath(next, "/ws/v1/events", "/ws/events", { retain: true })
 
   for (const route of contract.routes.filter((entry) => entry.document === "none")) {
     if (!next[route.path]?.[route.method]) continue
@@ -577,13 +1036,27 @@ function normalizePublicPaths(paths, contract) {
     for (const operation of Object.values(item)) {
       if (!operation || typeof operation !== "object" || !operation.responses) continue
       operation.security = authForPath(path)
-      if (path.startsWith("/api/v1/") || path.startsWith("/ws/v1/")) operation.deprecated = true
+      if (
+        operation.security.some((requirement) => Object.hasOwn(requirement, "dpopAccess")) &&
+        !operation.parameters?.some((parameter) => parameter?.$ref === "#/components/parameters/DpopProof")
+      ) {
+        operation.parameters = [
+          ...(operation.parameters ?? []),
+          { $ref: "#/components/parameters/DpopProof" },
+        ]
+      }
     }
   }
 
   const canonicalEvents = next["/ws/events"]?.get
   if (canonicalEvents) {
     canonicalEvents.summary = "Open the canonical event stream with a single-use socket ticket."
+    canonicalEvents.description = [
+      "Open a resumable Companion event stream with a 60-second, path-bound, single-use ticket.",
+      "Obtain the ticket from `POST /api/auth/socket-ticket` with channel `events`; bearer tokens",
+      "and arbitrary query-token credentials are not accepted on the WebSocket URL.",
+      "Use the optional `since` cursor to replay retained events in sequence.",
+    ].join(" ")
     canonicalEvents.parameters = [
       {
         in: "query",
@@ -600,9 +1073,228 @@ function normalizePublicPaths(paths, contract) {
       },
     ]
   }
-  const legacyEvents = next["/ws/v1/events"]?.get
-  if (legacyEvents) legacyEvents.operationId = "legacyWsEvents"
-
+  const whoami = next["/api/whoami"]?.get
+  if (whoami) {
+    whoami.summary = "Return the authenticated Companion device identity."
+    whoami.description =
+      "Requires a five-minute device access token and a matching DPoP proof; returns the device, tenant, server version, and pinned TLS fingerprint."
+  }
+  const schemaResponse = (schema, description) => ({
+    description,
+    content: { "application/json": { schema: { $ref: `#/components/schemas/${schema}` } } },
+  })
+  const publicApiError = { $ref: "#/components/responses/PublicApiError" }
+  const authenticationRejected = { $ref: "#/components/responses/AuthenticationRejected" }
+  const addPublicErrors = (operation, statuses) => {
+    if (!operation) return
+    for (const status of statuses) {
+      operation.responses[status] =
+        status === 401 || status === 403 ? authenticationRejected : publicApiError
+    }
+  }
+  const agentCard = next["/.well-known/agent-card.json"]?.get
+  if (agentCard) {
+    agentCard.summary = "Discover the Cognia A2A agent and its supported capabilities."
+    agentCard.responses = {
+      200: schemaResponse("A2aAgentCard", "A2A Agent Card discovery document."),
+      400: publicApiError,
+    }
+  }
+  if (whoami) {
+    whoami.responses[200] = schemaResponse(
+      "WhoamiResponse",
+      "Authenticated Companion device identity."
+    )
+    addPublicErrors(whoami, [400, 401, 409, 503])
+  }
+  const devices = next["/api/devices"]?.get
+  if (devices) {
+    devices.responses[200] = schemaResponse("DevicesResponse", "Registered devices.")
+    addPublicErrors(devices, [400, 401, 403, 409, 503])
+  }
+  const revokeDevice = next["/api/devices/{device_id}"]?.delete
+  if (revokeDevice) {
+    revokeDevice.responses[200] = schemaResponse(
+      "DeviceRevocationResponse",
+      "Device revoked."
+    )
+    addPublicErrors(revokeDevice, [400, 401, 403, 409, 503])
+  }
+  const invitation = next["/api/invitations"]?.post
+  if (invitation) {
+    invitation.requestBody = {
+      required: true,
+      content: {
+        "application/json": { schema: { $ref: "#/components/schemas/InvitationRequest" } },
+      },
+    }
+    invitation.responses[200] = schemaResponse("InvitationResponse", "Owner invitation created.")
+    addPublicErrors(invitation, [400, 401, 403, 409, 415, 422, 503])
+  }
+  const listPolicies = next["/api/policies"]?.get
+  if (listPolicies) {
+    listPolicies.responses[200] = schemaResponse("PoliciesResponse", "Active host policies.")
+    addPublicErrors(listPolicies, [400, 401, 403, 409, 503])
+  }
+  const createPolicy = next["/api/policies"]?.post
+  if (createPolicy) {
+    createPolicy.requestBody = {
+      required: true,
+      content: {
+        "application/json": { schema: { $ref: "#/components/schemas/CreatePolicyRequest" } },
+      },
+    }
+    createPolicy.responses[200] = schemaResponse("HostPolicySummary", "Host policy created.")
+    addPublicErrors(createPolicy, [400, 401, 403, 409, 415, 422, 503])
+  }
+  const operation = next["/api/operations/{operation_id}"]?.get
+  if (operation) {
+    operation.responses[200] = schemaResponse("OperationSummary", "Durable operation status.")
+    addPublicErrors(operation, [400, 401, 404, 409, 503])
+  }
+  const sessionMedia = next["/api/sessions/{session_id}/media/{hash}"]?.get
+  if (sessionMedia) {
+    sessionMedia.summary = "Read immutable media bytes owned by an authenticated session."
+    sessionMedia.parameters ??= []
+    if (
+      !sessionMedia.parameters.some(
+        (parameter) => parameter?.in === "query" && parameter.name === "variant"
+      )
+    ) {
+      sessionMedia.parameters.push({
+        in: "query",
+        name: "variant",
+        required: false,
+        schema: {
+          type: "string",
+          enum: ["thumbnail", "canonical", "original"],
+          default: "canonical",
+        },
+      })
+    }
+    sessionMedia.responses = {
+      200: {
+        description: "Media bytes. The concrete Content-Type is supplied by the media record.",
+        headers: {
+          "Cache-Control": { schema: { type: "string" } },
+          ETag: { schema: { type: "string" } },
+        },
+        content: {
+          "application/octet-stream": { schema: { type: "string", format: "binary" } },
+        },
+      },
+      400: publicApiError,
+      401: { $ref: "#/components/responses/AuthenticationRejected" },
+      404: publicApiError,
+      413: publicApiError,
+      503: publicApiError,
+    }
+  }
+  const terminal = next["/ws/terminal"]?.get
+  if (terminal) {
+    terminal.description = [
+      "Open the canonical binary terminal protocol after obtaining a 60-second, path-bound,",
+      "single-use ticket from `POST /api/auth/socket-ticket` with channel `terminal`.",
+      "Remote terminal access and the device terminal capability are revalidated before upgrade.",
+      "Bearer tokens are never accepted in the WebSocket URL.",
+    ].join(" ")
+    terminal.responses[403] = publicApiError
+    terminal.responses[503] = publicApiError
+  }
+  const browser = next["/ws/browser/{session_id}"]?.get
+  if (browser) {
+    browser.summary = "Open a browser-session stream with a one-time ticket."
+    browser.description =
+      "Redeem a 60-second browser ticket bound to this session. Text frames use the versioned browser envelope; binary frames carry screencast media."
+    browser.parameters ??= []
+    if (!browser.parameters.some((parameter) => parameter?.in === "query" && parameter.name === "ticket")) {
+      browser.parameters.push({
+        in: "query",
+        name: "ticket",
+        required: true,
+        schema: { type: "string" },
+        description: "Single-use stream ticket bound to this browser session.",
+      })
+    }
+    browser.responses = {
+      101: { description: "WebSocket upgrade accepted." },
+      200: schemaResponse(
+        "BrowserSocketTextFrame",
+        "Synthetic success response documenting browser WebSocket text frames."
+      ),
+      401: { $ref: "#/components/responses/AuthenticationRejected" },
+      426: { description: "A WebSocket upgrade is required." },
+      503: publicApiError,
+    }
+    browser["x-websocket"] = {
+      outboundFrames: [
+        { name: "BrowserSocketTextFrame", schema: { $ref: "#/components/schemas/BrowserSocketTextFrame" } },
+        { name: "BrowserScreencastFrame", schema: { type: "string", format: "binary" } },
+      ],
+      inboundFrames: [
+        {
+          name: "BrowserSocketCommand",
+          schema: {
+            type: "object",
+            required: ["version", "type", "payload"],
+            additionalProperties: false,
+            properties: {
+              version: { type: "integer", const: 1 },
+              type: { type: "string", enum: ["control.takeover", "input", "frame.ack"] },
+              payload: { type: "object", additionalProperties: true },
+            },
+          },
+        },
+      ],
+    }
+  }
+  const acp = next["/ws/acp"]?.get
+  if (acp) {
+    acp.summary = "Open the ACP stream with a one-time socket ticket."
+    acp.description = [
+      "Obtain a 60-second, path-bound, single-use ticket from `POST /api/auth/socket-ticket`",
+      "with channel `acp`. The redeemed principal and canonical capability snapshot govern every",
+      "mapped command; bearer tokens are never accepted in the WebSocket URL.",
+    ].join(" ")
+    acp.parameters = [
+      {
+        in: "query",
+        name: "ticket",
+        required: true,
+        schema: { type: "string" },
+        description: "Single-use ticket bound to /ws/acp and the authenticated device principal.",
+      },
+    ]
+    acp.responses = {
+      101: { description: "WebSocket upgrade accepted." },
+      200: { description: "WebSocket handshake accepted by tooling that models upgrades as success." },
+      401: { $ref: "#/components/responses/AuthenticationRejected" },
+      503: publicApiError,
+    }
+  }
+  const a2a = next["/a2a"]?.post
+  if (a2a) {
+    a2a.operationId = "dispatchA2aJsonRpc"
+    a2a.tags = ["a2a"]
+    a2a.summary = "Dispatch an A2A JSON-RPC request through the canonical execution authority."
+    a2a.requestBody = {
+      required: true,
+      content: {
+        "application/json": { schema: { $ref: "#/components/schemas/A2aJsonRpcRequest" } },
+      },
+    }
+    a2a.responses = {
+      200: schemaResponse(
+        "A2aJsonRpcResponse",
+        "A2A JSON-RPC success or protocol error envelope."
+      ),
+      400: publicApiError,
+      401: { $ref: "#/components/responses/AuthenticationRejected" },
+      415: publicApiError,
+      422: publicApiError,
+      503: publicApiError,
+    }
+  }
   const workflowDeployment = next["/api/workflow-deployments/{deployment_id}/runs"]?.post
   const deploymentParameter = workflowDeployment?.parameters?.find(
     (parameter) => parameter?.in === "path"
@@ -621,6 +1313,8 @@ function canonicalAuthPaths() {
     description,
     content: { "application/json": { schema: { $ref: `#/components/schemas/${schema}` } } },
   })
+  const authenticationRejected = { $ref: "#/components/responses/AuthenticationRejected" }
+  const publicApiError = { $ref: "#/components/responses/PublicApiError" }
   return {
     "/api/auth/device/challenge": {
       post: {
@@ -629,7 +1323,14 @@ function canonicalAuthPaths() {
         summary: "Issue a one-minute device proof challenge.",
         security: [],
         requestBody: jsonBody("DeviceChallengeRequest"),
-        responses: { 200: jsonResponse("DeviceChallengeResponse", "Challenge issued.") },
+        responses: {
+          200: jsonResponse("DeviceChallengeResponse", "Challenge issued."),
+          400: publicApiError,
+          415: publicApiError,
+          422: publicApiError,
+          429: publicApiError,
+          503: publicApiError,
+        },
       },
     },
     "/api/auth/device/register": {
@@ -641,8 +1342,14 @@ function canonicalAuthPaths() {
         requestBody: jsonBody("DeviceRegisterRequest"),
         responses: {
           200: jsonResponse("DeviceRegisterResponse", "Device key registered."),
-          401: { $ref: "#/components/responses/AuthenticationRejected" },
-          403: { $ref: "#/components/responses/AuthenticationRejected" },
+          400: publicApiError,
+          401: authenticationRejected,
+          403: authenticationRejected,
+          409: publicApiError,
+          415: publicApiError,
+          422: publicApiError,
+          429: publicApiError,
+          503: publicApiError,
         },
       },
     },
@@ -655,7 +1362,14 @@ function canonicalAuthPaths() {
         requestBody: jsonBody("DeviceTokenRequest"),
         responses: {
           200: jsonResponse("DeviceTokenResponse", "DPoP access token issued."),
-          401: { $ref: "#/components/responses/AuthenticationRejected" },
+          400: publicApiError,
+          401: authenticationRejected,
+          409: publicApiError,
+          415: publicApiError,
+          422: publicApiError,
+          429: publicApiError,
+          500: publicApiError,
+          503: publicApiError,
         },
       },
     },
@@ -663,13 +1377,22 @@ function canonicalAuthPaths() {
       post: {
         operationId: "issueSocketTicket",
         tags: ["device-auth"],
-        summary: "Mint a 60-second single-use WebSocket ticket.",
+        summary: "Mint a 60-second single-use, endpoint-bound WebSocket ticket.",
+        description:
+          "The server derives the exact path, audience, and required capability from the typed channel (`host.observe` for events, `terminal.open` for terminal, and `agent.run` for browser/ACP). Browser requests must also name an active session owned by the authenticated device.",
         security: [{ dpopAccess: [] }],
         parameters: [{ $ref: "#/components/parameters/DpopProof" }],
         requestBody: jsonBody("SocketTicketRequest"),
         responses: {
           200: jsonResponse("SocketTicketResponse", "Socket ticket issued."),
-          401: { $ref: "#/components/responses/AuthenticationRejected" },
+          400: publicApiError,
+          401: authenticationRejected,
+          403: authenticationRejected,
+          409: publicApiError,
+          415: publicApiError,
+          422: publicApiError,
+          429: publicApiError,
+          503: publicApiError,
         },
       },
     },
@@ -684,21 +1407,13 @@ function ensurePublicComponents(components, publicNames) {
       type: "http",
       scheme: "bearer",
       bearerFormat: "JWT",
-      description: "Five-minute access token bound to the active device key; send a matching DPoP header.",
-    },
-    legacyBearer: {
-      type: "http",
-      scheme: "bearer",
-      bearerFormat: "JWT",
-      description: "Deprecated 90-day device JWT accepted only on explicit /api/v1 compatibility routes.",
-    },
-    legacyQueryToken: {
-      type: "apiKey",
-      in: "query",
-      name: "token",
-      description: "Deprecated long-lived device JWT query parameter for released v1 WebSocket clients.",
+      description:
+        "Five-minute access token bound to the active device key and signed by a process-ephemeral authority; a server restart invalidates outstanding tokens. Send a matching DPoP header.",
     },
   }
+  delete next.securitySchemes.legacyBearer
+  delete next.securitySchemes.legacyQueryToken
+  delete next.securitySchemes.bearerAuth
   next.parameters = {
     ...(next.parameters ?? {}),
     DpopProof: {
@@ -728,6 +1443,374 @@ function ensurePublicComponents(components, publicNames) {
     ...(next.schemas ?? {}),
     RpcArgs: { type: "object", additionalProperties: true },
     RpcResult: {},
+    RpcCompletedResponse: completedRpcSchema(),
+    RpcRunningResponse: {
+      type: "object",
+      required: ["requestId", "operationId", "status"],
+      additionalProperties: false,
+      properties: {
+        requestId: { type: "string", format: "uuid" },
+        operationId: { type: "string", format: "uuid" },
+        status: { type: "string", const: "running" },
+      },
+    },
+    WhoamiResponse: {
+      type: "object",
+      required: ["deviceId", "accountId", "serverVersion", "tlsFingerprint"],
+      additionalProperties: false,
+      properties: {
+        deviceId: { type: "string" },
+        accountId: { type: "string" },
+        serverVersion: { type: "string" },
+        tlsFingerprint: { type: "string" },
+      },
+    },
+    DeviceSummary: {
+      type: "object",
+      required: ["deviceId", "displayName", "role", "status", "createdAt", "updatedAt"],
+      additionalProperties: false,
+      properties: {
+        deviceId: { type: "string" },
+        displayName: { type: "string" },
+        role: { type: "string" },
+        status: { type: "string" },
+        createdAt: { type: "integer", format: "int64" },
+        updatedAt: { type: "integer", format: "int64" },
+      },
+    },
+    DevicesResponse: {
+      type: "object",
+      required: ["devices"],
+      additionalProperties: false,
+      properties: {
+        devices: { type: "array", items: { $ref: "#/components/schemas/DeviceSummary" } },
+      },
+    },
+    DeviceRevocationResponse: {
+      type: "object",
+      required: ["revokedDeviceId"],
+      additionalProperties: false,
+      properties: { revokedDeviceId: { type: "string" } },
+    },
+    InvitationRequest: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        ttlSeconds: { type: "integer", minimum: 1, maximum: 3600, default: 600 },
+      },
+    },
+    InvitationResponse: {
+      type: "object",
+      required: ["invitation", "expiresIn"],
+      additionalProperties: false,
+      properties: {
+        invitation: { type: "string" },
+        expiresIn: { type: "integer", format: "int64" },
+      },
+    },
+    HostPolicySummary: {
+      type: "object",
+      required: ["policyId", "capability", "policy", "createdAt"],
+      additionalProperties: false,
+      properties: {
+        policyId: { type: "string" },
+        capability: { type: "string" },
+        policy: { type: "object", additionalProperties: true },
+        expiresAt: { type: ["integer", "null"], format: "int64" },
+        createdAt: { type: "integer", format: "int64" },
+      },
+    },
+    PoliciesResponse: {
+      type: "object",
+      required: ["policies"],
+      additionalProperties: false,
+      properties: {
+        policies: { type: "array", items: { $ref: "#/components/schemas/HostPolicySummary" } },
+      },
+    },
+    CreatePolicyRequest: {
+      type: "object",
+      required: ["capability", "commands", "expiresAt"],
+      additionalProperties: false,
+      properties: {
+        capability: { type: "string" },
+        commands: { type: "array", minItems: 1, maxItems: 64, items: { type: "string" } },
+        constraints: { type: "object", additionalProperties: true, default: {} },
+        expiresAt: { type: "integer", format: "int64" },
+      },
+    },
+    OperationSummary: {
+      type: "object",
+      required: ["operationId", "status", "createdAt", "updatedAt"],
+      additionalProperties: false,
+      properties: {
+        operationId: { type: "string", format: "uuid" },
+        status: { type: "string" },
+        receipt: {},
+        createdAt: { type: "integer", format: "int64" },
+        updatedAt: { type: "integer", format: "int64" },
+      },
+    },
+    A2aAgentCard: {
+      type: "object",
+      required: [
+        "protocolVersion",
+        "name",
+        "url",
+        "preferredTransport",
+        "version",
+        "capabilities",
+        "defaultInputModes",
+        "defaultOutputModes",
+        "securitySchemes",
+        "security",
+        "skills",
+      ],
+      additionalProperties: false,
+      properties: {
+        protocolVersion: { type: "string", const: "0.3.0" },
+        name: { type: "string" },
+        description: { type: "string" },
+        url: { type: "string", format: "uri" },
+        preferredTransport: { type: "string", const: "JSONRPC" },
+        version: { type: "string" },
+        provider: {
+          type: "object",
+          required: ["organization", "url"],
+          additionalProperties: false,
+          properties: {
+            organization: { type: "string" },
+            url: { type: "string", format: "uri" },
+          },
+        },
+        capabilities: {
+          type: "object",
+          required: ["streaming", "pushNotifications", "stateTransitionHistory"],
+          additionalProperties: false,
+          properties: {
+            streaming: { type: "boolean", const: false },
+            pushNotifications: { type: "boolean", const: false },
+            stateTransitionHistory: { type: "boolean", const: false },
+          },
+        },
+        defaultInputModes: { type: "array", items: { type: "string" } },
+        defaultOutputModes: { type: "array", items: { type: "string" } },
+        securitySchemes: {
+          type: "object",
+          required: ["bearer", "dpop"],
+          additionalProperties: false,
+          properties: {
+            bearer: { type: "object", additionalProperties: true },
+            dpop: { type: "object", additionalProperties: true },
+          },
+        },
+        security: {
+          type: "array",
+          items: { type: "object", additionalProperties: { type: "array", items: {} } },
+        },
+        skills: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["id", "name", "description", "tags", "inputModes", "outputModes"],
+            additionalProperties: false,
+            properties: {
+              id: { type: "string" },
+              name: { type: "string" },
+              description: { type: "string" },
+              tags: { type: "array", items: { type: "string" } },
+              inputModes: { type: "array", items: { type: "string" } },
+              outputModes: { type: "array", items: { type: "string" } },
+            },
+          },
+        },
+      },
+    },
+    A2aPart: {
+      oneOf: [
+        {
+          type: "object",
+          required: ["kind", "text"],
+          additionalProperties: false,
+          properties: { kind: { type: "string", const: "text" }, text: { type: "string" } },
+        },
+        {
+          type: "object",
+          required: ["kind", "data"],
+          additionalProperties: false,
+          properties: { kind: { type: "string", const: "data" }, data: {} },
+        },
+        {
+          type: "object",
+          required: ["kind", "file"],
+          additionalProperties: false,
+          properties: {
+            kind: { type: "string", const: "file" },
+            file: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                name: { type: "string" },
+                mimeType: { type: "string" },
+                bytes: { type: "string", format: "byte" },
+                uri: { type: "string", format: "uri" },
+              },
+              anyOf: [{ required: ["bytes"] }, { required: ["uri"] }],
+            },
+          },
+        },
+      ],
+    },
+    A2aMessage: {
+      type: "object",
+      required: ["kind", "role", "messageId", "parts"],
+      additionalProperties: false,
+      properties: {
+        kind: { type: "string", const: "message" },
+        role: { type: "string", enum: ["user", "agent"] },
+        messageId: { type: "string", minLength: 1 },
+        contextId: { type: "string" },
+        taskId: { type: "string" },
+        parts: {
+          type: "array",
+          minItems: 1,
+          items: { $ref: "#/components/schemas/A2aPart" },
+        },
+      },
+    },
+    A2aTask: {
+      type: "object",
+      required: ["kind", "id", "contextId", "status", "artifacts"],
+      additionalProperties: false,
+      properties: {
+        kind: { type: "string", const: "task" },
+        id: { type: "string" },
+        contextId: { type: "string" },
+        status: {
+          type: "object",
+          required: ["state"],
+          additionalProperties: false,
+          properties: {
+            state: {
+              type: "string",
+              enum: ["submitted", "working", "input-required", "completed", "failed", "canceled"],
+            },
+            message: { $ref: "#/components/schemas/A2aMessage" },
+          },
+        },
+        artifacts: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["artifactId", "name", "parts"],
+            additionalProperties: false,
+            properties: {
+              artifactId: { type: "string" },
+              name: { type: "string" },
+              parts: { type: "array", items: { $ref: "#/components/schemas/A2aPart" } },
+            },
+          },
+        },
+      },
+    },
+    A2aJsonRpcRequest: {
+      type: "object",
+      required: ["jsonrpc", "id", "method", "params"],
+      additionalProperties: false,
+      properties: {
+        jsonrpc: { type: "string", const: "2.0" },
+        id: { oneOf: [{ type: "string" }, { type: "integer" }, { type: "null" }] },
+        method: { type: "string", enum: ["message/send", "tasks/get", "tasks/cancel"] },
+        params: {
+          oneOf: [
+            {
+              type: "object",
+              required: ["message"],
+              additionalProperties: false,
+              properties: { message: { $ref: "#/components/schemas/A2aMessage" } },
+            },
+            {
+              type: "object",
+              required: ["id"],
+              additionalProperties: false,
+              properties: { id: { type: "string" } },
+            },
+          ],
+        },
+      },
+    },
+    A2aJsonRpcResponse: {
+      oneOf: [
+        {
+          type: "object",
+          required: ["jsonrpc", "id", "result"],
+          additionalProperties: false,
+          properties: {
+            jsonrpc: { type: "string", const: "2.0" },
+            id: { oneOf: [{ type: "string" }, { type: "integer" }, { type: "null" }] },
+            result: { $ref: "#/components/schemas/A2aTask" },
+          },
+        },
+        {
+          type: "object",
+          required: ["jsonrpc", "id", "error"],
+          additionalProperties: false,
+          properties: {
+            jsonrpc: { type: "string", const: "2.0" },
+            id: { oneOf: [{ type: "string" }, { type: "integer" }, { type: "null" }] },
+            error: {
+              type: "object",
+              required: ["code", "message"],
+              additionalProperties: false,
+              properties: { code: { type: "integer" }, message: { type: "string" }, data: {} },
+            },
+          },
+        },
+      ],
+    },
+    BrowserSocketTextFrame: {
+      oneOf: [
+        {
+          type: "object",
+          required: ["version", "type", "payload"],
+          additionalProperties: false,
+          properties: {
+            version: { type: "integer", const: 1 },
+            type: { type: "string", const: "connected" },
+            payload: {
+              type: "object",
+              required: ["sessionId"],
+              additionalProperties: false,
+              properties: { sessionId: { type: "string" } },
+            },
+          },
+        },
+        {
+          type: "object",
+          required: ["version", "type", "payload"],
+          additionalProperties: false,
+          properties: {
+            version: { type: "integer", const: 1 },
+            type: { type: "string", enum: ["event", "result"] },
+            payload: {},
+          },
+        },
+        {
+          type: "object",
+          required: ["version", "type", "payload"],
+          additionalProperties: false,
+          properties: {
+            version: { type: "integer", const: 1 },
+            type: { type: "string", const: "error" },
+            payload: {
+              type: "object",
+              required: ["code"],
+              properties: { code: { type: "string" }, message: { type: "string" } },
+            },
+          },
+        },
+      ],
+    },
     DeviceChallengeRequest: {
       type: "object",
       additionalProperties: false,
@@ -784,10 +1867,29 @@ function ensurePublicComponents(components, publicNames) {
       },
     },
     SocketTicketRequest: {
-      type: "object",
-      additionalProperties: false,
-      required: ["channel"],
-      properties: { channel: { type: "string", enum: ["events", "terminal", "browser", "acp"] } },
+      oneOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["channel", "sessionId"],
+          properties: {
+            channel: { type: "string", const: "browser" },
+            sessionId: {
+              type: "string",
+              minLength: 1,
+              description: "Binds the ticket to one active browser session owned by the device.",
+            },
+          },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["channel"],
+          properties: {
+            channel: { type: "string", enum: ["events", "terminal", "acp"] },
+          },
+        },
+      ],
     },
     SocketTicketResponse: {
       type: "object",
@@ -813,13 +1915,30 @@ function ensurePublicComponents(components, publicNames) {
       },
     },
   }
+  next.schemas.RpcError = { $ref: "#/components/schemas/CanonicalApiError" }
+  delete next.schemas.BrowserSocketCommand
+  for (const legacySchema of ["IssueResponse", "PairRequest", "PairResponse"]) {
+    delete next.schemas[legacySchema]
+  }
   next.responses = {
     ...(next.responses ?? {}),
+    PublicApiError: {
+      description: "The request was rejected by the public Companion API.",
+      content: { "application/json": { schema: { $ref: "#/components/schemas/CanonicalApiError" } } },
+    },
     AuthenticationRejected: {
       description: "Authentication or authorization rejected.",
       content: { "application/json": { schema: { $ref: "#/components/schemas/CanonicalApiError" } } },
     },
   }
+  for (const legacyResponse of [
+    "PayloadTooLarge",
+    "RemoteControlForbidden",
+    "ServiceTokenRequired",
+  ]) {
+    delete next.responses[legacyResponse]
+  }
+  delete next.responses.JwtRejected
   const sidecarPath = next.schemas.McpServerLifecycleRequest?.properties?.sidecarPath
   if (sidecarPath) {
     sidecarPath.description =
@@ -856,15 +1975,14 @@ function buildPublicSpec(base, contract, manifest, remoteNames, argumentSchemas)
     const operation = paths[`/api/_rpc/${name}`]?.post
     if (operation) operation.security = [{ dpopAccess: [] }]
   }
-  paths["/api/v1/_rpc/{name}"].post.security = [{ legacyBearer: [] }]
-  return normalizeOpenApi31({
+  return rewriteLegacyComponentReferences(normalizeOpenApi31({
     ...base,
     info: {
       ...base.info,
       title: "Cognia Companion Device API",
-      summary: "Canonical DPoP device API plus explicitly deprecated v1 compatibility routes.",
+      summary: "Canonical unversioned DPoP device API.",
       description:
-        "The canonical device surface uses unversioned /api and /ws routes, five-minute DPoP-bound access tokens, and 60-second single-use WebSocket tickets. Explicit /api/v1 and /ws/v1 entries are deprecated compatibility routes for released mobile clients; service-token Headless routes are documented separately.",
+        "The device surface uses unversioned /api and /ws routes, five-minute DPoP-bound access tokens, and 60-second single-use WebSocket tickets. Versioned compatibility aliases are intentionally not exposed; service-token Headless routes are documented separately.",
     },
     servers: [
       { url: "https://127.0.0.1:27890", description: "Default TLS loopback listener." },
@@ -896,9 +2014,9 @@ function buildPublicSpec(base, contract, manifest, remoteNames, argumentSchemas)
           !argumentSchemas.has(name) &&
           classified.byName.get(name).inputSchema === "#/components/schemas/RpcArgs"
       ).length,
-      legacyCompatibility: true,
+      legacyCompatibility: false,
     },
-  })
+  }))
 }
 
 function normalizeOpenApi31(value) {
@@ -919,7 +2037,7 @@ function headlessBaseSpec() {
     info: {
       title: "Cognia Headless Service API",
       version: "0.1.0",
-      license: { name: "Proprietary" },
+      license: { name: "Proprietary", identifier: "LicenseRef-Proprietary" },
       summary: "Loopback-only authenticated RPC and WebSocket plane for the renderer-free Brain.",
       description: [
         "This is an internal development and deployment contract, not a paired-device API.",
@@ -948,6 +2066,7 @@ function headlessBaseSpec() {
           },
           responses: {
             200: { description: "Command result.", content: { "application/json": { schema: { $ref: "#/components/schemas/RpcResult" } } } },
+            202: { description: "Command is still running.", content: { "application/json": { schema: { $ref: "#/components/schemas/InternalRpcRunningResponse" } } } },
             401: { $ref: "#/components/responses/ServiceTokenRejected" },
             403: { $ref: "#/components/responses/ServiceTokenRejected" },
           },
@@ -962,7 +2081,11 @@ function headlessBaseSpec() {
           parameters: [
             { in: "query", name: "since", required: false, schema: { type: "integer", minimum: 0 } },
           ],
-          responses: { 101: { description: "WebSocket upgrade accepted." } },
+          responses: {
+            101: { description: "WebSocket upgrade accepted." },
+            200: { description: "Handshake accepted by tooling that models upgrades as success." },
+            401: { $ref: "#/components/responses/ServiceTokenRejected" },
+          },
         },
       },
       "/internal/bridge": {
@@ -971,7 +2094,11 @@ function headlessBaseSpec() {
           tags: ["headless-bridge"],
           summary: "Open the bidirectional Rust-to-Brain data-plane bridge.",
           security: [{ serviceQueryToken: [] }],
-          responses: { 101: { description: "WebSocket upgrade accepted." } },
+          responses: {
+            101: { description: "WebSocket upgrade accepted." },
+            200: { description: "Handshake accepted by tooling that models upgrades as success." },
+            401: { $ref: "#/components/responses/ServiceTokenRejected" },
+          },
         },
       },
       "/ide/content": genericRoutePath({ path: "/ide/content", method: "post" }),
@@ -993,6 +2120,15 @@ function headlessBaseSpec() {
       schemas: {
         RpcArgs: { type: "object", additionalProperties: true },
         RpcResult: {},
+        InternalRpcRunningResponse: {
+          type: "object",
+          required: ["operationId", "status"],
+          additionalProperties: false,
+          properties: {
+            operationId: { type: "string", format: "uuid" },
+            status: { type: "string", const: "running" },
+          },
+        },
         RpcError: {
           type: "object",
           required: ["code", "message"],
@@ -1060,10 +2196,18 @@ function renderSpec(spec) {
   return stringify(spec, { indent: 2, lineWidth: 120, sortMapEntries: false })
 }
 
-function extractKnownCommands(source) {
+export function extractKnownCommands(source) {
   const match = source.match(/const KNOWN_COMMANDS[^=]*=\s*&\[([\s\S]*?)\n\];/)
   if (!match) throw new Error("Could not locate KNOWN_COMMANDS in rpc.rs")
-  return new Set([...match[1].matchAll(/"([a-z0-9_]+)"/g)].map((entry) => entry[1]))
+  const names = [...match[1].matchAll(/"([a-z0-9_]+)"/g)].map((entry) => entry[1])
+  const unique = new Set(names)
+  if (unique.size !== names.length) {
+    const duplicates = [...unique].filter(
+      (name) => names.indexOf(name) !== names.lastIndexOf(name),
+    )
+    throw new Error(`duplicate KNOWN_COMMANDS entries: ${duplicates.sort().join(", ")}`)
+  }
+  return unique
 }
 
 function createProgram() {
@@ -1092,12 +2236,19 @@ export function inspectCommittedContract() {
   } catch {
     // The first generator run creates the dedicated Headless contract.
   }
-  const publicSpec = parseYaml(publicSource, PUBLIC_SPEC_PATH)
-  const runtimePaths = new Set()
-  for (const sourcePath of RUNTIME_ROUTE_SOURCES) {
-    for (const route of extractRuntimeRoutePaths(readRepo(sourcePath))) runtimePaths.add(route)
+  let hostCommandCatalogSource = ""
+  try {
+    hostCommandCatalogSource = readRepo(HOST_COMMAND_CATALOG_PATH)
+  } catch {
+    // The first generator run creates the embedded CLI catalog.
   }
+  const publicSpec = parseYaml(publicSource, PUBLIC_SPEC_PATH)
+  const runtime = collectRuntimeRoutes(
+    RUNTIME_ROUTE_SOURCES.map((sourcePath) => [sourcePath, readRepo(sourcePath)])
+  )
+  const runtimeRoutes = runtime.routes
   const remoteNames = extractKnownCommands(readRepo(RPC_SOURCE_PATH))
+  const commandCoverageErrors = validateCommandCoverage(manifest, remoteNames)
   const inferredArgumentSchemas = extractCommandArgumentSchemas(readRepo(RPC_SOURCE_PATH))
   const argumentSchemas = new Map(
     [...inferredArgumentSchemas].map(([name, schema]) => [
@@ -1128,12 +2279,24 @@ export function inspectCommittedContract() {
   )
   const desiredPublicSource = renderSpec(desiredPublicSpec)
   const desiredHeadlessSource = renderSpec(desiredHeadlessSpec)
+  const desiredHostCommandCatalog = buildHostCommandCatalog(
+    manifest,
+    remoteNames,
+    desiredHeadlessSpec,
+  )
+  const desiredHostCommandCatalogSource = renderHostCommandCatalog(desiredHostCommandCatalog)
   const errors = validateRouteContract({
     contract,
-    runtimePaths,
+    runtimeRoutes,
     publicPaths: desiredPublicSpec.paths ?? {},
     internalPaths: desiredHeadlessSpec.paths ?? {},
   })
+  errors.push(...runtime.errors)
+  errors.push(...commandCoverageErrors)
+  const versionedReference = JSON.stringify(desiredPublicSpec).match(/\/(?:api|ws)\/v\d+\//)
+  if (versionedReference) {
+    errors.push(`versioned public path reference is forbidden: ${versionedReference[0]}`)
+  }
   const classified = classifyCommands(manifest, remoteNames)
   for (const name of classified.publicNames) {
     if (!desiredPublicSpec.paths[`/api/_rpc/${name}`]) {
@@ -1166,14 +2329,17 @@ export function inspectCommittedContract() {
     contract,
     manifest,
     publicSpec,
-    runtimePaths,
+    runtimeRoutes,
     remoteNames,
     desiredPublicSpec,
     desiredHeadlessSpec,
     desiredPublicSource,
     desiredHeadlessSource,
+    desiredHostCommandCatalog,
+    desiredHostCommandCatalogSource,
     publicDrift: publicSource !== desiredPublicSource,
     headlessDrift: headlessSource !== desiredHeadlessSource,
+    hostCommandCatalogDrift: hostCommandCatalogSource !== desiredHostCommandCatalogSource,
     errors,
   }
 }
@@ -1191,16 +2357,24 @@ async function main(argv = process.argv.slice(2)) {
   if (inspected.errors.length > 0) {
     throw new Error(inspected.errors.join("\n"))
   }
-  if (check && (inspected.publicDrift || inspected.headlessDrift)) {
+  if (
+    check &&
+    (inspected.publicDrift || inspected.headlessDrift || inspected.hostCommandCatalogDrift)
+  ) {
     const drift = [
       inspected.publicDrift ? PUBLIC_SPEC_PATH : null,
       inspected.headlessDrift ? HEADLESS_SPEC_PATH : null,
+      inspected.hostCommandCatalogDrift ? HOST_COMMAND_CATALOG_PATH : null,
     ].filter(Boolean)
     throw new Error(`generated artifacts drifted: ${drift.join(", ")}; run pnpm companion-api:gen`)
   }
   if (!check) {
     writeFileSync(resolve(repoRoot, PUBLIC_SPEC_PATH), inspected.desiredPublicSource)
     writeFileSync(resolve(repoRoot, HEADLESS_SPEC_PATH), inspected.desiredHeadlessSource)
+    writeFileSync(
+      resolve(repoRoot, HOST_COMMAND_CATALOG_PATH),
+      inspected.desiredHostCommandCatalogSource,
+    )
   }
   process.stdout.write(
     `[companion-api] OK: ${inspected.remoteNames.size} remote commands, ` +

@@ -1,7 +1,13 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
-import { bundle, ENTRY, OUTFILE } from "./build-convert-bundle.mjs"
+import { bundle, ENTRY, OUTFILE, parseArgs } from "./build-convert-bundle.mjs"
+
+test("parseArgs supports check mode and rejects unknown options", () => {
+  assert.deepEqual(parseArgs([]), { check: false })
+  assert.deepEqual(parseArgs(["--check"]), { check: true })
+  assert.throws(() => parseArgs(["--unknown"]), /unknown option/i)
+})
 
 test("the checked-in bundle matches a fresh build of lib/plugin/convert", async () => {
   const fresh = await bundle()

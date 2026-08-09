@@ -26,29 +26,22 @@
  *   node scripts/build/clean-stale-turbopack-cache.mjs --all
  */
 
-import { readdirSync, statSync, rmSync, existsSync } from "node:fs"
+import { statSync, rmSync, existsSync } from "node:fs"
 import { resolve, join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
+import { Command, CommanderError } from "commander"
+import { globSync } from "glob"
+import { z } from "zod"
 
 const BYTES_PER_GB = 1024 ** 3
 
 /** Recursively sum the byte size of every file under `dir`. Missing dir → 0. */
 export function dirSizeBytes(dir) {
   if (!existsSync(dir)) return 0
-  let total = 0
-  const stack = [dir]
-  while (stack.length > 0) {
-    const current = stack.pop()
-    for (const entry of readdirSync(current, { withFileTypes: true })) {
-      const full = join(current, entry.name)
-      if (entry.isDirectory()) {
-        stack.push(full)
-      } else if (entry.isFile()) {
-        total += statSync(full).size
-      }
-    }
-  }
-  return total
+  return globSync("**/*", { cwd: dir, nodir: true }).reduce(
+    (total, relative) => total + statSync(join(dir, relative)).size,
+    0
+  )
 }
 
 /**
@@ -128,11 +121,36 @@ export function cleanAllNextCaches({ nextDir, log = console.log }) {
 const __filename = fileURLToPath(import.meta.url)
 const isDirectRun = process.argv[1] && resolve(process.argv[1]) === __filename
 
+const cliSchema = z.object({ all: z.boolean().default(false) })
+
+function createProgram() {
+  return new Command()
+    .name("pnpm clean:cache")
+    .description("Apply Cognia's bounded Next.js cache cleanup policy.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--all", "Remove all development output and the production Webpack cache.")
+}
+
+export function parseArgs(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  return cliSchema.parse(program.opts())
+}
+
 if (isDirectRun) {
   try {
+    const options = parseArgs(process.argv.slice(2))
+    if (!options) process.exit(0)
     const repoRoot = resolve(dirname(__filename), "..", "..")
     const nextDir = join(repoRoot, ".next")
-    if (process.argv.includes("--all")) {
+    if (options.all) {
       cleanAllNextCaches({ nextDir })
     } else {
       const devDir = join(nextDir, "dev")

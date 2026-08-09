@@ -295,7 +295,6 @@ const schemas = {
   }),
   browser_session_get: browserSession,
   browser_session_close: browserSession,
-  browser_stream_ticket_issue: browserSession,
   browser_navigate: browserSession.extend({ url: z.string().min(1) }),
   browser_snapshot: browserSession.extend({
     options: z.object({ includeText: z.boolean().optional() }).optional(),

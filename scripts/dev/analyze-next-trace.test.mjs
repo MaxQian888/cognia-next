@@ -1,7 +1,20 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { buildAnalysisReport } from "./analyze-next-trace.mjs"
+import { buildAnalysisReport, parseArgs } from "./analyze-next-trace.mjs"
+
+test("parseArgs uses documented defaults and validates options", () => {
+  assert.deepEqual(parseArgs([]), {
+    json: false,
+    trace: ".next/dev/trace",
+  })
+  assert.deepEqual(parseArgs(["trace.ndjson", "--browser-snapshot", "browser.json", "--json"]), {
+    browserSnapshot: "browser.json",
+    json: true,
+    trace: "trace.ndjson",
+  })
+  assert.throws(() => parseArgs(["--unknown"]), /unknown option/i)
+})
 
 test("buildAnalysisReport combines compiler, cache, browser, database, and boot metrics", () => {
   const report = buildAnalysisReport({

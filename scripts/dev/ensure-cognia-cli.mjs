@@ -23,7 +23,7 @@
  * Override with COGNIA_SKIP_CLI_BUILD=1 to skip even under Tauri.
  */
 
-import { spawnSync } from "node:child_process"
+import { execaSync } from "execa"
 
 const tag = "[ensure-cognia-cli]"
 
@@ -36,8 +36,11 @@ function isTauriDev() {
 
 /** True when `cargo` is on PATH and runnable. */
 function hasCargo() {
-  const probe = spawnSync("cargo", ["--version"], { stdio: "ignore" })
-  return probe.status === 0
+  try {
+    return execaSync("cargo", ["--version"], { stdio: "ignore", reject: false }).exitCode === 0
+  } catch {
+    return false
+  }
 }
 
 function main() {
@@ -58,14 +61,15 @@ function main() {
   }
 
   console.log(`${tag} building cognia CLI (cargo build -p cognia-cli)…`)
-  const build = spawnSync("cargo", ["build", "-p", "cognia-cli"], {
+  const build = execaSync("cargo", ["build", "-p", "cognia-cli"], {
     stdio: "inherit",
+    reject: false,
   })
-  if (build.status === 0) {
+  if (build.exitCode === 0) {
     console.log(`${tag} cognia CLI ready in target/debug — DevTools will detect it on boot.`)
   } else {
     console.warn(
-      `${tag} cargo build -p cognia-cli failed (exit ${build.status ?? "signal"}). ` +
+      `${tag} cargo build -p cognia-cli failed (${build.signal ?? `exit ${build.exitCode}`}). ` +
         `Dev server will start anyway; Plugin DevTools will show the CLI as missing.`
     )
   }

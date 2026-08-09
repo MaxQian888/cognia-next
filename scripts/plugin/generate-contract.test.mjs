@@ -8,12 +8,19 @@ import {
   validateApiSurfaceCompatibility,
   validatePluginPointCatalog,
   validateInterfaceCatalog,
+  parseArgs,
 } from "./generate-contract.mjs"
 import { describe, test } from "node:test"
 import assert from "node:assert/strict"
 
 describe("plugin contract generator", () => {
   const catalog = readCatalog()
+
+  test("parseArgs supports check mode and rejects unknown options", () => {
+    assert.deepEqual(parseArgs([]), { check: false })
+    assert.deepEqual(parseArgs(["--check"]), { check: true })
+    assert.throws(() => parseArgs(["--unknown"]), /unknown option/i)
+  })
 
   test("projects every canonical plugin point into the authoring catalog", () => {
     assert.equal(catalog.pluginPointSchemaVersion, 1)

@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
-import { execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
+import { Command, CommanderError } from "commander"
+import { execaSync } from "execa"
+import { z } from "zod"
 
 const AUTO_INCREMENT_TABLES = [
   "subscriptionUsage",
@@ -69,12 +71,15 @@ export function listFixtureCandidates() {
 }
 
 function listTestFiles() {
-  return execFileSync(
-    "git",
-    ["ls-files", "-co", "--exclude-standard", "--", "*.test.ts", "*.test.tsx"],
-    { encoding: "utf8" }
-  )
-    .trim()
+  return execaSync("git", [
+    "ls-files",
+    "-co",
+    "--exclude-standard",
+    "--",
+    "*.test.ts",
+    "*.test.tsx",
+  ])
+    .stdout.trim()
     .split("\n")
     .filter(Boolean)
 }
@@ -140,24 +145,50 @@ export function auditDbFixtures({ strict = false } = {}) {
   })
 }
 
-function main() {
-  const args = new Set(process.argv.slice(2))
-  for (const arg of args) {
-    if (arg !== "--strict" && arg !== "--list-candidates") {
-      throw new Error(`Unknown argument: ${arg}`)
-    }
+const cliSchema = z
+  .object({
+    listCandidates: z.boolean().default(false),
+    strict: z.boolean().default(false),
+  })
+  .refine(({ listCandidates, strict }) => !(listCandidates && strict), {
+    message: "--list-candidates cannot be combined with other arguments",
+  })
+
+function createProgram() {
+  return new Command()
+    .name("pnpm test:db-fixture:audit")
+    .description("Audit database tests for safe fast-fixture adoption.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--strict", "Require zero legacy database reset suites.")
+    .option("--list-candidates", "List suites that can adopt the fast fixture.")
+}
+
+export function parseArgs(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
   }
-  if (args.has("--list-candidates")) {
-    if (args.size > 1) throw new Error("--list-candidates cannot be combined with other arguments")
+  return cliSchema.parse(program.opts())
+}
+
+function main(argv) {
+  const args = parseArgs(argv)
+  if (!args) return 0
+  if (args.listCandidates) {
     for (const file of listFixtureCandidates()) console.log(file)
     return 0
   }
-  return auditDbFixtures({ strict: args.has("--strict") }) ? 0 : 1
+  return auditDbFixtures({ strict: args.strict }) ? 0 : 1
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
-    process.exitCode = main()
+    process.exitCode = main(process.argv.slice(2))
   } catch (error) {
     console.error(`[db-fixture-audit] ${error instanceof Error ? error.message : String(error)}`)
     process.exitCode = 1

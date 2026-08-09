@@ -9,51 +9,71 @@
  * merging because no individual shard owns the complete coverage map.
  */
 
-import { spawn } from "node:child_process"
 import { mkdirSync, rmSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { Command, CommanderError } from "commander"
+import { execa } from "execa"
+import { z } from "zod"
 
-const POSITIVE_INTEGER = /^[1-9]\d*$/
+const positiveInteger = (flag) =>
+  z.coerce
+    .number({ error: `${flag} requires a positive integer` })
+    .int({ error: `${flag} requires a positive integer` })
+    .positive({ error: `${flag} requires a positive integer` })
 
-function positiveInteger(flag, value) {
-  if (!POSITIVE_INTEGER.test(value ?? "")) {
-    throw new Error(`${flag} requires a positive integer`)
-  }
-  return Number(value)
+const cliSchema = z.object({
+  jobs: positiveInteger("--jobs").default(2),
+  maxOldSpaceSize: positiveInteger("--max-old-space-size").default(8192),
+  only: z
+    .string()
+    .trim()
+    .min(1, "--only requires a comma-separated shard list")
+    .transform((value, context) => {
+      const shards = value.split(",").map((item) => {
+        const result = positiveInteger("--only").safeParse(item)
+        if (!result.success) {
+          context.addIssue({ code: "custom", message: "--only requires positive integers" })
+          return z.NEVER
+        }
+        return result.data
+      })
+      return [...new Set(shards)]
+    })
+    .optional(),
+  out: z.string().trim().min(1, "--out requires a directory").default("coverage"),
+  shards: positiveInteger("--shards").default(8),
+  workers: positiveInteger("--workers").default(4),
+})
+
+function createProgram() {
+  return new Command()
+    .name("pnpm test:coverage")
+    .description("Run Jest coverage in bounded shards, then merge and gate the result.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--shards <count>", "Total Jest shard count.", "8")
+    .option("--jobs <count>", "Maximum concurrent shard processes.", "2")
+    .option("--workers <count>", "Jest workers per shard.", "4")
+    .option("--max-old-space-size <megabytes>", "Node.js heap limit per shard.", "8192")
+    .option("--out <directory>", "Coverage output directory.", "coverage")
+    .option("--only <shards>", "Comma-separated shard numbers to rerun.")
 }
 
 export function parseArgs(argv) {
-  const args = {
-    shards: 8,
-    jobs: 2,
-    workers: 4,
-    maxOldSpaceSize: 8192,
-    out: "coverage",
-    only: undefined,
+  const program = createProgram()
+  try {
+    program.parse(
+      argv.filter((argument) => argument !== "--"),
+      { from: "user" }
+    )
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
   }
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i]
-    if (arg === "--") continue
-    if (arg === "--shards") args.shards = positiveInteger(arg, argv[++i])
-    else if (arg === "--jobs") args.jobs = positiveInteger(arg, argv[++i])
-    else if (arg === "--workers") args.workers = positiveInteger(arg, argv[++i])
-    else if (arg === "--max-old-space-size") {
-      args.maxOldSpaceSize = positiveInteger(arg, argv[++i])
-    } else if (arg === "--out") {
-      const value = argv[++i]
-      if (!value) throw new Error("--out requires a directory")
-      args.out = value
-    } else if (arg === "--only") {
-      const value = argv[++i]
-      if (!value) throw new Error("--only requires a comma-separated shard list")
-      const shards = value.split(",").map((item) => positiveInteger(arg, item))
-      args.only = [...new Set(shards)]
-    } else {
-      throw new Error(`Unknown argument: ${arg}`)
-    }
-  }
-  return args
+  const options = cliSchema.parse(program.opts())
+  return { ...options, only: options.only }
 }
 
 export function effectiveJobCount(shards, jobs) {
@@ -104,13 +124,13 @@ export function buildCoveragePlan({ shards, workers = 4, out, only }) {
   }
 }
 
-function runProcess(spec, { maxOldSpaceSize }) {
+async function runProcess(spec, { maxOldSpaceSize }) {
   const nodeOptions = [process.env.NODE_OPTIONS, `--max-old-space-size=${maxOldSpaceSize}`]
     .filter(Boolean)
     .join(" ")
   console.log(`[coverage] starting ${spec.label}`)
-  return new Promise((resolve) => {
-    const child = spawn(spec.command, spec.args, {
+  try {
+    const result = await execa(spec.command, spec.args, {
       stdio: "inherit",
       env: {
         ...process.env,
@@ -118,16 +138,14 @@ function runProcess(spec, { maxOldSpaceSize }) {
         JEST_JUNIT_OUTPUT_NAME: spec.junitOutputName ?? "junit.xml",
         NODE_OPTIONS: nodeOptions,
       },
+      reject: false,
     })
-    child.once("error", (error) => {
-      console.error(`[coverage] ${spec.label} failed to start: ${error.message}`)
-      resolve(1)
-    })
-    child.once("exit", (code, signal) => {
-      if (signal) console.error(`[coverage] ${spec.label} terminated by ${signal}`)
-      resolve(code ?? 1)
-    })
-  })
+    if (result.signal) console.error(`[coverage] ${spec.label} terminated by ${result.signal}`)
+    return result.exitCode ?? 1
+  } catch (error) {
+    console.error(`[coverage] ${spec.label} failed to start: ${error.message}`)
+    return 1
+  }
 }
 
 export async function executeShardPlan(shards, { jobs, run }) {
@@ -156,6 +174,7 @@ function prepareShardRoot(shardRoot, { preserve }) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2))
+  if (!args) return
   const plan = buildCoveragePlan(args)
   prepareShardRoot(plan.shardRoot, { preserve: args.only !== undefined })
   const run = (spec) => runProcess(spec, args)

@@ -28,6 +28,8 @@ import { existsSync, rmSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import path, { resolve, join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
+import { Command, CommanderError } from "commander"
+import { z } from "zod"
 
 /** Hard-coded fallbacks, mirrored from src-tauri/tauri.conf.json. */
 const FALLBACK_IDENTIFIER = "com.cognia.desktop"
@@ -150,8 +152,32 @@ export function cleanAppDatabases({ targets, exists, rm, log = console.log, dryR
 const __filename = fileURLToPath(import.meta.url)
 const isDirectRun = process.argv[1] && resolve(process.argv[1]) === __filename
 
-if (isDirectRun) {
-  const dryRun = process.argv.includes("--dry-run")
+const cliSchema = z.object({ dryRun: z.boolean().default(false) })
+
+function createProgram() {
+  return new Command()
+    .name("pnpm clean:db")
+    .description("Reset Cognia's local databases and WebView caches.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--dry-run", "Print the deletion plan without removing files.")
+}
+
+export function parseArgs(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  return cliSchema.parse(program.opts())
+}
+
+function main(argv) {
+  const options = parseArgs(argv)
+  if (!options) return
   const repoRoot = resolve(dirname(__filename), "..", "..")
   const { identifier, productName } = readTauriIdentity(repoRoot)
   const targets = appStorageTargets({
@@ -169,7 +195,7 @@ if (isDirectRun) {
     )
   } else {
     console.log(
-      dryRun
+      options.dryRun
         ? "[clean-db] DRY RUN — the following would be removed (nothing is deleted):"
         : "[clean-db] Resetting local databases & web caches. Make sure the desktop app is CLOSED first."
     )
@@ -177,12 +203,21 @@ if (isDirectRun) {
       targets,
       exists: existsSync,
       rm: (target) => rmSync(target, { recursive: true, force: true }),
-      dryRun,
+      dryRun: options.dryRun,
     })
     console.log(
-      `[clean-db] ${dryRun ? "would remove" : "removed"} ${result.removed.length}, ` +
+      `[clean-db] ${options.dryRun ? "would remove" : "removed"} ${result.removed.length}, ` +
         `absent ${result.skipped.length}, failed ${result.failed.length}.`
     )
     if (result.failed.length > 0) process.exitCode = 1
+  }
+}
+
+if (isDirectRun) {
+  try {
+    main(process.argv.slice(2))
+  } catch (error) {
+    console.error(`[clean-db] ${error instanceof Error ? error.message : String(error)}`)
+    process.exitCode = 1
   }
 }

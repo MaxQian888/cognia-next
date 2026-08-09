@@ -18,11 +18,15 @@
 //   node scripts/build/build-builtin-skills.mjs          # write the catalog
 //   node scripts/build/build-builtin-skills.mjs --check   # verify it's up to date
 
-import { readFileSync, readdirSync, existsSync, writeFileSync, statSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { Command, CommanderError } from "commander"
+import { globSync } from "glob"
 import matter from "gray-matter"
+import writeFileAtomic from "write-file-atomic"
+import { z } from "zod"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(HERE, "..", "..")
@@ -102,37 +106,31 @@ export function collectResources(skillDir) {
   const resources = []
   for (const [subdir, kind] of Object.entries(RESOURCE_DIR_KIND)) {
     const root = path.join(skillDir, subdir)
-    if (!existsSync(root) || !statSync(root).isDirectory()) continue
-    const walk = (current) => {
-      for (const entry of readdirSync(current).sort()) {
-        const abs = path.join(current, entry)
-        if (statSync(abs).isDirectory()) {
-          walk(abs)
-        } else {
-          const rel = path.relative(skillDir, abs).split(path.sep).join("/")
-          resources.push({ kind, name: entry, path: rel, content: readFileSync(abs, "utf8") })
-        }
-      }
+    for (const relative of globSync("**/*", { cwd: root, nodir: true }).sort()) {
+      const absolute = path.join(root, relative)
+      resources.push({
+        kind,
+        name: path.basename(relative),
+        path: path.posix.join(subdir, relative.split(path.sep).join("/")),
+        content: readFileSync(absolute, "utf8"),
+      })
     }
-    walk(root)
   }
   return resources.sort((a, b) => a.path.localeCompare(b.path))
 }
 
 /** Discover + parse every `skills/built-in/<id>/SKILL.md`, sorted by id. */
 export function buildCatalog(dir = SKILLS_DIR) {
-  if (!existsSync(dir)) return []
-  const entries = []
-  for (const name of readdirSync(dir).sort()) {
-    const full = path.join(dir, name)
-    if (!statSync(full).isDirectory()) continue
-    const skillMd = path.join(full, "SKILL.md")
-    if (!existsSync(skillMd)) continue
-    const entry = parseSkillFile(name, readFileSync(skillMd, "utf8"))
-    const resources = collectResources(full)
-    if (resources.length > 0) entry.resources = resources
-    entries.push(entry)
-  }
+  const entries = globSync("*/SKILL.md", { cwd: dir, nodir: true })
+    .sort()
+    .map((relative) => {
+      const name = relative.split("/")[0]
+      const full = path.join(dir, name)
+      const entry = parseSkillFile(name, readFileSync(path.join(dir, relative), "utf8"))
+      const resources = collectResources(full)
+      if (resources.length > 0) entry.resources = resources
+      return entry
+    })
   return entries.sort((a, b) => a.id.localeCompare(b.id))
 }
 
@@ -184,12 +182,36 @@ export function renderCatalogModule(entries) {
   return lines.join("\n")
 }
 
-function main() {
-  const check = process.argv.includes("--check")
+const cliSchema = z.object({ check: z.boolean().default(false) })
+
+function createProgram() {
+  return new Command()
+    .name("pnpm skills:build")
+    .description("Build or verify the static built-in skill catalog.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--check", "Verify the generated catalog without writing it.")
+}
+
+export function parseArgs(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  return cliSchema.parse(program.opts())
+}
+
+function main(argv) {
+  const options = parseArgs(argv)
+  if (!options) return
   const entries = buildCatalog()
   const next = renderCatalogModule(entries)
   const current = existsSync(OUT_FILE) ? readFileSync(OUT_FILE, "utf8") : ""
-  if (check) {
+  if (options.check) {
     if (current !== next) {
       console.error(
         "built-in skills catalog is out of date. Run `pnpm skills:build` and commit lib/skills/built-in-catalog.generated.ts."
@@ -200,13 +222,16 @@ function main() {
     return
   }
   if (current !== next) {
-    writeFileSync(OUT_FILE, next)
+  writeFileAtomic.sync(OUT_FILE, next)
     console.log(`wrote ${OUT_FILE} (${entries.length} skills).`)
   } else {
     console.log(`built-in skills catalog unchanged (${entries.length} skills).`)
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1] === fileURLToPath(import.meta.url)) {
-  main()
+if (
+  import.meta.url === `file://${process.argv[1]}` ||
+  process.argv[1] === fileURLToPath(import.meta.url)
+) {
+  main(process.argv.slice(2))
 }
