@@ -124,7 +124,7 @@ RUN target_triple=$(rustc -vV | sed -n 's/^host: //p') \
 # the container backend, so COGNIA_EXEC_BACKEND=container works at T2
 # (Docker socket proxy) and =kubernetes at T3 (runner Pods, in-cluster).
 RUN cargo build --release --locked --bin cognia-server \
-    --features container-exec,k8s-exec,workspace-runtime-exec \
+    --features container-exec,k8s-exec,workspace-runtime-exec,otel-export \
     --config 'profile.release.package.cognia-next.opt-level=0' \
     --config 'profile.release.package.cognia-next.codegen-units=256' \
     --config 'profile.release.package.cognia-next.debug=0' \
@@ -168,7 +168,7 @@ RUN target_triple=$(rustc -vV | sed -n 's/^host: //p') \
     && echo placeholder > sidecar/webclone/dist/keep.txt \
     && echo placeholder > sidecar/webclone/node_modules/cognia-placeholder/keep.txt \
     && echo placeholder > sidecar/codeserver-agent-ext/cognia-agent-bridge.vsix
-RUN cargo check --release --locked --bin cognia-server --features container-exec,k8s-exec,workspace-runtime-exec
+RUN cargo check --release --locked --bin cognia-server --features container-exec,k8s-exec,workspace-runtime-exec,otel-export
 RUN cargo check --release --locked -p cognia-cli --bin cognia
 
 # ── Node: brain (cognia-agent) + sidecar bundle ─────────────────────────────
