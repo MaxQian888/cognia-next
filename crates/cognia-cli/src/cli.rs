@@ -1204,14 +1204,9 @@ mod tests {
 
     #[test]
     fn host_call_parses_strict_output_without_changing_the_default() {
-        let strict = Cli::try_parse_from([
-            "cognia",
-            "host",
-            "call",
-            "session_list",
-            "--strict-output",
-        ])
-        .expect("strict Headless output validation should parse");
+        let strict =
+            Cli::try_parse_from(["cognia", "host", "call", "session_list", "--strict-output"])
+                .expect("strict Headless output validation should parse");
         let TopCommand::Host {
             command: HostCommand::Call { strict_output, .. },
             ..

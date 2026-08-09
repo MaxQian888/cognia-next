@@ -63,6 +63,14 @@ mod hooks;
 pub mod jobs;
 mod keyring_secrets;
 mod logging;
+
+/// Install Cognia's structured tracing subscriber for non-Tauri entrypoints.
+///
+/// The desktop bootstrap owns the full native logging module. Headless binaries
+/// only need this narrow seam so the implementation stays private.
+pub fn init_structured_tracing() -> bool {
+    logging::tracing_setup::init()
+}
 // Native local-video pipeline lives in its own subsystem crate; the app crate
 // only re-exports it for generate_handler! command registration.
 pub use cognia_media as media;
@@ -2076,6 +2084,12 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn structured_tracing_initializer_is_exposed_to_headless_binaries() {
+        let initializer: fn() -> bool = super::init_structured_tracing;
+        let _ = initializer;
+    }
+
     #[test]
     fn resource_tracking_commands_remain_registered() {
         let source = include_str!("lib.rs");
