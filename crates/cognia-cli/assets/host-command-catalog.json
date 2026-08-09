@@ -4752,6 +4752,33 @@
       "outputTyped": false
     },
     {
+      "name": "fleet_question_reject",
+      "category": "agents",
+      "resource": "fleet",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "fleet_question_reject (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": ["requestId"],
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": null,
+      "outputTyped": false
+    },
+    {
       "name": "fleet_question_respond",
       "category": "agents",
       "resource": "fleet",
@@ -15967,5 +15994,5 @@
       "outputTyped": false
     }
   ],
-  "catalogHash": "fcf9462698bbc1307110a96fea303da83eda1a5262b57f25494da58faf64b307"
+  "catalogHash": "d0afacf75e72f147c67879ef65898566d1e62e2ffb68123bb66edb94cf5319d6"
 }
