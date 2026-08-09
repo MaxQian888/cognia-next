@@ -6,8 +6,7 @@ info:
     name: MIT
     identifier: MIT
   summary: Canonical unversioned DPoP device API.
-  description:
-    The device surface uses unversioned /api and /ws routes, five-minute DPoP-bound access tokens, and
+  description: The device surface uses unversioned /api and /ws routes, five-minute DPoP-bound access tokens, and
     60-second single-use WebSocket tickets. Versioned compatibility aliases are intentionally not exposed; service-token
     Headless routes are documented separately.
 servers:
@@ -254,8 +253,7 @@ paths:
       tags:
         - device-auth
       summary: Mint a 60-second single-use, endpoint-bound WebSocket ticket.
-      description:
-        The server derives the exact path, audience, and required capability from the typed channel (`host.observe`
+      description: The server derives the exact path, audience, and required capability from the typed channel (`host.observe`
         for events, `terminal.open` for terminal, and `agent.run` for browser/ACP). Browser requests must also name an
         active session owned by the authenticated device.
       security:
@@ -297,8 +295,7 @@ paths:
       tags:
         - identity
       summary: Return the authenticated Companion device identity.
-      description:
-        Requires a five-minute device access token and a matching DPoP proof; returns the device, tenant, server
+      description: Requires a five-minute device access token and a matching DPoP proof; returns the device, tenant, server
         version, and pinned TLS fingerprint.
       responses:
         "200":
@@ -811,8 +808,7 @@ paths:
       tags:
         - events
       summary: Open the canonical event stream with a single-use socket ticket.
-      description:
-        Open a resumable Companion event stream with a 60-second, path-bound, single-use ticket. Obtain the ticket
+      description: Open a resumable Companion event stream with a 60-second, path-bound, single-use ticket. Obtain the ticket
         from `POST /api/auth/socket-ticket` with channel `events`; bearer tokens and arbitrary query-token credentials
         are not accepted on the WebSocket URL. Use the optional `since` cursor to replay retained events in sequence.
       parameters:
@@ -898,8 +894,7 @@ paths:
             schema:
               $ref: "#/components/schemas/PingFrame"
           - name: ResyncRequiredFrame
-            description:
-              Sent when the client's `since` cursor is older than the retained ring buffer; followed by an immediate
+            description: Sent when the client's `since` cursor is older than the retained ring buffer; followed by an immediate
               close.
             schema:
               $ref: "#/components/schemas/ResyncRequiredFrame"
@@ -922,8 +917,7 @@ paths:
       tags:
         - terminal
       summary: WebSocket upgrade — interactive remote PTY (live terminal).
-      description:
-        Open the canonical binary terminal protocol after obtaining a 60-second, path-bound, single-use ticket from
+      description: Open the canonical binary terminal protocol after obtaining a 60-second, path-bound, single-use ticket from
         `POST /api/auth/socket-ticket` with channel `terminal`. Remote terminal access and the device terminal
         capability are revalidated before upgrade. Bearer tokens are never accepted in the WebSocket URL.
       parameters:
@@ -1000,8 +994,7 @@ paths:
         subprotocol: null
         outboundFrames:
           - name: CanonicalTerminalFrame
-            description:
-              Binary header plus payload; kind identifies snapshots, output, integration, replay, controller, exit,
+            description: Binary header plus payload; kind identifies snapshots, output, integration, replay, controller, exit,
               acknowledgement, or error.
         inboundFrames:
           - name: CanonicalTerminalFrame
@@ -1041,8 +1034,7 @@ paths:
           required: true
           schema:
             type: string
-      description:
-        Redeem a 60-second browser ticket bound to this session. Text frames use the versioned browser envelope;
+      description: Redeem a 60-second browser ticket bound to this session. Text frames use the versioned browser envelope;
         binary frames carry screencast media.
       x-websocket:
         outboundFrames:
@@ -1091,8 +1083,7 @@ paths:
           $ref: "#/components/responses/AuthenticationRejected"
         "503":
           $ref: "#/components/responses/PublicApiError"
-      description:
-        Obtain a 60-second, path-bound, single-use ticket from `POST /api/auth/socket-ticket` with channel `acp`.
+      description: Obtain a 60-second, path-bound, single-use ticket from `POST /api/auth/socket-ticket` with channel `acp`.
         The redeemed principal and canonical capability snapshot govern every mapped command; bearer tokens are never
         accepted in the WebSocket URL.
       parameters:
@@ -7025,8 +7016,7 @@ paths:
                   type: string
                   description: Optional rejection reason or note (denial only).
                 updated_input:
-                  description:
-                    "Replacement tool input — substituted for the original arguments when sent (typically with `decision:
+                  description: "Replacement tool input — substituted for the original arguments when sent (typically with `decision:
                     allow`)."
                   oneOf:
                     - type: object
@@ -24029,8 +24019,7 @@ paths:
                 sidecarPath:
                   type: string
                   deprecated: true
-                  description:
-                    Legacy local-Tauri hint; ignored by the headless Companion facade, which resolves the packaged host
+                  description: Legacy local-Tauri hint; ignored by the headless Companion facade, which resolves the packaged host
                     sidecar.
       responses:
         "200":
@@ -24162,8 +24151,7 @@ paths:
                 sidecarPath:
                   type: string
                   deprecated: true
-                  description:
-                    Legacy local-Tauri hint; ignored by the headless Companion facade, which resolves the packaged host
+                  description: Legacy local-Tauri hint; ignored by the headless Companion facade, which resolves the packaged host
                     sidecar.
       responses:
         "200":
@@ -41297,8 +41285,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description:
-        Five-minute access token bound to the active device key and signed by a process-ephemeral authority; a
+      description: Five-minute access token bound to the active device key and signed by a process-ephemeral authority; a
         server restart invalidates outstanding tokens. Send a matching DPoP header.
   parameters:
     WorkflowRunId:

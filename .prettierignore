@@ -26,6 +26,11 @@ lib/skills/built-in-catalog.generated.ts
 # esbuild owns this generated CommonJS bundle; formatting it would make the
 # committed artifact diverge from `pnpm plugin-convert:bundle`.
 crates/cognia-cli/assets/plugin-convert.cjs
+# Companion API specs and CLI catalog are canonical generator output. Prettier
+# rewrites compact schema arrays and makes `companion-api:check` report drift.
+docs/api/mobile-companion-api.openapi.yaml
+docs/api/headless-service-api.openapi.yaml
+crates/cognia-cli/assets/host-command-catalog.json
 # Generated i18n message bundles — built from the per-namespace split sources
 # by `pnpm i18n:build`. Prettier collapses the build's expanded arrays, which
 # desyncs the committed bundle from `i18n:build:check`; the codegen owns format.

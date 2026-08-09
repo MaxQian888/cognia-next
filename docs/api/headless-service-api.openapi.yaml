@@ -183,8 +183,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -300,8 +299,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -422,8 +420,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -548,8 +545,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -665,8 +661,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -782,8 +777,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -894,8 +888,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -1067,8 +1060,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -1171,8 +1163,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -1404,8 +1395,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -1544,8 +1534,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -1659,8 +1648,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -1781,8 +1769,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -1894,8 +1881,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -2034,8 +2020,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -2244,8 +2229,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -2353,8 +2337,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -2478,8 +2461,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -2606,8 +2588,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -2719,8 +2700,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -2833,8 +2813,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -2950,8 +2929,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -3063,8 +3041,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -3181,8 +3158,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -3303,8 +3279,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -3414,8 +3389,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -3527,8 +3501,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -3638,8 +3611,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -3755,8 +3727,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -3868,8 +3839,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -3988,8 +3958,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -4099,8 +4068,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -4210,8 +4178,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -4323,8 +4290,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -4427,8 +4393,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -4537,8 +4502,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -4663,8 +4627,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -4776,8 +4739,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -4904,8 +4866,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -5009,8 +4970,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -5130,8 +5090,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -5247,8 +5206,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -5366,8 +5324,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -5480,8 +5437,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -5597,8 +5553,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -5747,8 +5702,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -5878,8 +5832,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -5995,8 +5948,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -6107,8 +6059,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -6225,8 +6176,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -6344,8 +6294,7 @@ paths:
                   type: string
                   description: Optional rejection reason or note (denial only).
                 updated_input:
-                  description:
-                    "Replacement tool input — substituted for the original arguments when sent (typically with `decision:
+                  description: "Replacement tool input — substituted for the original arguments when sent (typically with `decision:
                     allow`)."
                   oneOf:
                     - type: object
@@ -8021,8 +7970,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -8240,8 +8188,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -8362,8 +8309,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -8486,8 +8432,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -8603,8 +8548,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -8717,8 +8661,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -8829,8 +8772,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -8932,8 +8874,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -9037,8 +8978,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -9148,8 +9088,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -9443,8 +9382,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -9543,8 +9481,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -9654,8 +9591,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -9766,8 +9702,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -9885,8 +9820,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -10002,8 +9936,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -10114,8 +10047,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -10219,8 +10151,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -10349,8 +10280,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -10564,8 +10494,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -10682,8 +10611,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -10914,8 +10842,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -11034,8 +10961,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -11243,8 +11169,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -11482,8 +11407,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -11804,8 +11728,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -12447,8 +12370,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -12660,8 +12582,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -12869,8 +12790,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -13281,8 +13201,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -13404,8 +13323,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -13522,8 +13440,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -13629,8 +13546,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -13744,8 +13660,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -13858,8 +13773,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -13959,8 +13873,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -14067,8 +13980,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -14174,8 +14086,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -14282,8 +14193,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -14390,8 +14300,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -14493,8 +14402,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -14593,8 +14501,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -14805,8 +14712,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -14913,8 +14819,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -15029,8 +14934,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -15144,8 +15048,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -15262,8 +15165,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -15382,8 +15284,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -15818,8 +15719,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -16149,8 +16049,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -16263,8 +16162,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -16371,8 +16269,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -16697,8 +16594,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -16810,8 +16706,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -17242,8 +17137,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -17356,8 +17250,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -17469,8 +17362,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -18019,8 +17911,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -18129,8 +18020,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -18242,8 +18132,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -18352,8 +18241,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -18556,8 +18444,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -18997,8 +18884,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -19103,8 +18989,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -19639,8 +19524,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -20401,8 +20285,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -20514,8 +20397,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -20840,8 +20722,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -21055,8 +20936,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -22245,8 +22125,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -22566,8 +22445,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -22677,8 +22555,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -22789,8 +22666,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -23123,8 +22999,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -23234,8 +23109,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -23558,8 +23432,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -23671,8 +23544,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -23784,8 +23656,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -23897,8 +23768,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -24015,8 +23885,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -24126,8 +23995,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -24238,8 +24106,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -24343,8 +24210,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -24454,8 +24320,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -24567,8 +24432,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -24685,8 +24549,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -24883,8 +24746,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -24983,8 +24845,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -25208,8 +25069,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -25320,8 +25180,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -25433,8 +25292,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -25552,8 +25410,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -25657,8 +25514,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -25765,8 +25621,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -25883,8 +25738,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -26110,8 +25964,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -26226,8 +26079,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -26351,8 +26203,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -26590,8 +26441,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -26701,8 +26551,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -26817,8 +26666,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -26923,8 +26771,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -27063,8 +26910,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -27376,8 +27222,7 @@ paths:
                 sidecarPath:
                   type: string
                   deprecated: true
-                  description:
-                    Legacy local-Tauri hint; ignored by the headless Companion facade, which resolves the packaged host
+                  description: Legacy local-Tauri hint; ignored by the headless Companion facade, which resolves the packaged host
                     sidecar.
       responses:
         "200":
@@ -27392,8 +27237,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -27504,8 +27348,7 @@ paths:
                 sidecarPath:
                   type: string
                   deprecated: true
-                  description:
-                    Legacy local-Tauri hint; ignored by the headless Companion facade, which resolves the packaged host
+                  description: Legacy local-Tauri hint; ignored by the headless Companion facade, which resolves the packaged host
                     sidecar.
       responses:
         "200":
@@ -27515,8 +27358,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -27613,8 +27455,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -27820,8 +27661,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -27943,8 +27783,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -28072,8 +27911,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -28208,8 +28046,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -28328,8 +28165,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -28442,8 +28278,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -28694,8 +28529,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -28809,8 +28643,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -28927,8 +28760,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -29052,8 +28884,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -29192,8 +29023,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -29298,8 +29128,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -29407,8 +29236,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -29520,8 +29348,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -29634,8 +29461,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -29776,8 +29602,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -29904,8 +29729,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -30014,8 +29838,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -30333,8 +30156,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -30856,8 +30678,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -30980,8 +30801,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -31100,8 +30920,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -31230,8 +31049,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -31571,8 +31389,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -31677,8 +31494,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -31910,8 +31726,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -32022,8 +31837,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -32271,8 +32085,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -32391,8 +32204,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -32511,8 +32323,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -32632,8 +32443,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -32744,8 +32554,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -32856,8 +32665,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -32971,8 +32779,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -33390,8 +33197,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -33527,8 +33333,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -33674,8 +33479,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -33792,8 +33596,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -34005,8 +33808,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -34219,8 +34021,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -34335,8 +34136,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -34784,8 +34584,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -35316,8 +35115,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -35536,8 +35334,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -35644,8 +35441,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -35763,8 +35559,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -36032,8 +35827,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -36142,8 +35936,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -36252,8 +36045,7 @@ paths:
                     items:
                       type: object
                       additionalProperties: true
-                      x-cognia-opaque-reason:
-                        The command serializes an existing domain record whose stable root is an object; property-level
+                      x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                         compatibility remains owned by that domain.
                 additionalProperties: false
         "202":
@@ -36353,8 +36145,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -36465,8 +36256,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -36579,8 +36369,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -36724,8 +36513,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -36826,8 +36614,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -37043,8 +36830,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -37258,8 +37044,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -37603,8 +37388,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -37820,8 +37604,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -37932,8 +37715,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -38297,8 +38079,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -38409,8 +38190,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -38530,8 +38310,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -38635,8 +38414,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -38740,8 +38518,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -39187,8 +38964,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -39356,8 +39132,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -39470,8 +39245,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -39583,8 +39357,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -39707,8 +39480,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -39823,8 +39595,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -39925,8 +39696,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -40036,8 +39806,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -40361,8 +40130,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -40589,8 +40357,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -40926,8 +40693,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -41041,8 +40807,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -41296,8 +41061,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -41423,8 +41187,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -41537,8 +41300,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -41854,8 +41616,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -41983,8 +41744,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -42084,8 +41844,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -42197,8 +41956,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -42361,8 +42119,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -42467,8 +42224,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -42574,8 +42330,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -42694,8 +42449,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -42807,8 +42561,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -43186,8 +42939,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -43396,8 +43148,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -43511,8 +43262,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -43737,8 +43487,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -43946,8 +43695,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -44063,8 +43811,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -44183,8 +43930,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -44300,8 +44046,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -44408,8 +44153,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -44520,8 +44264,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -44625,8 +44368,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -44734,8 +44476,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -44847,8 +44588,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -44958,8 +44698,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -45068,8 +44807,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -45188,8 +44926,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -45298,8 +45035,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -45410,8 +45146,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -45526,8 +45261,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -45634,8 +45368,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -45760,8 +45493,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -45888,8 +45620,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -46001,8 +45732,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -46101,8 +45831,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -46212,8 +45941,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -46324,8 +46052,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -46436,8 +46163,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -46548,8 +46274,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -46666,8 +46391,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -46792,8 +46516,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -46918,8 +46641,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -47035,8 +46757,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -47162,8 +46883,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -47378,8 +47098,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -47484,8 +47203,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -47597,8 +47315,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -47699,8 +47416,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -47811,8 +47527,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -47922,8 +47637,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -48042,8 +47756,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -48156,8 +47869,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -48268,8 +47980,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -48380,8 +48091,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -48492,8 +48202,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -48597,8 +48306,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -48701,8 +48409,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -49289,8 +48996,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -49401,8 +49107,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -49512,8 +49217,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -49624,8 +49328,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -49737,8 +49440,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -49843,8 +49545,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -49962,8 +49663,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -50074,8 +49774,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -50183,8 +49882,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -50294,8 +49992,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -50408,8 +50105,7 @@ paths:
                     - number
                     - boolean
                     - "null"
-                  x-cognia-opaque-reason:
-                    The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                     command remains contract-covered at the JSON value boundary until its owning domain publishes a
                     narrower stable wire type.
                 x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
@@ -50521,8 +50217,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -50633,8 +50328,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -50757,8 +50451,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -50871,8 +50564,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
@@ -50983,8 +50675,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                x-cognia-opaque-reason:
-                  The command serializes an existing domain record whose stable root is an object; property-level
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
         "202":
           description: Command is still running under the durable operation ledger.
@@ -51100,8 +50791,7 @@ paths:
                   - number
                   - boolean
                   - "null"
-                x-cognia-opaque-reason:
-                  The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
         "202":
